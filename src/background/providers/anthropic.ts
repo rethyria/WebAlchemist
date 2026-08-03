@@ -22,6 +22,7 @@ import {
   REVIEW_SCHEMA,
   type AiProvider,
   type GenerateRequest,
+  type StreamListener,
 } from './types'
 
 /**
@@ -100,6 +101,50 @@ export async function createAnthropicProvider(provider: Provider): Promise<AiPro
         } as Parameters<typeof client.messages.create>[0])
 
         return parseJsonResponse<GenerationResult>(response)
+      } catch (error) {
+        throw toProviderError(error)
+      }
+    },
+
+    /**
+     * Streaming is not only for the progress display. A non-streaming request
+     * of this length is a single long-lived fetch, and Firefox will suspend a
+     * non-persistent background page underneath one — which surfaced as
+     * "Could not establish connection. Receiving end does not exist." after a
+     * long wait. An open stream keeps the page alive.
+     */
+    async generateStream(
+      request: GenerateRequest,
+      onChunk: StreamListener,
+    ): Promise<GenerationResult> {
+      const content = buildGenerationContent(request)
+
+      try {
+        const stream = client.messages.stream({
+          model: generateModel,
+          max_tokens: 16000,
+          system: GENERATE_SYSTEM_PROMPT,
+          thinking: { type: 'adaptive' },
+          messages: [
+            ...request.history.map((turn) => ({
+              role: turn.role,
+              content: turn.content,
+            })),
+            { role: 'user' as const, content },
+          ],
+          output_config: {
+            effort: 'high',
+            format: { type: 'json_schema', schema: GENERATION_SCHEMA },
+          },
+        } as Parameters<typeof client.messages.stream>[0])
+
+        let accumulated = ''
+        stream.on('text', (delta: string) => {
+          accumulated += delta
+          onChunk(accumulated)
+        })
+
+        return parseJsonResponse<GenerationResult>(await stream.finalMessage())
       } catch (error) {
         throw toProviderError(error)
       }

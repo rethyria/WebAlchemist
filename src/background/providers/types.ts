@@ -33,10 +33,22 @@ export interface GenerateRequest {
  * Every provider implements this. Adapters are responsible for their own auth
  * shape; callers only ever hand over a Provider and get results back.
  */
+/** Raw response text so far, for the panel to show code as it is written. */
+export type StreamListener = (accumulated: string) => void
+
 export interface AiProvider {
   readonly id: string
 
   generate(request: GenerateRequest): Promise<GenerationResult>
+
+  /**
+   * The same call, reporting the raw response as it arrives.
+   *
+   * Optional because not every endpoint streams usefully. Where it is absent
+   * the caller falls back to `generate`, and the panel shows an honest
+   * indeterminate wait rather than pretending to stream.
+   */
+  generateStream?(request: GenerateRequest, onChunk: StreamListener): Promise<GenerationResult>
 
   /**
    * Reviews generated JavaScript against the stated intent.

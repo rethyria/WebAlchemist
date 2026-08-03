@@ -3,6 +3,7 @@
   import type { GenerationResult, ReviewResult } from '@shared/types'
   import { autogrow } from '../lib/autogrow'
   import Button from './Button.svelte'
+  import CodeBlock from './CodeBlock.svelte'
   import Label from './Label.svelte'
 
   interface Props {
@@ -52,6 +53,9 @@
       { role: 'assistant' as const, text: result.rationale.approach },
     ].filter((bubble) => bubble.text),
   )
+
+  let codeOpen = $state(false)
+  let lineCount = $derived(result.code.split('\n').length)
 
   function onKeyDown(event: KeyboardEvent) {
     if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
@@ -126,6 +130,25 @@
         <p class="bubble {bubble.role}">{bubble.text}</p>
       {/each}
     </div>
+
+    <details bind:open={codeOpen}>
+      <summary>
+        <span class="caret" aria-hidden="true">{codeOpen ? '▾' : '▸'}</span>
+        Code and rationale
+        <span class="meta">{lineCount} lines · {result.kind.toUpperCase()}</span>
+      </summary>
+      <div class="detail">
+        <Label>Targets</Label>
+        <p class="prose">{result.rationale.targets}</p>
+        <Label>Assumes</Label>
+        <ul class="assumptions">
+          {#each result.rationale.assumptions as assumption}
+            <li>{assumption}</li>
+          {/each}
+        </ul>
+        <CodeBlock code={result.code} kind={result.kind} />
+      </div>
+    </details>
   </section>
 
   <div class="foot">
@@ -177,6 +200,8 @@
     flex-direction: column;
     gap: var(--sp-12);
     padding: var(--gutter-sidebar);
+    /* Lets the transcript below shrink instead of pushing the composer out. */
+    min-height: 0;
   }
 
   header {
@@ -269,8 +294,10 @@
     color: var(--text-dim);
   }
 
+  /* The only part that scrolls. */
   .transcript {
     display: flex;
+    flex: 1;
     flex-direction: column;
     gap: var(--sp-7);
     min-height: 0;
@@ -304,8 +331,52 @@
     color: var(--text-dim);
   }
 
+  summary {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-6);
+    font: 11.5px var(--font-ui);
+    color: var(--text-faint);
+    cursor: pointer;
+    list-style: none;
+  }
+
+  summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .caret {
+    font-size: 9px;
+  }
+
+  .meta {
+    margin-left: auto;
+    font: 10.5px var(--font-mono);
+  }
+
+  .detail {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-3);
+    padding-top: var(--sp-7);
+  }
+
+  .prose {
+    margin: 0 0 var(--sp-6);
+    font: 12px/1.55 var(--font-ui);
+    color: var(--text-dim);
+  }
+
+  .assumptions {
+    margin: 0 0 var(--sp-9);
+    padding-left: 16px;
+    font: 11.5px/1.5 var(--font-ui);
+    color: var(--text-dim);
+  }
+
   .foot {
     display: flex;
+    flex: none;
     flex-direction: column;
     gap: var(--sp-11);
     margin-top: auto;

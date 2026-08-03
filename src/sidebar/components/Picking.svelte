@@ -77,9 +77,12 @@
 <style>
   .panel {
     display: flex;
+    flex: 1;
     flex-direction: column;
     gap: 13px;
     padding: var(--gutter-sidebar);
+    min-height: 0;
+    overflow-y: auto;
   }
 
   .mode {

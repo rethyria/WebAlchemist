@@ -39,17 +39,14 @@
         withScreenshot ? ', with a screenshot' : ', no screenshot'
       }`,
     },
-    { id: 'streaming' as const, text: 'Writing code' },
+    {
+      id: 'streaming' as const,
+      text: code ? `Writing code — ${code.split('\n').length} lines so far` : 'Writing code',
+    },
     { id: 'analysis' as const, text: 'Static analysis' },
     { id: 'preview' as const, text: 'Preview on the page' },
   ])
 
-  /*
-   * Elapsed time drives the bar, not a percentage: nothing here knows how long
-   * the model will take, and a bar that claims to would be inventing it. It is
-   * capped so it slows down rather than completing early.
-   */
-  let fraction = $derived(Math.min(0.95, elapsed / 30))
 </script>
 
 <div class="panel">
@@ -58,9 +55,12 @@
     <span class="elapsed">{elapsed}s</span>
   </header>
 
-  <div class="bar">
-    <div class="fill" style="width: {(fraction * 100).toFixed(1)}%"></div>
-  </div>
+  <!--
+    An indeterminate bar, not a progress bar. Nothing here knows how long the
+    model will take, so a filling bar would be inventing a number — which is
+    what the previous one did, and it read as meaningless because it was.
+  -->
+  <div class="bar" role="progressbar" aria-label="Working"><div class="sweep"></div></div>
 
   <ol class="steps">
     {#each steps as step}
@@ -112,10 +112,25 @@
     background: var(--chrome);
   }
 
-  .fill {
+  .sweep {
+    width: 40%;
     height: 100%;
+    border-radius: var(--r-progress);
     background: var(--accent-fg);
-    transition: width 1s linear;
+    animation: sweep 1.4s ease-in-out infinite;
+  }
+
+  @keyframes sweep {
+    0% { transform: translateX(-100%); }
+    100% { transform: translateX(250%); }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .sweep {
+      width: 100%;
+      animation: none;
+      opacity: 0.5;
+    }
   }
 
   .steps {

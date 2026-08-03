@@ -45,6 +45,78 @@ export async function send<T>(message: Message): Promise<T> {
 }
 
 /**
+ * Runs a generation over a port, reporting the response as it arrives.
+ *
+ * The port is not an optimisation. A `sendMessage` round trip has nothing to
+ * say between request and response, and — because MV3 makes the background a
+ * non-persistent event page — Firefox may suspend it underneath a long fetch,
+ * which fails the whole call after the request has already been paid for. An
+ * open port both carries progress and keeps the page alive.
+ */
+export function generateOverPort(
+  request: { context: unknown; instruction: string; history: unknown[] },
+  handlers: {
+    onSent: () => void
+    onChunk: (accumulated: string) => void
+  },
+): { result: Promise<unknown>; cancel: () => void } {
+  const port = browser.runtime.connect({ name: 'wa-generate' })
+  let settled = false
+
+  const result = new Promise<unknown>((resolve, reject) => {
+    port.onMessage.addListener((raw: object) => {
+      const message = raw as Record<string, unknown>
+      switch (message['type']) {
+        case 'sent':
+          handlers.onSent()
+          return
+        case 'chunk':
+          handlers.onChunk(message['text'] as string)
+          return
+        case 'done':
+          settled = true
+          port.disconnect()
+          resolve(message['result'])
+          return
+        case 'error': {
+          settled = true
+          port.disconnect()
+          const error = message['error'] as {
+            message: string
+            kind?: string
+            retryable?: boolean
+          }
+          reject(new BackgroundError(error.message, error.kind, error.retryable ?? false))
+        }
+      }
+    })
+
+    // Covers the background being torn down mid-request. Without it the
+    // promise would hang and the panel would sit on a stage forever.
+    port.onDisconnect.addListener(() => {
+      if (settled) return
+      reject(
+        new BackgroundError(
+          'The connection to the extension dropped before the response arrived.',
+          'network',
+          true,
+        ),
+      )
+    })
+  })
+
+  port.postMessage($state.snapshot(request))
+
+  return {
+    result,
+    cancel: () => {
+      settled = true
+      port.disconnect()
+    },
+  }
+}
+
+/**
  * The active tab, including its URL.
  *
  * Reading `tab.url` needs the `tabs` permission. Without it Firefox returns

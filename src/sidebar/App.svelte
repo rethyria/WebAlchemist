@@ -274,10 +274,10 @@
       reached={(stage) => flow.stageReached(stage)}
       elapsed={flow.elapsed}
       kind={flow.result?.kind ?? null}
-      code={flow.result?.code ?? ''}
+      code={flow.streamed}
       withScreenshot={flow.sendScreenshot}
       {contextSize}
-      oncancel={() => void flow.discard()}
+      oncancel={() => flow.cancelGenerating()}
     />
   {:else if flow.step === 'refining' && flow.result}
     <Refining
@@ -391,10 +391,17 @@
 </div>
 
 <style>
+  /*
+   * A fixed-height frame, not a growing column. The panel scrolling as a whole
+   * pushed the composer and the Keep it / Discard buttons off the bottom as a
+   * conversation grew — the controls have to stay put, so each step owns its
+   * own scroll region instead.
+   */
   .panel {
     display: flex;
     flex-direction: column;
-    min-height: 100vh;
+    height: 100vh;
+    overflow: hidden;
     background: var(--surface);
     color: var(--text);
   }
@@ -478,9 +485,12 @@
 
   .rows {
     display: flex;
+    flex: 1;
     flex-direction: column;
     margin: 0;
     padding: 0;
+    min-height: 0;
+    overflow-y: auto;
   }
 
   footer {
@@ -507,6 +517,8 @@
     flex-direction: column;
     gap: var(--sp-16);
     padding: var(--sp-20) 18px;
+    min-height: 0;
+    overflow-y: auto;
   }
 
   /* A page, and the part you point at. */

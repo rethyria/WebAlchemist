@@ -39,7 +39,8 @@ import type {
   Transform,
   TransformKind,
 } from '@shared/types'
-import { BackgroundError, send } from './messaging.svelte'
+import { extractPartialString } from '@shared/partial-json'
+import { BackgroundError, generateOverPort, send } from './messaging.svelte'
 
 export type Step =
   | 'list'
@@ -119,6 +120,10 @@ export class Flow {
 
   stage = $state<ProgressStage>('context')
   elapsed = $state(0)
+  /** Code pulled out of the partial response, shown as it is written. */
+  streamed = $state('')
+
+  private cancelGeneration: (() => void) | null = null
 
   private tabId: number | null = null
   private url = ''
@@ -295,16 +300,29 @@ export class Flow {
         }
       }
 
-      this.stage = 'sent'
-      const result = await send<GenerationResult>({
-        type: 'generate',
-        context,
-        instruction: this.instruction,
-        history: this.history,
-      })
+      this.streamed = ''
+      const run = generateOverPort(
+        { context, instruction: this.instruction, history: this.history },
+        {
+          onSent: () => {
+            if (current()) this.stage = 'sent'
+          },
+          onChunk: (accumulated) => {
+            if (!current()) return
+            // The response is a JSON object, so what arrives is a partial
+            // document. Only the code field is worth showing.
+            const code = extractPartialString(accumulated, 'code')
+            if (code === null) return
+            this.stage = 'streaming'
+            this.streamed = code
+          },
+        },
+      )
+      this.cancelGeneration = run.cancel
+      const result = (await run.result) as GenerationResult
+      this.cancelGeneration = null
       if (!current()) return
 
-      this.stage = 'streaming'
       this.result = result
       this.intent = result.intent
       // Keep the user's scope choice across a regeneration; only seed it once.
@@ -446,6 +464,13 @@ export class Flow {
   async discard(): Promise<void> {
     await this.clearPreview()
     this.reset()
+  }
+
+  /** Drops the connection as well as ignoring the answer. */
+  cancelGenerating(): void {
+    this.cancelGeneration?.()
+    this.cancelGeneration = null
+    void this.discard()
   }
 
   /* ---------------------------------------------------------------- */
@@ -641,5 +666,6 @@ export class Flow {
     this.review = null
     this.stage = 'context'
     this.elapsed = 0
+    this.streamed = ''
   }
 }

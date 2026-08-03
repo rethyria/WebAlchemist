@@ -261,6 +261,8 @@
     display: flex;
     flex: 1;
     flex-direction: column;
+    min-height: 0;
+    overflow-y: auto;
     gap: var(--sp-12);
     padding: var(--gutter-sidebar);
   }

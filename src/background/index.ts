@@ -14,7 +14,8 @@ import type {
   MessageResponse,
 } from '@shared/messages'
 import { matchesUrl } from '@shared/match'
-import type { Rect, ReviewResult, Transform } from '@shared/types'
+import type { PageContext, Rect, ReviewResult, Transform } from '@shared/types'
+import type { RefinementTurn } from './providers/types'
 import { overlayPaletteFor } from '@shared/accents'
 import { reconcile as reconcileContentScripts } from './content-scripts'
 import { buildProbeTransform } from './csp-probe'
@@ -397,11 +398,64 @@ async function clearAllPreviews(): Promise<void> {
  * moment every preview has to come back out.
  */
 browser.runtime.onConnect.addListener((port) => {
-  if (port.name !== 'wa-sidebar') return
-  port.onDisconnect.addListener(() => {
-    void clearAllPreviews()
-  })
+  if (port.name === 'wa-sidebar') {
+    port.onDisconnect.addListener(() => {
+      void clearAllPreviews()
+    })
+    return
+  }
+
+  if (port.name === 'wa-generate') {
+    port.onMessage.addListener((message) => {
+      void runGeneration(port, message as GenerateOverPort)
+    })
+  }
 })
+
+interface GenerateOverPort {
+  context: PageContext
+  instruction: string
+  history: RefinementTurn[]
+}
+
+/**
+ * Generation over a port rather than a one-shot message.
+ *
+ * Two reasons, and the second is the one that was breaking things:
+ *
+ *   1. It is the only way to report progress. sendMessage is one request and
+ *      one response, so a panel fed by it can show nothing between them.
+ *   2. A connected port keeps the background alive. MV3 makes the background a
+ *      non-persistent event page, and Firefox will suspend it underneath a
+ *      long-running fetch — which appeared as "Could not establish connection.
+ *      Receiving end does not exist." after a long wait, with the request
+ *      already paid for.
+ */
+async function runGeneration(
+  port: browser.runtime.Port,
+  request: GenerateOverPort,
+): Promise<void> {
+  try {
+    const provider = await resolveActiveProvider()
+    port.postMessage({ type: 'sent' })
+
+    const result = provider.generateStream
+      ? await provider.generateStream(request, (accumulated) => {
+          port.postMessage({ type: 'chunk', text: accumulated })
+        })
+      : await provider.generate(request)
+
+    port.postMessage({ type: 'done', result })
+  } catch (error) {
+    port.postMessage({
+      type: 'error',
+      error:
+        error instanceof ProviderError
+          ? { message: error.message, kind: error.kind, retryable: error.retryable }
+          : { message: error instanceof Error ? error.message : String(error) },
+    })
+  }
+}
 
 browser.tabs.onRemoved.addListener((tabId) => {
   previewedCss.delete(tabId)
