@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "WebAlchemist",
+  "name": "Web Alchemist",
   "version": "0.1.0",
   "description": "Describe a change to any webpage and have it written, saved, and repaired when the site changes.",
 
@@ -29,13 +29,13 @@
   },
 
   "sidebar_action": {
-    "default_title": "WebAlchemist",
+    "default_title": "Web Alchemist",
     "default_panel": "src/sidebar/index.html",
     "default_icon": "icons/icon.svg"
   },
 
   "action": {
-    "default_title": "WebAlchemist",
+    "default_title": "Web Alchemist",
     "default_icon": {
       "48": "icons/icon.svg",
       "96": "icons/icon.svg"

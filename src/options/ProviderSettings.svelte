@@ -153,7 +153,6 @@
 
 <section>
   <h2>Providers</h2>
-  <p class="subtitle">Keys can be set and cleared here, never read back.</p>
 
   {#if settings.providers.length === 0 && !adding}
     <div class="none">
@@ -334,12 +333,6 @@
   h2 {
     margin: 0;
     font: 600 13.5px var(--font-ui);
-  }
-
-  .subtitle {
-    margin: -6px 0 0;
-    font: 11.5px/1.5 var(--font-ui);
-    color: var(--text-faint);
   }
 
   .none {

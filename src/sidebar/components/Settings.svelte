@@ -61,11 +61,6 @@
       {/each}
       <span class="hex">{SWATCH[settings.accent]}</span>
     </div>
-    <p class="note">
-      Buttons, selection, and the picker outline. The last one is monochrome —
-      white here, near-black in the light theme. Red, orange and amber sit next to
-      the status hues, which makes breakage harder to spot.
-    </p>
   </section>
 
   <section>

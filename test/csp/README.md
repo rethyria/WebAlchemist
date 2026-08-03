@@ -51,7 +51,7 @@ npm run start:firefox:probe
 
 Then, in that Firefox:
 
-1. Open the WebAlchemist sidebar on any page.
+1. Open the Web Alchemist sidebar on any page.
 2. Click **Run CSP probe** (only present when built with `VITE_CSP_PROBE=1`).
 3. Grant the permission prompt — `localhost:8787` and user scripts.
 

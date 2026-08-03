@@ -195,7 +195,7 @@ export async function importTransforms(bundle: ExportBundle): Promise<{
 }> {
   if (bundle.schemaVersion > SCHEMA_VERSION) {
     throw new Error(
-      `This file was made by a newer version of WebAlchemist (schema ${bundle.schemaVersion}). Update the extension to import it.`,
+      `This file was made by a newer version of Web Alchemist (schema ${bundle.schemaVersion}). Update the extension to import it.`,
     )
   }
 

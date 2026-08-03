@@ -206,7 +206,7 @@
 
 <div class="panel">
   <header class="chrome">
-    <span class="brand">WebAlchemist</span>
+    <span class="brand">Web Alchemist</span>
     <button
       type="button"
       class="chrome-link"

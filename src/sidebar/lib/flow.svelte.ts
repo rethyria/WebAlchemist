@@ -176,7 +176,7 @@ export class Flow {
     if (!granted) {
       this.error = {
         kind: 'request-failed',
-        message: `WebAlchemist needs permission to read ${this.hostname()} before it can point at anything on it.`,
+        message: `Web Alchemist needs permission to read ${this.hostname()} before it can point at anything on it.`,
       }
       return
     }

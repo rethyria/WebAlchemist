@@ -34,7 +34,7 @@ export function wrapTransform(transform: Transform): string {
     try {
       ${transform.code}
     } catch (error) {
-      console.error('[WebAlchemist] transform failed:', NAME, error);
+      console.error('[Web Alchemist] transform failed:', NAME, error);
     }
   };
 

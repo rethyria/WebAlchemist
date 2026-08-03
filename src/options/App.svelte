@@ -36,9 +36,6 @@
     mono: '#f5f3f0',
   }
 
-  /* The design allows these but says a broken transform is harder to spot. */
-  const NEAR_STATUS_HUE = new Set<Accent>(['red', 'orange', 'amber'])
-
   async function call<T>(message: unknown): Promise<T> {
     const response = await browser.runtime.sendMessage(message)
     if (!response?.ok) throw new Error(response?.error?.message ?? 'Request failed.')
@@ -77,7 +74,7 @@
 </script>
 
 <main>
-  <h1>WebAlchemist settings</h1>
+  <h1>Web Alchemist settings</h1>
 
   {#if settings}
     <ProviderSettings
@@ -104,16 +101,6 @@
           ></button>
         {/each}
       </div>
-      <p class="subtitle">
-        Buttons, selection, and the picker outline. The last one is monochrome —
-        white in the dark theme, near-black in the light one.
-        {#if NEAR_STATUS_HUE.has(settings.accent)}
-          <span class="warn-text">
-            Red, orange and amber sit next to the status hues — a broken transform is
-            harder to spot with this picked.
-          </span>
-        {/if}
-      </p>
     </section>
 
     <section>
@@ -190,11 +177,6 @@
     margin: 0;
     font: 11.5px/1.5 var(--font-ui);
     color: var(--text-faint);
-  }
-
-  .warn-text {
-    font: 11.5px var(--font-ui);
-    color: var(--attention);
   }
 
   .swatches {
