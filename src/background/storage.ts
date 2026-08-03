@@ -5,17 +5,28 @@
  * with per-item limits, and transforms carry anchor snapshots plus generated
  * code. Portability is served by explicit JSON export/import instead.
  *
- * CREDENTIALS
- * -----------
- * Credentials live under their own storage key, never inside settings, and are
- * only ever read here. The sidebar can set one, clear one, and ask whether one
- * is configured — it can never read the value back. Nothing outside this
- * module returns a Credential to a caller in another context.
+ * CREDENTIALS — WHAT THIS DOES AND DOES NOT GUARANTEE
+ * ---------------------------------------------------
+ * Credentials live under their own storage key, never inside settings, and no
+ * message returns one. The sidebar can set a credential, clear it, and ask
+ * whether one is configured; it has no way to ask for the value.
  *
- * Browser extensions have no equivalent of Electron's safeStorage or an OS
- * keychain. storage.local is plaintext in the profile directory, protected by
- * file permissions and nothing else. The settings UI says so rather than
- * implying protection we are not providing.
+ * That is a discipline, NOT a boundary, and the difference matters.
+ * storage.local is shared by every context in the extension, so any of our own
+ * pages could call browser.storage.local.get('credentials') and read the key in
+ * plaintext. This was verified against a running Firefox rather than assumed.
+ * WebExtensions offers no partitioned storage that would make it otherwise.
+ *
+ * What the discipline buys is real but narrower than it looks: the value never
+ * travels over message passing, never lands in a component's state, and cannot
+ * be logged or rendered by accident, because no UI code ever holds it. It
+ * rules out the mistakes we would otherwise make. It does not stop code that
+ * goes looking.
+ *
+ * The outer limit is lower still. Browser extensions have no equivalent of
+ * Electron's safeStorage or an OS keychain, so storage.local is plaintext in
+ * the profile directory, protected by file permissions and nothing else. The
+ * settings UI says so rather than implying protection we are not providing.
  */
 
 import {

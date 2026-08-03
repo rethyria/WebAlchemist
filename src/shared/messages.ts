@@ -2,8 +2,13 @@
  * Message contract between contexts.
  *
  * Note what is absent: there is no message that returns a Credential. The
- * sidebar can set one, clear one, and ask whether one is configured. The value
- * only ever exists in the background script, and only at the point of use.
+ * sidebar can set one, clear one, and ask whether one is configured.
+ *
+ * That absence keeps the value out of message passing and out of UI state, so
+ * it cannot be logged or rendered by mistake. It does not put the value beyond
+ * reach — storage.local is shared by every extension context, and a page that
+ * went looking would find it. See the header of background/storage.ts for what
+ * is and is not guaranteed.
  */
 
 import type {
