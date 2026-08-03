@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { MatchPreset } from '@shared/match'
   import type { GenerationResult } from '@shared/types'
+  import { autogrow } from '../lib/autogrow'
   import Button from './Button.svelte'
   import CodeBlock from './CodeBlock.svelte'
   import Label from './Label.svelte'
@@ -39,7 +40,10 @@
   </header>
 
   <section>
-    <textarea value={intent} oninput={(event) => onintent(event.currentTarget.value)}
+    <textarea
+      use:autogrow={intent}
+      value={intent}
+      oninput={(event) => onintent(event.currentTarget.value)}
     ></textarea>
     <p class="note">
       {#if consolidated}Written from your messages. {/if}Edit it — this is the text
@@ -121,6 +125,7 @@
     font: 12.5px/1.55 var(--font-ui);
     color: var(--text);
     resize: none;
+    overflow-y: hidden;
   }
 
   textarea:focus {

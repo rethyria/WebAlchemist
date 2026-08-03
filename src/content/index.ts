@@ -10,6 +10,7 @@
  */
 
 import type { ContentEvent, ContentMessage } from '@shared/messages'
+import type { OverlayPalette } from '@shared/accents'
 import type { HoverTarget, Rect, Transform, TransformRuntimeState } from '@shared/types'
 import { captureAnchor, isBuildHashClass, resolveAnchor } from './anchor'
 import { extractContext } from './context'
@@ -27,9 +28,10 @@ const OVERLAY_STYLES = `
   :host { all: initial; }
 
   /*
-   * Every colour here is fixed rather than themed. The overlay renders over
-   * pages we do not control, so it cannot rely on a surrounding palette, and
-   * light-dark() would follow the *page's* scheme rather than the panel's.
+   * The accent arrives as --wa-line / --wa-on, set on the host when picking
+   * starts. Everything else is fixed rather than themed: this renders over
+   * pages we do not control, so it cannot inherit a palette, and light-dark()
+   * would follow the *page's* colour scheme rather than the panel's.
    *
    * The two-tone halo is what makes it work on an arbitrary background: a dark
    * ring immediately outside the edge, a light ring outside that. One of the
@@ -40,7 +42,7 @@ const OVERLAY_STYLES = `
     pointer-events: none;
     z-index: 2147483647;
     box-sizing: border-box;
-    outline: 2px solid #00ddff;
+    outline: 2px solid var(--wa-line);
     box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.95), 0 0 0 4px rgba(255, 255, 255, 0.55);
     transition: all 60ms linear;
   }
@@ -56,15 +58,15 @@ const OVERLAY_STYLES = `
     padding: 3px 7px;
     border: 1px solid rgba(0, 0, 0, 0.85);
     border-radius: 3px;
-    background: #00ddff;
+    background: var(--wa-line);
     box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.5);
     font: 600 11px ui-monospace, SFMono-Regular, Menlo, monospace;
-    color: #15141a;
+    color: var(--wa-on);
     white-space: nowrap;
   }
   .label .size {
     font-weight: 400;
-    color: rgba(21, 20, 26, 0.7);
+    opacity: 0.7;
   }
 
   /*
@@ -84,14 +86,14 @@ const OVERLAY_STYLES = `
     z-index: 2147483647;
     pointer-events: none;
     box-sizing: border-box;
-    border: 1.5px solid #00ddff;
+    border: 1.5px solid var(--wa-line);
     box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.9), 0 0 0 3px rgba(255, 255, 255, 0.45);
   }
   .handle {
     position: absolute;
     width: 9px;
     height: 9px;
-    background: #00ddff;
+    background: var(--wa-line);
     border: 1px solid rgba(0, 0, 0, 0.8);
   }
   .handle.tl { top: -8px; left: -8px; }
@@ -141,10 +143,13 @@ class Overlay {
   private crop: HTMLDivElement | null = null
   private hint: HTMLDivElement | null = null
 
-  mount(): void {
+  mount(palette: OverlayPalette): void {
     if (this.host) return
     this.host = document.createElement('div')
     this.host.setAttribute('data-webalchemist-overlay', '')
+    // The accent, handed in from the background where settings live.
+    this.host.style.setProperty('--wa-line', palette.line)
+    this.host.style.setProperty('--wa-on', palette.labelText)
     const root = this.host.attachShadow({ mode: 'closed' })
 
     const style = document.createElement('style')
@@ -489,11 +494,11 @@ function exceedsViewport(rect: Rect): boolean {
   )
 }
 
-function startPicking(): void {
+function startPicking(palette: OverlayPalette): void {
   if (picking) return
   picking = true
   crop = null
-  overlay.mount()
+  overlay.mount(palette)
   overlay.setHint(false)
   document.addEventListener('mousemove', onMouseMove, true)
   document.addEventListener('mousedown', onMouseDown, true)
@@ -582,7 +587,7 @@ function send(event: ContentEvent): Promise<unknown> {
 browser.runtime.onMessage.addListener(async (message: ContentMessage) => {
   switch (message.type) {
     case 'start-picking':
-      startPicking()
+      startPicking(message.palette)
       return true
     case 'cancel-picking':
       stopPicking()

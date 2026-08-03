@@ -24,6 +24,7 @@ import type {
   Transform,
   TransformRuntimeState,
 } from './types'
+import type { OverlayPalette } from './accents'
 import type { RefinementTurn } from '@background/providers/types'
 
 export type Message =
@@ -95,7 +96,8 @@ export type Message =
 
 /** Sent from background to content script. */
 export type ContentMessage =
-  | { type: 'start-picking' }
+  /** The palette travels with the request: the overlay cannot read our CSS. */
+  | { type: 'start-picking'; palette: OverlayPalette }
   | { type: 'cancel-picking' }
   | { type: 'apply-transforms'; transforms: Transform[] }
   | { type: 'run-health-check'; transforms: Transform[] }

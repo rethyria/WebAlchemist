@@ -15,6 +15,7 @@ import type {
 } from '@shared/messages'
 import { matchesUrl } from '@shared/match'
 import type { Rect, ReviewResult, Transform } from '@shared/types'
+import { overlayPaletteFor } from '@shared/accents'
 import { reconcile as reconcileContentScripts } from './content-scripts'
 import { buildProbeTransform } from './csp-probe'
 import { forgetSession, runHealthCheck, shouldCheck } from './health'
@@ -284,7 +285,15 @@ async function handle(
         target: { tabId: message.tabId },
         files: ['src/content/index.js'],
       })
-      await sendToContent(message.tabId, { type: 'start-picking' })
+
+      // Resolved here rather than in the content script: settings live in the
+      // background, and the overlay has no way to read a CSS variable of ours.
+      const settings = await getSettings()
+      const dark = matchMedia('(prefers-color-scheme: dark)').matches
+      await sendToContent(message.tabId, {
+        type: 'start-picking',
+        palette: overlayPaletteFor(settings.accent, dark),
+      })
       return true
     }
 

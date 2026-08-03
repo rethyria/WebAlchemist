@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { HoverTarget, Rect } from '@shared/types'
+  import { autogrow } from '../lib/autogrow'
   import Button from './Button.svelte'
   import Label from './Label.svelte'
   import Toggle from './Toggle.svelte'
@@ -46,10 +47,14 @@
   <section>
     <Label>What should change?</Label>
     <textarea
+      use:autogrow={instruction}
       value={instruction}
       placeholder="Give the comment tree a dark background"
       oninput={(event) => onchange(event.currentTarget.value)}
     ></textarea>
+    <Button variant="primary" full disabled={!instruction.trim()} onclick={ongenerate}>
+      Generate
+    </Button>
   </section>
 
   {#if visionSupported}
@@ -80,12 +85,6 @@
       {/if}
     </section>
   {/if}
-
-  <div class="submit">
-    <Button variant="primary" full disabled={!instruction.trim()} onclick={ongenerate}>
-      Generate
-    </Button>
-  </div>
 </div>
 
 <style>
@@ -138,13 +137,14 @@
 
   textarea {
     min-height: 62px;
+    overflow-y: hidden;
+    resize: none;
     padding: 9px 10px;
     border: 1px solid var(--accent-fg);
     border-radius: var(--r-input);
     background: var(--surface-sunken);
     font: 12.5px/1.55 var(--font-ui);
     color: var(--text);
-    resize: none;
   }
 
   textarea:focus {
@@ -199,9 +199,5 @@
     margin: 0;
     font: 11px/1.5 var(--font-ui);
     color: var(--text-faint);
-  }
-
-  .submit {
-    margin-top: auto;
   }
 </style>

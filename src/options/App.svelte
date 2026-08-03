@@ -7,6 +7,7 @@
     type HealthCheckMode,
     type Settings,
   } from '@shared/types'
+  import { ACCENT_COLOURS } from '@shared/accents'
   import Toggle from '@sidebar/components/Toggle.svelte'
   import ProviderSettings from './ProviderSettings.svelte'
 
@@ -25,16 +26,6 @@
    *
    * Mono is drawn as its dark-theme value, which is the one being previewed.
    */
-  const SWATCH: Record<Accent, string> = {
-    red: '#c92a2a',
-    orange: '#c2410c',
-    amber: '#ffd43b',
-    green: '#1f7a33',
-    blue: '#0060df',
-    indigo: '#4338ca',
-    violet: '#7c3aed',
-    mono: '#f5f3f0',
-  }
 
   async function call<T>(message: unknown): Promise<T> {
     const response = await browser.runtime.sendMessage(message)
@@ -96,7 +87,7 @@
             aria-label={accent}
             class="swatch"
             class:selected={settings.accent === accent}
-            style="--swatch: {SWATCH[accent]}"
+            style="--swatch: {ACCENT_COLOURS[accent].swatch}"
             onclick={() => settings && save({ ...settings, accent })}
           ></button>
         {/each}

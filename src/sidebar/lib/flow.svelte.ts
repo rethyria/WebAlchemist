@@ -39,7 +39,7 @@ import type {
   Transform,
   TransformKind,
 } from '@shared/types'
-import { BackgroundError, send } from './messaging'
+import { BackgroundError, send } from './messaging.svelte'
 
 export type Step =
   | 'list'

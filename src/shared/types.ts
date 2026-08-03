@@ -142,6 +142,32 @@ export type Credential =
 export const DEFAULT_GENERATE_MODEL = 'claude-opus-5'
 export const DEFAULT_REVIEW_MODEL = 'claude-opus-5'
 
+/**
+ * Models offered in the settings dropdown, newest first.
+ *
+ * A list rather than a live fetch because the endpoint needs a working
+ * credential, and the model has to be choosable before one is proven. Any
+ * string can be typed in, so an endpoint serving something not listed here is
+ * never blocked by this.
+ *
+ * `vision` is what decides whether the screenshot toggle appears at all.
+ */
+export interface ModelOption {
+  id: string
+  label: string
+  /** Input / output USD per million tokens, for the settings hint. */
+  price: string
+  vision: boolean
+}
+
+export const ANTHROPIC_MODELS: ModelOption[] = [
+  { id: 'claude-opus-5', label: 'Opus 5', price: '$5 / $25', vision: true },
+  { id: 'claude-sonnet-5', label: 'Sonnet 5', price: '$3 / $15', vision: true },
+  { id: 'claude-opus-4-6', label: 'Opus 4.6', price: '$5 / $25', vision: true },
+  { id: 'claude-sonnet-4-6', label: 'Sonnet 4.6', price: '$3 / $15', vision: true },
+  { id: 'claude-haiku-4-5', label: 'Haiku 4.5', price: '$1 / $5', vision: true },
+]
+
 export interface Provider {
   id: string
   label: string

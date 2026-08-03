@@ -11,6 +11,7 @@
    * whatever is stored; leaving it alone changes nothing.
    */
   import {
+    ANTHROPIC_MODELS,
     DEFAULT_GENERATE_MODEL,
     DEFAULT_REVIEW_MODEL,
     type CredentialStatus,
@@ -18,6 +19,7 @@
     type ProviderType,
     type Settings,
   } from '@shared/types'
+  import ModelPicker from './ModelPicker.svelte'
   import Button from '@sidebar/components/Button.svelte'
 
   interface Props {
@@ -131,6 +133,28 @@
     }
   }
 
+  async function setModel(
+    provider: Provider,
+    field: 'generateModel' | 'reviewModel',
+    model: string,
+  ) {
+    const next = { ...provider, [field]: model }
+
+    // Vision support gates the screenshot toggle, so it has to follow the
+    // generation model. For Anthropic the list knows; for an arbitrary
+    // endpoint there is nothing to ask, so an unlisted model keeps whatever
+    // was set rather than being silently turned off.
+    if (field === 'generateModel') {
+      const known = ANTHROPIC_MODELS.find((m) => m.id === model)
+      if (known) next.supportsVision = known.vision
+    }
+
+    await onsave({
+      ...settings,
+      providers: settings.providers.map((p) => (p.id === provider.id ? next : p)),
+    })
+  }
+
   async function removeProvider(provider: Provider) {
     if (busy) return
     busy = true
@@ -213,6 +237,20 @@
               <Button small onclick={() => void onclearkey(provider.id)}>Clear</Button>
             {/if}
             <Button small onclick={() => void removeProvider(provider)}>Remove</Button>
+          </div>
+
+          <div class="models">
+            <ModelPicker
+              label="Writes the code"
+              value={provider.generateModel}
+              onchange={(model) => void setModel(provider, 'generateModel', model)}
+            />
+            <ModelPicker
+              label="Reviews the code"
+              hint="code and intent only"
+              value={provider.reviewModel}
+              onchange={(model) => void setModel(provider, 'reviewModel', model)}
+            />
           </div>
 
           {#if editingKeyFor === provider.id}
@@ -429,6 +467,15 @@
     display: flex;
     flex-wrap: wrap;
     gap: var(--sp-6);
+  }
+
+  .models {
+    display: flex;
+    gap: var(--sp-9);
+  }
+
+  .models :global(> *) {
+    flex: 1;
   }
 
   .key-field {

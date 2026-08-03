@@ -9,6 +9,7 @@
    * 320px column.
    */
   import { ACCENTS, type Accent, type CredentialStatus, type HealthCheckMode, type Settings } from '@shared/types'
+  import { ACCENT_COLOURS } from '@shared/accents'
   import Label from './Label.svelte'
   import Toggle from './Toggle.svelte'
 
@@ -21,17 +22,6 @@
 
   let { settings, statuses, onsave, onfullpage }: Props = $props()
 
-  /* Swatch fill only. The applied accent comes from tokens.css. */
-  const SWATCH: Record<Accent, string> = {
-    red: '#c92a2a',
-    orange: '#c2410c',
-    amber: '#ffd43b',
-    green: '#1f7a33',
-    blue: '#0060df',
-    indigo: '#4338ca',
-    violet: '#7c3aed',
-    mono: '#f5f3f0',
-  }
 
   const HEALTH_MODES: { value: HealthCheckMode; label: string; note?: string }[] = [
     { value: 'every-load', label: 'Every page load', note: 'default' },
@@ -55,11 +45,11 @@
           aria-label={accent}
           class="swatch"
           class:selected={settings.accent === accent}
-          style="--swatch: {SWATCH[accent]}"
+          style="--swatch: {ACCENT_COLOURS[accent].swatch}"
           onclick={() => onsave({ ...settings, accent })}
         ></button>
       {/each}
-      <span class="hex">{SWATCH[settings.accent]}</span>
+      <span class="hex">{ACCENT_COLOURS[settings.accent].swatch}</span>
     </div>
   </section>
 

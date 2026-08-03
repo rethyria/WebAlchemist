@@ -8,7 +8,7 @@
     Transform,
     TransformRuntimeState,
   } from '@shared/types'
-  import { activeTab, BackgroundError, send } from './lib/messaging'
+  import { activeTab, BackgroundError, send } from './lib/messaging.svelte'
   import { Flow } from './lib/flow.svelte'
   import Describing from './components/Describing.svelte'
   import ErrorCard from './components/ErrorCard.svelte'
@@ -529,11 +529,13 @@
     height: 26px;
   }
 
+  /* The bar you point at, in the accent — this is selection, not breakage,
+     and --attention is reserved for the latter. */
   .bar.target {
     width: 14px;
     height: 26px;
-    border: 1.5px dashed var(--attention);
-    background: rgb(from var(--attention) r g b / 0.14);
+    border: 1.5px dashed var(--accent-fg);
+    background: var(--accent-wash);
   }
 
   h1 {

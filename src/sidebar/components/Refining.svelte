@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { RefinementTurn } from '@background/providers/types'
   import type { GenerationResult, ReviewResult } from '@shared/types'
+  import { autogrow } from '../lib/autogrow'
   import Button from './Button.svelte'
   import Label from './Label.svelte'
 
@@ -131,6 +132,7 @@
     <section class="ask">
       <Label>Not right yet? Say what to change</Label>
       <textarea
+        use:autogrow={followUp}
         value={followUp}
         placeholder="keep the header light though"
         oninput={(event) => onfollowup(event.currentTarget.value)}
@@ -323,7 +325,8 @@
     background: var(--surface-sunken);
     font: 12.5px/1.55 var(--font-ui);
     color: var(--text);
-    resize: vertical;
+    resize: none;
+    overflow-y: hidden;
   }
 
   /* Outlined rather than filled: the filled button on this screen is the one

@@ -20,7 +20,20 @@ export class BackgroundError extends Error {
 }
 
 export async function send<T>(message: Message): Promise<T> {
-  const response = (await browser.runtime.sendMessage(message)) as MessageResponse<T>
+  /*
+   * Runes deep-proxy the objects they hold, and runtime.sendMessage
+   * structured-clones its argument — which throws on a Proxy:
+   *
+   *   DataCloneError: Proxy object could not be cloned.
+   *
+   * Anything reaching here may have come out of $state, directly or nested
+   * inside a plain object, so the unwrap happens centrally rather than at each
+   * call site where it is one omission away from breaking again. Snapshotting
+   * a value that was never reactive returns it unchanged, so this is safe for
+   * every message.
+   */
+  const payload = $state.snapshot(message) as Message
+  const response = (await browser.runtime.sendMessage(payload)) as MessageResponse<T>
   if (!response?.ok) {
     throw new BackgroundError(
       response?.error?.message ?? 'Something went wrong.',
