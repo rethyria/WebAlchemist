@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>WebAlchemist — user script world CSP probe</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 32px;
+        background: #1c1b22;
+        color: #fbfbfe;
+        font: 14px/1.6 system-ui, sans-serif;
+      }
+      main { max-width: 62ch; }
+      h1 { font-size: 18px; }
+      code { font-family: ui-monospace, Menlo, monospace; font-size: 13px; }
+      #status {
+        margin-top: 20px;
+        padding: 12px 14px;
+        border-radius: 6px;
+        border: 1px solid #42414d;
+        background: #22212a;
+        font-family: ui-monospace, Menlo, monospace;
+        font-size: 12px;
+        white-space: pre-wrap;
+      }
+      .waiting { color: rgba(251, 251, 254, 0.55); }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>User script world CSP probe</h1>
+      <p>
+        This page is the target for the transform registered by the sidebar's
+        <b>Run CSP probe</b> button. The probe runs in a user script world whose
+        CSP is built from an empty capability list, so every form of network
+        egress it attempts should fail.
+      </p>
+      <p>
+        The verdict comes from the server, not from this page and not from the
+        probe: any request that reaches <code>/egress</code> escaped.
+      </p>
+      <div id="status" class="waiting">Waiting for the probe to run…</div>
+    </main>
+
+    <!--
+      The probe writes its results into this element from the user script
+      world. Page script and user script share the DOM but not the JS context,
+      so this node is the only channel between them — which is also why the
+      page cannot simply be handed the results as a variable.
+    -->
+    <div id="wa-csp-results" hidden></div>
+
+    <script>
+      const status = document.getElementById('status')
+      const results = document.getElementById('wa-csp-results')
+
+      /*
+       * The control. This page has no extension CSP, so this request must
+       * arrive. Without it, "no egress arrived" is indistinguishable from
+       * "the probe never ran", and the run would report a false pass.
+       */
+      fetch('/control').catch(() => {})
+
+      const observer = new MutationObserver(() => {
+        const raw = results.textContent?.trim()
+        if (!raw) return
+        observer.disconnect()
+        status.classList.remove('waiting')
+        status.textContent =
+          'Probe reported:\n' + raw + '\n\nSee the terminal for the verdict.'
+        // Reporting is what starts the settle window on the server, so it
+        // happens after the probe has fired everything.
+        fetch('/report', { method: 'POST', body: raw }).catch(() => {})
+      })
+      observer.observe(results, { childList: true, characterData: true, subtree: true })
+    </script>
+  </body>
+</html>

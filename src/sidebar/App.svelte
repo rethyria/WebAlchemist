@@ -1,6 +1,7 @@
 <script lang="ts">
   import '@shared/tokens.css'
   import type { ContentEvent } from '@shared/messages'
+  import { originPermissionFor } from '@shared/match'
   import type { Settings, Transform, TransformRuntimeState } from '@shared/types'
   import { activeTab, BackgroundError, send } from './lib/messaging'
   import { Flow } from './lib/flow.svelte'
@@ -19,6 +20,7 @@
   let url = $state('')
   let expandedId = $state<string | null>(null)
   let loadError = $state<{ message: string; retryable: boolean } | null>(null)
+  let checking = $state(false)
 
   const flow = new Flow(() => void refresh())
 
@@ -71,6 +73,40 @@
     }
   }
 
+  /*
+   * Development affordance for the one claim in the safety model that cannot
+   * be established by reading code: whether the world CSP actually contains
+   * network egress. Behind a build flag so it never reaches a release.
+   */
+  const cspProbeEnabled = import.meta.env['VITE_CSP_PROBE'] === '1'
+
+  async function runCspProbe() {
+    const tab = await activeTab()
+    if (tab?.id === undefined) return
+    // Both grants, from this click while the gesture is still live.
+    const granted = await browser.permissions.request({
+      origins: ['http://localhost:8787/*'],
+      permissions: ['userScripts'],
+    } as unknown as browser.permissions.Permissions)
+    if (!granted) return
+    await send({ type: 'run-csp-probe', tabId: tab.id })
+  }
+
+  async function checkNow() {
+    const tab = await activeTab()
+    if (tab?.id === undefined || !url) return
+    checking = true
+    try {
+      runtimeStates = await send<TransformRuntimeState[]>({
+        type: 'check-now',
+        tabId: tab.id,
+        url,
+      })
+    } finally {
+      checking = false
+    }
+  }
+
   async function setEnabled(transform: Transform, enabled: boolean) {
     await send({ type: 'set-enabled', id: transform.id, enabled })
     transforms = transforms.map((t) => (t.id === transform.id ? { ...t, enabled } : t))
@@ -84,7 +120,10 @@
     void load()
 
     const onMessage = (message: ContentEvent) => {
-      flow.receive(message)
+      // Health results are the one content event the list owns rather than
+      // the flow — they describe saved transforms, not the draft.
+      if (message.type === 'health-check-result') runtimeStates = message.states
+      else flow.receive(message)
     }
     browser.runtime.onMessage.addListener(onMessage)
 
@@ -180,6 +219,8 @@
       result={flow.result}
       review={flow.review}
       intent={flow.intent}
+      origin={originPermissionFor(flow.matchPattern)}
+      permissionDenied={flow.permissionDenied}
       onrefuse={() => void flow.refuseCapabilities()}
       onsave={() => void flow.save()}
       onback={() => flow.toSaving()}
@@ -201,6 +242,11 @@
           Select an element
         </button>
         <p class="hint">Or drag a rectangle on the page</p>
+        {#if cspProbeEnabled}
+          <button type="button" class="link" onclick={() => void runCspProbe()}>
+            Run CSP probe
+          </button>
+        {/if}
       </div>
     </div>
     <footer class="idle-foot">
@@ -211,6 +257,15 @@
     <header class="site">
       <span class="site-dot" aria-hidden="true"></span>
       <span class="host">{host}</span>
+      <button
+        type="button"
+        class="check"
+        disabled={checking}
+        title="Check whether these still work"
+        onclick={() => void checkNow()}
+      >
+        {checking ? 'Checking…' : 'Check'}
+      </button>
       <span class="count">{activeCount} active</span>
     </header>
 
@@ -277,9 +332,23 @@
   }
 
   .count {
-    margin-left: auto;
     font: 11px var(--font-ui);
     color: var(--text-faint);
+  }
+
+  .check {
+    margin-left: auto;
+    padding: 0;
+    border: none;
+    background: none;
+    font: 11px var(--font-ui);
+    color: var(--accent-fg);
+    cursor: pointer;
+  }
+
+  .check:disabled {
+    color: var(--text-faint);
+    cursor: default;
   }
 
   .broken-banner {

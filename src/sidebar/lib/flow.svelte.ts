@@ -23,7 +23,7 @@
 
 import type { ContentEvent } from '@shared/messages'
 import type { RefinementTurn } from '@background/providers/types'
-import { matchPresetsFor, type MatchPreset } from '@shared/match'
+import { matchPresetsFor, originPermissionFor, type MatchPreset } from '@shared/match'
 import type {
   Anchor,
   GenerationResult,
@@ -32,6 +32,7 @@ import type {
   Rect,
   ReviewResult,
   Transform,
+  TransformKind,
 } from '@shared/types'
 import { BackgroundError, send } from './messaging'
 
@@ -104,6 +105,8 @@ export class Flow {
   jsRan = $state(false)
   /** Static analysis, run locally after every generation. Gates the preview. */
   analysis = $state<ReviewResult | null>(null)
+  /** Set when the user declines the grant the transform needs to function. */
+  permissionDenied = $state(false)
 
   intent = $state('')
   matchPattern = $state('')
@@ -465,9 +468,47 @@ export class Flow {
     this.review = { ...analysis, ...(this.review?.model ? { model: this.review.model } : {}) }
   }
 
+  /**
+   * What has to be granted before this transform can actually work.
+   *
+   * The origin grant is what lets `insertCSS` run on later visits. Without it
+   * the transform saves, appears in the list, and silently never applies —
+   * which is worse than refusing to save it.
+   */
+  permissionsFor(kind: TransformKind, match: string): browser.permissions.Permissions {
+    return {
+      origins: [originPermissionFor(match)],
+      // 'userScripts' is absent from the OptionalPermission union in
+      // @types/firefox-webext-browser, and a union cannot be widened by
+      // declaration merging. Same cast as registry.ts, for the same reason.
+      ...(kind === 'js' ? { permissions: ['userScripts'] } : {}),
+    } as unknown as browser.permissions.Permissions
+  }
+
   async save(): Promise<void> {
     const draft = this.draft
     if (!draft) return
+
+    /*
+     * This must be the first thing that happens, before any await.
+     * permissions.request() only succeeds while the user gesture that
+     * triggered it is still live, and an await spends it.
+     *
+     * It also has to happen here rather than in the background script, which
+     * has no gesture at all — the two background handlers that used to do this
+     * could never have worked.
+     *
+     * Requesting something already granted resolves true without prompting,
+     * so there is no need to check first.
+     */
+    const granted = await browser.permissions.request(
+      this.permissionsFor(draft.kind, this.matchPattern),
+    )
+    if (!granted) {
+      this.permissionDenied = true
+      return
+    }
+    this.permissionDenied = false
 
     // The intent and scope are editable right up to this point, so they are
     // read now rather than at generation time.
@@ -553,6 +594,7 @@ export class Flow {
     this.previewedCss = null
     this.jsRan = false
     this.analysis = null
+    this.permissionDenied = false
     this.intent = ''
     this.matchPattern = ''
     this.review = null

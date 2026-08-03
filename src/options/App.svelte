@@ -8,6 +8,7 @@
     type Settings,
   } from '@shared/types'
   import Toggle from '@sidebar/components/Toggle.svelte'
+  import ProviderSettings from './ProviderSettings.svelte'
 
   let settings = $state<Settings | null>(null)
   let statuses = $state<CredentialStatus[]>([])
@@ -56,8 +57,18 @@
     await call({ type: 'save-settings', settings: next })
   }
 
-  function statusFor(providerId: string): CredentialStatus | undefined {
-    return statuses.find((s) => s.providerId === providerId)
+  async function setKey(providerId: string, key: string) {
+    await call({
+      type: 'set-credential',
+      providerId,
+      credential: { kind: 'api_key', value: key },
+    })
+    statuses = await call<CredentialStatus[]>({ type: 'get-credential-statuses' })
+  }
+
+  async function clearKey(providerId: string) {
+    await call({ type: 'clear-credential', providerId })
+    statuses = await call<CredentialStatus[]>({ type: 'get-credential-statuses' })
   }
 
   $effect(() => {
@@ -69,43 +80,13 @@
   <h1>WebAlchemist settings</h1>
 
   {#if settings}
-    <section>
-      <h2>Providers</h2>
-      <p class="subtitle">Keys can be set and cleared here, never read back.</p>
-
-      {#if settings.providers.length === 0}
-        <p class="empty">No provider is set up yet.</p>
-      {:else}
-        <ul class="providers">
-          {#each settings.providers as provider (provider.id)}
-            {@const status = statusFor(provider.id)}
-            <li>
-              <div class="provider-id">
-                <span class="provider-label">{provider.label}</span>
-                {#if provider.id === settings.activeProviderId}
-                  <span class="chip">ACTIVE</span>
-                {/if}
-                <span class="provider-host">
-                  {provider.baseUrl ?? 'api.anthropic.com'} · {status?.kind === 'oauth'
-                    ? 'OAuth'
-                    : 'API key'}
-                </span>
-              </div>
-              <div class="provider-state">
-                {#if status?.configured}
-                  <span class="ok-text">Key configured</span>
-                  <button type="button" class="secondary">Replace key</button>
-                  <button type="button" class="secondary">Clear</button>
-                {:else}
-                  <span class="warn-text">No credential</span>
-                  <button type="button" class="primary">Set key</button>
-                {/if}
-              </div>
-            </li>
-          {/each}
-        </ul>
-      {/if}
-    </section>
+    <ProviderSettings
+      {settings}
+      {statuses}
+      onsave={save}
+      onsetkey={setKey}
+      onclearkey={clearKey}
+    />
 
     <section>
       <h2>Accent</h2>
@@ -205,64 +186,10 @@
     font: 600 13.5px var(--font-ui);
   }
 
-  .subtitle,
-  .empty {
+  .subtitle {
     margin: 0;
     font: 11.5px/1.5 var(--font-ui);
     color: var(--text-faint);
-  }
-
-  .providers {
-    margin: var(--sp-11) 0 0;
-    padding: 0;
-    list-style: none;
-    border: 1px solid var(--border);
-    border-radius: var(--r-card);
-  }
-
-  .providers li {
-    display: flex;
-    align-items: center;
-    gap: var(--sp-12);
-    padding: var(--sp-11) var(--sp-13);
-    border-bottom: 1px solid var(--border-subtle);
-  }
-
-  .providers li:last-child {
-    border-bottom: none;
-  }
-
-  .provider-label {
-    font: 13px var(--font-ui);
-  }
-
-  .provider-host {
-    display: block;
-    margin-top: var(--sp-3);
-    font: 11.5px var(--font-mono);
-    color: var(--text-faint);
-  }
-
-  .chip {
-    margin-left: var(--sp-6);
-    padding: 2px 5px;
-    border-radius: var(--r-badge);
-    background: var(--accent-wash);
-    font: 600 9.5px var(--font-mono);
-    letter-spacing: 0.04em;
-    color: var(--accent);
-  }
-
-  .provider-state {
-    display: flex;
-    align-items: center;
-    gap: var(--sp-6);
-    margin-left: auto;
-  }
-
-  .ok-text {
-    font: 11.5px var(--font-ui);
-    color: var(--text-dim);
   }
 
   .warn-text {
@@ -312,7 +239,7 @@
   }
 
   .radio-card.selected {
-    border-color: var(--accent);
+    border-color: var(--accent-fg);
     background: var(--accent-wash);
   }
 
@@ -325,7 +252,7 @@
   }
 
   .radio-card.selected .radio-dot {
-    border: 4px solid var(--accent);
+    border: 4px solid var(--accent-fg);
     background: var(--surface);
   }
 
@@ -365,23 +292,4 @@
     color: var(--text-dim);
   }
 
-  button.primary,
-  button.secondary {
-    padding: 6px 10px;
-    border-radius: var(--r-button);
-    font: 600 11.5px var(--font-ui);
-    cursor: pointer;
-  }
-
-  button.primary {
-    border: none;
-    background: var(--accent);
-    color: var(--accent-text);
-  }
-
-  button.secondary {
-    border: 1px solid var(--border-strong);
-    background: transparent;
-    color: var(--text);
-  }
 </style>

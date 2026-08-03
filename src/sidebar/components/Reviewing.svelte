@@ -17,12 +17,24 @@
     result: GenerationResult
     review: ReviewResult | null
     intent: string
+    /** Host the transform will need permission to run on. */
+    origin: string
+    permissionDenied: boolean
     onrefuse: () => void
     onsave: () => void
     onback: () => void
   }
 
-  let { result, review, intent, onrefuse, onsave, onback }: Props = $props()
+  let {
+    result,
+    review,
+    intent,
+    origin,
+    permissionDenied,
+    onrefuse,
+    onsave,
+    onback,
+  }: Props = $props()
 
   let detailOpen = $state(false)
   let codeOpen = $state(false)
@@ -198,6 +210,26 @@
       </ul>
     </div>
   </details>
+
+  <p class="grant">
+    Saving asks Firefox for permission to run on <code>{origin}</code>{#if result.kind === 'js'}, and to
+      run user scripts{/if}. Without it the transform saves but never applies.
+  </p>
+
+  {#if permissionDenied}
+    <div class="card attention">
+      <div class="card-head">
+        <span class="dot attention" aria-hidden="true"></span>
+        <div class="card-body">
+          <span class="card-title">Permission was declined</span>
+          <p class="finding">
+            Nothing was saved. A transform without this grant would sit in the list
+            looking active and do nothing on every visit.
+          </p>
+        </div>
+      </div>
+    </div>
+  {/if}
 
   <div class="submit">
     {#if blocking.length > 0}
@@ -421,6 +453,12 @@
     padding-left: 16px;
     font: 11.5px/1.5 var(--font-ui);
     color: var(--text-dim);
+  }
+
+  .grant {
+    margin: 0;
+    font: 11.5px/1.55 var(--font-ui);
+    color: var(--text-faint);
   }
 
   .submit {

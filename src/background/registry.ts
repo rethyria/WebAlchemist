@@ -83,10 +83,12 @@ export async function hasUserScriptsPermission(): Promise<boolean> {
   return browser.permissions.contains(USER_SCRIPTS_PERMISSION)
 }
 
-/** Must be called from a user gesture; Firefox will not grant it otherwise. */
-export async function requestUserScriptsPermission(): Promise<boolean> {
-  return browser.permissions.request(USER_SCRIPTS_PERMISSION)
-}
+/*
+ * There is deliberately no request helper here. Firefox will not grant an
+ * optional permission unless the call happens while a user gesture is live,
+ * and this module runs in the background script, which never has one. The
+ * sidebar calls permissions.request() itself, from the click handler.
+ */
 
 export async function registerTransform(transform: Transform): Promise<void> {
   if (transform.kind !== 'js' || !transform.enabled || !transform.code) return

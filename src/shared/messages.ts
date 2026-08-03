@@ -51,9 +51,12 @@ export type Message =
   | { type: 'set-credential'; providerId: string; credential: Credential }
   | { type: 'clear-credential'; providerId: string }
 
-  /* --- permissions -------------------------------------------------- */
-  | { type: 'request-origin-permission'; origin: string }
-  | { type: 'request-userscripts-permission' }
+  /*
+   * There are no permission messages. permissions.request() only succeeds
+   * while the user gesture that triggered it is still live, and the background
+   * script has no gesture — so the sidebar calls the API directly. Routing it
+   * through here would fail every time.
+   */
 
   /* --- page-side operations ----------------------------------------- */
   | { type: 'preview-css'; tabId: number; css: string }
@@ -69,6 +72,17 @@ export type Message =
   | { type: 'capture-region'; rect: Rect; viewportWidth: number }
   | { type: 'start-picking'; tabId: number }
   | { type: 'stop-picking'; tabId: number }
+  /** Runs a check regardless of the configured mode. Always user-initiated. */
+  | { type: 'check-now'; tabId: number; url: string }
+
+  /* --- verification --------------------------------------------------- */
+  /**
+   * Registers the CSP probe and navigates to its fixture. Development only —
+   * the sidebar affordance is behind an explicit build flag, and the probe is
+   * never persisted as a transform.
+   */
+  | { type: 'run-csp-probe'; tabId: number }
+  | { type: 'clear-csp-probe' }
 
   /* --- portability --------------------------------------------------- */
   | { type: 'export-transforms' }
@@ -125,9 +139,10 @@ export interface Responses {
   'clear-preview-js': boolean
   'export-transforms': { schemaVersion: number; exportedAt: number; transforms: Transform[] }
   'import-transforms': { imported: number; needsRegeneration: string[] }
-  'request-origin-permission': boolean
-  'request-userscripts-permission': boolean
   'capture-region': { dataUrl: string; clipped: boolean }
   'start-picking': boolean
   'stop-picking': boolean
+  'check-now': TransformRuntimeState[]
+  'run-csp-probe': boolean
+  'clear-csp-probe': boolean
 }

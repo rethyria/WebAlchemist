@@ -15,11 +15,13 @@ import type {
 } from '@shared/messages'
 import { matchesUrl } from '@shared/match'
 import type { Rect, ReviewResult, Transform } from '@shared/types'
+import { reconcile as reconcileContentScripts } from './content-scripts'
+import { buildProbeTransform } from './csp-probe'
+import { forgetSession, runHealthCheck, shouldCheck } from './health'
 import { resolveActiveProvider, ProviderError } from './providers'
 import {
   hasUserScriptsPermission,
   registerTransform,
-  requestUserScriptsPermission,
   reregisterAll,
   unregisterTransform,
 } from './registry'
@@ -42,18 +44,31 @@ import {
 /* ------------------------------------------------------------------ */
 
 browser.runtime.onInstalled.addListener(async (details) => {
-  // The platform wipes every userScripts registration on update. Without this,
-  // JS transforms silently stop working after an extension update.
+  // The platform wipes every userScripts registration on update, and drops
+  // dynamic content scripts too. Without this, transforms silently stop
+  // working after an extension update — with no error, which is the worst
+  // possible failure mode.
   if (details.reason === 'update' || details.reason === 'install') {
     await reregisterAll()
+    await reconcileContentScripts()
   }
 })
 
-// Firefox drops registrations when the permission is revoked and does not
-// restore them when it is granted again.
+/*
+ * Both directions matter. Firefox drops user script registrations when the
+ * permission is revoked and does not restore them when it is granted again;
+ * content script registration has to follow the set of origins we hold, which
+ * changes in both directions from about:addons as well as from our own
+ * request at save time.
+ */
 browser.permissions.onAdded.addListener(async (permissions) => {
   const granted = permissions.permissions as string[] | undefined
   if (granted?.includes('userScripts')) await reregisterAll()
+  await reconcileContentScripts()
+})
+
+browser.permissions.onRemoved.addListener(async () => {
+  await reconcileContentScripts()
 })
 
 /** Clicking the toolbar button opens the sidebar rather than a popup. */
@@ -79,7 +94,17 @@ browser.webNavigation.onCommitted.addListener(async (details) => {
   if (details.frameId !== 0) return
   const transforms = await transformsForUrl(details.url)
   if (transforms.length === 0) return
+
   await applyCssTransforms(details.tabId, transforms)
+
+  const settings = await getSettings()
+  if (!shouldCheck(settings, details.url)) return
+
+  // Deliberately not awaited alongside the CSS application: the check waits up
+  // to three seconds for a slow page to settle, and CSS must not queue behind
+  // it. A visible delay before the page restyles would be a worse bug than a
+  // late health result.
+  void checkAndPublish(details.tabId, transforms)
 })
 
 /* ------------------------------------------------------------------ */
@@ -222,15 +247,6 @@ async function handle(
       await clearCredential(message.providerId)
       return true
 
-    case 'request-origin-permission':
-      return browser.permissions.request({ origins: [message.origin] })
-
-    case 'request-userscripts-permission': {
-      const granted = await requestUserScriptsPermission()
-      if (granted) await reregisterAll()
-      return granted
-    }
-
     case 'preview-css':
       await setPreviewCss(message.tabId, message.css)
       return true
@@ -276,6 +292,26 @@ async function handle(
       await sendToContent(message.tabId, { type: 'cancel-picking' })
       return true
 
+    case 'run-csp-probe': {
+      // Registered, never saved. It must not appear in the user's transform
+      // list, and it must come back out when the run is over.
+      await registerTransform(buildProbeTransform())
+      await browser.tabs.update(message.tabId, { url: 'http://localhost:8787/' })
+      return true
+    }
+
+    case 'clear-csp-probe':
+      await unregisterTransform('wa-csp-probe')
+      return true
+
+    case 'check-now': {
+      // A manual check must actually run, even under once-per-session where
+      // this host has already been seen.
+      forgetSession(message.url)
+      const transforms = await transformsForUrl(message.url)
+      return (await runHealthCheck(message.tabId, transforms)) ?? []
+    }
+
     case 'capture-region':
       return captureRegion(message.rect, message.viewportWidth)
 
@@ -290,6 +326,21 @@ async function handle(
       return result
     }
   }
+}
+
+/**
+ * Runs a check and forwards the result to an open sidebar.
+ *
+ * Nothing is persisted. Broken-ness is a fact about the page as it is right
+ * now, not a property of the transform — storing it would mean showing a stale
+ * warning about a site that has since been fixed.
+ */
+async function checkAndPublish(tabId: number, transforms: Transform[]): Promise<void> {
+  const states = await runHealthCheck(tabId, transforms)
+  if (!states) return
+  await browser.runtime
+    .sendMessage({ type: 'health-check-result', states })
+    .catch(() => {})
 }
 
 /* ------------------------------------------------------------------ */
@@ -479,7 +530,9 @@ async function sendToContent(tabId: number, message: ContentMessage): Promise<vo
 /** Exposed for tests and for the sidebar's manual health-check action. */
 export { transformsForUrl, runReview }
 
-// Registration state can drift if the browser restarted with stale scripts.
+// Registration state can drift if the browser restarted with stale scripts,
+// or if a permission changed while the background script was not alive.
 void (async () => {
   if (await hasUserScriptsPermission()) await reregisterAll()
+  await reconcileContentScripts()
 })()

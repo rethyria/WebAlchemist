@@ -29,8 +29,8 @@ import {
  * the implementer's. Generation quality is the product here, so the default is
  * the current Opus; users pick something cheaper in settings if they prefer.
  */
-export const DEFAULT_GENERATE_MODEL = 'claude-opus-5'
-export const DEFAULT_REVIEW_MODEL = 'claude-opus-5'
+import { DEFAULT_GENERATE_MODEL, DEFAULT_REVIEW_MODEL } from '@shared/types'
+export { DEFAULT_GENERATE_MODEL, DEFAULT_REVIEW_MODEL }
 
 export async function createAnthropicProvider(provider: Provider): Promise<AiProvider> {
   const credential = await readCredentialForRequest(provider.id)

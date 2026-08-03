@@ -134,6 +134,14 @@ export type Credential =
       clientId: string
     }
 
+/*
+ * Defaults for a newly added provider. They live here rather than in the
+ * Anthropic adapter so the settings page can read them without pulling the SDK
+ * into its bundle.
+ */
+export const DEFAULT_GENERATE_MODEL = 'claude-opus-5'
+export const DEFAULT_REVIEW_MODEL = 'claude-opus-5'
+
 export interface Provider {
   id: string
   label: string
