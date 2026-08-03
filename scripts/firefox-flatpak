@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+#
+# Stands in for a Firefox binary so `web-ext` can launch the flatpak build.
+#
+# Two things this handles:
+#
+# 1. web-ext expects to exec a binary with arguments. Firefox is a flatpak here,
+#    so the real invocation is `flatpak run org.mozilla.firefox`.
+#
+# 2. `LD_LIBRARY_PATH` is stripped. Zed is also a flatpak, and it exports its own
+#    runtime library path into child processes. The host `flatpak` binary then
+#    loads Zed's bundled GLib instead of the system one, and libmalcontent fails
+#    with `undefined symbol: g_task_set_static_name`. Unsetting the variable for
+#    this call restores normal library resolution without affecting anything else.
+#
+# The flatpak sandbox also has no access to this project by default. Granted with:
+#
+#   flatpak override --user org.mozilla.firefox \
+#     --filesystem=/home/deck/Development/web-alchemist
+#
+# Revoke with:
+#
+#   flatpak override --user --nofilesystem=/home/deck/Development/web-alchemist \
+#     org.mozilla.firefox
+#
+set -euo pipefail
+exec env -u LD_LIBRARY_PATH flatpak run org.mozilla.firefox "$@"

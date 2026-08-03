@@ -11,7 +11,7 @@
     "check": "svelte-check --tsconfig ./tsconfig.json",
     "test": "vitest run",
     "test:watch": "vitest",
-    "start:firefox": "web-ext run --source-dir ./dist --target firefox-desktop",
+    "start:firefox": "web-ext run --source-dir ./dist --target firefox-desktop --firefox ./scripts/firefox-flatpak --firefox-profile ./.web-ext-profile --profile-create-if-missing --keep-profile-changes",
     "lint:ext": "web-ext lint --source-dir ./dist"
   },
   "dependencies": {

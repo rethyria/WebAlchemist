@@ -23,6 +23,13 @@ export default defineConfig({
       additionalInputs: ['src/content/index.ts'],
       webExtConfig: {
         target: ['firefox-desktop'],
+        // Firefox is a flatpak on this machine; scripts/firefox-flatpak stands
+        // in for the binary and explains why. The profile lives inside the
+        // project because the flatpak sandbox is only granted this directory.
+        firefox: resolve(__dirname, 'scripts/firefox-flatpak'),
+        firefoxProfile: resolve(__dirname, '.web-ext-profile'),
+        profileCreateIfMissing: true,
+        keepProfileChanges: true,
         startUrl: ['https://news.ycombinator.com'],
       },
     }),

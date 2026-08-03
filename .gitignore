@@ -1,6 +1,7 @@
 node_modules/
 dist/
 web-ext-artifacts/
+.web-ext-profile/
 *.tsbuildinfo
 .DS_Store
 .vite/

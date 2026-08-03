@@ -23,6 +23,29 @@ npm run start:firefox
 
 `npx tsc --noEmit` type-checks.
 
+### SteamOS / flatpak Firefox
+
+`npm run start:firefox` goes through `scripts/firefox-flatpak`, which wraps
+`flatpak run org.mozilla.firefox`. Two things it exists to handle, both
+documented in the script itself:
+
+- The flatpak sandbox has no access to this project by default. Grant it once:
+
+  ```sh
+  flatpak override --user org.mozilla.firefox \
+    --filesystem=/home/deck/Development/web-alchemist
+  ```
+
+  Revoke with `--nofilesystem=` and the same path. Nothing outside this
+  directory is exposed, and the dev profile lives in `.web-ext-profile/` inside
+  the project so it stays within the grant.
+
+- If you launch from a terminal spawned by Zed (also a flatpak), `LD_LIBRARY_PATH`
+  points at Zed's runtime libs, and the host `flatpak` binary then loads Zed's
+  bundled GLib and dies with `undefined symbol: g_task_set_static_name`. The
+  wrapper unsets it for that one call. Running `flatpak` directly from such a
+  shell needs `env -u LD_LIBRARY_PATH` in front of it.
+
 ## How it fits together
 
 ```
