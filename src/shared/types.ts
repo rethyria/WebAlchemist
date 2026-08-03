@@ -147,11 +147,31 @@ export interface CredentialStatus {
 
 export type HealthCheckMode = 'every-load' | 'once-per-session' | 'manual'
 
+/**
+ * Accent is user-selectable from a swatch row in settings. Applied as
+ * `data-accent` on the document element; the palette lives in tokens.css.
+ *
+ * Red and orange sit next to the status hues, which is allowed but makes a
+ * broken transform harder to spot. The settings UI says so at the point of
+ * choosing rather than preventing it.
+ */
+export const ACCENTS = [
+  'blue',
+  'red',
+  'orange',
+  'green',
+  'indigo',
+  'violet',
+  'mono',
+] as const
+export type Accent = (typeof ACCENTS)[number]
+
 export interface Settings {
   schemaVersion: number
   providers: Provider[]
   activeProviderId: string | null
   healthCheckMode: HealthCheckMode
+  accent: Accent
   /** Disables execution of every AI-authored JS transform, everywhere. */
   aiJsKillSwitch: boolean
 }
@@ -161,6 +181,7 @@ export const DEFAULT_SETTINGS: Settings = {
   providers: [],
   activeProviderId: null,
   healthCheckMode: 'every-load',
+  accent: 'blue',
   aiJsKillSwitch: false,
 }
 

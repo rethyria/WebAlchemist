@@ -1,0 +1,221 @@
+/**
+ * Design tokens. Shared by the sidebar, the settings page, and the in-page
+ * overlay.
+ *
+ * Source: the design handoff for this project. The dark theme is what was
+ * drawn; light values come from the handoff's token table.
+ *
+ * Two rules from the design that are easy to violate by accident:
+ *
+ *   1. There is no success colour. A clean state is neutral — `--ok` is a
+ *      low-alpha grey, not a green. Adding a green here would undo the whole
+ *      point of the quiet-review treatment.
+ *   2. `--attention` and `--block` are status hues and are never used for
+ *      emphasis or decoration. If something is orange, it is broken or it
+ *      wants a decision.
+ */
+
+/* ------------------------------------------------------------------ */
+/* Accent — user-selectable                                            */
+/* ------------------------------------------------------------------ */
+
+/*
+ * The settings page offers a swatch row; the choice is stored as
+ * Settings.accent and applied as data-accent on <html>.
+ *
+ * Only the default (blue) has a dark/light pair specified in the design —
+ * #00ddff dark, #0060df light. The other six give a single swatch hue, so
+ * their theme pairs are derived here: light theme uses the swatch as drawn,
+ * dark theme lifts it for contrast against #1c1b22. These six are the values
+ * most likely to want retuning by eye.
+ *
+ * The design's swatch row also repeats #7c3aed twice; only the unique hues are
+ * offered here. The sequence otherwise reads as a spectrum, so the duplicate
+ * was probably meant to be an amber.
+ */
+
+:root[data-accent='blue'],
+:root:not([data-accent]) {
+  --accent-l: #0060df;
+  --accent-d: #00ddff;
+  --accent-rgb-l: 0 96 223;
+  --accent-rgb-d: 0 221 255;
+  --accent-text-l: #ffffff;
+  --accent-text-d: #15141a;
+}
+
+:root[data-accent='red'] {
+  --accent-l: #c92a2a;
+  --accent-d: #ff6b6b;
+  --accent-rgb-l: 201 42 42;
+  --accent-rgb-d: 255 107 107;
+  --accent-text-l: #ffffff;
+  --accent-text-d: #15141a;
+}
+
+:root[data-accent='orange'] {
+  --accent-l: #c2410c;
+  --accent-d: #ffa94d;
+  --accent-rgb-l: 194 65 12;
+  --accent-rgb-d: 255 169 77;
+  --accent-text-l: #ffffff;
+  --accent-text-d: #15141a;
+}
+
+:root[data-accent='green'] {
+  --accent-l: #1f7a33;
+  --accent-d: #6ee7a8;
+  --accent-rgb-l: 31 122 51;
+  --accent-rgb-d: 110 231 168;
+  --accent-text-l: #ffffff;
+  --accent-text-d: #15141a;
+}
+
+:root[data-accent='indigo'] {
+  --accent-l: #4338ca;
+  --accent-d: #a5b4fc;
+  --accent-rgb-l: 67 56 202;
+  --accent-rgb-d: 165 180 252;
+  --accent-text-l: #ffffff;
+  --accent-text-d: #15141a;
+}
+
+:root[data-accent='violet'] {
+  --accent-l: #7c3aed;
+  --accent-d: #c9a7ff;
+  --accent-rgb-l: 124 58 237;
+  --accent-rgb-d: 201 167 255;
+  --accent-text-l: #ffffff;
+  --accent-text-d: #15141a;
+}
+
+/* Monochrome: white on dark, near-black on light. */
+:root[data-accent='mono'] {
+  --accent-l: #15141a;
+  --accent-d: #fbfbfe;
+  --accent-rgb-l: 21 20 26;
+  --accent-rgb-d: 251 251 254;
+  --accent-text-l: #ffffff;
+  --accent-text-d: #15141a;
+}
+
+/* ------------------------------------------------------------------ */
+/* Palette                                                             */
+/* ------------------------------------------------------------------ */
+
+:root {
+  color-scheme: light dark;
+
+  /* Surfaces */
+  --surface: light-dark(#ffffff, #1c1b22);
+  --surface-raised: light-dark(#f7f7fb, #22212a);
+  --surface-sunken: light-dark(#f0f0f4, #15141a);
+  --chrome: light-dark(#f0f0f4, #2b2a33);
+
+  /* Borders */
+  --border: light-dark(#cfcfd8, #42414d);
+  --border-subtle: light-dark(rgba(0, 0, 0, 0.07), rgba(255, 255, 255, 0.06));
+  --border-strong: light-dark(#8f8f9d, #5b5b66);
+
+  /* Text */
+  --text: light-dark(#15141a, #fbfbfe);
+  --text-dim: light-dark(rgba(21, 20, 26, 0.62), rgba(251, 251, 254, 0.62));
+  --text-faint: light-dark(rgba(21, 20, 26, 0.45), rgba(251, 251, 254, 0.42));
+
+  /* Status. No success colour exists by design. */
+  --attention: light-dark(#c2521f, #ef8354);
+  --block: light-dark(#b3261e, #f2726b);
+  --neutral: light-dark(#5f6b7f, #8d99ae);
+  --ok: light-dark(rgba(21, 20, 26, 0.35), rgba(251, 251, 254, 0.35));
+
+  /* Accent, resolved from the data-accent block above. */
+  --accent: var(--accent-l);
+  --accent-rgb: var(--accent-rgb-l);
+  --accent-text: var(--accent-text-l);
+  --accent-wash: rgb(var(--accent-rgb) / 0.07);
+
+  /* Code highlighting */
+  --code-selector: light-dark(#c2521f, #ef8354);
+  --code-property: light-dark(#1c5fa8, #8ec6ff);
+  --code-value: light-dark(#2b6e33, #a3d9a5);
+  --code-comment: light-dark(rgba(21, 20, 26, 0.4), rgba(251, 251, 254, 0.38));
+  --code-line-no: light-dark(rgba(21, 20, 26, 0.38), rgba(251, 251, 254, 0.35));
+  --code-flagged-bg: rgb(from var(--block) r g b / 0.16);
+
+  /* Spacing scale, as drawn. */
+  --sp-2: 2px;
+  --sp-3: 3px;
+  --sp-5: 5px;
+  --sp-6: 6px;
+  --sp-7: 7px;
+  --sp-9: 9px;
+  --sp-11: 11px;
+  --sp-12: 12px;
+  --sp-13: 13px;
+  --sp-16: 16px;
+  --sp-20: 20px;
+  --sp-26: 26px;
+
+  --gutter-sidebar: 12px;
+  --gutter-settings: 28px;
+  /* Expanded row body aligns under the transform name, past handle + toggle. */
+  --indent-expanded: 39px;
+
+  /* Radii */
+  --r-progress: 2px;
+  --r-badge: 3px;
+  --r-button: 4px;
+  --r-input: 5px;
+  --r-card: 6px;
+  --r-panel: 8px;
+
+  /* Type */
+  --font-ui: system-ui, sans-serif;
+  --font-mono: ui-monospace, Menlo, monospace;
+
+  /* Shadows */
+  --shadow-panel: 0 8px 30px rgba(0, 0, 0, 0.45);
+  --shadow-overlay: 0 4px 20px rgba(0, 0, 0, 0.5);
+  /* Two-tone halo so the picker outline survives white, black, and mid-tone. */
+  --halo-overlay: 0 0 0 1px rgba(0, 0, 0, 0.95), 0 0 0 4px rgba(255, 255, 255, 0.55);
+
+  /* Nothing animates longer than this, and only disclosure/expansion do. */
+  --motion: 120ms;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --accent: var(--accent-d);
+    --accent-rgb: var(--accent-rgb-d);
+    --accent-text: var(--accent-text-d);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --motion: 0ms;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Base                                                               */
+/* ------------------------------------------------------------------ */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--surface);
+  color: var(--text);
+  font-family: var(--font-ui);
+}
+
+/* Focus must stay visible on #1c1b22; the accent at 2px is the design's rule. */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
