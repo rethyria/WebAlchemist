@@ -10,13 +10,19 @@
  *    or every JS transform silently stops working after an update — with no
  *    error, which is the worst possible failure mode.
  *
- * CSP IS THE ENFORCEMENT BOUNDARY
- * -------------------------------
+ * CSP IS THE ENFORCEMENT BOUNDARY, FOR THE PART IT COVERS
+ * -------------------------------------------------------
  * Each transform gets its own world, and that world's Content Security Policy
  * is derived from the capabilities the transform declared. A transform that
- * declared nothing runs in a world that cannot open a connection at all, so an
- * undeclared network call fails at runtime regardless of what static analysis
- * or the model reviewer concluded. Declared capabilities are not advisory.
+ * did not declare `network` runs in a world that cannot open a connection at
+ * all, so the request fails at runtime regardless of what static analysis or
+ * the model reviewer concluded. That capability is not advisory.
+ *
+ * `storage` and `cookies` are. CSP has no directive for either, so there is no
+ * world configuration that stops `localStorage.setItem` or `document.cookie`.
+ * For those two, declaring is disclosure and the only real control is refusing
+ * to save the code — which is what an undeclared use triggers, since
+ * applyCapabilityPolicy raises it to `block`. See CAPABILITY_ENFORCEMENT.
  */
 
 import type { Capability, Transform } from '@shared/types'

@@ -23,6 +23,26 @@ export type ExecutionWorld = 'USER_SCRIPT' | 'MAIN'
 export type Capability = 'network' | 'storage' | 'cookies'
 
 /**
+ * Whether a declared capability can actually be enforced at runtime, or is
+ * only a disclosure.
+ *
+ * The enforcement mechanism is the user script world's CSP, and CSP has
+ * directives for fetching but none for storage or cookies. So `network` is
+ * genuinely contained — a transform that did not declare it runs under
+ * `connect-src 'none'` and its request fails whatever the code says. Storage
+ * and cookies have no equivalent, and the only real control over them is
+ * refusing to save the code at all.
+ *
+ * The review UI says which of the two it is at the point of approval, because
+ * "allow" means materially different things in each case.
+ */
+export const CAPABILITY_ENFORCEMENT: Record<Capability, 'csp' | 'disclosure'> = {
+  network: 'csp',
+  storage: 'disclosure',
+  cookies: 'disclosure',
+}
+
+/**
  * Identifying signals for the target element, captured at authoring time.
  * This is the machine-checkable twin of `rationale.assumptions` — the health
  * check tests this, and shows the assumption text when it fails.
@@ -151,15 +171,19 @@ export type HealthCheckMode = 'every-load' | 'once-per-session' | 'manual'
  * Accent is user-selectable from a swatch row in settings. Applied as
  * `data-accent` on the document element; the palette lives in tokens.css.
  *
- * Red and orange sit next to the status hues, which is allowed but makes a
- * broken transform harder to spot. The settings UI says so at the point of
- * choosing rather than preventing it.
+ * Order is the swatch row as drawn — a spectrum, not an alphabetical list —
+ * so this array is also the render order.
+ *
+ * Red, orange and amber sit next to the status hues, which is allowed but
+ * makes a broken transform harder to spot. The settings UI says so at the
+ * point of choosing rather than preventing it.
  */
 export const ACCENTS = [
-  'blue',
   'red',
   'orange',
+  'amber',
   'green',
+  'blue',
   'indigo',
   'violet',
   'mono',
@@ -223,6 +247,31 @@ export interface ReviewResult {
 /* Generation                                                          */
 /* ------------------------------------------------------------------ */
 
+/** Viewport coordinates. Also the screenshot crop when the user drew one. */
+export interface Rect {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+/**
+ * What the sidebar shows while the pointer moves over the page. Sent on every
+ * change of target, so it stays small — the expensive context extraction only
+ * happens once, on confirm.
+ */
+export interface HoverTarget {
+  /** Ancestor selectors, root first, the target itself last. */
+  breadcrumb: string[]
+  width: number
+  height: number
+  role?: string
+  /** Present once the user has drawn a rectangle. */
+  crop?: Rect
+  /** True while the mouse button is down and the rectangle is being drawn. */
+  drawing: boolean
+}
+
 /** Context extracted from the page and sent to the model. */
 export interface PageContext {
   url: string
@@ -239,7 +288,7 @@ export interface PageContext {
   /** CSS custom properties in scope at the target. */
   customProperties: Record<string, string>
   /** Only present when the user opted in for this specific request. */
-  screenshot?: { dataUrl: string; rect: DOMRectReadOnly; clipped: boolean }
+  screenshot?: { dataUrl: string; rect: Rect; clipped: boolean }
 }
 
 /** What the model returns for a generation or repair request. */

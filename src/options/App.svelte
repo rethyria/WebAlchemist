@@ -18,19 +18,25 @@
     { value: 'manual', label: 'Manual only', note: 'Nothing runs on its own' },
   ]
 
-  /* Swatch fill for the picker dots. The applied accent comes from tokens.css. */
+  /*
+   * Swatch fill for the picker dots, in the design's drawn order. The applied
+   * accent comes from tokens.css; this is only what the dot looks like.
+   *
+   * Mono is drawn as its dark-theme value, which is the one being previewed.
+   */
   const SWATCH: Record<Accent, string> = {
-    blue: '#1971c2',
     red: '#c92a2a',
     orange: '#c2410c',
+    amber: '#ffd43b',
     green: '#1f7a33',
+    blue: '#0060df',
     indigo: '#4338ca',
     violet: '#7c3aed',
     mono: '#f5f3f0',
   }
 
   /* The design allows these but says a broken transform is harder to spot. */
-  const NEAR_STATUS_HUE = new Set<Accent>(['red', 'orange'])
+  const NEAR_STATUS_HUE = new Set<Accent>(['red', 'orange', 'amber'])
 
   async function call<T>(message: unknown): Promise<T> {
     const response = await browser.runtime.sendMessage(message)
@@ -118,12 +124,12 @@
         {/each}
       </div>
       <p class="subtitle">
-        The last swatch is monochrome: white in the dark theme, near-black in the light
-        one.
+        Buttons, selection, and the picker outline. The last one is monochrome —
+        white in the dark theme, near-black in the light one.
         {#if NEAR_STATUS_HUE.has(settings.accent)}
           <span class="warn-text">
-            Red and orange sit next to the status hues — a broken transform is harder to
-            spot with this picked.
+            Red, orange and amber sit next to the status hues — a broken transform is
+            harder to spot with this picked.
           </span>
         {/if}
       </p>

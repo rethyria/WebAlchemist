@@ -10,8 +10,8 @@
  */
 
 import type { ContentEvent, ContentMessage } from '@shared/messages'
-import type { Transform, TransformRuntimeState } from '@shared/types'
-import { captureAnchor, resolveAnchor } from './anchor'
+import type { HoverTarget, Rect, Transform, TransformRuntimeState } from '@shared/types'
+import { captureAnchor, isBuildHashClass, resolveAnchor } from './anchor'
 import { extractContext } from './context'
 
 /* ------------------------------------------------------------------ */
@@ -25,75 +25,153 @@ import { extractContext } from './context'
  */
 const OVERLAY_STYLES = `
   :host { all: initial; }
+
+  /*
+   * Every colour here is fixed rather than themed. The overlay renders over
+   * pages we do not control, so it cannot rely on a surrounding palette, and
+   * light-dark() would follow the *page's* scheme rather than the panel's.
+   *
+   * The two-tone halo is what makes it work on an arbitrary background: a dark
+   * ring immediately outside the edge, a light ring outside that. One of the
+   * two always separates the outline from whatever is behind it.
+   */
   .highlight {
     position: fixed;
     pointer-events: none;
     z-index: 2147483647;
-    border: 2px solid #ef8354;
-    background: rgba(239, 131, 84, 0.12);
-    /* Double outline so the edge stays visible on any background. */
-    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.65), inset 0 0 0 1px rgba(255, 255, 255, 0.65);
+    box-sizing: border-box;
+    outline: 2px solid #00ddff;
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.95), 0 0 0 4px rgba(255, 255, 255, 0.55);
     transition: all 60ms linear;
   }
+  .highlight.locked { outline-style: dashed; }
+
   .label {
     position: fixed;
     z-index: 2147483647;
     pointer-events: none;
-    font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
-    color: #fff;
-    background: #2b2d42;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 3px 7px;
+    border: 1px solid rgba(0, 0, 0, 0.85);
+    border-radius: 3px;
+    background: #00ddff;
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.5);
+    font: 600 11px ui-monospace, SFMono-Regular, Menlo, monospace;
+    color: #15141a;
+    white-space: nowrap;
+  }
+  .label .size {
+    font-weight: 400;
+    color: rgba(21, 20, 26, 0.7);
+  }
+
+  /*
+   * The crop is the consent surface — it is the literal boundary of what gets
+   * sent. Dimming everything outside it, rather than tinting the inside, is
+   * what makes the boundary legible: the bright region is the payload.
+   */
+  .mask {
+    position: fixed;
+    inset: 0;
+    z-index: 2147483646;
+    pointer-events: none;
+    background: rgba(21, 20, 26, 0.5);
+  }
+  .crop {
+    position: fixed;
+    z-index: 2147483647;
+    pointer-events: none;
+    box-sizing: border-box;
+    border: 1.5px solid #00ddff;
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.9), 0 0 0 3px rgba(255, 255, 255, 0.45);
+  }
+  .handle {
+    position: absolute;
+    width: 9px;
+    height: 9px;
+    background: #00ddff;
+    border: 1px solid rgba(0, 0, 0, 0.8);
+  }
+  .handle.tl { top: -8px; left: -8px; }
+  .handle.tr { top: -8px; right: -8px; }
+  .handle.bl { bottom: -8px; left: -8px; }
+  .handle.br { bottom: -8px; right: -8px; }
+
+  .hint {
+    position: fixed;
+    left: 50%;
+    bottom: 14px;
+    transform: translateX(-50%);
+    z-index: 2147483647;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 12px;
+    border: 1px solid rgba(255, 255, 255, 0.22);
+    border-radius: 6px;
+    background: rgba(21, 20, 26, 0.93);
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+    font: 11.5px system-ui, sans-serif;
+    color: #fbfbfe;
+    white-space: nowrap;
+  }
+  .hint .rule {
+    width: 1px;
+    height: 14px;
+    background: rgba(255, 255, 255, 0.2);
+  }
+  .hint kbd {
     padding: 3px 6px;
     border-radius: 3px;
-    white-space: nowrap;
-    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+    background: rgba(255, 255, 255, 0.13);
+    font: 10.5px ui-monospace, SFMono-Regular, Menlo, monospace;
+    color: #fbfbfe;
   }
-  .drag {
-    position: fixed;
-    pointer-events: none;
-    z-index: 2147483646;
-    border: 1px dashed #ef8354;
-    background: rgba(239, 131, 84, 0.08);
-  }
+  .hint .keys { display: flex; gap: 5px; }
+  .hint .muted { color: rgba(251, 251, 254, 0.6); }
 `
 
 class Overlay {
   private host: HTMLDivElement | null = null
-  private root: ShadowRoot | null = null
   private highlight: HTMLDivElement | null = null
   private label: HTMLDivElement | null = null
-  private drag: HTMLDivElement | null = null
+  private mask: HTMLDivElement | null = null
+  private crop: HTMLDivElement | null = null
+  private hint: HTMLDivElement | null = null
 
   mount(): void {
     if (this.host) return
     this.host = document.createElement('div')
     this.host.setAttribute('data-webalchemist-overlay', '')
-    this.root = this.host.attachShadow({ mode: 'closed' })
+    const root = this.host.attachShadow({ mode: 'closed' })
 
     const style = document.createElement('style')
     style.textContent = OVERLAY_STYLES
-    this.root.append(style)
 
-    this.highlight = document.createElement('div')
-    this.highlight.className = 'highlight'
-    this.label = document.createElement('div')
-    this.label.className = 'label'
-    this.drag = document.createElement('div')
-    this.drag.className = 'drag'
-    this.drag.style.display = 'none'
+    this.highlight = element('div', 'highlight')
+    this.label = element('div', 'label')
+    this.mask = element('div', 'mask')
+    this.crop = element('div', 'crop')
+    for (const corner of ['tl', 'tr', 'bl', 'br']) {
+      this.crop.append(element('div', `handle ${corner}`))
+    }
+    this.hint = this.buildHint()
 
-    this.root.append(this.highlight, this.label, this.drag)
+    this.hideCrop()
+    root.append(style, this.mask, this.highlight, this.label, this.crop, this.hint)
     document.documentElement.append(this.host)
   }
 
   unmount(): void {
     this.host?.remove()
     this.host = null
-    this.root = null
   }
 
-  showElement(element: Element, breadcrumb: string): void {
+  showElement(target: Element, selector: string): void {
     if (!this.highlight || !this.label) return
-    const rect = element.getBoundingClientRect()
+    const rect = target.getBoundingClientRect()
     Object.assign(this.highlight.style, {
       display: 'block',
       left: `${rect.left}px`,
@@ -102,30 +180,85 @@ class Overlay {
       height: `${rect.height}px`,
     })
 
-    // Flip the label below the element when there is no room above it.
-    const above = rect.top > 24
+    this.label.replaceChildren(
+      text('span', selector),
+      text('span', `${Math.round(rect.width)} × ${Math.round(rect.height)}`, 'size'),
+    )
+    // Flip below the element when there is no room above it.
+    const above = rect.top > 30
     Object.assign(this.label.style, {
-      display: 'block',
-      left: `${Math.max(4, rect.left)}px`,
-      top: above ? `${rect.top - 22}px` : `${rect.bottom + 4}px`,
+      display: 'flex',
+      left: `${Math.max(4, rect.left - 2)}px`,
+      top: above ? `${rect.top - 27}px` : `${rect.bottom + 6}px`,
     })
-    this.label.textContent = breadcrumb
   }
 
-  showDrag(rect: { x: number; y: number; width: number; height: number }): void {
-    if (!this.drag) return
-    Object.assign(this.drag.style, {
+  showCrop(rect: Rect): void {
+    if (!this.crop || !this.mask) return
+    Object.assign(this.crop.style, {
       display: 'block',
       left: `${rect.x}px`,
       top: `${rect.y}px`,
       width: `${rect.width}px`,
       height: `${rect.height}px`,
     })
+
+    // A hole punched in the dimming layer, traced back to the start point so
+    // the path stays a single closed polygon.
+    const { x, y, width: w, height: h } = rect
+    this.mask.style.display = 'block'
+    this.mask.style.clipPath =
+      `polygon(0 0, 100% 0, 100% 100%, 0 100%, 0 0, ` +
+      `${x}px ${y}px, ${x}px ${y + h}px, ${x + w}px ${y + h}px, ` +
+      `${x + w}px ${y}px, ${x}px ${y}px)`
   }
 
-  hideDrag(): void {
-    if (this.drag) this.drag.style.display = 'none'
+  hideCrop(): void {
+    if (this.crop) this.crop.style.display = 'none'
+    if (this.mask) this.mask.style.display = 'none'
   }
+
+  setHint(hasCrop: boolean): void {
+    if (!this.hint) return
+    const lead = this.hint.firstElementChild
+    if (lead) lead.textContent = hasCrop ? 'Confirm or redraw' : 'Hover or drag'
+    this.hint.querySelector('.redraw')?.setAttribute(
+      'style',
+      hasCrop ? '' : 'display:none',
+    )
+  }
+
+  private buildHint(): HTMLDivElement {
+    const bar = element('div', 'hint')
+    bar.append(text('span', 'Hover or drag'), element('span', 'rule'))
+
+    const keys = element('div', 'keys')
+    for (const key of ['↑', '↓', '←', '→']) keys.append(text('kbd', key))
+    bar.append(keys, element('span', 'rule'))
+
+    const confirm = text('span', '')
+    confirm.append(text('kbd', '↵'), text('span', ' confirm'))
+    const redraw = text('span', 'redraw', 'muted redraw')
+    redraw.setAttribute('style', 'display:none')
+    const cancel = text('span', '', 'muted')
+    cancel.append(text('kbd', 'esc'), text('span', ' cancel'))
+
+    bar.append(confirm, redraw, cancel)
+    return bar
+  }
+}
+
+function element(tag: string, className: string): HTMLDivElement {
+  const node = document.createElement(tag) as HTMLDivElement
+  node.className = className
+  return node
+}
+
+function text(tag: string, content: string, className?: string): HTMLElement {
+  const node = document.createElement(tag)
+  node.textContent = content
+  if (className) node.className = className
+  return node
 }
 
 const overlay = new Overlay()
@@ -136,20 +269,44 @@ const overlay = new Overlay()
 
 let current: Element | null = null
 let dragOrigin: { x: number; y: number } | null = null
+let crop: Rect | null = null
 let picking = false
 
-function breadcrumbFor(element: Element): string {
+/** Short label for a single element: `aside.rail`, `div#root`, `main`. */
+function selectorFor(element: Element): string {
+  const tag = element.tagName.toLowerCase()
+  if (element.id) return `${tag}#${element.id}`
+  const cls = [...element.classList].find((token) => !isBuildHashClass(token))
+  return cls ? `${tag}.${cls}` : tag
+}
+
+/** Root first, target last. The panel renders the last entry as the chip. */
+function breadcrumbFor(element: Element): string[] {
   const parts: string[] = []
   let node: Element | null = element
-  let depth = 0
-  while (node && node !== document.documentElement && depth < 4) {
-    const tag = node.tagName.toLowerCase()
-    const id = node.id ? `#${node.id}` : ''
-    parts.unshift(`${tag}${id}`)
+  while (node && node !== document.documentElement && parts.length < 5) {
+    parts.unshift(selectorFor(node))
     node = node.parentElement
-    depth += 1
   }
-  return parts.join(' > ')
+  return parts
+}
+
+function describeTarget(element: Element): HoverTarget {
+  const rect = element.getBoundingClientRect()
+  const role = element.getAttribute('role')
+  return {
+    breadcrumb: breadcrumbFor(element),
+    width: Math.round(rect.width),
+    height: Math.round(rect.height),
+    ...(role ? { role } : {}),
+    ...(crop ? { crop } : {}),
+    drawing: dragOrigin !== null,
+  }
+}
+
+function publishTarget(): void {
+  if (!current) return
+  void send({ type: 'element-hovered', target: describeTarget(current) })
 }
 
 function setCurrent(element: Element | null): void {
@@ -157,25 +314,31 @@ function setCurrent(element: Element | null): void {
   // Never let the picker select its own overlay.
   if (element.closest('[data-webalchemist-overlay]')) return
   current = element
-  overlay.showElement(element, breadcrumbFor(element))
+  overlay.showElement(element, selectorFor(element))
+  publishTarget()
 }
 
 function onMouseMove(event: MouseEvent): void {
   if (dragOrigin) {
-    const rect = {
+    crop = {
       x: Math.min(dragOrigin.x, event.clientX),
       y: Math.min(dragOrigin.y, event.clientY),
       width: Math.abs(event.clientX - dragOrigin.x),
       height: Math.abs(event.clientY - dragOrigin.y),
     }
-    overlay.showDrag(rect)
+    overlay.showCrop(crop)
     return
   }
+  // Once a rectangle exists it owns the selection; moving the mouse must not
+  // silently retarget underneath it.
+  if (crop) return
   setCurrent(document.elementFromPoint(event.clientX, event.clientY))
 }
 
 function onMouseDown(event: MouseEvent): void {
   dragOrigin = { x: event.clientX, y: event.clientY }
+  crop = null
+  overlay.hideCrop()
   event.preventDefault()
   event.stopPropagation()
 }
@@ -187,35 +350,27 @@ function onMouseUp(event: MouseEvent): void {
   if (!dragOrigin) return
   const width = Math.abs(event.clientX - dragOrigin.x)
   const height = Math.abs(event.clientY - dragOrigin.y)
-  const rect = {
-    x: Math.min(dragOrigin.x, event.clientX),
-    y: Math.min(dragOrigin.y, event.clientY),
-    width,
-    height,
-  }
   dragOrigin = null
 
-  // A drag under a few pixels is a click; treat it as hover selection.
-  if (width < 5 && height < 5) {
-    overlay.hideDrag()
-    confirmSelection(null)
+  // A drag under a few pixels is a click, which confirms what is hovered.
+  if (width < 12 || height < 12) {
+    crop = null
+    overlay.hideCrop()
+    confirmSelection()
     return
   }
 
-  // Resolve the drag rectangle to the common ancestor of what it covers, then
-  // hand back to hover mode so the user confirms an actual element.
-  const covered = elementsInRect(rect)
-  const ancestor = commonAncestor(covered)
+  // A real rectangle resolves to the deepest element that fully contains it,
+  // then waits. Drawing a region is not the same act as approving it, and the
+  // rectangle is what a screenshot would send — the user confirms it
+  // explicitly.
+  const ancestor = commonAncestor(elementsInRect(crop as Rect))
   if (ancestor) setCurrent(ancestor)
-  confirmSelection(rect)
+  overlay.setHint(true)
+  publishTarget()
 }
 
-function elementsInRect(rect: {
-  x: number
-  y: number
-  width: number
-  height: number
-}): Element[] {
+function elementsInRect(rect: Rect): Element[] {
   const found = new Set<Element>()
   const steps = 6
   for (let i = 0; i <= steps; i += 1) {
@@ -256,7 +411,15 @@ function onKeyDown(event: KeyboardEvent): void {
       return
     case 'Enter':
       handled()
-      confirmSelection(null)
+      confirmSelection()
+      return
+    case 'Backspace':
+      if (!crop) return
+      handled()
+      crop = null
+      overlay.hideCrop()
+      overlay.setHint(false)
+      publishTarget()
       return
     case 'ArrowUp':
       handled()
@@ -277,49 +440,61 @@ function onKeyDown(event: KeyboardEvent): void {
   }
 }
 
-function confirmSelection(
-  dragRect: { x: number; y: number; width: number; height: number } | null,
-): void {
+function confirmSelection(): void {
   if (!current) return
   const anchor = captureAnchor(current)
   const context = extractContext(current, anchor.selector)
+  const target = describeTarget(current)
 
-  // The drag rectangle is also the screenshot crop, so it travels with the
+  // The drawn rectangle doubles as the screenshot crop, so it travels with the
   // context. No image is captured here — that happens only if the user opts in
-  // for a specific request, and they see this exact rect before it is sent.
-  const rect = dragRect ?? boundingRectWithPadding(current)
+  // for a specific request, and they have already seen this exact rect.
+  const region = crop ?? boundingRectWithPadding(current)
 
   stopPicking()
   void send({
     type: 'element-picked',
     context,
     anchor,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    ...({ cropRect: rect } as any),
+    crop: region,
+    cropClipped: exceedsViewport(region),
+    target,
+    viewportWidth: window.innerWidth,
   })
 }
 
 /** Falls back to the element's box plus padding so the model sees some context. */
-function boundingRectWithPadding(element: Element): {
-  x: number
-  y: number
-  width: number
-  height: number
-} {
+function boundingRectWithPadding(element: Element): Rect {
   const PADDING = 12
   const rect = element.getBoundingClientRect()
   return {
     x: Math.max(0, rect.left - PADDING),
     y: Math.max(0, rect.top - PADDING),
-    width: Math.min(window.innerWidth, rect.width + PADDING * 2),
-    height: Math.min(window.innerHeight, rect.height + PADDING * 2),
+    width: rect.width + PADDING * 2,
+    height: rect.height + PADDING * 2,
   }
+}
+
+/**
+ * captureVisibleTab can only photograph what is on screen. A region taller
+ * than the viewport comes back cut, and the describe step says so rather than
+ * sending a partial crop that looks complete.
+ */
+function exceedsViewport(rect: Rect): boolean {
+  return (
+    rect.x < 0 ||
+    rect.y < 0 ||
+    rect.x + rect.width > window.innerWidth ||
+    rect.y + rect.height > window.innerHeight
+  )
 }
 
 function startPicking(): void {
   if (picking) return
   picking = true
+  crop = null
   overlay.mount()
+  overlay.setHint(false)
   document.addEventListener('mousemove', onMouseMove, true)
   document.addEventListener('mousedown', onMouseDown, true)
   document.addEventListener('mouseup', onMouseUp, true)
@@ -330,6 +505,7 @@ function stopPicking(): void {
   picking = false
   current = null
   dragOrigin = null
+  crop = null
   overlay.unmount()
   document.removeEventListener('mousemove', onMouseMove, true)
   document.removeEventListener('mousedown', onMouseDown, true)

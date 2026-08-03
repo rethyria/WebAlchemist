@@ -11,7 +11,9 @@ import type {
   Credential,
   CredentialStatus,
   GenerationResult,
+  HoverTarget,
   PageContext,
+  Rect,
   ReviewResult,
   Settings,
   Transform,
@@ -35,6 +37,8 @@ export type Message =
     }
   | { type: 'repair'; transformId: string; context: PageContext; brokenReason: string }
   | { type: 'review'; code: string; intent: string; declaredCapabilities: Transform['capabilities'] }
+  /** Static analysis alone — no model call, so it is free to run before preview. */
+  | { type: 'analyse'; code: string; declaredCapabilities: Transform['capabilities'] }
 
   /* --- persistence -------------------------------------------------- */
   | { type: 'save-transform'; transform: Transform }
@@ -54,7 +58,17 @@ export type Message =
   /* --- page-side operations ----------------------------------------- */
   | { type: 'preview-css'; tabId: number; css: string }
   | { type: 'clear-preview-css'; tabId: number; css: string }
-  | { type: 'capture-region'; rect: { x: number; y: number; width: number; height: number } }
+  /**
+   * Registers an unsaved transform and reloads the tab, so the preview runs in
+   * the same world, under the same CSP, through the same harness as the saved
+   * one would. A JS preview that ran some other way would not be a preview.
+   */
+  | { type: 'preview-js'; tabId: number; transform: Transform }
+  | { type: 'clear-preview-js'; id: string }
+  /** `viewportWidth` converts the CSS-pixel rect to the capture's device pixels. */
+  | { type: 'capture-region'; rect: Rect; viewportWidth: number }
+  | { type: 'start-picking'; tabId: number }
+  | { type: 'stop-picking'; tabId: number }
 
   /* --- portability --------------------------------------------------- */
   | { type: 'export-transforms' }
@@ -62,15 +76,32 @@ export type Message =
 
 /** Sent from background to content script. */
 export type ContentMessage =
-  | { type: 'start-picking'; mode: 'hover' | 'drag' }
+  | { type: 'start-picking' }
   | { type: 'cancel-picking' }
   | { type: 'apply-transforms'; transforms: Transform[] }
   | { type: 'run-health-check'; transforms: Transform[] }
   | { type: 'url-changed'; url: string }
 
-/** Sent from content script to sidebar, via the background script. */
+/**
+ * Sent from content script to sidebar, via the background script.
+ *
+ * These are one-way notifications, not requests: the content script does not
+ * wait on the sidebar, and a closed sidebar simply means nobody is listening.
+ */
 export type ContentEvent =
-  | { type: 'element-picked'; context: PageContext; anchor: Anchor }
+  | { type: 'element-hovered'; target: HoverTarget }
+  | {
+      type: 'element-picked'
+      context: PageContext
+      anchor: Anchor
+      /** The region a screenshot would cover, whether drawn or derived. */
+      crop: Rect
+      /** True when the crop extends past the viewport and would be cut. */
+      cropClipped: boolean
+      target: HoverTarget
+      /** CSS pixels, for scaling the crop against a device-pixel capture. */
+      viewportWidth: number
+    }
   | { type: 'picking-cancelled' }
   | { type: 'health-check-result'; states: TransformRuntimeState[] }
 
@@ -89,9 +120,14 @@ export interface Responses {
   generate: GenerationResult
   repair: GenerationResult
   review: ReviewResult
+  analyse: ReviewResult
+  'preview-js': boolean
+  'clear-preview-js': boolean
   'export-transforms': { schemaVersion: number; exportedAt: number; transforms: Transform[] }
   'import-transforms': { imported: number; needsRegeneration: string[] }
   'request-origin-permission': boolean
   'request-userscripts-permission': boolean
   'capture-region': { dataUrl: string; clipped: boolean }
+  'start-picking': boolean
+  'stop-picking': boolean
 }

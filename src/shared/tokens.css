@@ -23,78 +23,111 @@
  * The settings page offers a swatch row; the choice is stored as
  * Settings.accent and applied as data-accent on <html>.
  *
- * Only the default (blue) has a dark/light pair specified in the design —
- * #00ddff dark, #0060df light. The other six give a single swatch hue, so
- * their theme pairs are derived here: light theme uses the swatch as drawn,
- * dark theme lifts it for contrast against #1c1b22. These six are the values
- * most likely to want retuning by eye.
+ * Each accent carries two colours, not one, because the design uses the hue
+ * two different ways and a single value cannot do both jobs:
  *
- * The design's swatch row also repeats #7c3aed twice; only the unique hues are
- * offered here. The sequence otherwise reads as a spectrum, so the duplicate
- * was probably meant to be an amber.
+ *   --accent     a fill. Buttons, toggle tracks, the selected radio. Paired
+ *                with --accent-text, which is whichever of black or white
+ *                reads on it.
+ *   --accent-fg  the same hue as *text*, borders, and dots on a surface. A
+ *                saturated mid-tone like #4338ca is legible as a button fill
+ *                but not as 11px text on #1c1b22, so the dark theme lifts it.
+ *
+ * The lift is the design's own function from flow.html: t = 0.55 - lum × 0.6,
+ * blended toward white. Light-theme values are the mirror, darkened in 1%
+ * steps until they clear 4.5:1 on white — only amber needed it. Every pair
+ * above is at or above 4.5:1 against its background.
+ *
+ * Blue keeps Firefox's own #0060df / #00ddff rather than the swatch row's
+ * #1971c2: option 1a, which was picked, is the Firefox-native treatment.
  */
-
-:root[data-accent='blue'],
-:root:not([data-accent]) {
-  --accent-l: #0060df;
-  --accent-d: #00ddff;
-  --accent-rgb-l: 0 96 223;
-  --accent-rgb-d: 0 221 255;
-  --accent-text-l: #ffffff;
-  --accent-text-d: #15141a;
-}
 
 :root[data-accent='red'] {
   --accent-l: #c92a2a;
-  --accent-d: #ff6b6b;
-  --accent-rgb-l: 201 42 42;
-  --accent-rgb-d: 255 107 107;
+  --accent-d: #c92a2a;
+  --accent-fg-l: #c92a2a;
+  --accent-fg-d: #dd7979;
+  --accent-fg-rgb-l: 201 42 42;
+  --accent-fg-rgb-d: 221 121 121;
   --accent-text-l: #ffffff;
-  --accent-text-d: #15141a;
+  --accent-text-d: #ffffff;
 }
 
 :root[data-accent='orange'] {
   --accent-l: #c2410c;
-  --accent-d: #ffa94d;
-  --accent-rgb-l: 194 65 12;
-  --accent-rgb-d: 255 169 77;
+  --accent-d: #c2410c;
+  --accent-fg-l: #c2410c;
+  --accent-fg-d: #d7825f;
+  --accent-fg-rgb-l: 194 65 12;
+  --accent-fg-rgb-d: 215 130 95;
   --accent-text-l: #ffffff;
+  --accent-text-d: #ffffff;
+}
+
+:root[data-accent='amber'] {
+  --accent-l: #ffd43b;
+  --accent-d: #ffd43b;
+  --accent-fg-l: #8c7420;
+  --accent-fg-d: #ffd43b;
+  --accent-fg-rgb-l: 140 116 32;
+  --accent-fg-rgb-d: 255 212 59;
+  --accent-text-l: #15141a;
   --accent-text-d: #15141a;
 }
 
 :root[data-accent='green'] {
   --accent-l: #1f7a33;
-  --accent-d: #6ee7a8;
-  --accent-rgb-l: 31 122 51;
-  --accent-rgb-d: 110 231 168;
+  --accent-d: #1f7a33;
+  --accent-fg-l: #1f7a33;
+  --accent-fg-d: #67a574;
+  --accent-fg-rgb-l: 31 122 51;
+  --accent-fg-rgb-d: 103 165 116;
+  --accent-text-l: #ffffff;
+  --accent-text-d: #ffffff;
+}
+
+:root[data-accent='blue'],
+:root:not([data-accent]) {
+  --accent-l: #0060df;
+  --accent-d: #00ddff;
+  --accent-fg-l: #0060df;
+  --accent-fg-d: #5998ea;
+  --accent-fg-rgb-l: 0 96 223;
+  --accent-fg-rgb-d: 89 152 234;
   --accent-text-l: #ffffff;
   --accent-text-d: #15141a;
 }
 
 :root[data-accent='indigo'] {
   --accent-l: #4338ca;
-  --accent-d: #a5b4fc;
-  --accent-rgb-l: 67 56 202;
-  --accent-rgb-d: 165 180 252;
+  --accent-d: #4338ca;
+  --accent-fg-l: #4338ca;
+  --accent-fg-d: #8c85df;
+  --accent-fg-rgb-l: 67 56 202;
+  --accent-fg-rgb-d: 140 133 223;
   --accent-text-l: #ffffff;
-  --accent-text-d: #15141a;
+  --accent-text-d: #ffffff;
 }
 
 :root[data-accent='violet'] {
   --accent-l: #7c3aed;
-  --accent-d: #c9a7ff;
-  --accent-rgb-l: 124 58 237;
-  --accent-rgb-d: 201 167 255;
+  --accent-d: #7c3aed;
+  --accent-fg-l: #7c3aed;
+  --accent-fg-d: #aa7ff3;
+  --accent-fg-rgb-l: 124 58 237;
+  --accent-fg-rgb-d: 170 127 243;
   --accent-text-l: #ffffff;
-  --accent-text-d: #15141a;
+  --accent-text-d: #ffffff;
 }
 
 /* Monochrome: white on dark, near-black on light. */
 :root[data-accent='mono'] {
   --accent-l: #15141a;
   --accent-d: #fbfbfe;
-  --accent-rgb-l: 21 20 26;
-  --accent-rgb-d: 251 251 254;
+  --accent-fg-l: #15141a;
+  --accent-fg-d: #fbfbfe;
+  --accent-fg-rgb-l: 21 20 26;
+  --accent-fg-rgb-d: 251 251 254;
   --accent-text-l: #ffffff;
   --accent-text-d: #15141a;
 }
@@ -130,9 +163,13 @@
 
   /* Accent, resolved from the data-accent block above. */
   --accent: var(--accent-l);
-  --accent-rgb: var(--accent-rgb-l);
   --accent-text: var(--accent-text-l);
-  --accent-wash: rgb(var(--accent-rgb) / 0.07);
+  --accent-fg: var(--accent-fg-l);
+  --accent-fg-rgb: var(--accent-fg-rgb-l);
+  /* Washes are mixed from --accent-fg, never the fill: at 7% a saturated fill
+     disappears, and the lifted tone is what the design tints with. */
+  --accent-wash: rgb(var(--accent-fg-rgb) / 0.09);
+  --accent-chip: rgb(var(--accent-fg-rgb) / 0.15);
 
   /* Code highlighting */
   --code-selector: light-dark(#c2521f, #ef8354);
@@ -186,8 +223,9 @@
 @media (prefers-color-scheme: dark) {
   :root {
     --accent: var(--accent-d);
-    --accent-rgb: var(--accent-rgb-d);
     --accent-text: var(--accent-text-d);
+    --accent-fg: var(--accent-fg-d);
+    --accent-fg-rgb: var(--accent-fg-rgb-d);
   }
 }
 
@@ -214,8 +252,9 @@ body {
   font-family: var(--font-ui);
 }
 
-/* Focus must stay visible on #1c1b22; the accent at 2px is the design's rule. */
+/* Focus must stay visible on #1c1b22; the accent at 2px is the design's rule.
+   The lifted tone, since this is a line rather than a fill. */
 :focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--accent-fg);
   outline-offset: 1px;
 }

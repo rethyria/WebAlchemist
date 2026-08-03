@@ -7,9 +7,14 @@
  */
 
 import { analyseJavaScript, applyCapabilityPolicy } from '@safety/static-analysis'
-import type { ContentMessage, Message, MessageResponse } from '@shared/messages'
+import type {
+  ContentEvent,
+  ContentMessage,
+  Message,
+  MessageResponse,
+} from '@shared/messages'
 import { matchesUrl } from '@shared/match'
-import type { GenerationResult, ReviewResult, Transform } from '@shared/types'
+import type { Rect, ReviewResult, Transform } from '@shared/types'
 import { resolveActiveProvider, ProviderError } from './providers'
 import {
   hasUserScriptsPermission,
@@ -81,9 +86,33 @@ browser.webNavigation.onCommitted.addListener(async (details) => {
 /* Message routing                                                     */
 /* ------------------------------------------------------------------ */
 
+/**
+ * Content events are relayed rather than handled. The content script cannot
+ * address the sidebar directly, and the sidebar must not be reachable from the
+ * page, so everything page-side passes through here first.
+ */
+function isContentEvent(message: Message | ContentEvent): message is ContentEvent {
+  return (
+    message.type === 'element-hovered' ||
+    message.type === 'element-picked' ||
+    message.type === 'picking-cancelled' ||
+    message.type === 'health-check-result'
+  )
+}
+
 browser.runtime.onMessage.addListener(
-  (message: Message, sender): Promise<MessageResponse<unknown>> =>
-    handle(message, sender).then(
+  (
+    message: Message | ContentEvent,
+    sender,
+  ): Promise<MessageResponse<unknown>> | undefined => {
+    if (isContentEvent(message)) {
+      // Fire and forget: an open sidebar receives it, a closed one does not,
+      // and neither case is an error worth surfacing to the page.
+      void browser.runtime.sendMessage(message).catch(() => {})
+      return undefined
+    }
+
+    return handle(message, sender).then(
       (data) => ({ ok: true, data }),
       (error: unknown) => ({
         ok: false,
@@ -92,7 +121,8 @@ browser.runtime.onMessage.addListener(
             ? { message: error.message, kind: error.kind, retryable: error.retryable }
             : { message: error instanceof Error ? error.message : String(error) },
       }),
-    ),
+    )
+  },
 )
 
 async function handle(
@@ -144,6 +174,9 @@ async function handle(
 
     case 'review':
       return runReview(message.code, message.intent, message.declaredCapabilities)
+
+    case 'analyse':
+      return runStaticAnalysis(message.code, message.declaredCapabilities)
 
     case 'save-transform': {
       await saveTransform(message.transform)
@@ -199,23 +232,52 @@ async function handle(
     }
 
     case 'preview-css':
-      await browser.scripting.insertCSS({
-        target: { tabId: message.tabId },
-        css: message.css,
-        origin: 'USER',
-      })
+      await setPreviewCss(message.tabId, message.css)
       return true
 
     case 'clear-preview-css':
-      await browser.scripting.removeCSS({
+      await setPreviewCss(message.tabId, null)
+      return true
+
+    case 'preview-js': {
+      // Re-run static analysis here rather than trusting that the caller did.
+      // This is the last point before arbitrary generated code is registered to
+      // run on a real page, so it is the one that has to hold.
+      const analysis = runStaticAnalysis(
+        message.transform.code,
+        message.transform.capabilities,
+      )
+      if (!analysis.passed) {
+        throw new Error('Static analysis rejected this code, so it was not run.')
+      }
+      await registerTransform(message.transform)
+      previewedScripts.add(message.transform.id)
+      await browser.tabs.reload(message.tabId)
+      return true
+    }
+
+    case 'clear-preview-js':
+      await unregisterTransform(message.id)
+      previewedScripts.delete(message.id)
+      return true
+
+    case 'start-picking': {
+      // activeTab is granted by the toolbar gesture that opened the sidebar,
+      // so the content script is injected on demand rather than declared.
+      await browser.scripting.executeScript({
         target: { tabId: message.tabId },
-        css: message.css,
-        origin: 'USER',
+        files: ['src/content/index.js'],
       })
+      await sendToContent(message.tabId, { type: 'start-picking' })
+      return true
+    }
+
+    case 'stop-picking':
+      await sendToContent(message.tabId, { type: 'cancel-picking' })
       return true
 
     case 'capture-region':
-      return captureRegion(sender.tab?.id, message.rect)
+      return captureRegion(message.rect, message.viewportWidth)
 
     case 'export-transforms':
       return exportTransforms()
@@ -231,6 +293,61 @@ async function handle(
 }
 
 /* ------------------------------------------------------------------ */
+/* Previews                                                            */
+/* ------------------------------------------------------------------ */
+
+/*
+ * Preview state lives here rather than in the sidebar because the sidebar can
+ * disappear without warning — a closed panel runs no teardown, and the page
+ * would be left carrying an unsaved change the user was told was discarded.
+ *
+ * Holding the exact injected string matters: removeCSS matches on content, so
+ * the only way to take a preview back out is to have kept what went in.
+ */
+const previewedCss = new Map<number, string>()
+const previewedScripts = new Set<string>()
+
+async function setPreviewCss(tabId: number, css: string | null): Promise<void> {
+  const existing = previewedCss.get(tabId)
+  if (existing) {
+    await browser.scripting
+      .removeCSS({ target: { tabId }, css: existing, origin: 'USER' })
+      .catch(() => {})
+    previewedCss.delete(tabId)
+  }
+  if (css === null) return
+
+  await browser.scripting.insertCSS({ target: { tabId }, css, origin: 'USER' })
+  previewedCss.set(tabId, css)
+}
+
+async function clearAllPreviews(): Promise<void> {
+  for (const tabId of [...previewedCss.keys()]) {
+    await setPreviewCss(tabId, null)
+  }
+  for (const id of [...previewedScripts]) {
+    await unregisterTransform(id)
+    previewedScripts.delete(id)
+  }
+}
+
+/**
+ * The sidebar holds a port open for exactly as long as it is on screen. Its
+ * disconnect is the only reliable signal that the panel closed — which is the
+ * moment every preview has to come back out.
+ */
+browser.runtime.onConnect.addListener((port) => {
+  if (port.name !== 'wa-sidebar') return
+  port.onDisconnect.addListener(() => {
+    void clearAllPreviews()
+  })
+})
+
+browser.tabs.onRemoved.addListener((tabId) => {
+  previewedCss.delete(tabId)
+})
+
+/* ------------------------------------------------------------------ */
 /* Safety pipeline                                                     */
 /* ------------------------------------------------------------------ */
 
@@ -241,30 +358,38 @@ async function handle(
  * something blocking — there is nothing to learn from a second opinion on code
  * that is already rejected, and the call is not free.
  */
+/**
+ * The deterministic half, on its own. Separated because it is free and local,
+ * which is what lets it gate the preview — the model review costs a call and
+ * only happens once, at approval.
+ */
+function runStaticAnalysis(
+  code: string,
+  declared: Transform['capabilities'],
+): ReviewResult {
+  const outcome = analyseJavaScript(code)
+  const { findings, undeclared } = applyCapabilityPolicy(outcome, declared)
+  return {
+    static: findings,
+    undeclaredCapabilities: undeclared,
+    passed: !findings.some((f) => f.severity === 'block'),
+  }
+}
+
 async function runReview(
   code: string,
   intent: string,
   declared: Transform['capabilities'],
 ): Promise<ReviewResult> {
-  const outcome = analyseJavaScript(code)
-  const { findings, undeclared } = applyCapabilityPolicy(outcome, declared)
-  const blocked = findings.some((f) => f.severity === 'block')
-
-  if (blocked) {
-    return { static: findings, undeclaredCapabilities: undeclared, passed: false }
-  }
+  const analysis = runStaticAnalysis(code, declared)
+  if (!analysis.passed) return analysis
 
   const provider = await resolveActiveProvider()
   // No page content crosses into this call. That is the entire basis of the
   // reviewer's independence — see REVIEW_SYSTEM_PROMPT.
   const model = await provider.review({ code, intent })
 
-  return {
-    static: findings,
-    undeclaredCapabilities: undeclared,
-    model,
-    passed: model.verdict === 'match',
-  }
+  return { ...analysis, model, passed: model.verdict === 'match' }
 }
 
 /* ------------------------------------------------------------------ */
@@ -299,33 +424,37 @@ async function applyCssTransforms(tabId: number, transforms: Transform[]): Promi
 }
 
 async function captureRegion(
-  tabId: number | undefined,
-  rect: { x: number; y: number; width: number; height: number },
+  rect: Rect,
+  viewportWidth: number,
 ): Promise<{ dataUrl: string; clipped: boolean }> {
-  if (tabId === undefined) throw new Error('No tab to capture.')
-
-  // captureVisibleTab only sees the viewport, so a target taller than the
-  // viewport is clipped. We say so rather than silently sending a partial crop.
   const full = await browser.tabs.captureVisibleTab({ format: 'png' })
-  const clipped = rect.height > window.innerHeight || rect.y < 0
 
   // Cropping happens here so the full-viewport capture never leaves this scope.
   const blob = await (await fetch(full)).blob()
   const bitmap = await createImageBitmap(blob)
-  const canvas = new OffscreenCanvas(rect.width, rect.height)
+
+  // The capture comes back in device pixels; the rectangle was measured in CSS
+  // pixels. On a HiDPI display those differ, and cropping without the
+  // correction silently returns the wrong part of the page.
+  const scale = bitmap.width / Math.max(1, viewportWidth)
+
+  // captureVisibleTab only sees the viewport, so a region taller or wider than
+  // it comes back cut. Clamp to what actually exists and say that we did,
+  // rather than drawing past the edge and sending transparent padding.
+  const source = {
+    x: Math.max(0, rect.x * scale),
+    y: Math.max(0, rect.y * scale),
+    width: rect.width * scale,
+    height: rect.height * scale,
+  }
+  const width = Math.min(source.width, bitmap.width - source.x)
+  const height = Math.min(source.height, bitmap.height - source.y)
+  const clipped = width < source.width - 1 || height < source.height - 1
+
+  const canvas = new OffscreenCanvas(Math.max(1, width), Math.max(1, height))
   const context = canvas.getContext('2d')
   if (!context) throw new Error('Could not prepare the image.')
-  context.drawImage(
-    bitmap,
-    rect.x,
-    rect.y,
-    rect.width,
-    rect.height,
-    0,
-    0,
-    rect.width,
-    rect.height,
-  )
+  context.drawImage(bitmap, source.x, source.y, width, height, 0, 0, width, height)
   const cropped = await canvas.convertToBlob({ type: 'image/png' })
 
   const dataUrl = await new Promise<string>((resolve, reject) => {
