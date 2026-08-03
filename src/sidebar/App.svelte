@@ -2,7 +2,12 @@
   import '@shared/tokens.css'
   import type { ContentEvent } from '@shared/messages'
   import { originPermissionFor } from '@shared/match'
-  import type { Settings, Transform, TransformRuntimeState } from '@shared/types'
+  import type {
+    CredentialStatus,
+    Settings,
+    Transform,
+    TransformRuntimeState,
+  } from '@shared/types'
   import { activeTab, BackgroundError, send } from './lib/messaging'
   import { Flow } from './lib/flow.svelte'
   import Describing from './components/Describing.svelte'
@@ -12,19 +17,34 @@
   import Refining from './components/Refining.svelte'
   import Reviewing from './components/Reviewing.svelte'
   import Saving from './components/Saving.svelte'
+  import SettingsPanel from './components/Settings.svelte'
   import TransformRow from './components/TransformRow.svelte'
 
   let settings = $state<Settings | null>(null)
+  let statuses = $state<CredentialStatus[]>([])
   let transforms = $state<Transform[]>([])
   let runtimeStates = $state<TransformRuntimeState[]>([])
   let url = $state('')
   let expandedId = $state<string | null>(null)
   let loadError = $state<{ message: string; retryable: boolean } | null>(null)
   let checking = $state(false)
+  let showSettings = $state(false)
 
   const flow = new Flow(() => void refresh())
 
+  /**
+   * Whether the active tab is a page we could actually transform.
+   *
+   * about:, moz-extension: and view-source: are not. Without this check the
+   * panel offers to transform its own options page and shows the extension's
+   * UUID as the site name, which is how this was found.
+   */
+  let transformable = $derived(
+    url.startsWith('http://') || url.startsWith('https://'),
+  )
+
   let host = $derived.by(() => {
+    if (!transformable) return ''
     try {
       return new URL(url).hostname
     } catch {
@@ -50,16 +70,29 @@
   }
 
   async function refresh() {
-    if (!url) return
+    if (!transformable) {
+      transforms = []
+      return
+    }
     transforms = await send<Transform[]>({ type: 'get-transforms-for-url', url })
+  }
+
+  function applySettings(next: Settings) {
+    settings = next
+    // Accent is a user setting; tokens.css keys the palette off this.
+    document.documentElement.dataset['accent'] = next.accent
+  }
+
+  async function saveSettings(next: Settings) {
+    applySettings(next)
+    await send({ type: 'save-settings', settings: next })
   }
 
   async function load() {
     loadError = null
     try {
-      settings = await send<Settings>({ type: 'get-settings' })
-      // Accent is a user setting; tokens.css keys the palette off this.
-      document.documentElement.dataset['accent'] = settings.accent
+      applySettings(await send<Settings>({ type: 'get-settings' }))
+      statuses = await send<CredentialStatus[]>({ type: 'get-credential-statuses' })
 
       const tab = await activeTab()
       url = tab?.url ?? ''
@@ -112,7 +145,7 @@
     transforms = transforms.map((t) => (t.id === transform.id ? { ...t, enabled } : t))
   }
 
-  function openSettings() {
+  function openSettingsPage() {
     void browser.runtime.openOptionsPage()
   }
 
@@ -127,6 +160,35 @@
     }
     browser.runtime.onMessage.addListener(onMessage)
 
+    /*
+     * The full settings page is a separate document, so a change made there
+     * reaches this panel only through storage. Without this the accent looked
+     * like it had no effect on the sidebar until it was reopened.
+     */
+    const onStored = (
+      changes: Record<string, browser.storage.StorageChange>,
+      area: string,
+    ) => {
+      if (area !== 'local' || !changes['settings']) return
+      applySettings(changes['settings'].newValue as Settings)
+    }
+    browser.storage.onChanged.addListener(onStored)
+
+    /*
+     * The panel persists while tabs come and go. Bound once, it kept showing
+     * the site it opened on — and offered to save transforms against it.
+     */
+    const onTabChange = () => void load()
+    browser.tabs.onActivated.addListener(onTabChange)
+    const onTabUpdated = (
+      _id: number,
+      change: browser.tabs._OnUpdatedChangeInfo,
+      tab: browser.tabs.Tab,
+    ) => {
+      if (change.url && tab.active) void load()
+    }
+    browser.tabs.onUpdated.addListener(onTabUpdated)
+
     // Held open for the lifetime of the panel. The background watches for it
     // to drop, which is how "closing this panel discards it" is kept true —
     // a closed sidebar gets no chance to run cleanup of its own.
@@ -134,12 +196,26 @@
 
     return () => {
       browser.runtime.onMessage.removeListener(onMessage)
+      browser.storage.onChanged.removeListener(onStored)
+      browser.tabs.onActivated.removeListener(onTabChange)
+      browser.tabs.onUpdated.removeListener(onTabUpdated)
       port.disconnect()
     }
   })
 </script>
 
 <div class="panel">
+  <header class="chrome">
+    <span class="brand">WebAlchemist</span>
+    <button
+      type="button"
+      class="chrome-link"
+      onclick={() => (showSettings = !showSettings)}
+    >
+      {showSettings ? 'Done' : 'Settings'}
+    </button>
+  </header>
+
   {#if loadError}
     <div class="load-error" role="alert">
       <p>{loadError.message}</p>
@@ -147,7 +223,7 @@
         {#if loadError.retryable}
           <button type="button" onclick={load}>Try again</button>
         {/if}
-        <button type="button" onclick={openSettings}>Settings</button>
+        <button type="button" onclick={openSettingsPage}>Settings</button>
       </div>
     </div>
   {/if}
@@ -156,12 +232,27 @@
     <ErrorCard
       error={flow.error}
       onretry={() => void flow.retry()}
-      onsettings={openSettings}
+      onsettings={openSettingsPage}
       ondismiss={() => flow.dismissError()}
     />
   {/if}
 
-  {#if flow.step === 'picking'}
+  {#if showSettings && settings}
+    <SettingsPanel
+      {settings}
+      {statuses}
+      onsave={(next: Settings) => void saveSettings(next)}
+      onfullpage={openSettingsPage}
+    />
+  {:else if !transformable}
+    <div class="empty">
+      <h1>Nothing to change here</h1>
+      <p>
+        This is a browser page, not a website. Open a site and the panel will show
+        what can be changed on it.
+      </p>
+    </div>
+  {:else if flow.step === 'picking'}
     <Picking hover={flow.hover} oncancel={() => void flow.cancelPicking()} />
   {:else if flow.step === 'describing' && flow.picked}
     <Describing
@@ -251,7 +342,6 @@
     </div>
     <footer class="idle-foot">
       <span>{host}</span>
-      <button type="button" class="link" onclick={openSettings}>Settings</button>
     </footer>
   {:else}
     <header class="site">
@@ -307,6 +397,29 @@
     min-height: 100vh;
     background: var(--surface);
     color: var(--text);
+  }
+
+  .chrome {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-7);
+    padding: 8px var(--gutter-sidebar);
+    border-bottom: 1px solid var(--border-subtle);
+    background: var(--chrome);
+  }
+
+  .brand {
+    font: 600 11.5px var(--font-ui);
+  }
+
+  .chrome-link {
+    margin-left: auto;
+    padding: 0;
+    border: none;
+    background: none;
+    font: 11px var(--font-ui);
+    color: var(--text-faint);
+    cursor: pointer;
   }
 
   .site {
@@ -386,11 +499,12 @@
     color: var(--text-faint);
   }
 
+  /* Top-aligned. The sidebar is a tall column and vertically centring a
+     short block leaves it floating with no relationship to the header. */
   .empty {
     display: flex;
     flex: 1;
     flex-direction: column;
-    justify-content: center;
     gap: var(--sp-16);
     padding: var(--sp-20) 18px;
   }

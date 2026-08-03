@@ -31,6 +31,18 @@ export async function send<T>(message: Message): Promise<T> {
   return response.data as T
 }
 
+/**
+ * The active tab, including its URL.
+ *
+ * Reading `tab.url` needs the `tabs` permission. Without it Firefox returns
+ * the tab object with `url` undefined for any page we hold no host permission
+ * for — which is every site, before the user has granted anything.
+ *
+ * That is why `tabs` is a required permission rather than an optional one. A
+ * per-site tool has to know which site it is on to say anything at all, and
+ * deriving it from host permissions is circular: the panel cannot offer to
+ * request permission for a site it cannot name.
+ */
 export async function activeTab(): Promise<browser.tabs.Tab | null> {
   const [tab] = await browser.tabs.query({ active: true, currentWindow: true })
   return tab ?? null

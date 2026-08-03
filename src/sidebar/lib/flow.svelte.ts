@@ -23,7 +23,12 @@
 
 import type { ContentEvent } from '@shared/messages'
 import type { RefinementTurn } from '@background/providers/types'
-import { matchPresetsFor, originPermissionFor, type MatchPreset } from '@shared/match'
+import {
+  matchPresetsFor,
+  originPermissionFor,
+  originPermissionForUrl,
+  type MatchPreset,
+} from '@shared/match'
 import type {
   Anchor,
   GenerationResult,
@@ -146,8 +151,36 @@ export class Flow {
   /* Picking                                                           */
   /* ---------------------------------------------------------------- */
 
+  /**
+   * `activeTab` is not enough here, and assuming it was is what produced
+   * "Missing host permission for the tab".
+   *
+   * That permission is granted by a click on the *toolbar button*, and it
+   * expires. Opening the sidebar from the toolbar grants it once; every
+   * subsequent click inside an already-open panel is not a fresh gesture on
+   * the action, so `executeScript` has nothing to run under.
+   *
+   * Asking for the origin outright is also the more honest request: picking is
+   * the point where the user decides this extension may read this site, and
+   * the transform they are about to make will need the same grant to apply on
+   * later visits anyway.
+   */
   async startPicking(): Promise<void> {
     if (this.tabId === null) return
+
+    const origin = originPermissionForUrl(this.url)
+    if (!origin) return
+
+    // First await — the gesture has to still be live when this runs.
+    const granted = await browser.permissions.request({ origins: [origin] })
+    if (!granted) {
+      this.error = {
+        kind: 'request-failed',
+        message: `WebAlchemist needs permission to read ${this.hostname()} before it can point at anything on it.`,
+      }
+      return
+    }
+
     this.error = null
     this.hover = null
     this.picked = null
@@ -157,6 +190,14 @@ export class Flow {
     } catch (cause) {
       this.step = 'list'
       this.fail(cause)
+    }
+  }
+
+  private hostname(): string {
+    try {
+      return new URL(this.url).hostname
+    } catch {
+      return 'this site'
     }
   }
 

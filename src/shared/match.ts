@@ -83,3 +83,20 @@ export function originPermissionFor(pattern: string): string {
   const host = pattern.split('/')[0] ?? pattern
   return `*://${host}/*`
 }
+
+/**
+ * The same, from a full URL rather than a stored pattern.
+ *
+ * These are separate on purpose. Passing a URL to originPermissionFor yields
+ * `*://https:/*`, because it splits on the first slash and a URL's first
+ * segment is the scheme — a silent wrong answer rather than an error.
+ */
+export function originPermissionForUrl(rawUrl: string): string | null {
+  try {
+    const url = new URL(rawUrl)
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return null
+    return `*://${url.hostname}/*`
+  } catch {
+    return null
+  }
+}
