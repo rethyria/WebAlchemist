@@ -1,0 +1,234 @@
+/**
+ * Core data model. Every other module is arranged around these shapes.
+ *
+ * The three text fields on a Transform are deliberately distinct and must not
+ * be collapsed into each other:
+ *
+ *   intent     what the user wants, in their words, describing the end state.
+ *              User-editable. This is the seed for every regeneration, so it
+ *              must describe the destination rather than the path taken to it.
+ *   rationale  how the current code achieves that. Model-written. Regenerated
+ *              on every repair and never preserved across one, because it
+ *              describes an implementation that no longer exists.
+ *   code       the implementation itself.
+ */
+
+export const SCHEMA_VERSION = 1
+
+export type TransformKind = 'css' | 'js'
+export type TransformOrigin = 'manual' | 'ai'
+export type ExecutionWorld = 'USER_SCRIPT' | 'MAIN'
+
+/** Capabilities a transform must declare before its code is allowed to use them. */
+export type Capability = 'network' | 'storage' | 'cookies'
+
+/**
+ * Identifying signals for the target element, captured at authoring time.
+ * This is the machine-checkable twin of `rationale.assumptions` — the health
+ * check tests this, and shows the assumption text when it fails.
+ */
+export interface Anchor {
+  tag: string
+  /** Classes filtered to drop build-hash-looking tokens; see anchor.ts. */
+  classes: string[]
+  id?: string
+  role?: string
+  /** Leading text content, truncated. Absent when the element has none. */
+  text?: string
+  /** Structural path from document root, used as the last-resort locator. */
+  path: string
+  /** Nearby landmark elements that survive redesigns more often than classes. */
+  landmarks: string[]
+  /** Selector generated at authoring time; tried first on every resolve. */
+  selector: string
+}
+
+export interface Rationale {
+  /** What the code targets, in prose. */
+  targets: string
+  /** How it achieves the intent. */
+  approach: string
+  /** What must stay true for this to keep working. Shown when it breaks. */
+  assumptions: string[]
+}
+
+export type TransformStatus = 'ok' | 'broken' | 'disabled'
+
+export interface Transform {
+  id: string
+  /** Short human-facing name, model-proposed, user-editable. */
+  name: string
+  enabled: boolean
+  /** Application order within a site. Later entries win conflicts. */
+  order: number
+  /** Match pattern glob, e.g. "*://reddit.com/r/programming/*". */
+  match: string
+  kind: TransformKind
+  origin: TransformOrigin
+  /** Only meaningful when kind === 'js'. Defaults to USER_SCRIPT. */
+  world?: ExecutionWorld
+  /** Empty by default. Anything used beyond this list is a rejection. */
+  capabilities: Capability[]
+  intent: string
+  rationale: Rationale
+  anchor: Anchor
+  code: string
+  createdAt: number
+  updatedAt: number
+}
+
+/** Runtime state, derived per page load. Never persisted. */
+export interface TransformRuntimeState {
+  id: string
+  status: TransformStatus
+  /** Populated when status === 'broken'. */
+  brokenReason?: string
+  /** Which stored assumption stopped holding, when we can attribute it. */
+  failedAssumption?: string
+}
+
+/* ------------------------------------------------------------------ */
+/* Providers and credentials                                           */
+/* ------------------------------------------------------------------ */
+
+export type ProviderType = 'anthropic' | 'openai-compatible'
+
+/**
+ * Credentials are keyed by provider *id*, not provider type, so two
+ * OpenAI-compatible endpoints hold independent keys. Removing a provider
+ * clears its credential.
+ *
+ * Anthropic is API-key only: Anthropic restricted OAuth to Claude Code and
+ * Claude.ai in February 2026 and disabled third-party OAuth tokens. OAuth is
+ * implemented only for providers that sanction it.
+ */
+export type Credential =
+  | { kind: 'api_key'; value: string }
+  | {
+      kind: 'oauth'
+      accessToken: string
+      refreshToken: string
+      /** Epoch ms. Refresh is attempted ahead of this. */
+      expiresAt: number
+      tokenEndpoint: string
+      clientId: string
+    }
+
+export interface Provider {
+  id: string
+  label: string
+  type: ProviderType
+  /** Required for openai-compatible; ignored for anthropic. */
+  baseUrl?: string
+  /** Model used to generate transforms. */
+  generateModel: string
+  /** Model used for the adversarial review pass. */
+  reviewModel: string
+  /**
+   * Whether the generate model accepts images. For Anthropic this is resolved
+   * live from GET /v1/models/{id} (capabilities.image_input.supported); for
+   * OpenAI-compatible endpoints there is no equivalent, so it is set by hand.
+   */
+  supportsVision: boolean
+}
+
+/** What the sidebar is allowed to know about a credential. Never the value. */
+export interface CredentialStatus {
+  providerId: string
+  configured: boolean
+  kind?: Credential['kind']
+  /** Epoch ms, oauth only. Lets the UI warn before a hard expiry. */
+  expiresAt?: number
+}
+
+/* ------------------------------------------------------------------ */
+/* Settings                                                            */
+/* ------------------------------------------------------------------ */
+
+export type HealthCheckMode = 'every-load' | 'once-per-session' | 'manual'
+
+export interface Settings {
+  schemaVersion: number
+  providers: Provider[]
+  activeProviderId: string | null
+  healthCheckMode: HealthCheckMode
+  /** Disables execution of every AI-authored JS transform, everywhere. */
+  aiJsKillSwitch: boolean
+}
+
+export const DEFAULT_SETTINGS: Settings = {
+  schemaVersion: SCHEMA_VERSION,
+  providers: [],
+  activeProviderId: null,
+  healthCheckMode: 'every-load',
+  aiJsKillSwitch: false,
+}
+
+/* ------------------------------------------------------------------ */
+/* Safety pipeline                                                     */
+/* ------------------------------------------------------------------ */
+
+export type FindingSeverity = 'block' | 'warn'
+
+export interface StaticFinding {
+  line: number
+  column: number
+  /** The API that was matched, e.g. "navigator.sendBeacon". */
+  api: string
+  capability: Capability | null
+  severity: FindingSeverity
+  /** Plain-language explanation for someone who cannot read the code. */
+  explanation: string
+}
+
+export type ReviewVerdict = 'match' | 'mismatch' | 'uncertain'
+
+export interface ModelReview {
+  verdict: ReviewVerdict
+  explanation: string
+}
+
+export interface ReviewResult {
+  static: StaticFinding[]
+  /** APIs used whose capability was not declared on the transform. */
+  undeclaredCapabilities: Capability[]
+  /** Absent for CSS transforms, which are not sent for model review. */
+  model?: ModelReview
+  /** False when anything blocking is outstanding. */
+  passed: boolean
+}
+
+/* ------------------------------------------------------------------ */
+/* Generation                                                          */
+/* ------------------------------------------------------------------ */
+
+/** Context extracted from the page and sent to the model. */
+export interface PageContext {
+  url: string
+  target: {
+    selector: string
+    tag: string
+    /** Bounded, depth- and node-capped, with text truncated. */
+    outerHTMLExcerpt: string
+    computedStyles: Record<string, string>
+    /** Author rules matching the target, with specificity, most specific last. */
+    matchedRules: { selector: string; specificity: string; declarations: string }[]
+  }
+  ancestors: { selector: string; tag: string; computedStyles: Record<string, string> }[]
+  /** CSS custom properties in scope at the target. */
+  customProperties: Record<string, string>
+  /** Only present when the user opted in for this specific request. */
+  screenshot?: { dataUrl: string; rect: DOMRectReadOnly; clipped: boolean }
+}
+
+/** What the model returns for a generation or repair request. */
+export interface GenerationResult {
+  name: string
+  kind: TransformKind
+  world: ExecutionWorld
+  capabilities: Capability[]
+  code: string
+  rationale: Rationale
+  /** Model's consolidation of the conversation into a single end-state intent. */
+  intent: string
+}
