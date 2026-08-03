@@ -395,10 +395,32 @@ export class Flow {
     this.previewedCss = result.code
   }
 
-  /** JS only. Registers the draft and reloads, so it runs the way it will run. */
+  /**
+   * JS only. Registers the draft and reloads, so it runs the way it will run.
+   *
+   * The permission has to be asked for here, not left to the save step.
+   * Registering a user script needs it, and previewing registers one — so
+   * without this the preview failed with "Running JavaScript transforms needs
+   * an extra permission. Grant it from the sidebar", which the sidebar then
+   * offered no way to do.
+   */
   async runJs(): Promise<void> {
     const draft = this.draft
     if (!draft || this.tabId === null || !this.analysis?.passed) return
+
+    // Before any await: the gesture that reached here has to still be live.
+    const granted = await browser.permissions.request(
+      this.permissionsFor('js', this.matchPattern),
+    )
+    if (!granted) {
+      this.error = {
+        kind: 'request-failed',
+        message:
+          'Running a script needs Firefox’s user scripts permission. Nothing was run, and your description is kept.',
+      }
+      return
+    }
+
     try {
       await send({ type: 'preview-js', tabId: this.tabId, transform: draft })
       this.jsRan = true
@@ -542,8 +564,14 @@ export class Flow {
    * which is worse than refusing to save it.
    */
   permissionsFor(kind: TransformKind, match: string): browser.permissions.Permissions {
+    // A blank pattern would yield `*:///*`, which Firefox rejects outright and
+    // which would take the whole request down with it.
+    const origin = match
+      ? originPermissionFor(match)
+      : (originPermissionForUrl(this.url) ?? '')
+
     return {
-      origins: [originPermissionFor(match)],
+      origins: origin ? [origin] : [],
       // 'userScripts' is absent from the OptionalPermission union in
       // @types/firefox-webext-browser, and a union cannot be widened by
       // declaration merging. Same cast as registry.ts, for the same reason.

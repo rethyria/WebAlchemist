@@ -13,6 +13,27 @@
 
   let { code, kind, streaming = false, flagged = [] }: Props = $props()
 
+  let box = $state<HTMLPreElement | null>(null)
+  /*
+   * Tail-following, but only while the user is already at the bottom. Yanking
+   * the view back on every chunk would make it impossible to read anything
+   * further up while the response is still arriving.
+   */
+  let following = $state(true)
+
+  function onScroll() {
+    if (!box) return
+    const distance = box.scrollHeight - box.scrollTop - box.clientHeight
+    following = distance < 24
+  }
+
+  $effect(() => {
+    // Referenced so this re-runs on each chunk.
+    void code
+    if (!streaming || !following || !box) return
+    box.scrollTop = box.scrollHeight
+  })
+
   let tokens = $derived(highlight(code, kind))
   let flaggedSet = $derived(new Set(flagged))
 
@@ -31,7 +52,7 @@
   })
 </script>
 
-<pre class:streaming>{#if lines}{#each lines as line (line.number)}<span
+<pre bind:this={box} onscroll={onScroll} class:streaming>{#if lines}{#each lines as line (line.number)}<span
         class="line"
         class:flagged={line.flagged}>{#each highlight(line.text, kind) as token}<span
             class={token.kind}>{token.text}</span
@@ -53,11 +74,16 @@
     word-break: break-word;
   }
 
-  /* While streaming the box is a fixed window: growing it on every chunk
-     would drag the rest of the panel around for the whole request. */
+  /*
+   * A fixed window that scrolls, rather than one that grows. Growing it on
+   * every chunk would drag the rest of the panel around for the whole request;
+   * clipping it, which is what this did before, hid the code being written the
+   * moment it passed the bottom edge.
+   */
   pre.streaming {
     flex: 1;
-    overflow: hidden;
+    min-height: 120px;
+    overflow-y: auto;
   }
 
   .line {

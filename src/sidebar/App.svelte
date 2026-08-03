@@ -141,6 +141,21 @@
   }
 
   async function setEnabled(transform: Transform, enabled: boolean) {
+    /*
+     * Re-enabling a JS transform registers a user script again, which needs
+     * the permission. If it was revoked since the transform was saved, the
+     * toggle would otherwise fail with an error telling the user to grant it
+     * from the sidebar — from the sidebar, with no way to.
+     *
+     * Before any await, so the gesture behind the toggle is still live.
+     */
+    if (enabled && transform.kind === 'js') {
+      const granted = await browser.permissions.request(
+        flow.permissionsFor('js', transform.match),
+      )
+      if (!granted) return
+    }
+
     await send({ type: 'set-enabled', id: transform.id, enabled })
     transforms = transforms.map((t) => (t.id === transform.id ? { ...t, enabled } : t))
   }
