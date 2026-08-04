@@ -289,6 +289,7 @@
       scopeCount={flow.scopeCount}
       scopeContainer={flow.scopeContainer}
       onscope={(depth: number) => void flow.setScopeDepth(depth)}
+      oncancel={() => void flow.discard()}
       ongenerate={() => void flow.generate()}
     />
   {:else if flow.step === 'generating'}

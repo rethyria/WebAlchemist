@@ -25,6 +25,7 @@
     scopeCount: number
     scopeContainer: string | null
     onscope: (depth: number) => void
+    oncancel: () => void
     ongenerate: () => void
   }
 
@@ -47,6 +48,7 @@
     scopeCount,
     scopeContainer,
     onscope,
+    oncancel,
     ongenerate,
   }: Props = $props()
 
@@ -79,6 +81,14 @@
         // The container the current scope resolves to, marked distinctly:
         // it answers a different question from the target.
         isContainer: scopeDepth > 0 && levelsUp === depth + scopeDepth,
+        /*
+         * Everything between the container and the target is inside the
+         * scope. Shading the span, rather than only its top row, is what
+         * makes the slider legible — the reach is a region of the chain,
+         * not a single line in it.
+         */
+        inScope:
+          scopeDepth > 0 && levelsUp <= depth + scopeDepth && levelsUp >= depth,
       }
     }),
   )
@@ -104,6 +114,7 @@
               class="ancestor"
               class:selected={ancestor.isTarget}
               class:container={ancestor.isContainer}
+              class:in-scope={ancestor.inScope}
               style="padding-left: {6 + ancestor.indent * 9}px"
               onclick={() => onretarget(ancestor.levelsUp)}
               onmouseenter={() => onpreview(ancestor.levelsUp)}
@@ -150,9 +161,18 @@
       placeholder="Give the comment tree a dark background"
       oninput={(event) => onchange(event.currentTarget.value)}
     ></textarea>
-    <Button variant="primary" full disabled={!instruction.trim()} onclick={ongenerate}>
-      Generate
-    </Button>
+    <div class="actions">
+      <Button grow={1} small onclick={oncancel}>Cancel</Button>
+      <Button
+        variant="primary"
+        grow={2}
+        small
+        disabled={!instruction.trim()}
+        onclick={ongenerate}
+      >
+        Generate
+      </Button>
+    </div>
   </section>
 
   {#if visionSupported}
@@ -186,14 +206,28 @@
 </div>
 
 <style>
+  /*
+   * The list is the only part that flexes. Everything else keeps the height it
+   * asks for, so the description field, its buttons and the screenshot opt-in
+   * are never pushed off the panel by a deeply nested chain.
+   */
   .panel {
     display: flex;
     flex: 1;
     flex-direction: column;
     min-height: 0;
-    overflow-y: auto;
+    overflow: hidden;
     gap: var(--sp-11);
     padding: var(--gutter-sidebar);
+  }
+
+  .panel > :global(*) {
+    flex: none;
+  }
+
+  .actions {
+    display: flex;
+    gap: var(--sp-6);
   }
 
   header {
@@ -251,15 +285,17 @@
     outline: none;
   }
 
-  /*
-   * Scrolls rather than growing. A framework-built page can nest an element a
-   * dozen wrappers deep, and the list must not push the description field off
-   * the panel.
-   */
+  /* Takes the room that is left, and scrolls once there is not enough. */
+  .tree {
+    flex: 1 1 auto !important;
+    min-height: 64px;
+  }
+
   .tree ul {
     display: flex;
+    flex: 1;
     flex-direction: column;
-    max-height: 132px;
+    min-height: 0;
     margin: 0;
     padding: 0;
     overflow-y: auto;
@@ -313,9 +349,19 @@
    * distinct colour rather than a second shade of the selection.
    */
   .ancestor.container {
-    background: rgb(from var(--neutral) r g b / 0.18);
+    background: rgb(from var(--neutral) r g b / 0.22);
     color: var(--text);
     box-shadow: inset 2px 0 0 var(--neutral);
+  }
+
+  /* The span the container reaches over, faint so the two ends still read. */
+  .ancestor.in-scope:not(.container):not(.selected) {
+    background: rgb(from var(--neutral) r g b / 0.1);
+    box-shadow: inset 2px 0 0 rgb(from var(--neutral) r g b / 0.45);
+  }
+
+  .ancestor.selected.in-scope {
+    box-shadow: inset 2px 0 0 rgb(from var(--neutral) r g b / 0.45);
   }
 
   .screenshot {

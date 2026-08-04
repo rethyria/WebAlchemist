@@ -50,6 +50,15 @@ const OVERLAY_STYLES = `
    * what you point at stops being possible by construction rather than by
    * catching events after the fact.
    */
+  /* Sits under the capture sheet, so it dims without intercepting. */
+  .dim {
+    position: fixed;
+    inset: 0;
+    z-index: 2147483644;
+    pointer-events: none;
+    background: rgba(21, 20, 26, 0.42);
+  }
+
   .capture {
     position: fixed;
     inset: 0;
@@ -66,6 +75,8 @@ const OVERLAY_STYLES = `
     z-index: 2147483647;
     box-sizing: border-box;
     outline: 2px solid var(--wa-line);
+    /* Reads against the dimmed page: the target is the one lit region. */
+    background: rgb(from var(--wa-line) r g b / 0.16);
     box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.95), 0 0 0 4px rgba(255, 255, 255, 0.55);
     transition: all 60ms linear;
   }
@@ -251,6 +262,7 @@ const LOCK_STYLES = `
   /* The one that was actually picked, among its lookalikes. */
   .lock.primary {
     outline-width: 2px;
+    background: rgb(from var(--wa-line) r g b / 0.1);
     opacity: 1;
   }
 `
@@ -258,6 +270,7 @@ const LOCK_STYLES = `
 class Overlay {
   private host: HTMLDivElement | null = null
   private interactive = true
+  private dim: HTMLDivElement | null = null
   private capture: HTMLDivElement | null = null
   private highlight: HTMLDivElement | null = null
   private label: HTMLDivElement | null = null
@@ -278,6 +291,7 @@ class Overlay {
     const style = document.createElement('style')
     style.textContent = OVERLAY_STYLES
 
+    this.dim = element('div', 'dim')
     this.capture = element('div', 'capture')
     this.highlight = element('div', 'highlight')
     this.label = element('div', 'label')
@@ -292,7 +306,16 @@ class Overlay {
     // A preview draws only. Giving it the capture sheet would put a
     // click-swallowing layer over the page while the user is reading a list.
     if (this.interactive) {
-      root.append(style, this.capture, this.mask, this.highlight, this.label, this.crop, this.hint)
+      root.append(
+        style,
+        this.dim,
+        this.capture,
+        this.mask,
+        this.highlight,
+        this.label,
+        this.crop,
+        this.hint,
+      )
     } else {
       this.highlight.classList.add('locked')
       root.append(style, this.highlight, this.label)
@@ -342,6 +365,7 @@ class Overlay {
     // A hole punched in the dimming layer, traced back to the start point so
     // the path stays a single closed polygon.
     const { x, y, width: w, height: h } = rect
+    if (this.dim) this.dim.style.display = 'none'
     this.mask.style.display = 'block'
     this.mask.style.clipPath =
       `polygon(0 0, 100% 0, 100% 100%, 0 100%, 0 0, ` +
@@ -352,6 +376,7 @@ class Overlay {
   hideCrop(): void {
     if (this.crop) this.crop.style.display = 'none'
     if (this.mask) this.mask.style.display = 'none'
+    if (this.dim) this.dim.style.display = 'block'
   }
 
   setHint(hasCrop: boolean): void {
