@@ -15,6 +15,8 @@
     ontoggle: (enabled: boolean) => void
     onexpand: () => void
     onrename: (name: string) => void
+    /** Returns a blocking-finding message, or null when the edit was saved. */
+    oneditcode: (code: string) => Promise<string | null>
     ondelete: () => void
     ongrab: () => void
     /** The dragged row should come to rest here. */
@@ -33,6 +35,7 @@
     ontoggle,
     onexpand,
     onrename,
+    oneditcode,
     ondelete,
     ongrab,
     onhover,
@@ -76,6 +79,34 @@
     const next = draftName.trim()
     // An empty name would leave a row with nothing to click on.
     if (next && next !== transform.name) onrename(next)
+  }
+
+  /*
+   * Hand-editing is the way out when the model cannot get there, and the way
+   * to fix a transform without spending another request. It goes through the
+   * same static analysis the generated code does — the background re-runs it
+   * regardless, so a rejection here is a message rather than the only guard.
+   */
+  let editing = $state(false)
+  let draftCode = $state('')
+  let editError = $state<string | null>(null)
+  let saving = $state(false)
+
+  function startEdit() {
+    draftCode = transform.code
+    editError = null
+    editing = true
+  }
+
+  async function commitEdit() {
+    if (draftCode === transform.code) {
+      editing = false
+      return
+    }
+    saving = true
+    editError = await oneditcode(draftCode)
+    saving = false
+    if (editError === null) editing = false
   }
 
   function onRenameKey(event: KeyboardEvent) {
@@ -207,13 +238,40 @@
         <div class="rationale">
           <h4 class="label">Approach</h4>
           <p>{transform.rationale.approach}</p>
-          <h4 class="label">Assumes</h4>
-          <ul>
-            {#each transform.rationale.assumptions as assumption}
-              <li>{assumption}</li>
-            {/each}
-          </ul>
-          <pre>{transform.code}</pre>
+          {#if transform.rationale.assumptions.length > 0}
+            <h4 class="label">Assumes</h4>
+            <ul>
+              {#each transform.rationale.assumptions as assumption}
+                <li>{assumption}</li>
+              {/each}
+            </ul>
+          {/if}
+
+          {#if editing}
+            <textarea
+              class="code-edit"
+              value={draftCode}
+              spellcheck="false"
+              aria-label="Transform code"
+              oninput={(event) => (draftCode = event.currentTarget.value)}
+            ></textarea>
+            {#if editError}
+              <p class="edit-error">{editError}</p>
+            {/if}
+            <div class="actions">
+              <button type="button" class="secondary" disabled={saving} onclick={commitEdit}>
+                {saving ? 'Checking…' : 'Save code'}
+              </button>
+              <button type="button" class="secondary" onclick={() => (editing = false)}>
+                Cancel
+              </button>
+            </div>
+          {:else}
+            <pre>{transform.code}</pre>
+            <div class="actions">
+              <button type="button" class="secondary" onclick={startEdit}>Edit code</button>
+            </div>
+          {/if}
         </div>
       </details>
     </div>
@@ -403,6 +461,24 @@
     color: var(--attention);
   }
 
+  .code-edit {
+    width: 100%;
+    min-height: 140px;
+    padding: 9px;
+    border: 1px solid var(--accent-fg);
+    border-radius: var(--r-input);
+    background: var(--surface-sunken);
+    font: 11px/1.7 var(--font-mono);
+    color: var(--text);
+    resize: vertical;
+  }
+
+  .edit-error {
+    margin: 6px 0 0;
+    font: 11.5px/1.45 var(--font-ui);
+    color: var(--attention);
+  }
+
   .disclosure summary {
     font: 11.5px/1.5 var(--font-ui);
     color: var(--text-dim);
@@ -410,6 +486,9 @@
   }
 
   .rationale {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
     padding-top: 7px;
   }
 

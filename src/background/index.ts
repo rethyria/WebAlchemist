@@ -220,6 +220,23 @@ async function handle(
       return runStaticAnalysis(message.code, message.declaredCapabilities)
 
     case 'save-transform': {
+      /*
+       * Re-run the gate here rather than trusting that the caller did, exactly
+       * as preview-js does. This stopped being a formality when transform code
+       * became hand-editable: the sidebar is no longer only ever sending back
+       * something it just analysed, so the last point before code is persisted
+       * and registered has to check it for itself.
+       */
+      if (message.transform.kind === 'js') {
+        const analysis = runStaticAnalysis(
+          message.transform.code,
+          message.transform.capabilities,
+        )
+        if (!analysis.passed) {
+          throw new Error('Static analysis rejected this code, so it was not saved.')
+        }
+      }
+
       await saveTransform(message.transform)
       if (message.transform.kind === 'js') {
         await registerTransform(message.transform)

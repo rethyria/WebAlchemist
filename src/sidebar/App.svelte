@@ -4,6 +4,7 @@
   import { originPermissionFor } from '@shared/match'
   import type {
     CredentialStatus,
+    ReviewResult,
     Settings,
     Transform,
     TransformRuntimeState,
@@ -223,6 +224,60 @@
     if (from === -1) return
     moveTo(transform.id, from + delta)
     await persistOrder()
+  }
+
+  /**
+   * Saves hand-edited code. Resolves to a message when it was refused.
+   *
+   * The rationale is not carried across. It describes an implementation that
+   * no longer exists — the same reason repair regenerates it rather than
+   * preserving it — and stale assumptions are worse than none, because the
+   * health check reports them to the user as the reason something broke.
+   * `targets` survives: the anchor is unchanged, so what this aims at has not
+   * moved even though how it gets there has.
+   *
+   * `origin` deliberately stays as it was. Flipping an edited transform to
+   * 'manual' would take it out of the AI-JS kill switch's reach, which is the
+   * wrong direction for a switch whose whole job is to stop model-written
+   * code running.
+   */
+  async function editCode(transform: Transform, code: string): Promise<string | null> {
+    if (transform.kind === 'js') {
+      const analysis = await send<ReviewResult>({
+        type: 'analyse',
+        code,
+        declaredCapabilities: transform.capabilities,
+      })
+      const blocking = analysis.static.filter((f) => f.severity === 'block')
+      if (blocking.length > 0) {
+        return blocking
+          .map((f) => `Line ${f.line}: ${f.explanation}`)
+          .join('\n')
+      }
+    }
+
+    const next: Transform = {
+      ...transform,
+      code,
+      rationale: {
+        targets: transform.rationale.targets,
+        approach: 'Edited by hand. Any description of the previous code no longer applies.',
+        assumptions: [],
+      },
+    }
+
+    const tab = await activeTab()
+    try {
+      await send({
+        type: 'save-transform',
+        transform: next,
+        ...(tab?.id === undefined ? {} : { tabId: tab.id }),
+      })
+    } catch (cause) {
+      return cause instanceof BackgroundError ? cause.message : String(cause)
+    }
+    transforms = transforms.map((t) => (t.id === transform.id ? next : t))
+    return null
   }
 
   async function renameTransform(transform: Transform, name: string) {
@@ -532,6 +587,7 @@
           onexpand={() =>
             (expandedId = expandedId === transform.id ? null : transform.id)}
           onrename={(name) => void renameTransform(transform, name)}
+          oneditcode={(code) => editCode(transform, code)}
           ondelete={() => void removeTransform(transform)}
           dragging={draggingId === transform.id}
           ongrab={() => (draggingId = transform.id)}
