@@ -286,12 +286,16 @@ async function handle(
       return true
 
     case 'start-picking': {
-      // activeTab is granted by the toolbar gesture that opened the sidebar,
-      // so the content script is injected on demand rather than declared.
-      await browser.scripting.executeScript({
-        target: { tabId: message.tabId },
-        files: ['src/content/index.js'],
-      })
+      // Inject only when nothing is answering. executeScript re-runs the file
+      // unconditionally, and a second instance brings a second overlay and a
+      // second set of listeners — see the guard in the content script.
+      const alive = await askContent(message.tabId, { type: 'ping' })
+      if (alive !== true) {
+        await browser.scripting.executeScript({
+          target: { tabId: message.tabId },
+          files: ['src/content/index.js'],
+        })
+      }
 
       // Resolved here rather than in the content script: settings live in the
       // background, and the overlay has no way to read a CSS variable of ours.

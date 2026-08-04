@@ -1019,7 +1019,29 @@ function send(event: ContentEvent): Promise<unknown> {
   return browser.runtime.sendMessage(event).catch(() => undefined)
 }
 
-browser.runtime.onMessage.addListener(async (message: ContentMessage) => {
+/**
+ * Guards against a second copy of this script running in the same tab.
+ *
+ * `scripting.executeScript` re-runs the file every time it is called, and each
+ * run is a fresh module with its own overlay, lock and listeners. Starting the
+ * picker then went to all of them: every one mounted its own dimming layer and
+ * its own event-swallowing sheet, so the page got darker with each visit to
+ * the picker and stayed in pick mode after leaving it.
+ *
+ * The flag lives on the sandbox global, which is shared between content
+ * scripts of this extension in this tab, rather than on the page — a
+ * persistent attribute in the DOM would hand every site a way to detect the
+ * extension.
+ */
+const LOADED = '__webAlchemistContentLoaded'
+const sandbox = globalThis as unknown as Record<string, unknown>
+
+if (!sandbox[LOADED]) {
+  sandbox[LOADED] = true
+  browser.runtime.onMessage.addListener(handleMessage)
+}
+
+async function handleMessage(message: ContentMessage) {
   switch (message.type) {
     case 'start-picking':
       palette = message.palette
@@ -1050,6 +1072,8 @@ browser.runtime.onMessage.addListener(async (message: ContentMessage) => {
       return true
     case 'run-health-check':
       return { type: 'health-check-result', states: await runHealthCheck(message.transforms) }
+    case 'ping':
+      return true
     case 'url-changed':
       // Re-evaluation is driven from the background script, which owns the
       // record set; nothing to do here beyond dropping picker state.
@@ -1058,4 +1082,4 @@ browser.runtime.onMessage.addListener(async (message: ContentMessage) => {
     case 'apply-transforms':
       return true
   }
-})
+}

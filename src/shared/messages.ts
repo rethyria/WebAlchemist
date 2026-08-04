@@ -115,6 +115,8 @@ export type ContentMessage =
   | { type: 'apply-transforms'; transforms: Transform[] }
   | { type: 'run-health-check'; transforms: Transform[] }
   | { type: 'url-changed'; url: string }
+  /** Answered only by a live instance; the background uses it to avoid reinjecting. */
+  | { type: 'ping' }
 
 /**
  * Sent from content script to sidebar, via the background script.

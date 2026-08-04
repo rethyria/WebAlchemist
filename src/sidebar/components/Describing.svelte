@@ -285,10 +285,14 @@
     outline: none;
   }
 
-  /* Takes the room that is left, and scrolls once there is not enough. */
+  /*
+   * Sized to its content, not to the space available — a three-row chain
+   * should look like three rows. It still gives way when the panel is short,
+   * shrinking and scrolling rather than pushing the controls off.
+   */
   .tree {
-    flex: 1 1 auto !important;
-    min-height: 64px;
+    flex: 0 1 auto !important;
+    min-height: 52px;
   }
 
   .tree ul {
