@@ -635,7 +635,7 @@ export class Flow {
        * visible on both the describing and refining panels, so an unticked box
        * is something the user can see rather than a silent downgrade.
        */
-      this.cancelScreenshot()
+      this.clearShot()
     }
   }
 
@@ -705,12 +705,35 @@ export class Flow {
     }
   }
 
-  /** Turns it back off and forgets the image. Nothing to revoke. */
-  cancelScreenshot(): void {
+  /**
+   * Forgets the image but keeps the grant.
+   *
+   * Used between attempts within one run. The opt-in is per request, so the
+   * image is dropped every time — but re-prompting for an all-sites grant on
+   * every refinement would be worse than the thing it protects against, so
+   * the permission survives until the run ends.
+   */
+  private clearShot(): void {
     this.choosingRegion = false
     this.sendScreenshot = false
     this.shotPreview = null
     this.shot = null
+  }
+
+  /**
+   * Turns screenshots off and hands the all-sites grant back.
+   *
+   * Holding `<all_urls>` is what lets captureVisibleTab work, and it is far
+   * broader than this feature needs: while it is held, every per-site prompt
+   * this extension would otherwise show is silently satisfied, because
+   * `<all_urls>` subsumes any specific origin. So it is given back as soon as
+   * the run that wanted it is over, rather than left standing.
+   *
+   * permissions.remove needs no user gesture, so this can run from a reset.
+   */
+  cancelScreenshot(): void {
+    this.clearShot()
+    void browser.permissions.remove({ origins: ['<all_urls>'] }).catch(() => {})
   }
 
   /**
@@ -1114,6 +1137,8 @@ export class Flow {
   reset(): void {
     this.stopClock()
     this.generation += 1
+    // The run is over, so the all-sites grant it may have taken goes back.
+    this.cancelScreenshot()
     this.step = 'list'
     this.hover = null
     this.picked = null
