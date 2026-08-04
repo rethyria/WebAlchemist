@@ -11,6 +11,7 @@
     cropClipped: boolean
     instruction: string
     sendScreenshot: boolean
+    armingScreenshot: boolean
     visionSupported: boolean
     providerLabel: string
     onchange: (instruction: string) => void
@@ -35,6 +36,7 @@
     cropClipped,
     instruction,
     sendScreenshot,
+    armingScreenshot,
     visionSupported,
     providerLabel,
     onchange,
@@ -179,12 +181,24 @@
     <section class="screenshot">
       <div class="opt-in">
         <Toggle
-          checked={sendScreenshot}
+          checked={sendScreenshot || armingScreenshot}
           label="Send a screenshot of this region"
           onchange={onscreenshot}
         />
         <span class="opt-in-text">Send a screenshot of this region</span>
       </div>
+
+      <!--
+        The panel cannot photograph the tab: Firefox only grants that to a
+        toolbar-button click, never to a sidebar. So it asks for one, rather
+        than failing in a way that looks like a bug.
+      -->
+      {#if armingScreenshot}
+        <p class="awaiting">
+          Click the Web Alchemist button in the toolbar to capture. Nothing is
+          taken until you do.
+        </p>
+      {/if}
 
       {#if sendScreenshot}
         <div class="preview" aria-hidden="true">
@@ -404,6 +418,15 @@
   .preview-text {
     font: 10.5px var(--font-mono);
     color: var(--text-dim);
+  }
+
+  .awaiting {
+    margin: 0;
+    padding: 7px 9px;
+    border: 1px solid var(--accent-fg);
+    border-radius: var(--r-input);
+    font: 11.5px/1.45 var(--font-ui);
+    color: var(--accent-fg);
   }
 
   .warning {

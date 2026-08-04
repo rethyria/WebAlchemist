@@ -453,10 +453,12 @@
       cropClipped={flow.picked.cropClipped}
       instruction={flow.instruction}
       sendScreenshot={flow.sendScreenshot}
+      armingScreenshot={flow.armingScreenshot}
       visionSupported={flow.visionSupported}
       {providerLabel}
       onchange={(value) => (flow.instruction = value)}
-      onscreenshot={(value) => (flow.sendScreenshot = value)}
+      onscreenshot={(value) =>
+        void (value ? flow.armScreenshot() : flow.cancelScreenshot())}
       onrepick={() => void flow.startPicking()}
       chain={flow.chain}
       depth={flow.chainDepth}
@@ -492,12 +494,14 @@
       references={flow.references}
       awaitingReference={flow.awaitingReference}
       sendScreenshot={flow.sendScreenshot}
+      armingScreenshot={flow.armingScreenshot}
       visionSupported={flow.visionSupported}
       {providerLabel}
       onfollowup={(value) => (flow.followUp = value)}
       onaddreference={() => void flow.addReference()}
       onremovereference={(selector) => flow.removeReference(selector)}
-      onscreenshot={(value) => (flow.sendScreenshot = value)}
+      onscreenshot={(value) =>
+        void (value ? flow.armScreenshot() : flow.cancelScreenshot())}
       onregenerate={() => void flow.regenerate()}
       onrun={() => void flow.runJs()}
       onreload={() => void flow.reloadAndRetry()}

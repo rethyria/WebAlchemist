@@ -89,8 +89,19 @@ export type Message =
    */
   | { type: 'preview-js'; tabId: number; transform: Transform }
   | { type: 'clear-preview-js'; id: string }
-  /** `viewportWidth` converts the CSS-pixel rect to the capture's device pixels. */
-  | { type: 'capture-region'; rect: Rect; viewportWidth: number }
+  /**
+   * Arms a screenshot for the next toolbar-button click.
+   *
+   * The capture cannot happen here. tabs.captureVisibleTab needs either the
+   * literal `<all_urls>` permission — unreachable in MV3, where granted hosts
+   * live in allowedOrigins and never enter the permission set — or an activeTab
+   * grant, which only a browser-action click produces. The sidebar never grants
+   * it. So the rect is parked and the click that follows does the work.
+   */
+  | { type: 'arm-screenshot'; tabId: number; rect: Rect; viewportWidth: number }
+  /** Whatever the armed click captured, or null if it has not happened yet. */
+  | { type: 'get-screenshot'; tabId: number }
+  | { type: 'clear-screenshot'; tabId: number }
   /**
    * `mode` decides what a confirmed pick means. 'target' replaces what the
    * transform acts on; 'reference' adds an element the follow-up can talk
@@ -154,6 +165,14 @@ export type ContentMessage =
  */
 export type ContentEvent =
   | { type: 'element-hovered'; target: HoverTarget }
+  /**
+   * Not from a content script — the background, telling the panel that the
+   * toolbar click it was waiting for has produced an image. It arrives at the
+   * same listener, so it lives in the same union.
+   */
+  | { type: 'screenshot-captured'; tabId: number }
+  /** The armed click happened and the capture failed. Never silent. */
+  | { type: 'screenshot-failed'; tabId: number; message: string }
   /** A reference pick. Carries no anchor or crop: nothing is targeted by it. */
   | { type: 'element-referenced'; element: ElementContext }
   | {

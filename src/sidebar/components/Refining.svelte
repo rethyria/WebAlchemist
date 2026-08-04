@@ -21,6 +21,7 @@
     /** True while the picker is open in the page waiting for a reference. */
     awaitingReference: boolean
     sendScreenshot: boolean
+    armingScreenshot: boolean
     visionSupported: boolean
     providerLabel: string
     onfollowup: (text: string) => void
@@ -44,6 +45,7 @@
     references,
     awaitingReference,
     sendScreenshot,
+    armingScreenshot,
     visionSupported,
     providerLabel,
     onfollowup,
@@ -207,7 +209,7 @@
       {#if visionSupported}
         <div class="shot">
           <Toggle
-            checked={sendScreenshot}
+            checked={sendScreenshot || armingScreenshot}
             label="Send a screenshot with this attempt"
             onchange={onscreenshot}
           />
@@ -217,10 +219,15 @@
             <em>shows the page as it is now, with this change applied</em>
           </span>
         </div>
-        {#if sendScreenshot}
+        {#if armingScreenshot}
+          <p class="shot-awaiting">
+            Click the Web Alchemist button in the toolbar to capture. Nothing is
+            taken until you do.
+          </p>
+        {:else if sendScreenshot}
           <p class="shot-warning">
-            Everything in that region goes to {providerLabel}. Off again after this
-            attempt.
+            Captured. Everything in that region goes to {providerLabel}. Off again
+            after this attempt.
           </p>
         {/if}
       {/if}
@@ -529,6 +536,15 @@
     display: block;
     font-style: normal;
     color: var(--text-faint);
+  }
+
+  .shot-awaiting {
+    margin: 0;
+    padding: 6px 8px;
+    border: 1px solid var(--accent-fg);
+    border-radius: var(--r-input);
+    font: 11px/1.45 var(--font-ui);
+    color: var(--accent-fg);
   }
 
   .shot-warning {

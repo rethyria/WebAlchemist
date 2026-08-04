@@ -115,8 +115,17 @@ export class Flow {
   /** What the page says that depth resolves to. Never estimated here. */
   scopeCount = $state(1)
   scopeContainer = $state<string | null>(null)
-  /** Per request. Reset on every entry to `describing`; never persisted. */
+  /**
+   * Whether an image is going with the next request.
+   *
+   * This is only ever true once one has actually been captured, so the panel
+   * cannot claim it is sending something it does not have. Ticking the box
+   * sets `armingScreenshot`; the toolbar click that follows is what makes this
+   * true. Per request, and never persisted.
+   */
   sendScreenshot = $state(false)
+  /** Waiting for the toolbar click that can capture. See armScreenshot. */
+  armingScreenshot = $state(false)
   visionSupported = $state(false)
 
   history = $state<RefinementTurn[]>([])
@@ -388,6 +397,22 @@ export class Flow {
         this.references = [...this.references, event.element]
         return
 
+      case 'screenshot-captured':
+        if (event.tabId !== this.tabId) return
+        this.armingScreenshot = false
+        this.sendScreenshot = true
+        return
+
+      case 'screenshot-failed':
+        if (event.tabId !== this.tabId) return
+        this.armingScreenshot = false
+        this.sendScreenshot = false
+        this.error = {
+          kind: 'request-failed',
+          message: `The screenshot could not be taken: ${event.message}`,
+        }
+        return
+
       case 'picking-cancelled':
         this.awaitingReference = false
         if (this.step === 'picking') this.step = 'list'
@@ -406,6 +431,7 @@ export class Flow {
     this.step = 'describing'
     // The reset that makes the opt-in per-request rather than sticky.
     this.sendScreenshot = false
+    this.armingScreenshot = false
     this.scopeDepth = 0
     this.scopeCount = 1
     this.scopeContainer = null
@@ -414,6 +440,7 @@ export class Flow {
     this.followUp = ''
     this.references = []
     this.awaitingReference = false
+    this.armingScreenshot = false
     void this.checkVisionSupport()
   }
 
@@ -515,17 +542,17 @@ export class Flow {
       const context: PageContext = { ...(await this.liveContext(picked)) }
       if (this.references.length > 0) context.references = [...this.references]
 
-      if (this.sendScreenshot && this.visionSupported) {
-        const shot = await send<{ dataUrl: string; clipped: boolean }>({
-          type: 'capture-region',
-          rect: picked.crop,
-          viewportWidth: picked.viewportWidth,
-        })
-        context.screenshot = {
-          dataUrl: shot.dataUrl,
-          rect: picked.crop,
-          clipped: shot.clipped,
-        }
+      /*
+       * Taken from what the toolbar click captured, not captured here — the
+       * sidebar has no permission to photograph a tab. See armScreenshot.
+       */
+      if (this.sendScreenshot && this.visionSupported && this.tabId !== null) {
+        const shot = await send<{
+          dataUrl: string
+          rect: Rect
+          clipped: boolean
+        } | null>({ type: 'get-screenshot', tabId: this.tabId })
+        if (shot) context.screenshot = shot
       }
 
       this.streamed = ''
@@ -615,8 +642,47 @@ export class Flow {
        * visible on both the describing and refining panels, so an unticked box
        * is something the user can see rather than a silent downgrade.
        */
-      this.sendScreenshot = false
+      void this.cancelScreenshot()
     }
+  }
+
+  /**
+   * Asks for a screenshot, which the sidebar cannot take.
+   *
+   * tabs.captureVisibleTab needs `hasPermission("<all_urls>")` or an activeTab
+   * grant. In MV3 the first is unreachable — granted host patterns live in
+   * allowedOrigins and never enter the permission set that hasPermission
+   * checks — and the second is produced only by a browser-action click.
+   * Nothing in the sidebar grants it, so there is no arrangement of our own
+   * code that lets this happen here.
+   *
+   * So the rect is armed and the user clicks the toolbar button. The panel
+   * says so plainly rather than appearing to have failed.
+   */
+  async armScreenshot(): Promise<void> {
+    const picked = this.picked
+    if (!picked || this.tabId === null) return
+    this.armingScreenshot = true
+    this.sendScreenshot = false
+    try {
+      await send({
+        type: 'arm-screenshot',
+        tabId: this.tabId,
+        rect: picked.crop,
+        viewportWidth: picked.viewportWidth,
+      })
+    } catch (cause) {
+      this.armingScreenshot = false
+      this.fail(cause)
+    }
+  }
+
+  /** Drops both the request and anything already captured for this tab. */
+  async cancelScreenshot(): Promise<void> {
+    this.armingScreenshot = false
+    this.sendScreenshot = false
+    if (this.tabId === null) return
+    await send({ type: 'clear-screenshot', tabId: this.tabId }).catch(() => {})
   }
 
   /**

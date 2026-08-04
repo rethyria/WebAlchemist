@@ -80,8 +80,11 @@ browser.permissions.onRemoved.addListener(async () => {
 })
 
 /** Clicking the toolbar button opens the sidebar rather than a popup. */
-browser.action.onClicked.addListener(() => {
+browser.action.onClicked.addListener((tab) => {
+  // Open first: sidebarAction.open() needs the gesture, and awaiting the
+  // capture before it would spend the click.
   void browser.sidebarAction.open()
+  void fulfilArmedCapture(tab)
 })
 
 /* ------------------------------------------------------------------ */
@@ -409,8 +412,22 @@ async function handle(
       return (await runHealthCheck(message.tabId, transforms)) ?? []
     }
 
-    case 'capture-region':
-      return captureRegion(message.rect, message.viewportWidth)
+    case 'arm-screenshot':
+      armedCapture = {
+        tabId: message.tabId,
+        rect: message.rect,
+        viewportWidth: message.viewportWidth,
+      }
+      capturedShots.delete(message.tabId)
+      return true
+
+    case 'get-screenshot':
+      return capturedShots.get(message.tabId) ?? null
+
+    case 'clear-screenshot':
+      if (armedCapture?.tabId === message.tabId) armedCapture = null
+      capturedShots.delete(message.tabId)
+      return true
 
     case 'export-transforms':
       return exportTransforms()
@@ -557,6 +574,9 @@ async function runGeneration(
 browser.tabs.onRemoved.addListener((tabId) => {
   previewedCss.delete(tabId)
   appliedCss.delete(tabId)
+  // An image of a page that no longer exists is not worth keeping.
+  capturedShots.delete(tabId)
+  if (armedCapture?.tabId === tabId) armedCapture = null
 })
 
 /* ------------------------------------------------------------------ */
@@ -677,6 +697,57 @@ async function reapply(tabId: number | undefined): Promise<void> {
   const tab = await browser.tabs.get(tabId).catch(() => undefined)
   if (!tab?.url) return
   await applyCssTransforms(tabId, await transformsForUrl(tab.url))
+}
+
+/* ------------------------------------------------------------------ */
+/* Screenshots                                                         */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The toolbar-click handshake.
+ *
+ * captureVisibleTab requires `hasPermission("<all_urls>")` or an activeTab
+ * grant. The first is unreachable in MV3 — hasPermission is a literal lookup
+ * in the permission set, and granted host patterns live in allowedOrigins,
+ * never in that set — and the second is only ever produced by a browser-action
+ * click (ext-browserAction.js), never by anything in the sidebar. So the panel
+ * arms a capture, asks for one click, and this runs while the grant is live.
+ *
+ * Holding the image here rather than handing it straight to the panel keeps it
+ * out of storage and out of the panel's state until a request actually wants
+ * it, and lets the tab own its lifetime.
+ */
+let armedCapture: { tabId: number; rect: Rect; viewportWidth: number } | null = null
+const capturedShots = new Map<number, { dataUrl: string; rect: Rect; clipped: boolean }>()
+
+async function fulfilArmedCapture(tab: browser.tabs.Tab): Promise<void> {
+  const armed = armedCapture
+  // Only for the tab it was armed on: the click may land anywhere.
+  if (!armed || tab.id === undefined || tab.id !== armed.tabId) return
+  armedCapture = null
+
+  try {
+    const shot = await captureRegion(armed.rect, armed.viewportWidth)
+    capturedShots.set(armed.tabId, { ...shot, rect: armed.rect })
+    // The panel is waiting on this; a closed panel simply means nobody hears.
+    void browser.runtime
+      .sendMessage({ type: 'screenshot-captured', tabId: armed.tabId })
+      .catch(() => {})
+  } catch (cause) {
+    /*
+     * Reported, not swallowed. A silent failure here leaves the panel waiting
+     * for a click that has already happened, which is indistinguishable from
+     * the user simply not having clicked yet — and that is the state this
+     * whole handshake exists to make legible.
+     */
+    void browser.runtime
+      .sendMessage({
+        type: 'screenshot-failed',
+        tabId: armed.tabId,
+        message: cause instanceof Error ? cause.message : String(cause),
+      })
+      .catch(() => {})
+  }
 }
 
 async function captureRegion(
