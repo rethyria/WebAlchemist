@@ -174,6 +174,35 @@
     transforms = transforms.map((t) => (t.id === transform.id ? { ...t, enabled } : t))
   }
 
+  async function renameTransform(transform: Transform, name: string) {
+    const tab = await activeTab()
+    // save-transform upserts by id, so this is the same path a save takes.
+    await send({
+      type: 'save-transform',
+      transform: { ...transform, name },
+      ...(tab?.id === undefined ? {} : { tabId: tab.id }),
+    })
+    transforms = transforms.map((t) => (t.id === transform.id ? { ...t, name } : t))
+  }
+
+  async function removeTransform(transform: Transform) {
+    const tab = await activeTab()
+    try {
+      await send({
+        type: 'delete-transform',
+        id: transform.id,
+        // So the change comes off the page now rather than on the next load.
+        ...(tab?.id === undefined ? {} : { tabId: tab.id }),
+      })
+    } catch (cause) {
+      flow.error = { kind: 'request-failed', message: String(cause) }
+      return
+    }
+    if (expandedId === transform.id) expandedId = null
+    transforms = transforms.filter((t) => t.id !== transform.id)
+    runtimeStates = runtimeStates.filter((s) => s.id !== transform.id)
+  }
+
   function openSettingsPage() {
     void browser.runtime.openOptionsPage()
   }
@@ -445,13 +474,13 @@
       {#each transforms as transform (transform.id)}
         <TransformRow
           {transform}
-          state={stateFor(transform.id)}
+          runtime={stateFor(transform.id)}
           expanded={expandedId === transform.id}
           ontoggle={(enabled) => void setEnabled(transform, enabled)}
           onexpand={() =>
             (expandedId = expandedId === transform.id ? null : transform.id)}
-          onrepair={() => {}}
-          onedit={() => {}}
+          onrename={(name) => void renameTransform(transform, name)}
+          ondelete={() => void removeTransform(transform)}
         />
       {/each}
     </ul>

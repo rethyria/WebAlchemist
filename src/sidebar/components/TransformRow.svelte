@@ -4,34 +4,85 @@
 
   interface Props {
     transform: Transform
-    state: TransformRuntimeState | undefined
+    /* Named `runtime`, not `state`: a prop called `state` makes every
+       `$state(...)` in this component parse as store access on it. */
+    runtime: TransformRuntimeState | undefined
     expanded: boolean
     ontoggle: (enabled: boolean) => void
     onexpand: () => void
-    onrepair: () => void
-    onedit: () => void
+    onrename: (name: string) => void
+    ondelete: () => void
   }
 
-  let { transform, state, expanded, ontoggle, onexpand, onrepair, onedit }: Props = $props()
+  let { transform, runtime, expanded, ontoggle, onexpand, onrename, ondelete }: Props =
+    $props()
 
-  let broken = $derived(state?.status === 'broken')
+  let broken = $derived(runtime?.status === 'broken')
   /* JS carrying capabilities, or broken, gets the attention treatment. */
   let flagged = $derived(broken || transform.capabilities.length > 0)
+
+  /*
+   * Delete asks first and asks in place. A transform is minutes of work and a
+   * model call, and there is no undo behind this — but a modal for a list row
+   * is heavier than the action deserves, so the row itself becomes the
+   * question and the answer is one click away from the cancel.
+   */
+  let confirming = $state(false)
+
+  let renaming = $state(false)
+  let draftName = $state('')
+
+  function startRename() {
+    draftName = transform.name
+    renaming = true
+  }
+
+  function commitRename() {
+    renaming = false
+    const next = draftName.trim()
+    // An empty name would leave a row with nothing to click on.
+    if (next && next !== transform.name) onrename(next)
+  }
+
+  function onRenameKey(event: KeyboardEvent) {
+    if (event.key === 'Enter') {
+      event.preventDefault()
+      commitRename()
+    }
+    if (event.key === 'Escape') renaming = false
+  }
 </script>
 
 <li class="row" class:expanded>
   <div class="head">
-    <span class="handle" aria-hidden="true">⠿</span>
-
     <Toggle
       checked={transform.enabled}
       label="Enable {transform.name}"
       onchange={ontoggle}
     />
 
-    <button type="button" class="name" onclick={onexpand} aria-expanded={expanded}>
-      {transform.name}
-    </button>
+    {#if renaming}
+      <!-- svelte-ignore a11y_autofocus -->
+      <input
+        class="rename"
+        autofocus
+        value={draftName}
+        aria-label="Name"
+        oninput={(event) => (draftName = event.currentTarget.value)}
+        onblur={commitRename}
+        onkeydown={onRenameKey}
+      />
+    {:else}
+      <button
+        type="button"
+        class="name"
+        onclick={onexpand}
+        ondblclick={startRename}
+        aria-expanded={expanded}
+      >
+        {transform.name}
+      </button>
+    {/if}
 
     <div class="meta">
       <span
@@ -58,20 +109,39 @@
       {#if broken}
         <section>
           <h3 class="label attention">What broke</h3>
-          <p>{state?.brokenReason}</p>
-          {#if state?.failedAssumption}
-            <p class="assumption">This transform assumed {state.failedAssumption}.</p>
+          <p>{runtime?.brokenReason}</p>
+          {#if runtime?.failedAssumption}
+            <p class="assumption">This transform assumed {runtime.failedAssumption}.</p>
           {/if}
         </section>
 
+        <!--
+          Repair and Edit stood here and did nothing — their handlers were
+          empty. They are gone rather than left inert: a button that claims a
+          capability the extension does not have is worse than its absence,
+          because it costs the user a click to find out. See #24 and #25.
+        -->
         <div class="actions">
-          <button type="button" class="primary" onclick={onrepair}>Repair with AI</button>
-          <button type="button" class="secondary" onclick={onedit}>Edit</button>
           <button type="button" class="secondary" onclick={() => ontoggle(false)}>
             Disable
           </button>
         </div>
       {/if}
+
+      <div class="manage">
+        {#if confirming}
+          <span class="ask">Delete this transform?</span>
+          <button type="button" class="danger" onclick={ondelete}>Delete</button>
+          <button type="button" class="secondary" onclick={() => (confirming = false)}>
+            Cancel
+          </button>
+        {:else}
+          <button type="button" class="secondary" onclick={startRename}>Rename</button>
+          <button type="button" class="secondary" onclick={() => (confirming = true)}>
+            Delete
+          </button>
+        {/if}
+      </div>
 
       <details class="disclosure">
         <summary>Code and rationale</summary>
@@ -108,10 +178,15 @@
     padding: 9px var(--gutter-sidebar);
   }
 
-  .handle {
-    font: 12px var(--font-mono);
-    color: var(--text-faint);
-    cursor: grab;
+  .rename {
+    flex: 1;
+    min-width: 0;
+    padding: 1px 4px;
+    border: 1px solid var(--accent-fg);
+    border-radius: var(--r-input);
+    background: var(--surface-sunken);
+    font: 13px var(--font-ui);
+    color: var(--text);
   }
 
   .name {
@@ -172,7 +247,7 @@
     display: flex;
     flex-direction: column;
     gap: 11px;
-    /* Aligns under the name, past the handle and toggle. */
+    /* Aligns under the name, past the toggle. */
     padding: 0 var(--gutter-sidebar) var(--gutter-sidebar) var(--indent-expanded);
   }
 
@@ -199,29 +274,51 @@
     color: var(--text-dim);
   }
 
-  .actions {
+  .actions,
+  .manage {
     display: flex;
+    align-items: center;
     gap: 6px;
   }
 
-  button.primary,
-  button.secondary {
+  /* Separated from the transform's own content: these act on the record. */
+  .manage button {
+    padding: 5px 9px;
+    font-weight: 400;
+    font-size: 12px;
+  }
+
+  .manage {
+    padding-top: 2px;
+    border-top: 1px solid var(--border-subtle);
+    margin-top: 2px;
+  }
+
+  .ask {
+    margin-right: auto;
+    font: 12px var(--font-ui);
+    color: var(--text);
+  }
+
+  button.secondary,
+  button.danger {
     padding: 8px 10px;
     border-radius: var(--r-button);
     font: 600 12.5px var(--font-ui);
     cursor: pointer;
   }
 
-  button.primary {
-    border: none;
-    background: var(--accent);
-    color: var(--accent-text);
-  }
-
   button.secondary {
     border: 1px solid var(--border-strong);
     background: transparent;
     color: var(--text);
+  }
+
+  /* The only destructive control in the panel, and the only one tinted. */
+  button.danger {
+    border: 1px solid var(--attention);
+    background: rgb(from var(--attention) r g b / 0.12);
+    color: var(--attention);
   }
 
   .disclosure summary {

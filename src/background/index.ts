@@ -233,6 +233,11 @@ async function handle(
     case 'delete-transform':
       await unregisterTransform(message.id)
       await deleteTransform(message.id)
+      // Take it off the page now. Without this a deleted CSS transform stayed
+      // applied until the next navigation — the row vanished from the list
+      // while the change it made was still on screen, which reads as the
+      // delete having failed.
+      await reapply(message.tabId)
       return true
 
     case 'reorder-transforms':

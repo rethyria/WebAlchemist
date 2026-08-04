@@ -61,7 +61,8 @@ export type Message =
   /* --- persistence -------------------------------------------------- */
   /** `tabId` lets the change take effect now instead of on the next load. */
   | { type: 'save-transform'; transform: Transform; tabId?: number }
-  | { type: 'delete-transform'; id: string }
+  /** `tabId` lets the change come off the page now rather than on reload. */
+  | { type: 'delete-transform'; id: string; tabId?: number }
   | { type: 'reorder-transforms'; orderedIds: string[] }
   | { type: 'set-enabled'; id: string; enabled: boolean; tabId?: number }
 
