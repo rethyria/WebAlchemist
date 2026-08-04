@@ -159,6 +159,102 @@ const OVERLAY_STYLES = `
   .hint .muted { color: rgba(251, 251, 254, 0.6); }
 `
 
+/**
+ * The persistent outline around what is being transformed.
+ *
+ * Separate from the picker overlay because it outlives it: once an element is
+ * confirmed the picker tears down, but the panel spends the rest of the flow
+ * talking about that element, and it should stay visible on the page while it
+ * does.
+ *
+ * It draws N boxes rather than one so 'every one like it' can show what that
+ * actually means — the count in the panel is a number, and the boxes are the
+ * evidence behind it.
+ */
+class LockOverlay {
+  private host: HTMLDivElement | null = null
+  private root: ShadowRoot | null = null
+  private targets: Element[] = []
+  private frame = 0
+
+  show(elements: Element[], colours: OverlayPalette): void {
+    this.targets = elements
+    if (!this.host) {
+      this.host = document.createElement('div')
+      this.host.setAttribute('data-webalchemist-overlay', '')
+      this.host.style.setProperty('--wa-line', colours.line)
+      this.root = this.host.attachShadow({ mode: 'closed' })
+      const style = document.createElement('style')
+      style.textContent = LOCK_STYLES
+      this.root.append(style)
+      document.documentElement.append(this.host)
+      // Boxes are positioned in viewport coordinates, so they have to be
+      // redrawn as the page moves under them or they drift immediately.
+      addEventListener('scroll', this.reposition, true)
+      addEventListener('resize', this.reposition)
+    }
+    this.draw()
+  }
+
+  hide(): void {
+    removeEventListener('scroll', this.reposition, true)
+    removeEventListener('resize', this.reposition)
+    cancelAnimationFrame(this.frame)
+    this.host?.remove()
+    this.host = null
+    this.root = null
+    this.targets = []
+  }
+
+  private reposition = (): void => {
+    cancelAnimationFrame(this.frame)
+    this.frame = requestAnimationFrame(() => this.draw())
+  }
+
+  private draw(): void {
+    const root = this.root
+    if (!root) return
+    const style = root.querySelector('style')
+    root.replaceChildren(...(style ? [style] : []))
+
+    this.targets.forEach((element, index) => {
+      const rect = element.getBoundingClientRect()
+      // Elements scrolled far out of view are skipped rather than drawn at the
+      // edge, where they would read as a match that is actually somewhere else.
+      if (rect.bottom < -40 || rect.top > innerHeight + 40) return
+      const box = document.createElement('div')
+      box.className = index === 0 ? 'lock primary' : 'lock'
+      Object.assign(box.style, {
+        left: `${rect.left}px`,
+        top: `${rect.top}px`,
+        width: `${rect.width}px`,
+        height: `${rect.height}px`,
+      })
+      root.append(box)
+    })
+  }
+}
+
+const LOCK_STYLES = `
+  :host { all: initial; }
+  .lock {
+    position: fixed;
+    pointer-events: none;
+    z-index: 2147483640;
+    box-sizing: border-box;
+    outline: 1.5px dashed var(--wa-line);
+    /* Fainter than the picker's: this sits on screen for the whole flow and
+       must not compete with the page it is describing. */
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.55);
+    opacity: 0.65;
+  }
+  /* The one that was actually picked, among its lookalikes. */
+  .lock.primary {
+    outline-width: 2px;
+    opacity: 1;
+  }
+`
+
 class Overlay {
   private host: HTMLDivElement | null = null
   private interactive = true
@@ -302,6 +398,7 @@ function text(tag: string, content: string, className?: string): HTMLElement {
 }
 
 const overlay = new Overlay()
+const lock = new LockOverlay()
 /** Separate instance: a preview may be shown while the picker is not running. */
 const preview = new Overlay()
 /** Kept so previews and retargets can draw in the user's accent after picking. */
@@ -522,6 +619,8 @@ function ancestorOf(element: Element | null, levelsUp: number): Element | null {
 }
 
 function emitPicked(element: Element, region: Rect): void {
+  describedElement = element
+  updateLock()
   const anchor = captureAnchor(element)
   void send({
     type: 'element-picked',
@@ -559,6 +658,61 @@ function retarget(levelsUp: number): void {
   const node = ancestorOf(pickedRoot, levelsUp)
   if (!node) return
   emitPicked(node, boundingRectWithPadding(node))
+}
+
+/**
+ * What "every one like it" means, decided here rather than by the model.
+ *
+ * The scope control is offered before generation, so there is no
+ * model-written selector to count yet. This is the extension's own reading,
+ * and it is what the boxes on the page show — so the user sees the set they
+ * are about to ask for rather than being told a number.
+ *
+ * Deliberately conservative. A selector that is too broad would light up half
+ * the page and misrepresent the request; too narrow simply shows fewer boxes,
+ * which is the safer way to be wrong.
+ */
+function similarSelectorFor(element: Element): string | null {
+  const tag = element.tagName.toLowerCase()
+  const classes = [...element.classList].filter((token) => !isBuildHashClass(token))
+
+  if (classes.length > 0) {
+    return `${tag}.${classes.map((c) => CSS.escape(c)).join('.')}`
+  }
+
+  const role = element.getAttribute('role')
+  if (role) return `${tag}[role="${CSS.escape(role)}"]`
+
+  // With nothing distinguishing it, siblings of the same tag are the most
+  // defensible reading — a bare tag selector would match the whole document.
+  const parent = element.parentElement
+  if (!parent) return null
+  const parentSelector = selectorFor(parent)
+  return `${parentSelector} > ${tag}`
+}
+
+function similarTo(element: Element): Element[] {
+  const selector = similarSelectorFor(element)
+  if (!selector) return [element]
+  try {
+    const found = [...document.querySelectorAll(selector)]
+    // The picked element leads, so the panel and the overlay agree on which
+    // box is the one that was actually chosen.
+    return [element, ...found.filter((other) => other !== element)]
+  } catch {
+    return [element]
+  }
+}
+
+/** The element the panel is describing, and how widely it is being applied. */
+let describedElement: Element | null = null
+let lockScope: 'element' | 'similar' = 'element'
+
+function updateLock(): number {
+  if (!describedElement || !palette) return 0
+  const targets = lockScope === 'similar' ? similarTo(describedElement) : [describedElement]
+  lock.show(targets, palette)
+  return targets.length
 }
 
 /** Draws an ancestor without selecting it, for hovering the list. */
@@ -827,6 +981,9 @@ browser.runtime.onMessage.addListener(async (message: ContentMessage) => {
     case 'start-picking':
       palette = message.palette
       preview.unmount()
+      // The previous target stops being the subject the moment picking starts.
+      lock.hide()
+      describedElement = null
       startPicking(message.palette)
       return true
     case 'cancel-picking':
@@ -838,6 +995,14 @@ browser.runtime.onMessage.addListener(async (message: ContentMessage) => {
       return true
     case 'highlight-ancestor':
       highlightAncestor(message.levelsUp)
+      return true
+    case 'set-lock-scope':
+      lockScope = message.scope
+      return { type: 'lock-count', count: updateLock() }
+    case 'clear-lock':
+      describedElement = null
+      lockScope = 'element'
+      lock.hide()
       return true
     case 'run-health-check':
       return { type: 'health-check-result', states: await runHealthCheck(message.transforms) }

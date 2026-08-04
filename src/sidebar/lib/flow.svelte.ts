@@ -105,6 +105,8 @@ export class Flow {
   instruction = $state('')
   /** How broadly the result should apply. Persisted, unlike the screenshot. */
   scope = $state<TransformScope>('element')
+  /** How many elements the page says that scope covers. 0 until asked. */
+  scopeCount = $state(0)
   /** Per request. Reset on every entry to `describing`; never persisted. */
   sendScreenshot = $state(false)
   visionSupported = $state(false)
@@ -223,6 +225,7 @@ export class Flow {
   async cancelPicking(): Promise<void> {
     if (this.tabId !== null) {
       await send({ type: 'stop-picking', tabId: this.tabId }).catch(() => {})
+      await this.clearLock()
     }
     this.step = 'list'
     this.hover = null
@@ -275,6 +278,7 @@ export class Flow {
     // The reset that makes the opt-in per-request rather than sticky.
     this.sendScreenshot = false
     this.scope = 'element'
+    this.scopeCount = 0
     this.instruction = ''
     this.history = []
     this.followUp = ''
@@ -296,6 +300,27 @@ export class Flow {
     if (this.tabId === null || levelsUp === this.chainDepth) return
     this.chainDepth = levelsUp
     await send({ type: 'retarget', tabId: this.tabId, levelsUp }).catch(() => {})
+  }
+
+  /**
+   * Changes the scope and redraws the outline for it.
+   *
+   * The count comes back from the page rather than being guessed here: what
+   * counts as "like it" is decided against the live DOM, and showing a number
+   * we had not actually verified would be worse than showing none.
+   */
+  async setScope(scope: TransformScope): Promise<void> {
+    this.scope = scope
+    if (this.tabId === null) return
+    try {
+      this.scopeCount = await send<number>({
+        type: 'set-lock-scope',
+        tabId: this.tabId,
+        scope,
+      })
+    } catch {
+      this.scopeCount = 0
+    }
   }
 
   /** Draws an ancestor on the page while its row is hovered. */
@@ -476,6 +501,12 @@ export class Flow {
     }
   }
 
+  /** Takes the outline off the page. The subject is no longer on screen. */
+  private async clearLock(): Promise<void> {
+    if (this.tabId === null) return
+    await send({ type: 'clear-lock', tabId: this.tabId }).catch(() => {})
+  }
+
   private async clearPreview(): Promise<void> {
     if (this.tabId !== null && this.previewedCss !== null) {
       await send({
@@ -532,6 +563,7 @@ export class Flow {
 
   async discard(): Promise<void> {
     await this.clearPreview()
+    await this.clearLock()
     this.reset()
   }
 
@@ -665,6 +697,7 @@ export class Flow {
       // The preview and the saved transform would otherwise both be applied,
       // stacking the same rules twice.
       await this.clearPreview()
+      await this.clearLock()
       await send({ type: 'save-transform', transform })
       this.reset()
       this.onSaved()
@@ -728,6 +761,8 @@ export class Flow {
     this.picked = null
     this.chain = []
     this.chainDepth = 0
+    this.scope = 'element'
+    this.scopeCount = 0
     this.instruction = ''
     this.sendScreenshot = false
     this.history = []

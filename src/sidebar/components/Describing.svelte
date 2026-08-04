@@ -22,6 +22,7 @@
     onretarget: (levelsUp: number) => void
     onpreview: (levelsUp: number | null) => void
     scope: TransformScope
+    scopeCount: number
     onscope: (scope: TransformScope) => void
     ongenerate: () => void
   }
@@ -42,6 +43,7 @@
     onretarget,
     onpreview,
     scope,
+    scopeCount,
     onscope,
     ongenerate,
   }: Props = $props()
@@ -118,6 +120,17 @@
         Every one like it
       </button>
     </div>
+    {#if scope === 'similar'}
+      <p class="note">
+        {#if scopeCount > 1}
+          {scopeCount} elements on this page, outlined so you can check the set
+          before asking for it.
+        {:else}
+          Nothing else on this page looks like it, so this will behave the same
+          as targeting just the one.
+        {/if}
+      </p>
+    {/if}
   </section>
 
   <section>

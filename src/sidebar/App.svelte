@@ -286,7 +286,8 @@
       onretarget={(levelsUp: number) => void flow.retarget(levelsUp)}
       onpreview={(levelsUp: number | null) => void flow.previewAncestor(levelsUp)}
       scope={flow.scope}
-      onscope={(next) => (flow.scope = next)}
+      scopeCount={flow.scopeCount}
+      onscope={(next) => void flow.setScope(next)}
       ongenerate={() => void flow.generate()}
     />
   {:else if flow.step === 'generating'}

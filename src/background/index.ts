@@ -323,6 +323,20 @@ async function handle(
       })
       return true
 
+    case 'set-lock-scope': {
+      // The count comes back from the page, so the panel can say how many
+      // elements 'every one like it' actually covers here.
+      const reply = (await askContent(message.tabId, {
+        type: 'set-lock-scope',
+        scope: message.scope,
+      })) as { count?: number } | undefined
+      return reply?.count ?? 0
+    }
+
+    case 'clear-lock':
+      await sendToContent(message.tabId, { type: 'clear-lock' })
+      return true
+
     case 'run-csp-probe': {
       // Registered, never saved. It must not appear in the user's transform
       // list, and it must come back out when the run is over.
@@ -601,6 +615,15 @@ async function captureRegion(
   })
 
   return { dataUrl, clipped }
+}
+
+/** Same as sendToContent, but keeps the content script's reply. */
+async function askContent(tabId: number, message: ContentMessage): Promise<unknown> {
+  try {
+    return await browser.tabs.sendMessage(tabId, message)
+  } catch {
+    return undefined
+  }
 }
 
 async function sendToContent(tabId: number, message: ContentMessage): Promise<void> {

@@ -82,6 +82,8 @@ export type Message =
   | { type: 'stop-picking'; tabId: number }
   | { type: 'retarget'; tabId: number; levelsUp: number }
   | { type: 'highlight-ancestor'; tabId: number; levelsUp: number | null }
+  | { type: 'set-lock-scope'; tabId: number; scope: TransformScope }
+  | { type: 'clear-lock'; tabId: number }
   /** Runs a check regardless of the configured mode. Always user-initiated. */
   | { type: 'check-now'; tabId: number; url: string }
 
@@ -107,6 +109,9 @@ export type ContentMessage =
   | { type: 'retarget'; levelsUp: number }
   /** Draws an ancestor without selecting it. `null` clears. */
   | { type: 'highlight-ancestor'; levelsUp: number | null }
+  /** Redraws the persistent outline for the current scope. Answers a count. */
+  | { type: 'set-lock-scope'; scope: TransformScope }
+  | { type: 'clear-lock' }
   | { type: 'apply-transforms'; transforms: Transform[] }
   | { type: 'run-health-check'; transforms: Transform[] }
   | { type: 'url-changed'; url: string }
@@ -159,6 +164,8 @@ export interface Responses {
   'stop-picking': boolean
   retarget: boolean
   'highlight-ancestor': boolean
+  'set-lock-scope': number
+  'clear-lock': boolean
   'check-now': TransformRuntimeState[]
   'run-csp-probe': boolean
   'clear-csp-probe': boolean
