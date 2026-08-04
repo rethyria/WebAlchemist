@@ -71,6 +71,34 @@
   let specificity = $derived(maxDepth - scopeDepth)
 
   /*
+   * Indentation is scaled to fit the deepest row rather than clipped at a
+   * level, so nesting stays readable however deep the tree runs. Clipping
+   * drew two different depths as the same line, which is worse than a tight
+   * step: the indent is the only thing saying what contains what.
+   *
+   * Capped at the step a shallow tree already used, so nothing changes for
+   * the common case, and floored so the deepest levels stay distinguishable.
+   */
+  /*
+   * The selection can now sit a long way down the list — three generations
+   * under any of several neighbours — so it is scrolled to rather than left to
+   * be found. `nearest` because the row is usually already visible, and moving
+   * the list when it did not need to move is its own kind of noise.
+   */
+  let list = $state<HTMLUListElement | null>(null)
+  $effect(() => {
+    void tree
+    list?.querySelector('.node.selected')?.scrollIntoView({ block: 'nearest' })
+  })
+
+  const INDENT_BUDGET = 108
+  let step = $derived.by(() => {
+    const deepest = Math.max(0, ...tree.map((row) => row.indent))
+    if (deepest === 0) return 9
+    return Math.max(3, Math.min(9, INDENT_BUDGET / deepest))
+  })
+
+  /*
    * Outermost first, so the list reads down the page's own nesting: ancestors,
    * then the selection, then what is inside it. `above` is distance up from
    * the selection and only ancestors have one, which is also why the scope
@@ -80,7 +108,7 @@
   let rows = $derived(
     tree.map((row) => ({
       ...row,
-      pad: 6 + Math.min(row.indent, 8) * 9,
+      pad: 6 + row.indent * step,
       isTarget: row.relation === 'current',
       // The container the current scope resolves to, marked distinctly: it
       // answers a different question from the target.
@@ -107,7 +135,7 @@
     <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
     <section class="tree">
       <Label>Or target another element</Label>
-      <ul onmouseleave={() => onpreview(null)}>
+      <ul bind:this={list} onmouseleave={() => onpreview(null)}>
         {#each rows as row}
           <li>
             {#if row.path}
@@ -118,6 +146,7 @@
                 class:selected={row.isTarget}
                 class:container={row.isContainer}
                 class:in-scope={row.inScope}
+                class:aside={row.relation === 'sibling'}
                 style="padding-left: {row.pad}px"
                 onclick={() => onretarget(path)}
                 onmouseenter={() => onpreview(path)}
@@ -374,6 +403,11 @@
   .node.selected {
     background: var(--accent-chip);
     color: var(--accent-fg);
+  }
+
+  /* A neighbouring branch: reachable, but not on the line being described. */
+  .node.aside {
+    color: var(--text-faint);
   }
 
   .origin {

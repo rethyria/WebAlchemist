@@ -364,7 +364,12 @@ export interface TreeRow {
   label: string
   /** Nesting level, 0 at the outermost row. Drawn as indentation. */
   indent: number
-  relation: 'ancestor' | 'current' | 'descendant' | 'more'
+  /**
+   * Where the row sits relative to the selection. `sibling` covers a whole
+   * neighbouring branch, not only the neighbour itself: everything in it is
+   * off the selection's line, which is what the panel dims it for.
+   */
+  relation: 'ancestor' | 'current' | 'sibling' | 'descendant' | 'more'
   /**
    * Levels above the current element. Ancestors and the current row only —
    * the scope slider reaches upwards, so it is the one measurement it needs.

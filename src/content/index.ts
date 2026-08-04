@@ -688,11 +688,28 @@ function ancestorOf(element: Element | null, levelsUp: number): Element | null {
 
 /** As far up as the chain is worth reading; a deeper one stops being a list. */
 const TREE_MAX_ANCESTORS = 12
-/** Levels below the current element: its children, then their children. */
-const TREE_MAX_DEPTH = 2
+/** Generations below any element the tree opens up: children to great-grandchildren. */
+const TREE_MAX_DEPTH = 3
+/** The selection's own children, which are the likeliest thing to want next. */
 const TREE_MAX_CHILDREN = 8
-/** Below the first level a full list stops being a chooser, so it is tighter. */
+/** Everywhere else. A full list of a wide node stops being a chooser. */
 const TREE_MAX_DEEP_CHILDREN = 3
+/**
+ * Neighbours shown on each side of the selection.
+ *
+ * A window rather than the whole row of them: siblings are the one part of
+ * this tree with no bound at all — a feed or a nav can have hundreds, and all
+ * of them are equally close to the selection. Nearest-first is the only
+ * ordering that is about the selection rather than about the page.
+ */
+const TREE_SIBLINGS_EACH_SIDE = 3
+/**
+ * A ceiling on the whole thing, because the caps above multiply: three
+ * generations under seven neighbours is a four-figure list on a page built
+ * from small nested boxes. The selection's own subtree is expanded first, so
+ * what this cuts is always a neighbour's branch, and the cut is shown.
+ */
+const TREE_MAX_ROWS = 200
 
 /**
  * Elements that are in the DOM but never on the screen. They are not things
@@ -777,12 +794,12 @@ function nodeAt(path: TreePath): Element | null {
 
 /**
  * The tree the panel draws: the chain above the current element, the element
- * itself, and what is under it.
+ * itself, its nearest neighbours, and what is under all of them.
  *
  * Ancestors get one row each — the chain up to the root is a path, not a
- * branch, so its siblings are not part of this choice. Below the current
- * element the whole subtree is, which is why that half is capped in both
- * directions and says so where it truncates.
+ * branch, so it is the one part with nothing to fan out. Everything at and
+ * below the selection's own level is a branch, which is why that half is
+ * capped in every direction and says so wherever it truncates.
  *
  * The exception is the element originally picked. Once the selection has moved
  * up to an ancestor, the path back down to it is kept whatever the caps say,
@@ -814,32 +831,36 @@ function buildTree(current: Element): TreeRow[] {
     })
   })
 
-  const currentPath = pathFor(current)
-  rows.push({
-    label: selectorFor(current),
-    indent: ancestors.length,
-    relation: 'current',
-    above: 0,
-    ...(currentPath ? { path: currentPath } : {}),
-  })
+  /** The indent the selection and its neighbours share, being the same level. */
+  const level = ancestors.length
 
-  /** Levels still allowed below `node`, which sits `level` under the current. */
-  const allowance = (candidate: Element, level: number): number => {
-    if (!originBelow) return TREE_MAX_DEPTH - level
+  /** Generations still allowed below `candidate`, `depth` under its branch root. */
+  const allowance = (candidate: Element, depth: number): number => {
+    if (!originBelow) return TREE_MAX_DEPTH - depth
     // On the path down to the picked element: keep going, however deep it is.
-    if (candidate !== originBelow && candidate.contains(originBelow)) return Number.POSITIVE_INFINITY
+    if (candidate !== originBelow && candidate.contains(originBelow)) {
+      return Number.POSITIVE_INFINITY
+    }
     // At or below it: the budget starts again from there rather than from here.
     if (originBelow.contains(candidate)) {
       return TREE_MAX_DEPTH - levelsBetween(originBelow, candidate)
     }
-    return TREE_MAX_DEPTH - level
+    return TREE_MAX_DEPTH - depth
   }
 
-  const walk = (parent: Element, level: number, indent: number): void => {
-    if (allowance(parent, level) <= 0) return
+  let budget = TREE_MAX_ROWS
+
+  const walk = (
+    out: TreeRow[],
+    parent: Element,
+    depth: number,
+    indent: number,
+    relation: 'descendant' | 'sibling',
+  ): void => {
+    if (allowance(parent, depth) <= 0 || budget <= 0) return
 
     const children = treeChildren(parent)
-    const cap = level === 0 ? TREE_MAX_CHILDREN : TREE_MAX_DEEP_CHILDREN
+    const cap = parent === current ? TREE_MAX_CHILDREN : TREE_MAX_DEEP_CHILDREN
     const shown = children.slice(0, cap)
 
     const onward = originBelow
@@ -850,23 +871,76 @@ function buildTree(current: Element): TreeRow[] {
       shown.sort((a, b) => children.indexOf(a) - children.indexOf(b))
     }
 
-    for (const child of shown) {
+    for (const [index, child] of shown.entries()) {
+      if (budget <= 0) {
+        out.push({ label: `+${children.length - index} more`, indent, relation: 'more' })
+        return
+      }
       const path = pathFor(child)
-      rows.push({
+      out.push({
         label: selectorFor(child),
         indent,
-        relation: 'descendant',
+        relation,
         ...(path ? { path } : {}),
         ...(child === origin ? { origin: true } : {}),
       })
-      walk(child, level + 1, indent + 1)
+      budget -= 1
+      walk(out, child, depth + 1, indent + 1, relation)
     }
 
     const hidden = children.length - shown.length
-    if (hidden > 0) rows.push({ label: `+${hidden} more`, indent, relation: 'more' })
+    if (hidden > 0) out.push({ label: `+${hidden} more`, indent, relation: 'more' })
   }
 
-  walk(current, 0, ancestors.length + 1)
+  // Expanded before any neighbour, so a page big enough to exhaust the row
+  // budget loses a neighbour's branch rather than the selection's own.
+  const own: TreeRow[] = []
+  walk(own, current, 0, level + 1, 'descendant')
+
+  const parent = current.parentElement
+  const family = parent ? treeChildren(parent) : [current]
+  const at = family.indexOf(current)
+  const from = at < 0 ? 0 : Math.max(0, at - TREE_SIBLINGS_EACH_SIDE)
+  const to = at < 0 ? 0 : Math.min(family.length, at + TREE_SIBLINGS_EACH_SIDE + 1)
+  const near = at < 0 ? [current] : family.slice(from, to)
+
+  const branches = new Map<Element, TreeRow[]>()
+  for (const sibling of near) {
+    if (sibling === current) continue
+    const branch: TreeRow[] = []
+    walk(branch, sibling, 0, level + 1, 'sibling')
+    branches.set(sibling, branch)
+  }
+
+  if (from > 0) rows.push({ label: `+${from} more`, indent: level, relation: 'more' })
+
+  for (const sibling of near) {
+    const path = pathFor(sibling)
+    if (sibling === current) {
+      rows.push({
+        label: selectorFor(current),
+        indent: level,
+        relation: 'current',
+        above: 0,
+        ...(path ? { path } : {}),
+      })
+      rows.push(...own)
+      continue
+    }
+    rows.push({
+      label: selectorFor(sibling),
+      indent: level,
+      relation: 'sibling',
+      ...(path ? { path } : {}),
+      ...(sibling === origin ? { origin: true } : {}),
+    })
+    rows.push(...(branches.get(sibling) ?? []))
+  }
+
+  if (to < family.length) {
+    rows.push({ label: `+${family.length - to} more`, indent: level, relation: 'more' })
+  }
+
   return rows
 }
 
