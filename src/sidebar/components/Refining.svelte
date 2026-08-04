@@ -6,7 +6,6 @@
   import Button from './Button.svelte'
   import CodeBlock from './CodeBlock.svelte'
   import Label from './Label.svelte'
-  import Toggle from './Toggle.svelte'
 
   interface Props {
     result: GenerationResult
@@ -20,7 +19,6 @@
     references: ElementContext[]
     /** True while the picker is open in the page waiting for a reference. */
     awaitingReference: boolean
-    sendScreenshot: boolean
     choosingRegion: boolean
     shotPreview: string | null
     shotClipped: boolean
@@ -46,7 +44,6 @@
     jsRan,
     references,
     awaitingReference,
-    sendScreenshot,
     choosingRegion,
     shotPreview,
     shotClipped,
@@ -211,28 +208,29 @@
       </div>
 
       {#if visionSupported}
-        <div class="shot">
-          <Toggle
-            checked={sendScreenshot || choosingRegion}
-            label="Send a screenshot with this attempt"
-            onchange={onscreenshot}
-          />
-          <span class="shot-text">
-            Send a screenshot with this attempt
-            <!-- The preview is already applied, so this shows the last result. -->
-            <em>shows the page as it is now, with this change applied</em>
-          </span>
-        </div>
-        {#if choosingRegion}
-          <p class="shot-awaiting">Drag the area to capture on the page.</p>
+        <!-- An action rather than a state; see Describing. -->
+        {#if !shotPreview}
+          <button
+            type="button"
+            class="shot-action"
+            disabled={choosingRegion}
+            onclick={() => onscreenshot(true)}
+          >
+            {choosingRegion
+              ? 'Drag the area on the page…'
+              : 'Add a screenshot of the page as it is now'}
+          </button>
         {/if}
         {#if shotPreview}
           <img class="shot-image" src={shotPreview} alt="The region that will be sent" />
           <p class="shot-warning">
             This image goes to {providerLabel}{shotClipped
               ? ', clipped at the viewport'
-              : ''}. Off again after this attempt.
+              : ''}. Dropped again after this attempt.
           </p>
+          <button type="button" class="shot-action" onclick={() => onscreenshot(false)}>
+            Remove screenshot
+          </button>
         {/if}
       {/if}
       {#if isJs && jsRan}
@@ -525,22 +523,8 @@
     cursor: default;
   }
 
-  .shot {
-    display: flex;
-    align-items: flex-start;
-    gap: var(--sp-6);
-  }
 
-  .shot-text {
-    font: 11.5px/1.4 var(--font-ui);
-    color: var(--text-dim);
-  }
 
-  .shot-text em {
-    display: block;
-    font-style: normal;
-    color: var(--text-faint);
-  }
 
   .shot-image {
     display: block;
@@ -553,14 +537,24 @@
     background: var(--surface-sunken);
   }
 
-  .shot-awaiting {
-    margin: 0;
-    padding: 6px 8px;
-    border: 1px solid var(--accent-fg);
-    border-radius: var(--r-input);
-    font: 11px/1.45 var(--font-ui);
-    color: var(--accent-fg);
+  .shot-action {
+    align-self: flex-start;
+    padding: 5px 9px;
+    border: 1px dashed var(--border);
+    border-radius: var(--r-badge);
+    background: transparent;
+    font: 10.5px var(--font-ui);
+    color: var(--text-dim);
+    cursor: pointer;
   }
+
+  .shot-action:disabled {
+    border-style: solid;
+    border-color: var(--accent-fg);
+    color: var(--accent-fg);
+    cursor: default;
+  }
+
 
   .shot-warning {
     margin: 0;

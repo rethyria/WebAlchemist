@@ -3,14 +3,12 @@
   import { autogrow } from '../lib/autogrow'
   import Button from './Button.svelte'
   import Label from './Label.svelte'
-  import Toggle from './Toggle.svelte'
 
   interface Props {
     target: HoverTarget
     crop: Rect
     cropClipped: boolean
     instruction: string
-    sendScreenshot: boolean
     choosingRegion: boolean
     /** The captured image, once there is one. */
     shotPreview: string | null
@@ -38,7 +36,6 @@
     crop,
     cropClipped,
     instruction,
-    sendScreenshot,
     choosingRegion,
     shotPreview,
     shotClipped,
@@ -183,17 +180,20 @@
 
   {#if visionSupported}
     <section class="screenshot">
-      <div class="opt-in">
-        <Toggle
-          checked={sendScreenshot || choosingRegion}
-          label="Send a screenshot"
-          onchange={onscreenshot}
-        />
-        <span class="opt-in-text">Send a screenshot</span>
-      </div>
-
-      {#if choosingRegion}
-        <p class="awaiting">Drag the area to capture on the page.</p>
+      <!--
+        An action, not a state. Taking a screenshot is a thing the user does
+        once and then either keeps or drops; a checkbox implied it could be
+        armed in advance, which it cannot.
+      -->
+      {#if !shotPreview}
+        <button
+          type="button"
+          class="shot-action"
+          disabled={choosingRegion}
+          onclick={() => onscreenshot(true)}
+        >
+          {choosingRegion ? 'Drag the area on the page…' : 'Add a screenshot'}
+        </button>
       {/if}
 
       <!--
@@ -211,8 +211,11 @@
           {#if shotClipped}
             Clipped at the viewport — only the visible part was captured.
           {/if}
-          Off again every time you start a new request.
+          Dropped again every time you start a new request.
         </p>
+        <button type="button" class="shot-action" onclick={() => onscreenshot(false)}>
+          Remove screenshot
+        </button>
       {/if}
     </section>
   {/if}
@@ -388,15 +391,7 @@
     border-radius: var(--r-card);
   }
 
-  .opt-in {
-    display: flex;
-    align-items: center;
-    gap: var(--sp-9);
-  }
 
-  .opt-in-text {
-    font: 12.5px var(--font-ui);
-  }
 
   /* Stands in for the capture rather than showing one: taking the screenshot
      to preview it would be the very thing the toggle is asking about. */
@@ -413,14 +408,23 @@
     background: var(--surface-sunken);
   }
 
-  .awaiting {
-    margin: 0;
-    padding: 7px 9px;
-    border: 1px solid var(--accent-fg);
-    border-radius: var(--r-input);
-    font: 11.5px/1.45 var(--font-ui);
-    color: var(--accent-fg);
+  .shot-action {
+    align-self: flex-start;
+    padding: 6px 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--r-button);
+    background: transparent;
+    font: 11.5px var(--font-ui);
+    color: var(--text);
+    cursor: pointer;
   }
+
+  .shot-action:disabled {
+    border-color: var(--accent-fg);
+    color: var(--accent-fg);
+    cursor: default;
+  }
+
 
   .warning {
     margin: 0;

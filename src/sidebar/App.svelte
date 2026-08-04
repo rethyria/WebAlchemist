@@ -452,7 +452,6 @@
       crop={flow.picked.crop}
       cropClipped={flow.picked.cropClipped}
       instruction={flow.instruction}
-      sendScreenshot={flow.sendScreenshot}
       choosingRegion={flow.choosingRegion}
       shotPreview={flow.shotPreview}
       shotClipped={flow.shotClipped}
@@ -495,7 +494,6 @@
       jsRan={flow.jsRan}
       references={flow.references}
       awaitingReference={flow.awaitingReference}
-      sendScreenshot={flow.sendScreenshot}
       choosingRegion={flow.choosingRegion}
       shotPreview={flow.shotPreview}
       shotClipped={flow.shotClipped}
