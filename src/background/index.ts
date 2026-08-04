@@ -19,7 +19,6 @@ import type {
   Rect,
   ReviewResult,
   Transform,
-  TransformScope,
 } from '@shared/types'
 import type { RefinementTurn } from './providers/types'
 import { overlayPaletteFor } from '@shared/accents'
@@ -324,13 +323,13 @@ async function handle(
       return true
 
     case 'set-lock-scope': {
-      // The count comes back from the page, so the panel can say how many
-      // elements 'every one like it' actually covers here.
+      // Both numbers come from the page: what the depth resolves to is a fact
+      // about the live DOM, not something worth estimating in the panel.
       const reply = (await askContent(message.tabId, {
         type: 'set-lock-scope',
-        scope: message.scope,
-      })) as { count?: number } | undefined
-      return reply?.count ?? 0
+        depth: message.depth,
+      })) as { count?: number; container?: string | null } | undefined
+      return { count: reply?.count ?? 1, container: reply?.container ?? null }
     }
 
     case 'clear-lock':
@@ -451,7 +450,8 @@ interface GenerateOverPort {
   context: PageContext
   instruction: string
   history: RefinementTurn[]
-  scope?: TransformScope
+  scopeDepth?: number
+  scopeContainer?: string | null
 }
 
 /**

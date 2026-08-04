@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { HoverTarget, Rect, TransformScope } from '@shared/types'
+  import type { HoverTarget, Rect } from '@shared/types'
   import { autogrow } from '../lib/autogrow'
   import Button from './Button.svelte'
   import Label from './Label.svelte'
@@ -21,9 +21,10 @@
     depth: number
     onretarget: (levelsUp: number) => void
     onpreview: (levelsUp: number | null) => void
-    scope: TransformScope
+    scopeDepth: number
     scopeCount: number
-    onscope: (scope: TransformScope) => void
+    scopeContainer: string | null
+    onscope: (depth: number) => void
     ongenerate: () => void
   }
 
@@ -42,8 +43,9 @@
     depth,
     onretarget,
     onpreview,
-    scope,
+    scopeDepth,
     scopeCount,
+    scopeContainer,
     onscope,
     ongenerate,
   }: Props = $props()
@@ -56,12 +58,29 @@
    * chain each row sits — an absolute position, so the list moves in both
    * directions rather than only outwards.
    */
+  /* How far the scope can widen: up to the outermost ancestor we captured. */
+  let maxDepth = $derived(Math.max(0, chain.length - 1 - depth))
+
+  /*
+   * The slider reads as specificity, so the full-right position is the most
+   * specific — the picked element alone. Depth counts the other way, which is
+   * why the two are mirrored here rather than anywhere else.
+   */
+  let specificity = $derived(maxDepth - scopeDepth)
+
   let ancestors = $derived(
-    chain.map((label, index) => ({
-      label,
-      levelsUp: chain.length - 1 - index,
-      indent: Math.min(index, 6),
-    })),
+    chain.map((label, index) => {
+      const levelsUp = chain.length - 1 - index
+      return {
+        label,
+        levelsUp,
+        indent: Math.min(index, 6),
+        isTarget: levelsUp === depth,
+        // The container the current scope resolves to, marked distinctly:
+        // it answers a different question from the target.
+        isContainer: scopeDepth > 0 && levelsUp === depth + scopeDepth,
+      }
+    }),
   )
   let cropLabel = $derived(`${Math.round(crop.width)} × ${Math.round(crop.height)}`)
 </script>
@@ -83,7 +102,8 @@
             <button
               type="button"
               class="ancestor"
-              class:selected={ancestor.levelsUp === depth}
+              class:selected={ancestor.isTarget}
+              class:container={ancestor.isContainer}
               style="padding-left: {6 + ancestor.indent * 9}px"
               onclick={() => onretarget(ancestor.levelsUp)}
               onmouseenter={() => onpreview(ancestor.levelsUp)}
@@ -98,40 +118,29 @@
     </section>
   {/if}
 
-  <section class="scope">
-    <Label>How widely should it apply?</Label>
-    <div class="choices" role="radiogroup" aria-label="How widely should it apply?">
-      <button
-        type="button"
-        role="radio"
-        aria-checked={scope === 'element'}
-        class:selected={scope === 'element'}
-        onclick={() => onscope('element')}
-      >
-        Just this element
-      </button>
-      <button
-        type="button"
-        role="radio"
-        aria-checked={scope === 'similar'}
-        class:selected={scope === 'similar'}
-        onclick={() => onscope('similar')}
-      >
-        Every one like it
-      </button>
-    </div>
-    {#if scope === 'similar'}
+  {#if maxDepth > 0}
+    <section class="scope">
+      <Label>How widely should it apply?</Label>
+      <input
+        type="range"
+        min="0"
+        max={maxDepth}
+        value={specificity}
+        aria-label="How widely should it apply"
+        oninput={(event) => onscope(maxDepth - Number(event.currentTarget.value))}
+      />
       <p class="note">
-        {#if scopeCount > 1}
-          {scopeCount} elements on this page, outlined so you can check the set
-          before asking for it.
+        {#if scopeDepth === 0}
+          Just this element.
+        {:else if scopeContainer}
+          {scopeCount === 1 ? 'Only this one' : `All ${scopeCount} like it`} inside
+          <code>{scopeContainer}</code>, outlined on the page.
         {:else}
-          Nothing else on this page looks like it, so this will behave the same
-          as targeting just the one.
+          Every element like this one.
         {/if}
       </p>
-    {/if}
-  </section>
+    </section>
+  {/if}
 
   <section>
     <Label>What should change?</Label>
@@ -287,26 +296,26 @@
     color: var(--accent-fg);
   }
 
-  .choices {
-    display: flex;
-    gap: var(--sp-6);
+  .scope input[type='range'] {
+    width: 100%;
+    margin: 0;
+    accent-color: var(--accent-fg);
   }
 
-  .choices button {
-    flex: 1;
-    padding: 7px 8px;
-    border: 1px solid var(--border);
-    border-radius: var(--r-input);
-    background: transparent;
-    font: 11.5px var(--font-ui);
+  .note code {
+    font: 11px var(--font-mono);
     color: var(--text-dim);
-    cursor: pointer;
   }
 
-  .choices button.selected {
-    border-color: var(--accent-fg);
-    background: var(--accent-wash);
+  /*
+   * The container is a different kind of answer from the target — one is what
+   * changes, the other is how far the change reaches — so it reads as a
+   * distinct colour rather than a second shade of the selection.
+   */
+  .ancestor.container {
+    background: rgb(from var(--neutral) r g b / 0.18);
     color: var(--text);
+    box-shadow: inset 2px 0 0 var(--neutral);
   }
 
   .screenshot {

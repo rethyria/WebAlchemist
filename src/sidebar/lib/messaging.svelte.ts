@@ -58,7 +58,8 @@ export function generateOverPort(
     context: unknown
     instruction: string
     history: unknown[]
-    scope?: string
+    scopeDepth?: number
+    scopeContainer?: string | null
   },
   handlers: {
     onSent: () => void

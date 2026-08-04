@@ -285,9 +285,10 @@
       depth={flow.chainDepth}
       onretarget={(levelsUp: number) => void flow.retarget(levelsUp)}
       onpreview={(levelsUp: number | null) => void flow.previewAncestor(levelsUp)}
-      scope={flow.scope}
+      scopeDepth={flow.scopeDepth}
       scopeCount={flow.scopeCount}
-      onscope={(next) => void flow.setScope(next)}
+      scopeContainer={flow.scopeContainer}
+      onscope={(depth: number) => void flow.setScopeDepth(depth)}
       ongenerate={() => void flow.generate()}
     />
   {:else if flow.step === 'generating'}

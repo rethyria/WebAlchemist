@@ -1,4 +1,4 @@
-import type { TransformScope } from '@shared/types'
+
 
 /**
  * System prompts. Kept in one file so they can be reviewed and edited as
@@ -112,13 +112,18 @@ The current page structure is provided below. Write a replacement that achieves 
 /**
  * How the chosen scope is stated to the model.
  *
- * Both readings are legitimate and the model cannot infer which was meant —
- * "hide the promoted post" is ambiguous between the one in front of you and
- * every one on the page. Saying so explicitly is the whole point of the
- * control, so this text is deliberately unhedged.
+ * The container is named rather than described, because "elements like this
+ * one" is ambiguous without one — the same phrase means a single row, a list,
+ * or every list on the page depending on where you stop. The user has already
+ * chosen where to stop, and this passes that choice through verbatim.
  */
-export function scopeInstruction(scope: TransformScope | undefined): string {
-  return scope === 'similar'
-    ? 'SCOPE: apply to every element of this kind on the page, not only the one picked. Prefer a selector that matches the whole class of them, and say in the rationale what makes them a set.'
-    : 'SCOPE: apply only to the element picked. Do not widen the selector to catch similar elements elsewhere on the page.'
+export function scopeInstruction(depth: number | undefined, container: string | null): string {
+  if (!depth || depth <= 0 || !container) {
+    return 'SCOPE: apply only to the element picked. Do not widen the selector to catch similar elements elsewhere on the page.'
+  }
+  return [
+    `SCOPE: apply to every element like the target that sits inside \`${container}\`,`,
+    'not only the one picked, and not to matches outside that container.',
+    'Say in the rationale what makes them a set.',
+  ].join(' ')
 }

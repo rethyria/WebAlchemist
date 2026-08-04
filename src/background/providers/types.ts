@@ -3,7 +3,6 @@ import type {
   ModelReview,
   PageContext,
   Provider,
-  TransformScope,
 } from '@shared/types'
 
 /** One conversational turn during refinement. */
@@ -16,8 +15,10 @@ export interface GenerateRequest {
   context: PageContext
   /** The user's latest instruction. */
   instruction: string
-  /** How broadly the result should apply. Absent reads as 'element'. */
-  scope?: TransformScope
+  /** Distance up the ancestor chain the result should cover. See ScopeDepth. */
+  scopeDepth?: number
+  /** Selector of the container that depth resolves to, for the prompt. */
+  scopeContainer?: string | null
   /**
    * Prior turns in this refinement session. Discarded on save — only the
    * consolidated intent is persisted.

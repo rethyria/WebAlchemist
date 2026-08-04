@@ -38,7 +38,6 @@ import type {
   ReviewResult,
   Transform,
   TransformKind,
-  TransformScope,
 } from '@shared/types'
 import { extractPartialString } from '@shared/partial-json'
 import { BackgroundError, generateOverPort, send } from './messaging.svelte'
@@ -103,10 +102,11 @@ export class Flow {
   chainDepth = $state(0)
 
   instruction = $state('')
-  /** How broadly the result should apply. Persisted, unlike the screenshot. */
-  scope = $state<TransformScope>('element')
-  /** How many elements the page says that scope covers. 0 until asked. */
-  scopeCount = $state(0)
+  /** Distance up the ancestor chain the result covers. See ScopeDepth. */
+  scopeDepth = $state(0)
+  /** What the page says that depth resolves to. Never estimated here. */
+  scopeCount = $state(1)
+  scopeContainer = $state<string | null>(null)
   /** Per request. Reset on every entry to `describing`; never persisted. */
   sendScreenshot = $state(false)
   visionSupported = $state(false)
@@ -277,8 +277,9 @@ export class Flow {
     this.step = 'describing'
     // The reset that makes the opt-in per-request rather than sticky.
     this.sendScreenshot = false
-    this.scope = 'element'
-    this.scopeCount = 0
+    this.scopeDepth = 0
+    this.scopeCount = 1
+    this.scopeContainer = null
     this.instruction = ''
     this.history = []
     this.followUp = ''
@@ -300,26 +301,32 @@ export class Flow {
     if (this.tabId === null || levelsUp === this.chainDepth) return
     this.chainDepth = levelsUp
     await send({ type: 'retarget', tabId: this.tabId, levelsUp }).catch(() => {})
+    // The depth was measured from the old target; reset rather than silently
+    // re-pointing it at a different container.
+    await this.setScopeDepth(0)
   }
 
   /**
-   * Changes the scope and redraws the outline for it.
+   * Changes how far up the chain the transform reaches, and redraws for it.
    *
-   * The count comes back from the page rather than being guessed here: what
-   * counts as "like it" is decided against the live DOM, and showing a number
-   * we had not actually verified would be worse than showing none.
+   * Both the count and the container name come back from the page: what a
+   * depth resolves to is a fact about the live DOM, and showing either without
+   * having checked would be worse than showing neither.
    */
-  async setScope(scope: TransformScope): Promise<void> {
-    this.scope = scope
+  async setScopeDepth(depth: number): Promise<void> {
+    this.scopeDepth = depth
     if (this.tabId === null) return
     try {
-      this.scopeCount = await send<number>({
+      const resolved = await send<{ count: number; container: string | null }>({
         type: 'set-lock-scope',
         tabId: this.tabId,
-        scope,
+        depth,
       })
+      this.scopeCount = resolved.count
+      this.scopeContainer = resolved.container
     } catch {
-      this.scopeCount = 0
+      this.scopeCount = 1
+      this.scopeContainer = null
     }
   }
 
@@ -372,7 +379,8 @@ export class Flow {
           context,
           instruction: this.instruction,
           history: this.history,
-          scope: this.scope,
+          scopeDepth: this.scopeDepth,
+          scopeContainer: this.scopeContainer,
         },
         {
           onSent: () => {
@@ -443,7 +451,7 @@ export class Flow {
       ...(result.kind === 'js' ? { world: result.world } : {}),
       capabilities: result.capabilities,
       intent: this.intent,
-      scope: this.scope,
+      scopeDepth: this.scopeDepth,
       rationale: result.rationale,
       anchor,
       code: result.code,
@@ -761,8 +769,9 @@ export class Flow {
     this.picked = null
     this.chain = []
     this.chainDepth = 0
-    this.scope = 'element'
-    this.scopeCount = 0
+    this.scopeDepth = 0
+    this.scopeCount = 1
+    this.scopeContainer = null
     this.instruction = ''
     this.sendScreenshot = false
     this.history = []

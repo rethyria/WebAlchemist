@@ -23,7 +23,6 @@ import type {
   Settings,
   Transform,
   TransformRuntimeState,
-  TransformScope,
 } from './types'
 import type { OverlayPalette } from './accents'
 import type { RefinementTurn } from '@background/providers/types'
@@ -41,7 +40,8 @@ export type Message =
       context: PageContext
       instruction: string
       history: RefinementTurn[]
-      scope?: TransformScope
+      scopeDepth?: number
+      scopeContainer?: string | null
     }
   | { type: 'repair'; transformId: string; context: PageContext; brokenReason: string }
   | { type: 'review'; code: string; intent: string; declaredCapabilities: Transform['capabilities'] }
@@ -82,7 +82,7 @@ export type Message =
   | { type: 'stop-picking'; tabId: number }
   | { type: 'retarget'; tabId: number; levelsUp: number }
   | { type: 'highlight-ancestor'; tabId: number; levelsUp: number | null }
-  | { type: 'set-lock-scope'; tabId: number; scope: TransformScope }
+  | { type: 'set-lock-scope'; tabId: number; depth: number }
   | { type: 'clear-lock'; tabId: number }
   /** Runs a check regardless of the configured mode. Always user-initiated. */
   | { type: 'check-now'; tabId: number; url: string }
@@ -110,7 +110,7 @@ export type ContentMessage =
   /** Draws an ancestor without selecting it. `null` clears. */
   | { type: 'highlight-ancestor'; levelsUp: number | null }
   /** Redraws the persistent outline for the current scope. Answers a count. */
-  | { type: 'set-lock-scope'; scope: TransformScope }
+  | { type: 'set-lock-scope'; depth: number }
   | { type: 'clear-lock' }
   | { type: 'apply-transforms'; transforms: Transform[] }
   | { type: 'run-health-check'; transforms: Transform[] }
@@ -164,7 +164,7 @@ export interface Responses {
   'stop-picking': boolean
   retarget: boolean
   'highlight-ancestor': boolean
-  'set-lock-scope': number
+  'set-lock-scope': { count: number; container: string | null }
   'clear-lock': boolean
   'check-now': TransformRuntimeState[]
   'run-csp-probe': boolean

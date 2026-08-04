@@ -691,28 +691,46 @@ function similarSelectorFor(element: Element): string | null {
   return `${parentSelector} > ${tag}`
 }
 
-function similarTo(element: Element): Element[] {
+/** The element the panel is describing, and how far up the chain it applies. */
+let describedElement: Element | null = null
+let lockDepth = 0
+
+/**
+ * The elements a given depth covers, and the container it resolves to.
+ *
+ * Depth 0 is the picked element alone. Beyond that the search is confined to
+ * the ancestor that many levels up — which is the point of expressing scope
+ * this way. "Every element like this" without a container is not a request
+ * anyone can check; "every element like this inside `ul.results`" is.
+ */
+function resolveScope(
+  element: Element,
+  depth: number,
+): { targets: Element[]; container: string | null } {
+  if (depth <= 0) return { targets: [element], container: null }
+
+  const container = ancestorOf(element, depth)
   const selector = similarSelectorFor(element)
-  if (!selector) return [element]
+  if (!container || !selector) return { targets: [element], container: null }
+
   try {
-    const found = [...document.querySelectorAll(selector)]
-    // The picked element leads, so the panel and the overlay agree on which
-    // box is the one that was actually chosen.
-    return [element, ...found.filter((other) => other !== element)]
+    const found = [...container.querySelectorAll(selector)]
+    return {
+      // The picked element leads, so the panel and the overlay agree on which
+      // box is the one that was actually chosen.
+      targets: [element, ...found.filter((other) => other !== element)],
+      container: selectorFor(container),
+    }
   } catch {
-    return [element]
+    return { targets: [element], container: null }
   }
 }
 
-/** The element the panel is describing, and how widely it is being applied. */
-let describedElement: Element | null = null
-let lockScope: 'element' | 'similar' = 'element'
-
-function updateLock(): number {
-  if (!describedElement || !palette) return 0
-  const targets = lockScope === 'similar' ? similarTo(describedElement) : [describedElement]
+function updateLock(): { count: number; container: string | null } {
+  if (!describedElement || !palette) return { count: 0, container: null }
+  const { targets, container } = resolveScope(describedElement, lockDepth)
   lock.show(targets, palette)
-  return targets.length
+  return { count: targets.length, container }
 }
 
 /** Draws an ancestor without selecting it, for hovering the list. */
@@ -996,12 +1014,13 @@ browser.runtime.onMessage.addListener(async (message: ContentMessage) => {
     case 'highlight-ancestor':
       highlightAncestor(message.levelsUp)
       return true
-    case 'set-lock-scope':
-      lockScope = message.scope
-      return { type: 'lock-count', count: updateLock() }
+    case 'set-lock-scope': {
+      lockDepth = message.depth
+      return updateLock()
+    }
     case 'clear-lock':
       describedElement = null
-      lockScope = 'element'
+      lockDepth = 0
       lock.hide()
       return true
     case 'run-health-check':

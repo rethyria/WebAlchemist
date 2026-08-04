@@ -188,7 +188,7 @@ function buildGenerationContent(
     ? repairPrompt(request.repair)
     : request.instruction
 
-  const text = `${instruction}\n\n${scopeInstruction(request.scope)}\n\n${describeContext(request.context)}`
+  const text = `${instruction}\n\n${scopeInstruction(request.scopeDepth, request.scopeContainer ?? null)}\n\n${describeContext(request.context)}`
 
   const shot = request.context.screenshot
   if (!shot) return text

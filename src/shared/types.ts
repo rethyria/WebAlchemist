@@ -20,18 +20,23 @@ export type TransformOrigin = 'manual' | 'ai'
 export type ExecutionWorld = 'USER_SCRIPT' | 'MAIN'
 
 /**
- * How broadly a transform is meant to apply.
+ * How broadly a transform applies, as a distance up the ancestor chain.
  *
- * uBlock Origin's equivalent is a specificity slider, which works there
- * because it generates the selector itself and can offer a continuum. Here the
- * model writes the selector, so this is a statement of intent passed into the
- * prompt rather than a knob over a value we compute — a slider would be a
- * control connected to nothing.
+ *   0  only the element that was picked
+ *   1  every element like it inside its parent
+ *   2  every element like it inside its grandparent
+ *   n  …and so on, widening one container at a time
  *
- * Optional on Transform: records written before it existed read as 'element',
- * which is the narrower and safer of the two.
+ * This is uBlock Origin's specificity slider, expressed against something we
+ * actually compute. A bare specificity number would be a knob over a value we
+ * never calculate, since the model writes the selector — but the ancestor
+ * chain is ours, already captured, and already shown in the picker. Indexing
+ * it gives every position a container the user can point at.
+ *
+ * Optional on Transform: records written before it existed read as 0, the
+ * narrowest and safest reading.
  */
-export type TransformScope = 'element' | 'similar'
+export type ScopeDepth = number
 
 /** Capabilities a transform must declare before its code is allowed to use them. */
 export type Capability = 'network' | 'storage' | 'cookies'
@@ -104,8 +109,8 @@ export interface Transform {
   /** Empty by default. Anything used beyond this list is a rejection. */
   capabilities: Capability[]
   intent: string
-  /** Absent means 'element'. See TransformScope. */
-  scope?: TransformScope
+  /** Absent means 0 — the picked element alone. See ScopeDepth. */
+  scopeDepth?: ScopeDepth
   rationale: Rationale
   anchor: Anchor
   code: string
