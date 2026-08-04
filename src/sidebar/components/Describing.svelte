@@ -71,18 +71,9 @@
   let specificity = $derived(maxDepth - scopeDepth)
 
   /*
-   * Indentation is scaled to fit the deepest row rather than clipped at a
-   * level, so nesting stays readable however deep the tree runs. Clipping
-   * drew two different depths as the same line, which is worse than a tight
-   * step: the indent is the only thing saying what contains what.
-   *
-   * Capped at the step a shallow tree already used, so nothing changes for
-   * the common case, and floored so the deepest levels stay distinguishable.
-   */
-  /*
-   * The selection can now sit a long way down the list — three generations
-   * under any of several neighbours — so it is scrolled to rather than left to
-   * be found. `nearest` because the row is usually already visible, and moving
+   * The selection can sit a long way down the list — three generations under
+   * any of several neighbours — so it is scrolled to rather than left to be
+   * found. `nearest` because the row is usually already visible, and moving
    * the list when it did not need to move is its own kind of noise.
    */
   let list = $state<HTMLDivElement | null>(null)
@@ -92,24 +83,23 @@
   })
 
   /*
-   * Brings the hovered row's own text into view sideways.
+   * Rows are laid out at their full width rather than clipped, so a deep one
+   * runs off the right of a 264px panel. Hovering scrolls to it, which is what
+   * lets the panel stay narrow without the names becoming unreadable.
    *
-   * Rows are laid out at their full width rather than clipped, so a deep row
-   * runs off the right of a 264px panel. Scrolling on hover means the panel
-   * can stay narrow without the names becoming unreadable — the row you are
-   * pointing at is the one you want to read.
+   * The offset is the row's own indent and nothing else, so the list moves as
+   * a function of depth: down a branch it slides one step at a time, and two
+   * rows at the same depth always sit at the same offset. Measuring the text
+   * instead made the offset depend on how long each label happened to be, so
+   * the list jumped back and forth between neighbours for no visible reason.
    *
-   * Never scrolled past the start of the label: indentation is the part worth
-   * giving up to make room, the name is not. So a row too long to fit either
-   * way ends up flush left with as much of it showing as there is space for.
+   * Scrolling exactly the indent away puts the name where a top-level name
+   * sits, and never scrolls past it — indentation is the part worth giving up
+   * to make room, the name is not. The browser clamps the rest: a list with
+   * nothing to scroll does not move at all.
    */
-  function reveal(row: HTMLElement, indent: number): void {
-    const text = row.firstElementChild
-    if (!list || !text) return
-    const end =
-      text.getBoundingClientRect().right - list.getBoundingClientRect().left + list.scrollLeft
-    const overflow = end + 8 - list.clientWidth
-    list.scrollLeft = Math.max(0, Math.min(overflow, indent))
+  function reveal(indent: number): void {
+    if (list) list.scrollLeft = indent
   }
 
   /** Back to the left edge, so the indentation reads as a shape again. */
@@ -117,12 +107,24 @@
     if (list) list.scrollLeft = 0
   }
 
+  /*
+   * Indentation is scaled to fit the deepest row rather than clipped at a
+   * level, so nesting stays readable however deep the tree runs. Clipping
+   * drew two different depths as the same line, which is worse than a tight
+   * step: the indent is the only thing saying what contains what.
+   *
+   * Capped at the step a shallow tree already used, so nothing changes for
+   * the common case, and floored so the deepest levels stay distinguishable.
+   */
   const INDENT_BUDGET = 108
   let step = $derived.by(() => {
     const deepest = Math.max(0, ...tree.map((row) => row.indent))
     if (deepest === 0) return 9
     return Math.max(3, Math.min(9, INDENT_BUDGET / deepest))
   })
+
+  /** The gutter every row keeps, scrolled or not. */
+  const GUTTER = 6
 
   /*
    * Outermost first, so the list reads down the page's own nesting: ancestors,
@@ -134,7 +136,10 @@
   let rows = $derived(
     tree.map((row) => ({
       ...row,
-      pad: 6 + row.indent * step,
+      /* Kept apart from the padding so hovering can scroll the indent away
+         and leave the gutter, rather than putting the name on the edge. */
+      shift: row.indent * step,
+      pad: GUTTER + row.indent * step,
       isTarget: row.relation === 'current',
       // The container the current scope resolves to, marked distinctly: it
       // answers a different question from the target.
@@ -184,22 +189,20 @@
                   class:aside={row.relation === 'sibling'}
                   style="padding-left: {row.pad}px"
                   onclick={() => onretarget(path)}
-                  onmouseenter={(event) => {
+                  onmouseenter={() => {
                     onpreview(path)
-                    reveal(event.currentTarget, row.pad)
+                    reveal(row.shift)
                   }}
-                  onfocus={(event) => {
+                  onfocus={() => {
                     onpreview(path)
-                    reveal(event.currentTarget, row.pad)
+                    reveal(row.shift)
                   }}
                   onblur={() => onpreview(null)}
                 >
-                  <span class="text">
-                    {row.label}
-                    <!-- Where the pick started, so the way back to it is visible
-                         from wherever the selection has moved to. -->
-                    {#if row.origin}<span class="origin">picked</span>{/if}
-                  </span>
+                  {row.label}
+                  <!-- Where the pick started, so the way back to it is visible
+                       from wherever the selection has moved to. -->
+                  {#if row.origin}<span class="origin">picked</span>{/if}
                 </button>
               {:else}
                 <!-- Children not shown. A count rather than an element: there is
