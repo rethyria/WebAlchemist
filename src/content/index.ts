@@ -494,16 +494,95 @@ function exceedsViewport(rect: Rect): boolean {
   )
 }
 
+/**
+ * Everything the page must not receive while the picker is active.
+ *
+ * Stopping `mousedown` and `mouseup` is not enough, which is the bug this
+ * exists to fix: the browser synthesises `click` separately after a
+ * down/up pair, so picking a button pressed it and picking a link followed it.
+ * `preventDefault` on `mousedown` does not suppress that either — the click
+ * has to be swallowed in its own right.
+ *
+ * Pointer and touch events are here because plenty of sites are built on those
+ * rather than mouse events, and `dragstart` because pressing on a link or
+ * image and moving — which is exactly the drag gesture — otherwise begins a
+ * native drag.
+ *
+ * Scroll events are deliberately absent. Scrolling the page to reach something
+ * further down is part of picking, not an interaction to suppress.
+ */
+const SWALLOWED_EVENTS = [
+  'mousedown',
+  'mouseup',
+  'click',
+  'auxclick',
+  'dblclick',
+  'contextmenu',
+  'dragstart',
+  'keydown',
+  'keyup',
+  'keypress',
+  'submit',
+] as const
+
+/**
+ * Hidden from the page, but *not* cancelled.
+ *
+ * Calling preventDefault on a pointer or touch event suppresses the
+ * compatibility mouse events the browser would otherwise synthesise from it —
+ * including the mousedown and mouseup this picker runs on. Cancelling these
+ * would stop the page reacting and stop the picker working at the same time.
+ *
+ * Blocking propagation is enough: the page never sees them, and the mouse
+ * events they generate are cancelled by the list above.
+ */
+const MUFFLED_EVENTS = [
+  'pointerdown',
+  'pointerup',
+  'pointercancel',
+  'touchstart',
+  'touchend',
+  'touchcancel',
+] as const
+
+/**
+ * Registered after the picker's own handlers, so those still run.
+ *
+ * `stopImmediatePropagation` stops other listeners on this same node, which is
+ * why the ordering matters and why the picker's handlers must not call it
+ * themselves.
+ */
+function swallow(event: Event): void {
+  event.preventDefault()
+  event.stopPropagation()
+  event.stopImmediatePropagation()
+}
+
+function muffle(event: Event): void {
+  event.stopPropagation()
+  event.stopImmediatePropagation()
+}
+
 function startPicking(palette: OverlayPalette): void {
   if (picking) return
   picking = true
   crop = null
   overlay.mount(palette)
   overlay.setHint(false)
+
+  // The picker's own handlers first, so they see the event before it is
+  // swallowed below.
   document.addEventListener('mousemove', onMouseMove, true)
   document.addEventListener('mousedown', onMouseDown, true)
   document.addEventListener('mouseup', onMouseUp, true)
   document.addEventListener('keydown', onKeyDown, true)
+
+  for (const type of SWALLOWED_EVENTS) {
+    document.addEventListener(type, swallow, { capture: true, passive: false })
+  }
+  for (const type of MUFFLED_EVENTS) {
+    document.addEventListener(type, muffle, true)
+  }
 }
 
 function stopPicking(): void {
@@ -516,6 +595,13 @@ function stopPicking(): void {
   document.removeEventListener('mousedown', onMouseDown, true)
   document.removeEventListener('mouseup', onMouseUp, true)
   document.removeEventListener('keydown', onKeyDown, true)
+
+  for (const type of SWALLOWED_EVENTS) {
+    document.removeEventListener(type, swallow, true)
+  }
+  for (const type of MUFFLED_EVENTS) {
+    document.removeEventListener(type, muffle, true)
+  }
 }
 
 /* ------------------------------------------------------------------ */
