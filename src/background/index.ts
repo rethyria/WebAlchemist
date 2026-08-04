@@ -114,9 +114,15 @@ browser.webNavigation.onCommitted.addListener(async (details) => {
 /* ------------------------------------------------------------------ */
 
 /**
- * Content events are relayed rather than handled. The content script cannot
- * address the sidebar directly, and the sidebar must not be reachable from the
- * page, so everything page-side passes through here first.
+ * Content events are ignored here, not relayed.
+ *
+ * `runtime.sendMessage` from a content script already reaches every extension
+ * page, the sidebar included — it does not need forwarding. Re-sending them
+ * delivered each one twice, which a retarget test caught: every pick appeared
+ * as two identical events.
+ *
+ * They still have to be recognised, so `handle()` does not fall through its
+ * switch and answer a page-side event with a bare `{ ok: true }`.
  */
 function isContentEvent(message: Message | ContentEvent): message is ContentEvent {
   return (
@@ -132,12 +138,7 @@ browser.runtime.onMessage.addListener(
     message: Message | ContentEvent,
     sender,
   ): Promise<MessageResponse<unknown>> | undefined => {
-    if (isContentEvent(message)) {
-      // Fire and forget: an open sidebar receives it, a closed one does not,
-      // and neither case is an error worth surfacing to the page.
-      void browser.runtime.sendMessage(message).catch(() => {})
-      return undefined
-    }
+    if (isContentEvent(message)) return undefined
 
     return handle(message, sender).then(
       (data) => ({ ok: true, data }),
@@ -300,6 +301,13 @@ async function handle(
 
     case 'stop-picking':
       await sendToContent(message.tabId, { type: 'cancel-picking' })
+      return true
+
+    case 'retarget':
+      await sendToContent(message.tabId, {
+        type: 'retarget',
+        levelsUp: message.levelsUp,
+      })
       return true
 
     case 'run-csp-probe': {

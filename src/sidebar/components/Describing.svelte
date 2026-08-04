@@ -16,6 +16,7 @@
     onchange: (instruction: string) => void
     onscreenshot: (send: boolean) => void
     onrepick: () => void
+    onretarget: (levelsUp: number) => void
     ongenerate: () => void
   }
 
@@ -30,10 +31,24 @@
     onchange,
     onscreenshot,
     onrepick,
+    onretarget,
     ongenerate,
   }: Props = $props()
 
   let selector = $derived(target.breadcrumb.at(-1) ?? '')
+
+  /*
+   * Root first, so the list reads outermost to innermost and the selected
+   * element sits at the bottom. Distance from the end is how many levels up
+   * the content script has to walk.
+   */
+  let ancestors = $derived(
+    target.breadcrumb.map((label, index) => ({
+      label,
+      levelsUp: target.breadcrumb.length - 1 - index,
+      indent: Math.min(index, 6),
+    })),
+  )
   let cropLabel = $derived(`${Math.round(crop.width)} × ${Math.round(crop.height)}`)
 </script>
 
@@ -43,6 +58,28 @@
     <span class="locked">locked</span>
     <button type="button" class="change" onclick={onrepick}>Change</button>
   </header>
+
+  {#if ancestors.length > 1}
+    <section class="tree">
+      <Label>Or target a container it sits in</Label>
+      <ul>
+        {#each ancestors as ancestor}
+          <li>
+            <button
+              type="button"
+              class="ancestor"
+              class:selected={ancestor.levelsUp === 0}
+              style="padding-left: {6 + ancestor.indent * 9}px"
+              disabled={ancestor.levelsUp === 0}
+              onclick={() => onretarget(ancestor.levelsUp)}
+            >
+              {ancestor.label}
+            </button>
+          </li>
+        {/each}
+      </ul>
+    </section>
+  {/if}
 
   <section>
     <Label>What should change?</Label>
@@ -151,6 +188,51 @@
 
   textarea:focus {
     outline: none;
+  }
+
+  /*
+   * Scrolls rather than growing. A framework-built page can nest an element a
+   * dozen wrappers deep, and the list must not push the description field off
+   * the panel.
+   */
+  .tree ul {
+    display: flex;
+    flex-direction: column;
+    max-height: 132px;
+    margin: 0;
+    padding: 0;
+    overflow-y: auto;
+    list-style: none;
+    border: 1px solid var(--border);
+    border-radius: var(--r-input);
+    background: var(--surface-sunken);
+  }
+
+  .ancestor {
+    display: block;
+    width: 100%;
+    padding: 5px 8px;
+    border: none;
+    background: transparent;
+    font: 11.5px var(--font-mono);
+    color: var(--text-dim);
+    text-align: left;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    cursor: pointer;
+  }
+
+  .ancestor:hover:not(:disabled) {
+    background: var(--accent-wash);
+    color: var(--text);
+  }
+
+  /* The current target. Disabled because selecting it is a no-op. */
+  .ancestor.selected {
+    background: var(--accent-chip);
+    color: var(--accent-fg);
+    cursor: default;
   }
 
   .screenshot {

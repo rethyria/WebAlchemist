@@ -221,8 +221,10 @@ export class Flow {
         if (this.step === 'picking') this.hover = event.target
         return
 
-      case 'element-picked':
-        if (this.step !== 'picking') return
+      case 'element-picked': {
+        // Also arrives while describing, when the ancestor list retargets.
+        if (this.step !== 'picking' && this.step !== 'describing') return
+        const retargeting = this.step === 'describing'
         this.picked = {
           context: event.context,
           anchor: event.anchor,
@@ -231,8 +233,11 @@ export class Flow {
           target: event.target,
           viewportWidth: event.viewportWidth,
         }
-        this.enterDescribing()
+        // Retargeting must not wipe what has already been typed — the user is
+        // adjusting the target of a description they are partway through.
+        if (!retargeting) this.enterDescribing()
         return
+      }
 
       case 'picking-cancelled':
         if (this.step === 'picking') this.step = 'list'
@@ -265,6 +270,12 @@ export class Flow {
       // an image. Degrading to no-screenshot is the safe direction.
       this.visionSupported = false
     }
+  }
+
+  /** Moves the selection up the tree, from the ancestor list. */
+  async retarget(levelsUp: number): Promise<void> {
+    if (this.tabId === null || levelsUp <= 0) return
+    await send({ type: 'retarget', tabId: this.tabId, levelsUp }).catch(() => {})
   }
 
   /* ---------------------------------------------------------------- */

@@ -78,6 +78,7 @@ export type Message =
   | { type: 'capture-region'; rect: Rect; viewportWidth: number }
   | { type: 'start-picking'; tabId: number }
   | { type: 'stop-picking'; tabId: number }
+  | { type: 'retarget'; tabId: number; levelsUp: number }
   /** Runs a check regardless of the configured mode. Always user-initiated. */
   | { type: 'check-now'; tabId: number; url: string }
 
@@ -99,6 +100,8 @@ export type ContentMessage =
   /** The palette travels with the request: the overlay cannot read our CSS. */
   | { type: 'start-picking'; palette: OverlayPalette }
   | { type: 'cancel-picking' }
+  /** Walks the selection up the tree from the element being described. */
+  | { type: 'retarget'; levelsUp: number }
   | { type: 'apply-transforms'; transforms: Transform[] }
   | { type: 'run-health-check'; transforms: Transform[] }
   | { type: 'url-changed'; url: string }
@@ -149,6 +152,7 @@ export interface Responses {
   'capture-region': { dataUrl: string; clipped: boolean }
   'start-picking': boolean
   'stop-picking': boolean
+  retarget: boolean
   'check-now': TransformRuntimeState[]
   'run-csp-probe': boolean
   'clear-csp-probe': boolean

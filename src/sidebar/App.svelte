@@ -281,6 +281,7 @@
       onchange={(value) => (flow.instruction = value)}
       onscreenshot={(value) => (flow.sendScreenshot = value)}
       onrepick={() => void flow.startPicking()}
+      onretarget={(levelsUp: number) => void flow.retarget(levelsUp)}
       ongenerate={() => void flow.generate()}
     />
   {:else if flow.step === 'generating'}

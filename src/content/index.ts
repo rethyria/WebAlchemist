@@ -319,11 +319,19 @@ function selectorFor(element: Element): string {
   return cls ? `${tag}.${cls}` : tag
 }
 
-/** Root first, target last. The panel renders the last entry as the chip. */
+/**
+ * Root first, target last. The panel renders the last entry as the chip, and
+ * the whole chain as the ancestor list.
+ *
+ * Capped because a deeply nested element on a framework-built page can sit
+ * twenty wrappers down, and a list that long is not a chooser any more.
+ */
+const MAX_BREADCRUMB = 12
+
 function breadcrumbFor(element: Element): string[] {
   const parts: string[] = []
   let node: Element | null = element
-  while (node && node !== document.documentElement && parts.length < 5) {
+  while (node && node !== document.documentElement && parts.length < MAX_BREADCRUMB) {
     parts.unshift(selectorFor(node))
     node = node.parentElement
   }
@@ -492,27 +500,56 @@ function onKeyDown(event: KeyboardEvent): void {
   }
 }
 
+/**
+ * The element the panel is currently describing.
+ *
+ * Held past the end of picking so the ancestor list can retarget without
+ * putting the user back into the overlay — the chain is only meaningful
+ * relative to the element it was taken from.
+ */
+let described: Element | null = null
+
+function emitPicked(element: Element, region: Rect): void {
+  described = element
+  const anchor = captureAnchor(element)
+  void send({
+    type: 'element-picked',
+    context: extractContext(element, anchor.selector),
+    anchor,
+    crop: region,
+    cropClipped: exceedsViewport(region),
+    target: describeTarget(element),
+    viewportWidth: window.innerWidth,
+  })
+}
+
 function confirmSelection(): void {
   if (!current) return
-  const anchor = captureAnchor(current)
-  const context = extractContext(current, anchor.selector)
-  const target = describeTarget(current)
+  const target = current
 
   // The drawn rectangle doubles as the screenshot crop, so it travels with the
   // context. No image is captured here — that happens only if the user opts in
   // for a specific request, and they have already seen this exact rect.
-  const region = crop ?? boundingRectWithPadding(current)
+  const region = crop ?? boundingRectWithPadding(target)
 
   stopPicking()
-  void send({
-    type: 'element-picked',
-    context,
-    anchor,
-    crop: region,
-    cropClipped: exceedsViewport(region),
-    target,
-    viewportWidth: window.innerWidth,
-  })
+  emitPicked(target, region)
+}
+
+/**
+ * Moves the selection up the tree by `levelsUp` from what is being described.
+ *
+ * The crop is recomputed rather than carried over: it is the region a
+ * screenshot would cover, and after retargeting to a larger ancestor the old
+ * rectangle would no longer contain what the user is now pointing at.
+ */
+function retarget(levelsUp: number): void {
+  let node: Element | null = described
+  for (let i = 0; i < levelsUp && node?.parentElement; i += 1) {
+    node = node.parentElement
+  }
+  if (!node) return
+  emitPicked(node, boundingRectWithPadding(node))
 }
 
 /** Falls back to the element's box plus padding so the model sees some context. */
@@ -755,8 +792,13 @@ async function runHealthCheck(transforms: Transform[]): Promise<TransformRuntime
 /* Messaging                                                           */
 /* ------------------------------------------------------------------ */
 
+/**
+ * Broadcast to every extension page. An open sidebar receives it; a closed one
+ * does not, and that is not an error worth reporting — with no listener the
+ * send rejects, so the rejection is swallowed rather than left unhandled.
+ */
 function send(event: ContentEvent): Promise<unknown> {
-  return browser.runtime.sendMessage(event)
+  return browser.runtime.sendMessage(event).catch(() => undefined)
 }
 
 browser.runtime.onMessage.addListener(async (message: ContentMessage) => {
@@ -766,6 +808,9 @@ browser.runtime.onMessage.addListener(async (message: ContentMessage) => {
       return true
     case 'cancel-picking':
       stopPicking()
+      return true
+    case 'retarget':
+      retarget(message.levelsUp)
       return true
     case 'run-health-check':
       return { type: 'health-check-result', states: await runHealthCheck(message.transforms) }
