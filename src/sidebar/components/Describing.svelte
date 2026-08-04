@@ -81,34 +81,54 @@
    * and its resting place is the left edge.
    */
   let list = $state<HTMLDivElement | null>(null)
-  $effect(() => {
-    void tree
-    list?.querySelector('.node.selected')?.scrollIntoView({ block: 'center', inline: 'nearest' })
-  })
 
   /*
+   * Puts a row's own name on the panel's midline, or as near as the scroll
+   * range allows.
+   *
    * Rows are laid out at their full width rather than clipped, so a deep one
-   * runs off the right of a 264px panel. Hovering scrolls to it, which is what
-   * lets the panel stay narrow without the names becoming unreadable.
+   * runs off the right of a 264px panel and the list scrolls sideways to
+   * reach it. Where it stops is the question this answers: on the midline,
+   * which leaves the shallower rows above legible to the left and the deeper
+   * rows below to the right. Scrolling the name hard against either edge
+   * would read it at the cost of everything around it, which is the opposite
+   * of what the list is for.
    *
-   * The offset is the row's own indent and nothing else, so the list moves as
-   * a function of depth: down a branch it slides one step at a time, and two
-   * rows at the same depth always sit at the same offset. Measuring the text
-   * instead made the offset depend on how long each label happened to be, so
-   * the list jumped back and forth between neighbours for no visible reason.
-   *
-   * Scrolling exactly the indent away puts the name where a top-level name
-   * sits, and never scrolls past it — indentation is the part worth giving up
-   * to make room, the name is not. The browser clamps the rest: a list with
-   * nothing to scroll does not move at all.
+   * Only the viewport moves — nothing about the row's own position changes.
+   * The browser clamps the result, so a list with nothing to scroll stays
+   * where it is, and one scrolled to its end gets as close as it can.
    */
-  function reveal(indent: number): void {
-    if (list) list.scrollLeft = indent
+  function centre(row: Element | null | undefined): void {
+    const name = row?.firstElementChild
+    if (!list || !name) return
+    const box = name.getBoundingClientRect()
+    const start = box.left - list.getBoundingClientRect().left + list.scrollLeft
+    /*
+     * The second term only bites for a name wider than the panel, where
+     * centring would cut both of its ends: such a name is read from its
+     * beginning instead. Everything that fits is centred exactly, since
+     * centring a box narrower than the view never scrolls past its start.
+     */
+    list.scrollLeft = Math.min(start + box.width / 2 - list.clientWidth / 2, start)
   }
 
-  /** Back to the left edge, so the indentation reads as a shape again. */
+  const selectedRow = (): Element | null => list?.querySelector('.node.selected') ?? null
+
+  /*
+   * The selection is framed by default: centred down the list, and centred
+   * across it by the same rule the hover uses. It sits between its ancestors
+   * and its descendants, so the middle is the position that shows both.
+   */
+  $effect(() => {
+    void tree
+    const selected = selectedRow()
+    selected?.scrollIntoView({ block: 'center', inline: 'nearest' })
+    centre(selected)
+  })
+
+  /** Hovering is a departure from the selection, so leaving returns to it. */
   function rest(): void {
-    if (list) list.scrollLeft = 0
+    centre(selectedRow())
   }
 
   /*
@@ -140,9 +160,6 @@
   let rows = $derived(
     tree.map((row) => ({
       ...row,
-      /* Kept apart from the padding so hovering can scroll the indent away
-         and leave the gutter, rather than putting the name on the edge. */
-      shift: row.indent * step,
       pad: GUTTER + row.indent * step,
       isTarget: row.relation === 'current',
       // The container the current scope resolves to, marked distinctly: it
@@ -193,20 +210,25 @@
                   class:aside={row.relation === 'sibling'}
                   style="padding-left: {row.pad}px"
                   onclick={() => onretarget(path)}
-                  onmouseenter={() => {
+                  onmouseenter={(event) => {
                     onpreview(path)
-                    reveal(row.shift)
+                    centre(event.currentTarget)
                   }}
-                  onfocus={() => {
+                  onfocus={(event) => {
                     onpreview(path)
-                    reveal(row.shift)
+                    centre(event.currentTarget)
                   }}
                   onblur={() => onpreview(null)}
                 >
-                  {row.label}
-                  <!-- Where the pick started, so the way back to it is visible
-                       from wherever the selection has moved to. -->
-                  {#if row.origin}<span class="origin">picked</span>{/if}
+                <!--
+                  The name is wrapped so its own width can be measured: the
+                  button is stretched to the width of the widest row, and
+                  centring needs this row's extent rather than that one's. It
+                  is written on a single line because whitespace inside it
+                  would be measured too. The badge marks where the pick
+                  started, so the way back to it is visible from wherever the
+                  selection has moved to.
+                --><span class="name">{row.label}{#if row.origin}<span class="origin">picked</span>{/if}</span>
                 </button>
               {:else}
                 <!-- Children not shown. A count rather than an element: there is
