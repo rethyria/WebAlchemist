@@ -744,7 +744,12 @@ export class Flow {
       // stacking the same rules twice.
       await this.clearPreview()
       await this.clearLock()
-      await send({ type: 'save-transform', transform })
+      await send({
+        type: 'save-transform',
+        transform,
+        // So it applies to the page now, rather than on the next load.
+        ...(this.tabId === null ? {} : { tabId: this.tabId }),
+      })
       this.reset()
       this.onSaved()
     } catch (cause) {

@@ -156,7 +156,13 @@
       if (!granted) return
     }
 
-    await send({ type: 'set-enabled', id: transform.id, enabled })
+    const tab = await activeTab()
+    await send({
+      type: 'set-enabled',
+      id: transform.id,
+      enabled,
+      ...(tab?.id === undefined ? {} : { tabId: tab.id }),
+    })
     transforms = transforms.map((t) => (t.id === transform.id ? { ...t, enabled } : t))
   }
 

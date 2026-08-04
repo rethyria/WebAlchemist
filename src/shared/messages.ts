@@ -49,10 +49,11 @@ export type Message =
   | { type: 'analyse'; code: string; declaredCapabilities: Transform['capabilities'] }
 
   /* --- persistence -------------------------------------------------- */
-  | { type: 'save-transform'; transform: Transform }
+  /** `tabId` lets the change take effect now instead of on the next load. */
+  | { type: 'save-transform'; transform: Transform; tabId?: number }
   | { type: 'delete-transform'; id: string }
   | { type: 'reorder-transforms'; orderedIds: string[] }
-  | { type: 'set-enabled'; id: string; enabled: boolean }
+  | { type: 'set-enabled'; id: string; enabled: boolean; tabId?: number }
 
   /* --- settings and credentials ------------------------------------- */
   | { type: 'save-settings'; settings: Settings }

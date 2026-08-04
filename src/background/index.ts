@@ -99,6 +99,9 @@ browser.webNavigation.onHistoryStateUpdated.addListener(async (details) => {
 
 browser.webNavigation.onCommitted.addListener(async (details) => {
   if (details.frameId !== 0) return
+  // The page reloaded, so nothing we injected survives — forget it rather
+  // than trying to remove a stylesheet that is already gone.
+  appliedCss.delete(details.tabId)
   const transforms = await transformsForUrl(details.url)
   if (transforms.length === 0) return
 
@@ -167,7 +170,7 @@ async function handle(
       return getSettings()
 
     case 'get-transforms-for-url':
-      return transformsForUrl(message.url)
+      return matchingTransforms(message.url)
 
     case 'get-credential-statuses':
       return getAllCredentialStatuses()
@@ -216,6 +219,9 @@ async function handle(
       if (message.transform.kind === 'js') {
         await registerTransform(message.transform)
       }
+      // Apply it now rather than on the next navigation. The preview was just
+      // taken down, so without this the page visibly reverts on save.
+      await reapply(message.tabId)
       return true
     }
 
@@ -238,6 +244,8 @@ async function handle(
         if (next.enabled) await registerTransform(next)
         else await unregisterTransform(next.id)
       }
+      // A toggle that takes effect on the next reload is not a toggle.
+      await reapply(message.tabId)
       return true
     }
 
@@ -499,6 +507,7 @@ async function runGeneration(
 
 browser.tabs.onRemoved.addListener((tabId) => {
   previewedCss.delete(tabId)
+  appliedCss.delete(tabId)
 })
 
 /* ------------------------------------------------------------------ */
@@ -550,10 +559,32 @@ async function runReview(
 /* Application                                                         */
 /* ------------------------------------------------------------------ */
 
-async function transformsForUrl(url: string): Promise<Transform[]> {
+/**
+ * Everything saved for this page, enabled or not.
+ *
+ * The list needs the disabled ones — they are what the toggles turn back on.
+ * Filtering them out here made a transform vanish from the panel the moment
+ * it was switched off, which looked like it had been deleted.
+ */
+async function matchingTransforms(url: string): Promise<Transform[]> {
   const all = await getAllTransforms()
-  return all.filter((t) => t.enabled && matchesUrl(t.match, url))
+  return all.filter((t) => matchesUrl(t.match, url))
 }
+
+/** The subset that should actually run. */
+async function transformsForUrl(url: string): Promise<Transform[]> {
+  return (await matchingTransforms(url)).filter((t) => t.enabled)
+}
+
+/**
+ * What is currently injected in each tab.
+ *
+ * Held because removeCSS matches on content: taking a stylesheet back out
+ * requires the exact string that went in. Without this, saving or toggling
+ * could only add, never replace — so a change showed up on the next page load
+ * and not before.
+ */
+const appliedCss = new Map<number, string>()
 
 /**
  * CSS is applied by the background script rather than the content script:
@@ -562,19 +593,36 @@ async function transformsForUrl(url: string): Promise<Transform[]> {
  */
 async function applyCssTransforms(tabId: number, transforms: Transform[]): Promise<void> {
   const css = transforms
-    .filter((t) => t.kind === 'css')
+    .filter((t) => t.kind === 'css' && t.enabled)
     .sort((a, b) => a.order - b.order)
     .map((t) => `/* ${t.name} */\n${t.code}`)
     .join('\n\n')
 
-  if (!css) return
+  const previous = appliedCss.get(tabId)
+  if (previous !== undefined && previous !== css) {
+    await browser.scripting
+      .removeCSS({ target: { tabId }, css: previous, origin: 'USER' })
+      .catch(() => {})
+    appliedCss.delete(tabId)
+  }
+
+  if (!css || previous === css) return
 
   try {
     await browser.scripting.insertCSS({ target: { tabId }, css, origin: 'USER' })
+    appliedCss.set(tabId, css)
   } catch {
     // No host permission for this origin yet, which is expected until the user
     // saves their first transform for the site.
   }
+}
+
+/** Recomputes and applies whatever should be running in this tab right now. */
+async function reapply(tabId: number | undefined): Promise<void> {
+  if (tabId === undefined) return
+  const tab = await browser.tabs.get(tabId).catch(() => undefined)
+  if (!tab?.url) return
+  await applyCssTransforms(tabId, await transformsForUrl(tab.url))
 }
 
 async function captureRegion(

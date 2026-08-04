@@ -27,25 +27,32 @@ export function matchPresetsFor(rawUrl: string): MatchPreset[] {
   const registrable = host.replace(/^www\./, '')
   const presets: MatchPreset[] = []
 
+  /*
+   * `*.` covers the domain itself as well as its subdomains, so this matches
+   * youtube.com and www.youtube.com alike.
+   *
+   * The bare `registrable/*` that used to be recommended here did not match
+   * its own page on any www host: saving on www.youtube.com produced a
+   * transform that could never apply and never appeared in the list.
+   */
   presets.push({
-    label: `${registrable} (whole site)`,
-    pattern: `${registrable}/*`,
+    label: `${registrable} and its subdomains`,
+    pattern: `*.${registrable}/*`,
     recommended: true,
   })
 
-  if (host !== registrable || host.split('.').length > 2) {
-    presets.push({ label: `${host} only`, pattern: `${host}/*` })
-  }
-  presets.push({ label: `All subdomains of ${registrable}`, pattern: `*.${registrable}/*` })
+  presets.push({ label: `${host} only`, pattern: `${host}/*` })
 
-  // First meaningful path segment, e.g. reddit.com/r/programming/*
+  // First meaningful path segment, e.g. reddit.com/r/programming*
   const segments = url.pathname.split('/').filter(Boolean)
   if (segments.length >= 1) {
     const depth = Math.min(segments.length, 2)
     const prefix = segments.slice(0, depth).join('/')
     presets.push({
-      label: `${host}/${prefix}/`,
-      pattern: `${host}/${prefix}/*`,
+      // No slash before the wildcard, so this covers /watch as well as
+      // /watch/anything — the prefix page itself is part of the prefix.
+      label: `${host}/${prefix}`,
+      pattern: `${host}/${prefix}*`,
     })
   }
 
@@ -62,6 +69,22 @@ function patternToRegExp(pattern: string): RegExp {
   return new RegExp(`^${escaped}$`)
 }
 
+/**
+ * Host matching, following WebExtension match-pattern semantics.
+ *
+ * A leading `*.` means the domain itself *or* any subdomain of it, which is
+ * what `*://*.example.com/*` means to the browser. Treating it as a literal
+ * wildcard would exclude the bare domain, and the same string is handed to
+ * permissions.request — the two must agree on what they cover.
+ */
+function hostMatches(pattern: string, hostname: string): boolean {
+  if (pattern.startsWith('*.')) {
+    const domain = pattern.slice(2)
+    return hostname === domain || hostname.endsWith(`.${domain}`)
+  }
+  return patternToRegExp(pattern).test(hostname)
+}
+
 export function matchesUrl(pattern: string, rawUrl: string): boolean {
   let url: URL
   try {
@@ -71,11 +94,15 @@ export function matchesUrl(pattern: string, rawUrl: string): boolean {
   }
   if (url.protocol !== 'http:' && url.protocol !== 'https:') return false
 
-  const subject = `${url.hostname}${url.pathname}`
-  const withoutTrailingSlash = subject.replace(/\/$/, '')
+  const slash = pattern.indexOf('/')
+  const hostPattern = slash === -1 ? pattern : pattern.slice(0, slash)
+  const pathPattern = slash === -1 ? '/*' : pattern.slice(slash)
 
-  const regex = patternToRegExp(pattern)
-  return regex.test(subject) || regex.test(withoutTrailingSlash)
+  if (!hostMatches(hostPattern, url.hostname)) return false
+
+  const regex = patternToRegExp(pathPattern)
+  // Trailing slashes are not meaningful here: /watch and /watch/ are the page.
+  return regex.test(url.pathname) || regex.test(url.pathname.replace(/\/$/, ''))
 }
 
 /** The origin permission a pattern requires, for permissions.request(). */
