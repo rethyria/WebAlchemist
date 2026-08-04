@@ -68,6 +68,8 @@ interface Picked {
   anchor: Anchor
   crop: Rect
   cropClipped: boolean
+  /** True when the user drew the rectangle rather than it coming from bounds. */
+  cropDrawn: boolean
   target: HoverTarget
   viewportWidth: number
 }
@@ -125,6 +127,11 @@ export class Flow {
   sendScreenshot = $state(false)
   /** True while the user is drawing the region on the page. */
   choosingRegion = $state(false)
+  /** True when the pick came from a drawn rectangle, which is already a region. */
+  get pickedRegionAvailable(): boolean {
+    return this.picked?.cropDrawn === true
+  }
+
   /** The captured image, sent with the next request. */
   shot = $state<{ dataUrl: string; rect: Rect; clipped: boolean } | null>(null)
   shotClipped = $state(false)
@@ -137,6 +144,8 @@ export class Flow {
    */
   shotPreview = $state<string | null>(null)
   visionSupported = $state(false)
+  /** Mirrors the setting; decides whether the all-sites grant is handed back. */
+  keepScreenshotPermission = $state(false)
 
   history = $state<RefinementTurn[]>([])
   followUp = $state('')
@@ -386,6 +395,7 @@ export class Flow {
           anchor: event.anchor,
           crop: event.crop,
           cropClipped: event.cropClipped,
+          cropDrawn: event.cropDrawn,
           target: event.target,
           viewportWidth: event.viewportWidth,
         }
@@ -656,19 +666,43 @@ export class Flow {
    * The request is the first await, so the gesture from the toggle is still
    * live when it runs.
    */
+  /**
+   * Captures the rectangle the user already drew when picking.
+   *
+   * A drawn crop is a region they chose deliberately, so asking them to draw a
+   * second one to say "yes, that area" would be asking twice for the same
+   * answer. Requesting a different area stays available separately.
+   */
+  async includePickedRegion(): Promise<void> {
+    const picked = this.picked
+    if (!picked || this.tabId === null) return
+    if (!(await this.requestCaptureAccess())) return
+    this.shotPreview = null
+    this.shot = null
+    await this.captureRegion(picked.crop, picked.viewportWidth)
+  }
+
+  /**
+   * The all-sites grant captureVisibleTab needs. First await, so the gesture
+   * from the click that reached here is still live.
+   */
+  private async requestCaptureAccess(): Promise<boolean> {
+    const granted = await browser.permissions.request({ origins: ['<all_urls>'] })
+    if (!granted) {
+      this.sendScreenshot = false
+      this.error = {
+        kind: 'request-failed',
+        message:
+          'Firefox only lets an extension capture a page with access to all sites. Without it, screenshots cannot be taken; everything else still works.',
+      }
+    }
+    return granted
+  }
+
   async chooseScreenshotRegion(): Promise<void> {
     if (this.tabId === null) return
     try {
-      const granted = await browser.permissions.request({ origins: ['<all_urls>'] })
-      if (!granted) {
-        this.sendScreenshot = false
-        this.error = {
-          kind: 'request-failed',
-          message:
-            'Firefox only lets an extension capture a page with access to all sites. Without it, screenshots cannot be taken; everything else still works.',
-        }
-        return
-      }
+      if (!(await this.requestCaptureAccess())) return
 
       this.choosingRegion = true
       this.shotPreview = null
@@ -733,6 +767,9 @@ export class Flow {
    */
   cancelScreenshot(): void {
     this.clearShot()
+    // Held deliberately when the user has said so in settings; the point of
+    // that setting is not being asked again.
+    if (this.keepScreenshotPermission) return
     void browser.permissions.remove({ origins: ['<all_urls>'] }).catch(() => {})
   }
 

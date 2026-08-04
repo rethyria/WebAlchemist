@@ -23,7 +23,6 @@
     shotPreview: string | null
     shotClipped: boolean
     visionSupported: boolean
-    providerLabel: string
     onfollowup: (text: string) => void
     onaddreference: () => void
     onremovereference: (selector: string) => void
@@ -48,7 +47,6 @@
     shotPreview,
     shotClipped,
     visionSupported,
-    providerLabel,
     onfollowup,
     onaddreference,
     onremovereference,
@@ -224,9 +222,11 @@
         {#if shotPreview}
           <img class="shot-image" src={shotPreview} alt="The region that will be sent" />
           <p class="shot-warning">
-            This image goes to {providerLabel}{shotClipped
-              ? ', clipped at the viewport'
-              : ''}. Dropped again after this attempt.
+            This image is sent to your AI provider. Everything visible in it goes
+            too — names, messages, account details, anything personal that
+            happens to be on screen.{shotClipped
+              ? ' Clipped at the viewport; only the visible part was captured.'
+              : ''}
           </p>
           <button type="button" class="shot-action" onclick={() => onscreenshot(false)}>
             Remove screenshot
@@ -538,12 +538,12 @@
   }
 
   .shot-action {
-    align-self: flex-start;
-    padding: 5px 9px;
+    width: 100%;
+    padding: 6px 9px;
     border: 1px dashed var(--border);
-    border-radius: var(--r-badge);
+    border-radius: var(--r-button);
     background: transparent;
-    font: 10.5px var(--font-ui);
+    font: 11px var(--font-ui);
     color: var(--text-dim);
     cursor: pointer;
   }

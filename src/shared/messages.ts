@@ -194,6 +194,12 @@ export type ContentEvent =
       crop: Rect
       /** True when the crop extends past the viewport and would be cut. */
       cropClipped: boolean
+      /**
+       * True when the user drew the rectangle rather than it being derived
+       * from the element's bounds. A drawn one is already a screenshot region
+       * the user chose, so it can be offered directly.
+       */
+      cropDrawn: boolean
       target: HoverTarget
       /** CSS pixels, for scaling the crop against a device-pixel capture. */
       viewportWidth: number

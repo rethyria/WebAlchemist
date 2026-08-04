@@ -56,10 +56,6 @@
   let activeCount = $derived(transforms.filter((t) => t.enabled).length)
   let brokenCount = $derived(runtimeStates.filter((s) => s.status === 'broken').length)
 
-  let providerLabel = $derived(
-    settings?.providers.find((p) => p.id === settings?.activeProviderId)?.label ??
-      'the provider',
-  )
 
   /** Rough, and labelled as such in the panel — it is a progress hint. */
   let contextSize = $derived(
@@ -80,6 +76,7 @@
 
   function applySettings(next: Settings) {
     settings = next
+    flow.keepScreenshotPermission = next.keepScreenshotPermission === true
     // Accent is a user setting; tokens.css keys the palette off this.
     document.documentElement.dataset['accent'] = next.accent
   }
@@ -452,14 +449,15 @@
       crop={flow.picked.crop}
       cropClipped={flow.picked.cropClipped}
       instruction={flow.instruction}
+      regionAvailable={flow.pickedRegionAvailable}
       choosingRegion={flow.choosingRegion}
       shotPreview={flow.shotPreview}
       shotClipped={flow.shotClipped}
       visionSupported={flow.visionSupported}
-      {providerLabel}
       onchange={(value) => (flow.instruction = value)}
       onscreenshot={(value) =>
         value ? void flow.chooseScreenshotRegion() : flow.cancelScreenshot()}
+      onincluderegion={() => void flow.includePickedRegion()}
       onrepick={() => void flow.startPicking()}
       chain={flow.chain}
       depth={flow.chainDepth}
@@ -498,7 +496,6 @@
       shotPreview={flow.shotPreview}
       shotClipped={flow.shotClipped}
       visionSupported={flow.visionSupported}
-      {providerLabel}
       onfollowup={(value) => (flow.followUp = value)}
       onaddreference={() => void flow.addReference()}
       onremovereference={(selector) => flow.removeReference(selector)}

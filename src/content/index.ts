@@ -578,13 +578,12 @@ function onMouseUp(event: MouseEvent): void {
   }
 
   // A real rectangle resolves to the deepest element that fully contains it,
-  // then waits. Drawing a region is not the same act as approving it, and the
-  // rectangle is what a screenshot would send — the user confirms it
-  // explicitly.
+  // and releasing the mouse is the decision. It used to wait for a separate
+  // confirm, which meant the gesture that obviously ended the drag did not end
+  // the pick.
   const ancestor = commonAncestor(elementsInRect(crop as Rect))
   if (ancestor) setCurrent(ancestor)
-  overlay.setHint(true)
-  publishTarget()
+  confirmSelection()
 }
 
 function elementsInRect(rect: Rect): Element[] {
@@ -676,7 +675,7 @@ function ancestorOf(element: Element | null, levelsUp: number): Element | null {
   return node
 }
 
-function emitPicked(element: Element, region: Rect): void {
+function emitPicked(element: Element, region: Rect, drawn = false): void {
   describedElement = element
   updateLock()
   const anchor = captureAnchor(element)
@@ -686,6 +685,7 @@ function emitPicked(element: Element, region: Rect): void {
     anchor,
     crop: region,
     cropClipped: exceedsViewport(region),
+    cropDrawn: drawn,
     target: describeTarget(element),
     viewportWidth: window.innerWidth,
   })
@@ -698,6 +698,7 @@ function confirmSelection(): void {
   // The drawn rectangle doubles as the screenshot crop, so it travels with the
   // context. No image is captured here — that happens only if the user opts in
   // for a specific request, and they have already seen this exact rect.
+  const drawn = crop !== null
   const region = crop ?? boundingRectWithPadding(target)
 
   stopPicking()
@@ -720,7 +721,7 @@ function confirmSelection(): void {
   }
 
   pickedRoot = target
-  emitPicked(target, region)
+  emitPicked(target, region, drawn)
 }
 
 /**

@@ -2,9 +2,12 @@
   import type { HoverTarget, Rect } from '@shared/types'
   import { autogrow } from '../lib/autogrow'
   import Button from './Button.svelte'
+  import Toggle from './Toggle.svelte'
   import Label from './Label.svelte'
 
   interface Props {
+    /** True when the pick came from a drawn rectangle. */
+    regionAvailable: boolean
     target: HoverTarget
     crop: Rect
     cropClipped: boolean
@@ -14,9 +17,9 @@
     shotPreview: string | null
     shotClipped: boolean
     visionSupported: boolean
-    providerLabel: string
     onchange: (instruction: string) => void
     onscreenshot: (send: boolean) => void
+    onincluderegion: () => void
     onrepick: () => void
     /** The chain as first picked, so rows below the current one stay. */
     chain: string[]
@@ -36,13 +39,14 @@
     crop,
     cropClipped,
     instruction,
+    regionAvailable,
     choosingRegion,
     shotPreview,
     shotClipped,
     visionSupported,
-    providerLabel,
     onchange,
     onscreenshot,
+    onincluderegion,
     onrepick,
     chain,
     depth,
@@ -181,10 +185,22 @@
   {#if visionSupported}
     <section class="screenshot">
       <!--
-        An action, not a state. Taking a screenshot is a thing the user does
-        once and then either keeps or drops; a checkbox implied it could be
-        armed in advance, which it cannot.
+        A drawn rectangle is already a region the user chose, so including it
+        is a yes/no about something that exists — a toggle. With no drawn
+        rectangle there is nothing to include yet, so the only thing on offer
+        is the act of making one, which is a button.
       -->
+      {#if regionAvailable && !shotPreview}
+        <div class="include">
+          <Toggle
+            checked={false}
+            label="Include screenshot of the area you drew"
+            onchange={(on) => on && onincluderegion()}
+          />
+          <span class="include-text">Include screenshot of the area you drew</span>
+        </div>
+      {/if}
+
       {#if !shotPreview}
         <button
           type="button"
@@ -192,7 +208,11 @@
           disabled={choosingRegion}
           onclick={() => onscreenshot(true)}
         >
-          {choosingRegion ? 'Drag the area on the page…' : 'Add a screenshot'}
+          {choosingRegion
+            ? 'Drag the area on the page…'
+            : regionAvailable
+              ? 'Add a different screenshot'
+              : 'Add a screenshot'}
         </button>
       {/if}
 
@@ -204,15 +224,15 @@
       {#if shotPreview}
         <img class="shot" src={shotPreview} alt="The region that will be sent" />
         <p class="warning">
-          This image is sent to {providerLabel}, including any text, names or
-          images that happen to be in it.
+          This image is sent to your AI provider. Everything visible in it goes
+          too — names, messages, account details, anything personal that happens
+          to be on screen.
         </p>
-        <p class="note">
-          {#if shotClipped}
+        {#if shotClipped}
+          <p class="note">
             Clipped at the viewport — only the visible part was captured.
-          {/if}
-          Dropped again every time you start a new request.
-        </p>
+          </p>
+        {/if}
         <button type="button" class="shot-action" onclick={() => onscreenshot(false)}>
           Remove screenshot
         </button>
@@ -408,9 +428,20 @@
     background: var(--surface-sunken);
   }
 
+  .include {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-6);
+  }
+
+  .include-text {
+    font: 11.5px/1.4 var(--font-ui);
+    color: var(--text-dim);
+  }
+
   .shot-action {
-    align-self: flex-start;
-    padding: 6px 10px;
+    width: 100%;
+    padding: 7px 10px;
     border: 1px solid var(--border);
     border-radius: var(--r-button);
     background: transparent;

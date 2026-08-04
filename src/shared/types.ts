@@ -251,6 +251,16 @@ export interface Settings {
   activeProviderId: string | null
   healthCheckMode: HealthCheckMode
   accent: Accent
+  /**
+   * Keeps the all-sites grant that screenshots need, instead of handing it
+   * back when the run ends.
+   *
+   * Off by default. While the grant is held, every per-site prompt this
+   * extension would otherwise show is satisfied silently, because `<all_urls>`
+   * subsumes any specific origin — so leaving it on trades the per-site
+   * consent model for not being asked again.
+   */
+  keepScreenshotPermission: boolean
   /** Disables execution of every AI-authored JS transform, everywhere. */
   aiJsKillSwitch: boolean
 }
@@ -261,6 +271,7 @@ export const DEFAULT_SETTINGS: Settings = {
   activeProviderId: null,
   healthCheckMode: 'every-load',
   accent: 'blue',
+  keepScreenshotPermission: false,
   aiJsKillSwitch: false,
 }
 

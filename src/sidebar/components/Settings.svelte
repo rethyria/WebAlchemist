@@ -108,6 +108,28 @@
     </div>
   </section>
 
+  <!--
+    The grant screenshots need is all-sites, because captureVisibleTab accepts
+    nothing narrower. Keeping it means never being asked again; it also means
+    the per-site prompts stop appearing, since an all-sites grant satisfies
+    them. Said here rather than discovered later.
+  -->
+  <div class="kill">
+    <div class="kill-text">
+      <span class="card-title">Keep screenshot permission</span>
+      <span class="note">
+        Screenshots need access to all sites. Kept on, you are not asked again —
+        and you stop being asked per site when saving transforms too.
+      </span>
+    </div>
+    <Toggle
+      checked={settings.keepScreenshotPermission}
+      label="Keep screenshot permission"
+      onchange={(keepScreenshotPermission) =>
+        onsave({ ...settings, keepScreenshotPermission })}
+    />
+  </div>
+
   <div class="kill">
     <div class="kill-text">
       <span class="card-title">Stop running AI-written JavaScript</span>
