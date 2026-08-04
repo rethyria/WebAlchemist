@@ -37,6 +37,29 @@ const OVERLAY_STYLES = `
    * ring immediately outside the edge, a light ring outside that. One of the
    * two always separates the outline from whatever is behind it.
    */
+  /*
+   * A transparent sheet over the whole viewport, and the only part of the
+   * overlay that takes pointer events.
+   *
+   * Everything else here draws; this one intercepts. With it in place the page
+   * never sees a hover, which is what removes the pointer cursor over links and
+   * stops Firefox showing the link target in the status bar — neither of which
+   * can be suppressed once the pointer is genuinely over an anchor.
+   *
+   * It also means real clicks land here rather than on the page, so activating
+   * what you point at stops being possible by construction rather than by
+   * catching events after the fact.
+   */
+  .capture {
+    position: fixed;
+    inset: 0;
+    z-index: 2147483645;
+    cursor: crosshair;
+    /* A drag across the page would otherwise select text under the pointer. */
+    user-select: none;
+    -moz-user-select: none;
+  }
+
   .highlight {
     position: fixed;
     pointer-events: none;
@@ -103,6 +126,7 @@ const OVERLAY_STYLES = `
 
   .hint {
     position: fixed;
+    pointer-events: none;
     left: 50%;
     bottom: 14px;
     transform: translateX(-50%);
@@ -137,6 +161,7 @@ const OVERLAY_STYLES = `
 
 class Overlay {
   private host: HTMLDivElement | null = null
+  private capture: HTMLDivElement | null = null
   private highlight: HTMLDivElement | null = null
   private label: HTMLDivElement | null = null
   private mask: HTMLDivElement | null = null
@@ -155,6 +180,7 @@ class Overlay {
     const style = document.createElement('style')
     style.textContent = OVERLAY_STYLES
 
+    this.capture = element('div', 'capture')
     this.highlight = element('div', 'highlight')
     this.label = element('div', 'label')
     this.mask = element('div', 'mask')
@@ -165,7 +191,15 @@ class Overlay {
     this.hint = this.buildHint()
 
     this.hideCrop()
-    root.append(style, this.mask, this.highlight, this.label, this.crop, this.hint)
+    root.append(
+      style,
+      this.capture,
+      this.mask,
+      this.highlight,
+      this.label,
+      this.crop,
+      this.hint,
+    )
     document.documentElement.append(this.host)
   }
 
@@ -323,6 +357,19 @@ function setCurrent(element: Element | null): void {
   publishTarget()
 }
 
+/**
+ * The topmost page element at a point, ignoring our own overlay.
+ *
+ * `elementFromPoint` would now always return the capture sheet, so this walks
+ * the hit list instead and takes the first thing that is not ours.
+ */
+function elementUnder(x: number, y: number): Element | null {
+  for (const candidate of document.elementsFromPoint(x, y)) {
+    if (!candidate.closest('[data-webalchemist-overlay]')) return candidate
+  }
+  return null
+}
+
 function onMouseMove(event: MouseEvent): void {
   if (dragOrigin) {
     crop = {
@@ -337,7 +384,7 @@ function onMouseMove(event: MouseEvent): void {
   // Once a rectangle exists it owns the selection; moving the mouse must not
   // silently retarget underneath it.
   if (crop) return
-  setCurrent(document.elementFromPoint(event.clientX, event.clientY))
+  setCurrent(elementUnder(event.clientX, event.clientY))
 }
 
 function onMouseDown(event: MouseEvent): void {
@@ -382,8 +429,8 @@ function elementsInRect(rect: Rect): Element[] {
     for (let j = 0; j <= steps; j += 1) {
       const x = rect.x + (rect.width * i) / steps
       const y = rect.y + (rect.height * j) / steps
-      const element = document.elementFromPoint(x, y)
-      if (element && !element.closest('[data-webalchemist-overlay]')) found.add(element)
+      const element = elementUnder(x, y)
+      if (element) found.add(element)
     }
   }
   return [...found]
