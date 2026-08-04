@@ -204,6 +204,11 @@
     }
     browser.tabs.onUpdated.addListener(onTabUpdated)
 
+    // A run whose page has gone is not recoverable, and its outline went with
+    // the tab, so there is nothing left to clean up either.
+    const onTabRemoved = (id: number) => flow.tabClosed(id)
+    browser.tabs.onRemoved.addListener(onTabRemoved)
+
     // Held open for the lifetime of the panel. The background watches for it
     // to drop, which is how "closing this panel discards it" is kept true —
     // a closed sidebar gets no chance to run cleanup of its own.
@@ -214,6 +219,7 @@
       browser.storage.onChanged.removeListener(onStored)
       browser.tabs.onActivated.removeListener(onTabChange)
       browser.tabs.onUpdated.removeListener(onTabUpdated)
+      browser.tabs.onRemoved.removeListener(onTabRemoved)
       port.disconnect()
     }
   })
@@ -259,6 +265,22 @@
       onsave={(next: Settings) => void saveSettings(next)}
       onfullpage={openSettingsPage}
     />
+  {:else if flow.awayFromOwner}
+    <div class="paused">
+      <h1>Still describing something on {flow.ownerHost}</h1>
+      <p>
+        This run is about an element on that page, so it stays there rather than
+        following you here. Go back to carry on, or discard it and start fresh.
+      </p>
+      <div class="paused-actions">
+        <button type="button" class="primary" onclick={() => void flow.returnToOwner()}>
+          Back to {flow.ownerHost}
+        </button>
+        <button type="button" class="secondary" onclick={() => void flow.discard()}>
+          Discard it
+        </button>
+      </div>
+    </div>
   {:else if !transformable}
     <div class="empty">
       <h1>Nothing to change here</h1>
@@ -535,6 +557,39 @@
 
   /* Top-aligned. The sidebar is a tall column and vertically centring a
      short block leaves it floating with no relationship to the header. */
+  .paused {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    gap: var(--sp-12);
+    padding: var(--sp-20) 18px;
+    min-height: 0;
+    overflow-y: auto;
+  }
+
+  .paused p {
+    margin: 0;
+    font: 12.5px/1.6 var(--font-ui);
+    color: var(--text-dim);
+  }
+
+  .paused-actions {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-7);
+  }
+
+  button.secondary {
+    width: 100%;
+    padding: 9px 10px;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--r-button);
+    background: transparent;
+    font: 600 12.5px var(--font-ui);
+    color: var(--text);
+    cursor: pointer;
+  }
+
   .empty {
     display: flex;
     flex: 1;

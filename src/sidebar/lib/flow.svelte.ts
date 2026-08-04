@@ -141,8 +141,19 @@ export class Flow {
 
   private cancelGeneration: (() => void) | null = null
 
+  /**
+   * The tab this run belongs to, and the tab currently on screen.
+   *
+   * They are separate because a run is about an element in a particular page.
+   * Following the active tab mid-flow pointed every page-side operation at
+   * whatever the user happened to be looking at — the preview, the save, and
+   * the outline teardown, which is why cancelling from another tab left the
+   * highlight behind on the original.
+   */
   private tabId: number | null = null
   private url = ''
+  ownerHost = $state('')
+  activeTabId = $state<number | null>(null)
   private timer: ReturnType<typeof setInterval> | null = null
 
   /**
@@ -164,8 +175,35 @@ export class Flow {
   }
 
   bindTab(tabId: number | undefined, url: string): void {
+    this.activeTabId = tabId ?? null
+    // A run in progress keeps the tab it started on. Rebinding would silently
+    // move the subject out from under the user.
+    if (this.step !== 'list') return
     this.tabId = tabId ?? null
     this.url = url
+    this.ownerHost = this.hostname()
+  }
+
+  /** True when a run is in progress and the user is looking somewhere else. */
+  get awayFromOwner(): boolean {
+    return (
+      this.step !== 'list' &&
+      this.tabId !== null &&
+      this.activeTabId !== null &&
+      this.activeTabId !== this.tabId
+    )
+  }
+
+  /** Brings the run's own tab back to the front. */
+  async returnToOwner(): Promise<void> {
+    if (this.tabId === null) return
+    await browser.tabs.update(this.tabId, { active: true }).catch(() => {})
+  }
+
+  /** The run cannot outlive the page it is about. */
+  tabClosed(tabId: number): void {
+    if (tabId !== this.tabId) return
+    this.reset()
   }
 
   /* ---------------------------------------------------------------- */
