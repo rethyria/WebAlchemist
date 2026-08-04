@@ -92,17 +92,21 @@ export type Message =
   | { type: 'preview-js'; tabId: number; transform: Transform }
   | { type: 'clear-preview-js'; id: string }
   /**
-   * Arms a screenshot for the next toolbar-button click.
+   * Captures the region now. Throws when the tab holds no activeTab grant.
    *
-   * The capture cannot happen here. tabs.captureVisibleTab needs either the
-   * literal `<all_urls>` permission — unreachable in MV3, where granted hosts
-   * live in allowedOrigins and never enter the permission set — or an activeTab
-   * grant, which only a browser-action click produces. The sidebar never grants
-   * it. So the rect is parked and the click that follows does the work.
+   * tabs.captureVisibleTab needs either the literal `<all_urls>` permission —
+   * structurally unreachable in MV3, since the permissions schema does not
+   * accept it as a value and manifest parsing keeps it out of the permission
+   * set for any extension with origin controls — or an activeTab grant.
+   *
+   * activeTab comes from a browser-action click and lasts until the tab
+   * navigates, and our toolbar button is what opens the sidebar. So most of
+   * the time the grant is already there and this simply works; `arm-screenshot`
+   * is the fallback for when it is not.
    */
+  | { type: 'capture-region'; tabId: number; rect: Rect; viewportWidth: number }
+  /** Parks a capture for the next toolbar click, when activeTab has lapsed. */
   | { type: 'arm-screenshot'; tabId: number; rect: Rect; viewportWidth: number }
-  /** Whatever the armed click captured, or null if it has not happened yet. */
-  | { type: 'get-screenshot'; tabId: number }
   | { type: 'clear-screenshot'; tabId: number }
   /**
    * `mode` decides what a confirmed pick means. 'target' replaces what the
@@ -179,7 +183,11 @@ export type ContentEvent =
    * toolbar click it was waiting for has produced an image. It arrives at the
    * same listener, so it lives in the same union.
    */
-  | { type: 'screenshot-captured'; tabId: number }
+  | {
+      type: 'screenshot-captured'
+      tabId: number
+      shot: { dataUrl: string; rect: Rect; clipped: boolean }
+    }
   /** The armed click happened and the capture failed. Never silent. */
   | { type: 'screenshot-failed'; tabId: number; message: string }
   /** A reference pick. Carries no anchor or crop: nothing is targeted by it. */
@@ -227,7 +235,7 @@ export interface Responses {
   'clear-preview-js': boolean
   'export-transforms': { schemaVersion: number; exportedAt: number; transforms: Transform[] }
   'import-transforms': { imported: number; needsRegeneration: string[] }
-  'capture-region': { dataUrl: string; clipped: boolean }
+  'capture-region': { dataUrl: string; rect: Rect; clipped: boolean }
   'start-picking': boolean
   'stop-picking': boolean
   retarget: boolean

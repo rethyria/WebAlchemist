@@ -412,21 +412,24 @@ async function handle(
       return (await runHealthCheck(message.tabId, transforms)) ?? []
     }
 
+    case 'capture-region':
+      return captureWithLockDown(message.tabId, message.rect, message.viewportWidth)
+
     case 'arm-screenshot':
-      armedCapture = {
-        tabId: message.tabId,
-        rect: message.rect,
-        viewportWidth: message.viewportWidth,
-      }
-      capturedShots.delete(message.tabId)
+      // storage.session, not a variable: the event page is suspended after 30
+      // seconds idle and a trip to the toolbar can easily outlast that, which
+      // would drop the armed capture and make the click do nothing.
+      await browser.storage.session.set({
+        armedCapture: {
+          tabId: message.tabId,
+          rect: message.rect,
+          viewportWidth: message.viewportWidth,
+        },
+      })
       return true
 
-    case 'get-screenshot':
-      return capturedShots.get(message.tabId) ?? null
-
     case 'clear-screenshot':
-      if (armedCapture?.tabId === message.tabId) armedCapture = null
-      capturedShots.delete(message.tabId)
+      await browser.storage.session.remove('armedCapture')
       return true
 
     case 'export-transforms':
@@ -575,8 +578,7 @@ browser.tabs.onRemoved.addListener((tabId) => {
   previewedCss.delete(tabId)
   appliedCss.delete(tabId)
   // An image of a page that no longer exists is not worth keeping.
-  capturedShots.delete(tabId)
-  if (armedCapture?.tabId === tabId) armedCapture = null
+  void browser.storage.session.remove('armedCapture')
 })
 
 /* ------------------------------------------------------------------ */
@@ -717,32 +719,46 @@ async function reapply(tabId: number | undefined): Promise<void> {
  * out of storage and out of the panel's state until a request actually wants
  * it, and lets the tab own its lifetime.
  */
-let armedCapture: { tabId: number; rect: Rect; viewportWidth: number } | null = null
-const capturedShots = new Map<number, { dataUrl: string; rect: Rect; clipped: boolean }>()
+interface ArmedCapture {
+  tabId: number
+  rect: Rect
+  viewportWidth: number
+}
+
+/**
+ * Captures with the target outline taken down.
+ *
+ * The outline is a real element in the page, so capturing with it up puts our
+ * own highlight into the image the model is asked to read — drawn over the very
+ * thing being described. Down for the shot, back up after, rebuilt rather than
+ * restored so the boxes return where the elements are now.
+ */
+async function captureWithLockDown(
+  tabId: number,
+  rect: Rect,
+  viewportWidth: number,
+): Promise<{ dataUrl: string; rect: Rect; clipped: boolean }> {
+  await sendToContent(tabId, { type: 'set-lock-visible', visible: false })
+  try {
+    const shot = await captureRegion(rect, viewportWidth)
+    return { ...shot, rect }
+  } finally {
+    await sendToContent(tabId, { type: 'set-lock-visible', visible: true })
+  }
+}
 
 async function fulfilArmedCapture(tab: browser.tabs.Tab): Promise<void> {
-  const armed = armedCapture
+  const stored = await browser.storage.session.get('armedCapture')
+  const armed = stored['armedCapture'] as ArmedCapture | undefined
   // Only for the tab it was armed on: the click may land anywhere.
   if (!armed || tab.id === undefined || tab.id !== armed.tabId) return
-  armedCapture = null
+  await browser.storage.session.remove('armedCapture')
 
   try {
-    /*
-     * The outline is a real element in the page, so capturing with it up puts
-     * our own highlight into the image the model is asked to read — drawn over
-     * the very thing being described. Down for the shot, back up after.
-     */
-    await sendToContent(armed.tabId, { type: 'set-lock-visible', visible: false })
-    let shot
-    try {
-      shot = await captureRegion(armed.rect, armed.viewportWidth)
-    } finally {
-      await sendToContent(armed.tabId, { type: 'set-lock-visible', visible: true })
-    }
-    capturedShots.set(armed.tabId, { ...shot, rect: armed.rect })
+    const shot = await captureWithLockDown(armed.tabId, armed.rect, armed.viewportWidth)
     // The panel is waiting on this; a closed panel simply means nobody hears.
     void browser.runtime
-      .sendMessage({ type: 'screenshot-captured', tabId: armed.tabId })
+      .sendMessage({ type: 'screenshot-captured', tabId: armed.tabId, shot })
       .catch(() => {})
   } catch (cause) {
     /*

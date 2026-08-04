@@ -128,8 +128,8 @@ export class Flow {
   armingScreenshot = $state(false)
   /** True while the user is drawing the region on the page. */
   choosingRegion = $state(false)
-  /** The region drawn for the screenshot, in viewport coordinates. */
-  shotRegion = $state<Rect | null>(null)
+  /** The captured image, sent with the next request. */
+  shot = $state<{ dataUrl: string; rect: Rect; clipped: boolean } | null>(null)
   shotClipped = $state(false)
   /**
    * The captured image itself, shown in the panel.
@@ -413,19 +413,14 @@ export class Flow {
       case 'region-selected': {
         if (!this.choosingRegion) return
         this.choosingRegion = false
-        this.shotRegion = event.rect
-        this.shotClipped = event.clipped
-        // The permission for the capture itself only exists during a toolbar
-        // click, so drawing the region is step one of two. See armScreenshot.
-        void this.armScreenshot(event.rect, event.viewportWidth)
+        void this.captureRegion(event.rect, event.viewportWidth)
         return
       }
 
       case 'screenshot-captured':
         if (event.tabId !== this.tabId) return
         this.armingScreenshot = false
-        this.sendScreenshot = true
-        void this.loadShotPreview()
+        this.acceptShot(event.shot)
         return
 
       case 'screenshot-failed':
@@ -567,17 +562,10 @@ export class Flow {
       const context: PageContext = { ...(await this.liveContext(picked)) }
       if (this.references.length > 0) context.references = [...this.references]
 
-      /*
-       * Taken from what the toolbar click captured, not captured here — the
-       * sidebar has no permission to photograph a tab. See armScreenshot.
-       */
-      if (this.sendScreenshot && this.visionSupported && this.tabId !== null) {
-        const shot = await send<{
-          dataUrl: string
-          rect: Rect
-          clipped: boolean
-        } | null>({ type: 'get-screenshot', tabId: this.tabId })
-        if (shot) context.screenshot = shot
+      // Already captured and already on screen in the panel; nothing is taken
+      // at request time that the user has not seen.
+      if (this.sendScreenshot && this.visionSupported && this.shot) {
+        context.screenshot = this.shot
       }
 
       this.streamed = ''
@@ -698,17 +686,43 @@ export class Flow {
     }
   }
 
-  /** Pulls the captured image in for display. Absent is not an error. */
-  private async loadShotPreview(): Promise<void> {
+  private acceptShot(shot: { dataUrl: string; rect: Rect; clipped: boolean }): void {
+    this.shot = shot
+    this.shotPreview = shot.dataUrl
+    this.shotClipped = shot.clipped
+    this.sendScreenshot = true
+  }
+
+  /**
+   * Takes the shot as soon as the region is drawn.
+   *
+   * captureVisibleTab needs an activeTab grant, which comes from a click on
+   * the toolbar button and lasts until the tab navigates. Our toolbar button
+   * is what opens the sidebar, so in the ordinary case the grant is already
+   * there and this just works. When it has lapsed — the panel was opened from
+   * the sidebar menu, or the page has navigated since — there is no way to ask
+   * for it from here, so the capture is parked for the next toolbar click and
+   * the panel says so. That fallback is the only reason any of this is visible
+   * to the user at all.
+   */
+  private async captureRegion(rect: Rect, viewportWidth: number): Promise<void> {
     if (this.tabId === null) return
     try {
-      const shot = await send<{ dataUrl: string } | null>({
-        type: 'get-screenshot',
-        tabId: this.tabId,
-      })
-      this.shotPreview = shot?.dataUrl ?? null
-    } catch {
-      this.shotPreview = null
+      this.acceptShot(
+        await send<{ dataUrl: string; rect: Rect; clipped: boolean }>({
+          type: 'capture-region',
+          tabId: this.tabId,
+          rect,
+          viewportWidth,
+        }),
+      )
+    } catch (cause) {
+      const message = cause instanceof BackgroundError ? cause.message : String(cause)
+      if (!/activeTab/i.test(message)) {
+        this.fail(cause)
+        return
+      }
+      await this.armScreenshot(rect, viewportWidth)
     }
   }
 
@@ -734,7 +748,7 @@ export class Flow {
     this.choosingRegion = false
     this.sendScreenshot = false
     this.shotPreview = null
-    this.shotRegion = null
+    this.shot = null
     if (this.tabId === null) return
     await send({ type: 'clear-screenshot', tabId: this.tabId }).catch(() => {})
   }
