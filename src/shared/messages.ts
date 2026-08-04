@@ -24,6 +24,8 @@ import type {
   Settings,
   Transform,
   TransformRuntimeState,
+  TreePath,
+  TreeRow,
 } from './types'
 import type { OverlayPalette } from './accents'
 import type { RefinementTurn } from '@background/providers/types'
@@ -122,8 +124,8 @@ export type Message =
    * changed.
    */
   | { type: 'recapture'; tabId: number }
-  | { type: 'retarget'; tabId: number; levelsUp: number }
-  | { type: 'highlight-ancestor'; tabId: number; levelsUp: number | null }
+  | { type: 'retarget'; tabId: number; path: TreePath }
+  | { type: 'highlight-node'; tabId: number; path: TreePath | null }
   | { type: 'set-lock-scope'; tabId: number; depth: number }
   | { type: 'clear-lock'; tabId: number }
   /** Runs a check regardless of the configured mode. Always user-initiated. */
@@ -155,10 +157,10 @@ export type ContentMessage =
    * up contains our own highlight drawn over the very thing being described.
    */
   | { type: 'set-lock-visible'; visible: boolean }
-  /** Walks the selection up the tree from the element being described. */
-  | { type: 'retarget'; levelsUp: number }
-  /** Draws an ancestor without selecting it. `null` clears. */
-  | { type: 'highlight-ancestor'; levelsUp: number | null }
+  /** Moves the selection along the tree, up or down. See TreePath. */
+  | { type: 'retarget'; path: TreePath }
+  /** Draws a node without selecting it. `null` clears. */
+  | { type: 'highlight-node'; path: TreePath | null }
   /** Redraws the persistent outline for the current scope. Answers a count. */
   | { type: 'set-lock-scope'; depth: number }
   | { type: 'clear-lock' }
@@ -201,6 +203,13 @@ export type ContentEvent =
        */
       cropDrawn: boolean
       target: HoverTarget
+      /**
+       * The tree around the selection, as the page sees it right now. Sent on
+       * every retarget as well as the first pick: what is under the current
+       * element changes as the selection moves, so a copy taken once at
+       * confirm time would go stale the moment it was used.
+       */
+      tree: TreeRow[]
       /** CSS pixels, for scaling the crop against a device-pixel capture. */
       viewportWidth: number
     }
@@ -231,7 +240,7 @@ export interface Responses {
   'start-picking': boolean
   'stop-picking': boolean
   retarget: boolean
-  'highlight-ancestor': boolean
+  'highlight-node': boolean
   'set-lock-scope': { count: number; container: string | null }
   'clear-lock': boolean
   'check-now': TransformRuntimeState[]

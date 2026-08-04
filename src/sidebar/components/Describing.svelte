@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { HoverTarget, Rect } from '@shared/types'
+  import type { HoverTarget, Rect, TreePath, TreeRow } from '@shared/types'
   import { autogrow } from '../lib/autogrow'
   import Button from './Button.svelte'
   import Toggle from './Toggle.svelte'
@@ -21,11 +21,10 @@
     onscreenshot: (send: boolean) => void
     onincluderegion: () => void
     onrepick: () => void
-    /** The chain as first picked, so rows below the current one stay. */
-    chain: string[]
-    depth: number
-    onretarget: (levelsUp: number) => void
-    onpreview: (levelsUp: number | null) => void
+    /** The chain above the selection, the selection, and what is under it. */
+    tree: TreeRow[]
+    onretarget: (path: TreePath) => void
+    onpreview: (path: TreePath | null) => void
     scopeDepth: number
     scopeCount: number
     scopeContainer: string | null
@@ -48,8 +47,7 @@
     onscreenshot,
     onincluderegion,
     onrepick,
-    chain,
-    depth,
+    tree,
     onretarget,
     onpreview,
     scopeDepth,
@@ -62,14 +60,8 @@
 
   let selector = $derived(target.breadcrumb.at(-1) ?? '')
 
-  /*
-   * Root first, so the list reads outermost to innermost with the element
-   * originally picked at the bottom. Distance from the end is how far up the
-   * chain each row sits — an absolute position, so the list moves in both
-   * directions rather than only outwards.
-   */
-  /* How far the scope can widen: up to the outermost ancestor we captured. */
-  let maxDepth = $derived(Math.max(0, chain.length - 1 - depth))
+  /* How far the scope can widen: up to the outermost ancestor the page sent. */
+  let maxDepth = $derived(tree.filter((row) => row.relation === 'ancestor').length)
 
   /*
    * The slider reads as specificity, so the full-right position is the most
@@ -78,27 +70,29 @@
    */
   let specificity = $derived(maxDepth - scopeDepth)
 
-  let ancestors = $derived(
-    chain.map((label, index) => {
-      const levelsUp = chain.length - 1 - index
-      return {
-        label,
-        levelsUp,
-        indent: Math.min(index, 6),
-        isTarget: levelsUp === depth,
-        // The container the current scope resolves to, marked distinctly:
-        // it answers a different question from the target.
-        isContainer: scopeDepth > 0 && levelsUp === depth + scopeDepth,
-        /*
-         * Everything between the container and the target is inside the
-         * scope. Shading the span, rather than only its top row, is what
-         * makes the slider legible — the reach is a region of the chain,
-         * not a single line in it.
-         */
-        inScope:
-          scopeDepth > 0 && levelsUp <= depth + scopeDepth && levelsUp >= depth,
-      }
-    }),
+  /*
+   * Outermost first, so the list reads down the page's own nesting: ancestors,
+   * then the selection, then what is inside it. `above` is distance up from
+   * the selection and only ancestors have one, which is also why the scope
+   * shading below can key off it directly — the scope only ever widens
+   * upwards.
+   */
+  let rows = $derived(
+    tree.map((row) => ({
+      ...row,
+      pad: 6 + Math.min(row.indent, 8) * 9,
+      isTarget: row.relation === 'current',
+      // The container the current scope resolves to, marked distinctly: it
+      // answers a different question from the target.
+      isContainer: scopeDepth > 0 && row.above === scopeDepth,
+      /*
+       * Everything between the container and the target is inside the scope.
+       * Shading the span, rather than only its top row, is what makes the
+       * slider legible — the reach is a region of the chain, not a single
+       * line in it.
+       */
+      inScope: scopeDepth > 0 && row.above !== undefined && row.above <= scopeDepth,
+    })),
   )
 </script>
 
@@ -109,27 +103,37 @@
     <button type="button" class="change" onclick={onrepick}>Change</button>
   </header>
 
-  {#if ancestors.length > 1}
+  {#if rows.length > 1}
     <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
     <section class="tree">
-      <Label>Or target a container it sits in</Label>
+      <Label>Or target another element</Label>
       <ul onmouseleave={() => onpreview(null)}>
-        {#each ancestors as ancestor}
+        {#each rows as row}
           <li>
-            <button
-              type="button"
-              class="ancestor"
-              class:selected={ancestor.isTarget}
-              class:container={ancestor.isContainer}
-              class:in-scope={ancestor.inScope}
-              style="padding-left: {6 + ancestor.indent * 9}px"
-              onclick={() => onretarget(ancestor.levelsUp)}
-              onmouseenter={() => onpreview(ancestor.levelsUp)}
-              onfocus={() => onpreview(ancestor.levelsUp)}
-              onblur={() => onpreview(null)}
-            >
-              {ancestor.label}
-            </button>
+            {#if row.path}
+              {@const path = row.path}
+              <button
+                type="button"
+                class="node"
+                class:selected={row.isTarget}
+                class:container={row.isContainer}
+                class:in-scope={row.inScope}
+                style="padding-left: {row.pad}px"
+                onclick={() => onretarget(path)}
+                onmouseenter={() => onpreview(path)}
+                onfocus={() => onpreview(path)}
+                onblur={() => onpreview(null)}
+              >
+                {row.label}
+                <!-- Where the pick started, so the way back to it is visible
+                     from wherever the selection has moved to. -->
+                {#if row.origin}<span class="origin">picked</span>{/if}
+              </button>
+            {:else}
+              <!-- Children not shown. A count rather than an element: there is
+                   nothing here to select or to draw on the page. -->
+              <span class="more" style="padding-left: {row.pad}px">{row.label}</span>
+            {/if}
           </li>
         {/each}
       </ul>
@@ -345,7 +349,7 @@
     background: var(--surface-sunken);
   }
 
-  .ancestor {
+  .node {
     display: block;
     width: 100%;
     padding: 5px 8px;
@@ -360,16 +364,32 @@
     cursor: pointer;
   }
 
-  .ancestor:hover,
-  .ancestor:focus-visible {
+  .node:hover,
+  .node:focus-visible {
     background: var(--accent-wash);
     color: var(--text);
   }
 
   /* The current target. Still clickable — it is how you come back to it. */
-  .ancestor.selected {
+  .node.selected {
     background: var(--accent-chip);
     color: var(--accent-fg);
+  }
+
+  .origin {
+    margin-left: var(--sp-5);
+    padding: 1px 4px;
+    border-radius: var(--r-badge);
+    background: var(--surface-raised);
+    font: 10px var(--font-ui);
+    color: var(--text-faint);
+  }
+
+  .more {
+    display: block;
+    padding: 4px 8px;
+    font: 10.5px var(--font-ui);
+    color: var(--text-faint);
   }
 
   .scope input[type='range'] {
@@ -388,19 +408,19 @@
    * changes, the other is how far the change reaches — so it reads as a
    * distinct colour rather than a second shade of the selection.
    */
-  .ancestor.container {
+  .node.container {
     background: rgb(from var(--neutral) r g b / 0.22);
     color: var(--text);
     box-shadow: inset 2px 0 0 var(--neutral);
   }
 
   /* The span the container reaches over, faint so the two ends still read. */
-  .ancestor.in-scope:not(.container):not(.selected) {
+  .node.in-scope:not(.container):not(.selected) {
     background: rgb(from var(--neutral) r g b / 0.1);
     box-shadow: inset 2px 0 0 rgb(from var(--neutral) r g b / 0.45);
   }
 
-  .ancestor.selected.in-scope {
+  .node.selected.in-scope {
     box-shadow: inset 2px 0 0 rgb(from var(--neutral) r g b / 0.45);
   }
 

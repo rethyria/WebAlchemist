@@ -11,7 +11,14 @@
 
 import type { ContentEvent, ContentMessage, PickMode } from '@shared/messages'
 import type { OverlayPalette } from '@shared/accents'
-import type { HoverTarget, Rect, Transform, TransformRuntimeState } from '@shared/types'
+import type {
+  HoverTarget,
+  Rect,
+  Transform,
+  TransformRuntimeState,
+  TreePath,
+  TreeRow,
+} from '@shared/types'
 import { captureAnchor, isBuildHashClass, resolveAnchor } from './anchor'
 import { extractContext, extractElementContext } from './context'
 
@@ -675,6 +682,194 @@ function ancestorOf(element: Element | null, levelsUp: number): Element | null {
   return node
 }
 
+/* ------------------------------------------------------------------ */
+/* Tree                                                                */
+/* ------------------------------------------------------------------ */
+
+/** As far up as the chain is worth reading; a deeper one stops being a list. */
+const TREE_MAX_ANCESTORS = 12
+/** Levels below the current element: its children, then their children. */
+const TREE_MAX_DEPTH = 2
+const TREE_MAX_CHILDREN = 8
+/** Below the first level a full list stops being a chooser, so it is tighter. */
+const TREE_MAX_DEEP_CHILDREN = 3
+
+/**
+ * Elements that are in the DOM but never on the screen. They are not things
+ * anyone can point at, so they are not offered as things to target — and a
+ * framework-built page can carry dozens of them directly under <body>.
+ */
+const UNRENDERED = new Set([
+  'script',
+  'style',
+  'link',
+  'meta',
+  'noscript',
+  'template',
+  'head',
+  'title',
+  'base',
+])
+
+/**
+ * The children the tree considers, which is also what `TreePath.down` indexes.
+ * Both sides of a path go through here, so the filtering cannot desynchronise
+ * the two.
+ */
+function treeChildren(node: Element): Element[] {
+  return [...node.children].filter(
+    (child) =>
+      !UNRENDERED.has(child.tagName.toLowerCase()) &&
+      !child.hasAttribute('data-webalchemist-overlay'),
+  )
+}
+
+/** Parent hops from `ancestor` down to `node`, or -1 if unrelated. */
+function levelsBetween(ancestor: Element, node: Element): number {
+  let levels = 0
+  let cursor: Element | null = node
+  while (cursor && cursor !== ancestor) {
+    cursor = cursor.parentElement
+    levels += 1
+  }
+  return cursor ? levels : -1
+}
+
+/**
+ * Locates a node relative to the picked element.
+ *
+ * Null when the two are not related, which happens if the page rebuilt the
+ * subtree between the pick and now. Callers drop the row rather than offer a
+ * move that would resolve to nothing.
+ */
+function pathFor(node: Element): TreePath | null {
+  if (!pickedRoot) return null
+
+  let anchor: Element | null = pickedRoot
+  let up = 0
+  while (anchor && !anchor.contains(node)) {
+    anchor = anchor.parentElement
+    up += 1
+  }
+  if (!anchor) return null
+
+  const down: number[] = []
+  let cursor: Element = node
+  while (cursor !== anchor) {
+    const parent = cursor.parentElement
+    if (!parent) return null
+    const index = treeChildren(parent).indexOf(cursor)
+    if (index < 0) return null
+    down.unshift(index)
+    cursor = parent
+  }
+  return { up, down }
+}
+
+function nodeAt(path: TreePath): Element | null {
+  let node = ancestorOf(pickedRoot, path.up)
+  for (const index of path.down) {
+    node = (node ? treeChildren(node)[index] : undefined) ?? null
+    if (!node) return null
+  }
+  return node
+}
+
+/**
+ * The tree the panel draws: the chain above the current element, the element
+ * itself, and what is under it.
+ *
+ * Ancestors get one row each — the chain up to the root is a path, not a
+ * branch, so its siblings are not part of this choice. Below the current
+ * element the whole subtree is, which is why that half is capped in both
+ * directions and says so where it truncates.
+ *
+ * The exception is the element originally picked. Once the selection has moved
+ * up to an ancestor, the path back down to it is kept whatever the caps say,
+ * and the depth budget re-bases there — walking up must not delete the element
+ * that was picked from the list, which is the only way back to it.
+ */
+function buildTree(current: Element): TreeRow[] {
+  const rows: TreeRow[] = []
+  const origin = pickedRoot
+  const originBelow = origin && origin !== current && current.contains(origin) ? origin : null
+
+  const ancestors: Element[] = []
+  let node = current.parentElement
+  while (node && node !== document.documentElement && ancestors.length < TREE_MAX_ANCESTORS) {
+    ancestors.push(node)
+    node = node.parentElement
+  }
+  ancestors.reverse()
+
+  ancestors.forEach((ancestor, index) => {
+    const path = pathFor(ancestor)
+    rows.push({
+      label: selectorFor(ancestor),
+      indent: index,
+      relation: 'ancestor',
+      above: ancestors.length - index,
+      ...(path ? { path } : {}),
+      ...(ancestor === origin ? { origin: true } : {}),
+    })
+  })
+
+  const currentPath = pathFor(current)
+  rows.push({
+    label: selectorFor(current),
+    indent: ancestors.length,
+    relation: 'current',
+    above: 0,
+    ...(currentPath ? { path: currentPath } : {}),
+  })
+
+  /** Levels still allowed below `node`, which sits `level` under the current. */
+  const allowance = (candidate: Element, level: number): number => {
+    if (!originBelow) return TREE_MAX_DEPTH - level
+    // On the path down to the picked element: keep going, however deep it is.
+    if (candidate !== originBelow && candidate.contains(originBelow)) return Number.POSITIVE_INFINITY
+    // At or below it: the budget starts again from there rather than from here.
+    if (originBelow.contains(candidate)) {
+      return TREE_MAX_DEPTH - levelsBetween(originBelow, candidate)
+    }
+    return TREE_MAX_DEPTH - level
+  }
+
+  const walk = (parent: Element, level: number, indent: number): void => {
+    if (allowance(parent, level) <= 0) return
+
+    const children = treeChildren(parent)
+    const cap = level === 0 ? TREE_MAX_CHILDREN : TREE_MAX_DEEP_CHILDREN
+    const shown = children.slice(0, cap)
+
+    const onward = originBelow
+      ? children.find((child) => child === originBelow || child.contains(originBelow))
+      : undefined
+    if (onward && !shown.includes(onward)) {
+      shown.push(onward)
+      shown.sort((a, b) => children.indexOf(a) - children.indexOf(b))
+    }
+
+    for (const child of shown) {
+      const path = pathFor(child)
+      rows.push({
+        label: selectorFor(child),
+        indent,
+        relation: 'descendant',
+        ...(path ? { path } : {}),
+        ...(child === origin ? { origin: true } : {}),
+      })
+      walk(child, level + 1, indent + 1)
+    }
+
+    const hidden = children.length - shown.length
+    if (hidden > 0) rows.push({ label: `+${hidden} more`, indent, relation: 'more' })
+  }
+
+  walk(current, 0, ancestors.length + 1)
+  return rows
+}
+
 function emitPicked(element: Element, region: Rect, drawn = false): void {
   describedElement = element
   updateLock()
@@ -687,6 +882,7 @@ function emitPicked(element: Element, region: Rect, drawn = false): void {
     cropClipped: exceedsViewport(region),
     cropDrawn: drawn,
     target: describeTarget(element),
+    tree: buildTree(element),
     viewportWidth: window.innerWidth,
   })
 }
@@ -725,14 +921,15 @@ function confirmSelection(): void {
 }
 
 /**
- * Selects the ancestor `levelsUp` above the originally picked element.
+ * Selects the node the path points at, measured from the originally picked
+ * element.
  *
  * The crop is recomputed rather than carried over: it is the region a
- * screenshot would cover, and after moving to a larger ancestor the old
+ * screenshot would cover, and after moving to a different element the old
  * rectangle would no longer contain what is being pointed at.
  */
-function retarget(levelsUp: number): void {
-  const node = ancestorOf(pickedRoot, levelsUp)
+function retarget(path: TreePath): void {
+  const node = nodeAt(path)
   if (!node) return
   emitPicked(node, boundingRectWithPadding(node))
 }
@@ -832,13 +1029,13 @@ function updateLock(): { count: number; container: string | null } {
   return { count: targets.length, container }
 }
 
-/** Draws an ancestor without selecting it, for hovering the list. */
-function highlightAncestor(levelsUp: number | null): void {
-  if (levelsUp === null || !palette) {
+/** Draws a node without selecting it, for hovering the list. */
+function highlightNode(path: TreePath | null): void {
+  if (path === null || !palette) {
     preview.unmount()
     return
   }
-  const node = ancestorOf(pickedRoot, levelsUp)
+  const node = nodeAt(path)
   if (!node) return
   preview.mount(palette, false)
   preview.showElement(node, selectorFor(node))
@@ -1143,10 +1340,10 @@ async function handleMessage(message: ContentMessage) {
       return true
     case 'retarget':
       preview.unmount()
-      retarget(message.levelsUp)
+      retarget(message.path)
       return true
-    case 'highlight-ancestor':
-      highlightAncestor(message.levelsUp)
+    case 'highlight-node':
+      highlightNode(message.path)
       return true
     case 'set-lock-scope': {
       lockDepth = message.depth

@@ -338,6 +338,44 @@ export interface HoverTarget {
   drawing: boolean
 }
 
+/**
+ * A node located relative to the element the pick confirmed.
+ *
+ * Absolute rather than relative to wherever the selection currently sits.
+ * Every move is measured from the same fixed origin, so walking up the chain
+ * and back down lands where it started — a relative step would be cumulative
+ * and one-way, because after moving up the descendants are no longer on the
+ * path.
+ */
+export interface TreePath {
+  /** Levels up from the picked element. */
+  up: number
+  /** Then child indices down from there, outermost first. */
+  down: number[]
+}
+
+/**
+ * One row of the tree shown while describing, flattened for rendering.
+ *
+ * The page builds this, not the panel: which children exist, and which of them
+ * are worth showing, are facts about the live DOM.
+ */
+export interface TreeRow {
+  label: string
+  /** Nesting level, 0 at the outermost row. Drawn as indentation. */
+  indent: number
+  relation: 'ancestor' | 'current' | 'descendant' | 'more'
+  /**
+   * Levels above the current element. Ancestors and the current row only —
+   * the scope slider reaches upwards, so it is the one measurement it needs.
+   */
+  above?: number
+  /** Absent on 'more' rows, which are a count rather than an element. */
+  path?: TreePath
+  /** The element the pick confirmed, marked once the selection has left it. */
+  origin?: boolean
+}
+
 /** One element, described well enough for the model to write against it. */
 export interface ElementContext {
   selector: string

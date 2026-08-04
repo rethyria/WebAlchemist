@@ -8,6 +8,7 @@
     Settings,
     Transform,
     TransformRuntimeState,
+    TreePath,
   } from '@shared/types'
   import { activeTab, BackgroundError, send } from './lib/messaging.svelte'
   import { Flow } from './lib/flow.svelte'
@@ -459,10 +460,9 @@
         value ? void flow.chooseScreenshotRegion() : flow.cancelScreenshot()}
       onincluderegion={() => void flow.includePickedRegion()}
       onrepick={() => void flow.startPicking()}
-      chain={flow.chain}
-      depth={flow.chainDepth}
-      onretarget={(levelsUp: number) => void flow.retarget(levelsUp)}
-      onpreview={(levelsUp: number | null) => void flow.previewAncestor(levelsUp)}
+      tree={flow.tree}
+      onretarget={(path: TreePath) => void flow.retarget(path)}
+      onpreview={(path: TreePath | null) => void flow.previewNode(path)}
       scopeDepth={flow.scopeDepth}
       scopeCount={flow.scopeCount}
       scopeContainer={flow.scopeContainer}

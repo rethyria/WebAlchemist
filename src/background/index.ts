@@ -364,14 +364,14 @@ async function handle(
     case 'retarget':
       await sendToContent(message.tabId, {
         type: 'retarget',
-        levelsUp: message.levelsUp,
+        path: message.path,
       })
       return true
 
-    case 'highlight-ancestor':
+    case 'highlight-node':
       await sendToContent(message.tabId, {
-        type: 'highlight-ancestor',
-        levelsUp: message.levelsUp,
+        type: 'highlight-node',
+        path: message.path,
       })
       return true
 

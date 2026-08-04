@@ -39,6 +39,8 @@ import type {
   ReviewResult,
   Transform,
   TransformKind,
+  TreePath,
+  TreeRow,
 } from '@shared/types'
 import { extractPartialString } from '@shared/partial-json'
 import { BackgroundError, generateOverPort, send } from './messaging.svelte'
@@ -92,6 +94,11 @@ const STAGE_ORDER: ProgressStage[] = [
   'preview',
 ]
 
+function samePath(a: TreePath, b: TreePath | null): boolean {
+  if (!b) return false
+  return a.up === b.up && a.down.length === b.down.length && a.down.every((v, i) => v === b.down[i])
+}
+
 export class Flow {
   step = $state<Step>('list')
   error = $state<FlowError | null>(null)
@@ -101,15 +108,19 @@ export class Flow {
   picked = $state<Picked | null>(null)
 
   /**
-   * The chain as it was when the element was first confirmed, and how far up
-   * it the selection currently sits.
+   * The tree around the current selection, as the page last described it.
    *
-   * Held separately because retargeting replaces `picked` with an ancestor,
-   * whose own chain has no descendants in it — driving the list from that
-   * would delete the rows below the current one and make the move one-way.
+   * Replaced on every pick and every retarget, because what sits under the
+   * selection changes when the selection does. The page is what keeps the
+   * originally picked element in the list after a move up the chain — see
+   * buildTree in the content script.
    */
-  chain = $state<string[]>([])
-  chainDepth = $state(0)
+  tree = $state<TreeRow[]>([])
+
+  /** Where the selection sits, for the guard against re-selecting it. */
+  get currentPath(): TreePath | null {
+    return this.tree.find((row) => row.relation === 'current')?.path ?? null
+  }
 
   instruction = $state('')
   /** Distance up the ancestor chain the result covers. See ScopeDepth. */
@@ -399,13 +410,10 @@ export class Flow {
           target: event.target,
           viewportWidth: event.viewportWidth,
         }
+        this.tree = event.tree
         // Retargeting must not wipe what has already been typed — the user is
         // adjusting the target of a description they are partway through.
-        if (!retargeting) {
-          this.chain = event.target.breadcrumb
-          this.chainDepth = 0
-          this.enterDescribing()
-        }
+        if (!retargeting) this.enterDescribing()
         return
       }
 
@@ -464,11 +472,10 @@ export class Flow {
     }
   }
 
-  /** Moves the selection along the chain. Absolute, so it can go back down. */
-  async retarget(levelsUp: number): Promise<void> {
-    if (this.tabId === null || levelsUp === this.chainDepth) return
-    this.chainDepth = levelsUp
-    await send({ type: 'retarget', tabId: this.tabId, levelsUp }).catch(() => {})
+  /** Moves the selection along the tree. Absolute, so it can go back down. */
+  async retarget(path: TreePath): Promise<void> {
+    if (this.tabId === null || samePath(path, this.currentPath)) return
+    await send({ type: 'retarget', tabId: this.tabId, path }).catch(() => {})
     // The depth was measured from the old target; reset rather than silently
     // re-pointing it at a different container.
     await this.setScopeDepth(0)
@@ -498,13 +505,13 @@ export class Flow {
     }
   }
 
-  /** Draws an ancestor on the page while its row is hovered. */
-  async previewAncestor(levelsUp: number | null): Promise<void> {
+  /** Draws a node on the page while its row is hovered. */
+  async previewNode(path: TreePath | null): Promise<void> {
     if (this.tabId === null) return
     await send({
-      type: 'highlight-ancestor',
+      type: 'highlight-node',
       tabId: this.tabId,
-      levelsUp,
+      path,
     }).catch(() => {})
   }
 
@@ -1179,8 +1186,7 @@ export class Flow {
     this.step = 'list'
     this.hover = null
     this.picked = null
-    this.chain = []
-    this.chainDepth = 0
+    this.tree = []
     this.scopeDepth = 0
     this.scopeCount = 1
     this.scopeContainer = null
