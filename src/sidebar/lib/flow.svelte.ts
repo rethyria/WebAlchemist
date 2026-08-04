@@ -160,14 +160,26 @@ export class Flow {
   private cancelGeneration: (() => void) | null = null
 
   /**
-   * Set when we are the ones reloading the page.
+   * Where we are in a reload we asked for ourselves.
    *
    * A JS preview works by registering the draft and reloading, and the reload
    * after that is how a second attempt gets back to a clean page. Those are
    * the two cases where the run has to survive a reload — every other reload
    * means the element being described no longer exists.
+   *
+   * This was a boolean cleared by the first `loading` it saw, which was wrong
+   * in both directions. A single navigation can report `loading` more than
+   * once, so the second report found the flag already spent and discarded the
+   * run — "Reload and run it" reset the panel it was supposed to preserve. And
+   * clearing on `complete` alone would disarm us in the window between asking
+   * for the reload and it starting, if a previous load happened to settle
+   * there.
+   *
+   *   none      no reload of ours outstanding; any load is the user's
+   *   pending   we have asked, but the navigation has not begun
+   *   underway  it has begun; further `loading` reports are the same one
    */
-  private expectedReload = false
+  private ourReload: 'none' | 'pending' | 'underway' = 'none'
 
   /**
    * The tab this run belongs to, and the tab currently on screen.
@@ -244,11 +256,24 @@ export class Flow {
    */
   pageReloading(tabId: number): void {
     if (tabId !== this.tabId || this.step === 'list') return
-    if (this.expectedReload) {
-      this.expectedReload = false
+    if (this.ourReload !== 'none') {
+      // Ours. Stay armed: the same navigation may report loading again, and
+      // only the load settling tells us it is over.
+      this.ourReload = 'underway'
       return
     }
     void this.discard()
+  }
+
+  /**
+   * The owning page finished loading.
+   *
+   * Only meaningful as the end of a reload we asked for. Disarming here rather
+   * than on the first `loading` is what makes a repeated report harmless.
+   */
+  pageLoaded(tabId: number): void {
+    if (tabId !== this.tabId) return
+    if (this.ourReload === 'underway') this.ourReload = 'none'
   }
 
   /* ---------------------------------------------------------------- */
@@ -621,13 +646,13 @@ export class Flow {
       }
 
       // The background reloads the tab to run it; that reload is ours.
-      this.expectedReload = true
+      this.ourReload = 'pending'
       await send({ type: 'preview-js', tabId: this.tabId, transform: draft })
       this.jsRan = true
     } catch (cause) {
-      // Otherwise a reload that never came leaves the flag armed, and the next
+      // Otherwise a reload that never came leaves us armed, and the next
       // genuine refresh is swallowed instead of resetting the panel.
-      this.expectedReload = false
+      this.ourReload = 'none'
       this.fail(cause)
     }
   }
@@ -688,7 +713,7 @@ export class Flow {
   async reloadAndRetry(): Promise<void> {
     if (this.tabId === null) return
     await this.clearPreview()
-    this.expectedReload = true
+    this.ourReload = 'pending'
     await browser.tabs.reload(this.tabId)
     await this.regenerate()
   }
@@ -945,6 +970,6 @@ export class Flow {
     this.thinkingChars = 0
     this.streamedKind = null
     this.streamed = ''
-    this.expectedReload = false
+    this.ourReload = 'none'
   }
 }

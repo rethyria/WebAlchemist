@@ -216,8 +216,10 @@
     ) => {
       // A reload of the run's own page invalidates it, whether or not that
       // page is the one on screen. `status` catches a plain refresh, which
-      // reports no url change at all.
+      // reports no url change at all. `complete` is what closes out a reload
+      // we asked for ourselves — see Flow.ourReload.
       if (change.status === 'loading') flow.pageReloading(id)
+      if (change.status === 'complete') flow.pageLoaded(id)
       if (change.url && tab.active) void load()
     }
     browser.tabs.onUpdated.addListener(onTabUpdated)
