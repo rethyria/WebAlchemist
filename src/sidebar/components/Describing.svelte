@@ -71,15 +71,19 @@
   let specificity = $derived(maxDepth - scopeDepth)
 
   /*
-   * The selection can sit a long way down the list — three generations under
-   * any of several neighbours — so it is scrolled to rather than left to be
-   * found. `nearest` because the row is usually already visible, and moving
-   * the list when it did not need to move is its own kind of noise.
+   * The selection is put in the middle of the list, not merely brought into
+   * view. It sits between its ancestors and its descendants, so centring it
+   * shows both — where the minimum scroll would leave it against an edge with
+   * one side of its context off-screen, and leave it wherever it happened to
+   * land when it was already visible.
+   *
+   * The inline axis is left alone: sideways position is the hover's business,
+   * and its resting place is the left edge.
    */
   let list = $state<HTMLDivElement | null>(null)
   $effect(() => {
     void tree
-    list?.querySelector('.node.selected')?.scrollIntoView({ block: 'nearest' })
+    list?.querySelector('.node.selected')?.scrollIntoView({ block: 'center', inline: 'nearest' })
   })
 
   /*
