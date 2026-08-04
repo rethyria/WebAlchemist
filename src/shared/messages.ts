@@ -15,6 +15,7 @@ import type {
   Anchor,
   Credential,
   CredentialStatus,
+  ElementContext,
   GenerationResult,
   HoverTarget,
   PageContext,
@@ -26,6 +27,15 @@ import type {
 } from './types'
 import type { OverlayPalette } from './accents'
 import type { RefinementTurn } from '@background/providers/types'
+
+/**
+ * What a confirmed pick means.
+ *
+ * 'target' is the element the transform acts on — picking one replaces the
+ * previous target, its anchor and its outline. 'reference' only adds context
+ * for the next request and changes nothing about what is being transformed.
+ */
+export type PickMode = 'target' | 'reference'
 
 export type Message =
   /* --- read state --------------------------------------------------- */
@@ -79,8 +89,22 @@ export type Message =
   | { type: 'clear-preview-js'; id: string }
   /** `viewportWidth` converts the CSS-pixel rect to the capture's device pixels. */
   | { type: 'capture-region'; rect: Rect; viewportWidth: number }
-  | { type: 'start-picking'; tabId: number }
+  /**
+   * `mode` decides what a confirmed pick means. 'target' replaces what the
+   * transform acts on; 'reference' adds an element the follow-up can talk
+   * about and leaves the target, its outline and its anchor alone.
+   */
+  | { type: 'start-picking'; tabId: number; mode?: PickMode }
   | { type: 'stop-picking'; tabId: number }
+  /**
+   * Re-reads the element currently being described, from the live page.
+   *
+   * Refinement used to resend the context captured when the element was first
+   * confirmed, so after a preview was applied the model was reasoning about
+   * computed styles and matched rules that its own last attempt had already
+   * changed.
+   */
+  | { type: 'recapture'; tabId: number }
   | { type: 'retarget'; tabId: number; levelsUp: number }
   | { type: 'highlight-ancestor'; tabId: number; levelsUp: number | null }
   | { type: 'set-lock-scope'; tabId: number; depth: number }
@@ -104,8 +128,9 @@ export type Message =
 /** Sent from background to content script. */
 export type ContentMessage =
   /** The palette travels with the request: the overlay cannot read our CSS. */
-  | { type: 'start-picking'; palette: OverlayPalette }
+  | { type: 'start-picking'; palette: OverlayPalette; mode: PickMode }
   | { type: 'cancel-picking' }
+  | { type: 'recapture' }
   /** Walks the selection up the tree from the element being described. */
   | { type: 'retarget'; levelsUp: number }
   /** Draws an ancestor without selecting it. `null` clears. */
@@ -127,6 +152,8 @@ export type ContentMessage =
  */
 export type ContentEvent =
   | { type: 'element-hovered'; target: HoverTarget }
+  /** A reference pick. Carries no anchor or crop: nothing is targeted by it. */
+  | { type: 'element-referenced'; element: ElementContext }
   | {
       type: 'element-picked'
       context: PageContext

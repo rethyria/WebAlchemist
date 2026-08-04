@@ -327,18 +327,31 @@ export interface HoverTarget {
   drawing: boolean
 }
 
+/** One element, described well enough for the model to write against it. */
+export interface ElementContext {
+  selector: string
+  tag: string
+  /** Bounded, depth- and node-capped, with text truncated. */
+  outerHTMLExcerpt: string
+  computedStyles: Record<string, string>
+  /** Author rules matching the element, with specificity, most specific last. */
+  matchedRules: { selector: string; specificity: string; declarations: string }[]
+}
+
 /** Context extracted from the page and sent to the model. */
 export interface PageContext {
   url: string
-  target: {
-    selector: string
-    tag: string
-    /** Bounded, depth- and node-capped, with text truncated. */
-    outerHTMLExcerpt: string
-    computedStyles: Record<string, string>
-    /** Author rules matching the target, with specificity, most specific last. */
-    matchedRules: { selector: string; specificity: string; declarations: string }[]
-  }
+  target: ElementContext
+  /**
+   * Further elements the user pointed at while refining.
+   *
+   * Empty on a first generation. These are context, not targets: the model is
+   * told it may read them and refer to them, but that the transform still acts
+   * on `target` unless the instruction says otherwise. Without this the only
+   * way to mention a second element was to describe it in prose and hope the
+   * selector guessed from that description was the right one.
+   */
+  references?: ElementContext[]
   ancestors: { selector: string; tag: string; computedStyles: Record<string, string> }[]
   /** CSS custom properties in scope at the target. */
   customProperties: Record<string, string>

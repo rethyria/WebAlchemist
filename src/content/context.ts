@@ -7,7 +7,7 @@
  * it emits rules that are silently outranked and look like model errors.
  */
 
-import type { PageContext } from '@shared/types'
+import type { ElementContext, PageContext } from '@shared/types'
 
 /** Properties that matter for layout and appearance decisions. */
 const RELEVANT_PROPERTIES = [
@@ -41,16 +41,27 @@ const MAX_SUBTREE_DEPTH = 4
 const MAX_TEXT_LENGTH = 80
 const MAX_ANCESTORS = 4
 
+/**
+ * One element on its own, without the page-level parts.
+ *
+ * Split out so a reference pick can describe an element without dragging a
+ * second copy of the URL, ancestor chain and custom properties along with it —
+ * those belong to the page, and the page is the same one.
+ */
+export function extractElementContext(element: Element, selector: string): ElementContext {
+  return {
+    selector,
+    tag: element.tagName.toLowerCase(),
+    outerHTMLExcerpt: summariseSubtree(element),
+    computedStyles: relevantStyles(element),
+    matchedRules: matchedAuthorRules(element),
+  }
+}
+
 export function extractContext(element: Element, selector: string): PageContext {
   return {
     url: location.href,
-    target: {
-      selector,
-      tag: element.tagName.toLowerCase(),
-      outerHTMLExcerpt: summariseSubtree(element),
-      computedStyles: relevantStyles(element),
-      matchedRules: matchedAuthorRules(element),
-    },
+    target: extractElementContext(element, selector),
     ancestors: ancestorChain(element),
     customProperties: customPropertiesInScope(element),
   }

@@ -1,10 +1,12 @@
 <script lang="ts">
   import type { RefinementTurn } from '@background/providers/types'
   import type { GenerationResult, ReviewResult } from '@shared/types'
+  import type { ElementContext } from '@shared/types'
   import { autogrow } from '../lib/autogrow'
   import Button from './Button.svelte'
   import CodeBlock from './CodeBlock.svelte'
   import Label from './Label.svelte'
+  import Toggle from './Toggle.svelte'
 
   interface Props {
     result: GenerationResult
@@ -14,7 +16,17 @@
     followUp: string
     /** JS only: whether the draft has been registered and the page reloaded. */
     jsRan: boolean
+    /** Extra elements pointed at, sent with the next attempt. */
+    references: ElementContext[]
+    /** True while the picker is open in the page waiting for a reference. */
+    awaitingReference: boolean
+    sendScreenshot: boolean
+    visionSupported: boolean
+    providerLabel: string
     onfollowup: (text: string) => void
+    onaddreference: () => void
+    onremovereference: (selector: string) => void
+    onscreenshot: (value: boolean) => void
     onregenerate: () => void
     onrun: () => void
     onreload: () => void
@@ -29,7 +41,15 @@
     history,
     followUp,
     jsRan,
+    references,
+    awaitingReference,
+    sendScreenshot,
+    visionSupported,
+    providerLabel,
     onfollowup,
+    onaddreference,
+    onremovereference,
+    onscreenshot,
     onregenerate,
     onrun,
     onreload,
@@ -161,6 +181,49 @@
         oninput={(event) => onfollowup(event.currentTarget.value)}
         onkeydown={onKeyDown}
       ></textarea>
+
+      <!--
+        Context the follow-up can name. Without this the only way to mention a
+        second element was to describe it in prose and hope the selector the
+        model guessed from that description was the one meant.
+      -->
+      <div class="context">
+        {#each references as reference (reference.selector)}
+          <span class="chip">
+            <code>{reference.selector}</code>
+            <button
+              type="button"
+              class="drop"
+              aria-label="Remove {reference.selector}"
+              onclick={() => onremovereference(reference.selector)}>×</button
+            >
+          </span>
+        {/each}
+        <button type="button" class="add" disabled={awaitingReference} onclick={onaddreference}>
+          {awaitingReference ? 'Pick one on the page…' : '+ Point at another element'}
+        </button>
+      </div>
+
+      {#if visionSupported}
+        <div class="shot">
+          <Toggle
+            checked={sendScreenshot}
+            label="Send a screenshot with this attempt"
+            onchange={onscreenshot}
+          />
+          <span class="shot-text">
+            Send a screenshot with this attempt
+            <!-- The preview is already applied, so this shows the last result. -->
+            <em>shows the page as it is now, with this change applied</em>
+          </span>
+        </div>
+        {#if sendScreenshot}
+          <p class="shot-warning">
+            Everything in that region goes to {providerLabel}. Off again after this
+            attempt.
+          </p>
+        {/if}
+      {/if}
       {#if isJs && jsRan}
         <Button variant="primary" full onclick={onreload}>
           Reload page and try again
@@ -398,6 +461,80 @@
     color: var(--text);
     resize: none;
     overflow-y: hidden;
+  }
+
+  .context {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--sp-3);
+  }
+
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 4px 2px 6px;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--r-badge);
+    background: var(--surface-sunken);
+    max-width: 100%;
+  }
+
+  .chip code {
+    font: 10.5px var(--font-mono);
+    color: var(--text-dim);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .drop {
+    padding: 0 3px;
+    border: none;
+    background: none;
+    font: 12px var(--font-ui);
+    color: var(--text-faint);
+    cursor: pointer;
+  }
+
+  .add {
+    padding: 3px 7px;
+    border: 1px dashed var(--border);
+    border-radius: var(--r-badge);
+    background: transparent;
+    font: 10.5px var(--font-ui);
+    color: var(--text-dim);
+    cursor: pointer;
+  }
+
+  .add:disabled {
+    color: var(--accent-fg);
+    border-color: var(--accent-fg);
+    cursor: default;
+  }
+
+  .shot {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--sp-6);
+  }
+
+  .shot-text {
+    font: 11.5px/1.4 var(--font-ui);
+    color: var(--text-dim);
+  }
+
+  .shot-text em {
+    display: block;
+    font-style: normal;
+    color: var(--text-faint);
+  }
+
+  .shot-warning {
+    margin: 0;
+    font: 11px/1.45 var(--font-ui);
+    color: var(--text-faint);
   }
 
   /* Outlined rather than filled: the filled button on this screen is the one

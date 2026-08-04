@@ -317,9 +317,19 @@ async function handle(
       await sendToContent(message.tabId, {
         type: 'start-picking',
         palette: overlayPaletteFor(settings.accent, dark),
+        mode: message.mode ?? 'target',
       })
       return true
     }
+
+    /*
+     * Answered by the content script from the live DOM, so the reply carries
+     * the page as it stands — including any preview already applied to it.
+     * Null when the element has gone, which the caller treats as a reason to
+     * keep the context it already has rather than as a failure.
+     */
+    case 'recapture':
+      return askContent(message.tabId, { type: 'recapture' })
 
     case 'stop-picking':
       await sendToContent(message.tabId, { type: 'cancel-picking' })

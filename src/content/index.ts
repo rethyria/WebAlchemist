@@ -9,11 +9,11 @@
  * sensitive content.
  */
 
-import type { ContentEvent, ContentMessage } from '@shared/messages'
+import type { ContentEvent, ContentMessage, PickMode } from '@shared/messages'
 import type { OverlayPalette } from '@shared/accents'
 import type { HoverTarget, Rect, Transform, TransformRuntimeState } from '@shared/types'
 import { captureAnchor, isBuildHashClass, resolveAnchor } from './anchor'
-import { extractContext } from './context'
+import { extractContext, extractElementContext } from './context'
 
 /* ------------------------------------------------------------------ */
 /* Overlay                                                             */
@@ -668,6 +668,24 @@ function confirmSelection(): void {
   const region = crop ?? boundingRectWithPadding(target)
 
   stopPicking()
+
+  /*
+   * A reference is only something for the next request to talk about. It gets
+   * no anchor, because nothing will be resolved against it on a later visit;
+   * no crop, because it is not what a screenshot would frame; and it leaves
+   * pickedRoot alone, so the retarget slider still measures from the real
+   * target rather than from whatever was pointed at last.
+   */
+  if (pickMode === 'reference') {
+    void send({
+      type: 'element-referenced',
+      element: extractElementContext(target, selectorFor(target)),
+    })
+    // The subject never stopped being the subject; put its outline back.
+    updateLock()
+    return
+  }
+
   pickedRoot = target
   emitPicked(target, region)
 }
@@ -719,6 +737,14 @@ function similarSelectorFor(element: Element): string | null {
 /** The element the panel is describing, and how far up the chain it applies. */
 let describedElement: Element | null = null
 let lockDepth = 0
+
+/**
+ * What the current picking session will do with what it confirms.
+ *
+ * Defaults to 'target' so any path that starts picking without saying behaves
+ * as it always has.
+ */
+let pickMode: PickMode = 'target'
 
 /**
  * The elements a given depth covers, and the container it resolves to.
@@ -1045,12 +1071,25 @@ async function handleMessage(message: ContentMessage) {
   switch (message.type) {
     case 'start-picking':
       palette = message.palette
+      pickMode = message.mode
       preview.unmount()
-      // The previous target stops being the subject the moment picking starts.
-      lock.hide()
-      describedElement = null
+      /*
+       * A reference pick keeps the subject. Only a target pick replaces it, so
+       * only a target pick may take the outline down — clearing it here
+       * unconditionally would make pointing at a second element look like it
+       * had thrown the first one away.
+       */
+      if (pickMode === 'target') {
+        lock.hide()
+        describedElement = null
+      }
       startPicking(message.palette)
       return true
+    case 'recapture': {
+      // Re-read from the live DOM, which by now carries the preview.
+      if (!describedElement || !describedElement.isConnected) return null
+      return extractContext(describedElement, captureAnchor(describedElement).selector)
+    }
     case 'cancel-picking':
       stopPicking()
       return true

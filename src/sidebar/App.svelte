@@ -354,7 +354,15 @@
       history={flow.history}
       followUp={flow.followUp}
       jsRan={flow.jsRan}
+      references={flow.references}
+      awaitingReference={flow.awaitingReference}
+      sendScreenshot={flow.sendScreenshot}
+      visionSupported={flow.visionSupported}
+      {providerLabel}
       onfollowup={(value) => (flow.followUp = value)}
+      onaddreference={() => void flow.addReference()}
+      onremovereference={(selector) => flow.removeReference(selector)}
+      onscreenshot={(value) => (flow.sendScreenshot = value)}
       onregenerate={() => void flow.regenerate()}
       onrun={() => void flow.runJs()}
       onreload={() => void flow.reloadAndRetry()}

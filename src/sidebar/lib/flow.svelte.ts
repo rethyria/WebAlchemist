@@ -16,9 +16,9 @@
  *   into the tab and a draft held in memory. Closing the panel discards both,
  *   which is what the refining step promises the user.
  *
- *   The screenshot opt-in is per request. It resets on every entry to
- *   `describing` and is never written to storage. Consent to send an image of
- *   the page once is not consent to keep doing it.
+ *   The screenshot opt-in is per request. It resets after every attempt and is
+ *   never written to storage. Consent to send an image of the page once is not
+ *   consent to keep doing it.
  */
 
 import type { ContentEvent } from '@shared/messages'
@@ -31,6 +31,7 @@ import {
 } from '@shared/match'
 import type {
   Anchor,
+  ElementContext,
   GenerationResult,
   HoverTarget,
   PageContext,
@@ -120,6 +121,16 @@ export class Flow {
 
   history = $state<RefinementTurn[]>([])
   followUp = $state('')
+
+  /**
+   * Extra elements pointed at while refining, sent alongside the target.
+   *
+   * Cleared with the run, not with each attempt: having pointed at something
+   * once, the user should not have to point at it again for every follow-up.
+   */
+  references = $state<ElementContext[]>([])
+  /** True between asking for a reference pick and one arriving or being cancelled. */
+  awaitingReference = $state(false)
 
   result = $state<GenerationResult | null>(null)
   /**
@@ -369,7 +380,16 @@ export class Flow {
         return
       }
 
+      case 'element-referenced':
+        if (!this.awaitingReference) return
+        this.awaitingReference = false
+        // The same element twice tells the model nothing and costs tokens.
+        if (this.references.some((held) => held.selector === event.element.selector)) return
+        this.references = [...this.references, event.element]
+        return
+
       case 'picking-cancelled':
+        this.awaitingReference = false
         if (this.step === 'picking') this.step = 'list'
         return
 
@@ -392,6 +412,8 @@ export class Flow {
     this.instruction = ''
     this.history = []
     this.followUp = ''
+    this.references = []
+    this.awaitingReference = false
     void this.checkVisionSupport()
   }
 
@@ -453,6 +475,29 @@ export class Flow {
   /* Generating                                                        */
   /* ---------------------------------------------------------------- */
 
+  /**
+   * The target as it stands now, not as it stood when it was picked.
+   *
+   * Refinement used to resend the context captured at confirm time, so once a
+   * preview was applied the model was reading computed styles and matched
+   * rules that its own last attempt had already changed — and then being asked
+   * why the change had not taken. Falling back to the captured copy is
+   * deliberate: a page that cannot answer is a reason to use what we have, not
+   * to fail the request.
+   */
+  private async liveContext(picked: Picked): Promise<PageContext> {
+    if (this.tabId === null) return picked.context
+    try {
+      const live = await send<PageContext | null>({
+        type: 'recapture',
+        tabId: this.tabId,
+      })
+      return live ?? picked.context
+    } catch {
+      return picked.context
+    }
+  }
+
   async generate(): Promise<void> {
     const picked = this.picked
     if (!picked || !this.instruction.trim()) return
@@ -466,8 +511,9 @@ export class Flow {
     this.startClock()
 
     try {
-      const context = { ...picked.context }
       this.stage = 'context'
+      const context: PageContext = { ...(await this.liveContext(picked)) }
+      if (this.references.length > 0) context.references = [...this.references]
 
       if (this.sendScreenshot && this.visionSupported) {
         const shot = await send<{ dataUrl: string; clipped: boolean }>({
@@ -563,7 +609,37 @@ export class Flow {
       this.fail(cause)
     } finally {
       this.stopClock()
+      /*
+       * The opt-in is spent by the attempt, not by the run. A failed attempt
+       * still sent the image, so it is consumed either way — and the toggle is
+       * visible on both the describing and refining panels, so an unticked box
+       * is something the user can see rather than a silent downgrade.
+       */
+      this.sendScreenshot = false
     }
+  }
+
+  /**
+   * Points at a second element to talk about, without changing the target.
+   *
+   * No permission request here: the origin was granted before the first pick,
+   * and this is the same page in the same run. The step deliberately stays on
+   * 'refining' — the picker runs in the page while the panel keeps the
+   * conversation, so cancelling in the page returns to exactly where they were.
+   */
+  async addReference(): Promise<void> {
+    if (this.tabId === null || this.step !== 'refining') return
+    this.awaitingReference = true
+    try {
+      await send({ type: 'start-picking', tabId: this.tabId, mode: 'reference' })
+    } catch (cause) {
+      this.awaitingReference = false
+      this.fail(cause)
+    }
+  }
+
+  removeReference(selector: string): void {
+    this.references = this.references.filter((held) => held.selector !== selector)
   }
 
   private buildDraft(result: GenerationResult, anchor: Anchor): Transform {
@@ -969,6 +1045,8 @@ export class Flow {
     this.elapsed = 0
     this.thinkingChars = 0
     this.streamedKind = null
+    this.references = []
+    this.awaitingReference = false
     this.streamed = ''
     this.ourReload = 'none'
   }

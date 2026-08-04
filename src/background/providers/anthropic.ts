@@ -254,6 +254,38 @@ function describeContext(context: PageContext): string {
     .map(([property, value]) => `  ${property}: ${value}`)
     .join('\n')
 
+  /*
+   * Rendered only when there are any, and labelled as context rather than as
+   * further targets. The user pointed at these to be able to talk about them;
+   * whether the transform should touch them is something their instruction
+   * says, not something their having pointed implies.
+   */
+  const references = (context.references ?? [])
+    .map(
+      (element) => `  ${element.selector}  (${element.tag})
+  computed styles:
+${styles(element.computedStyles)}
+  author rules matching it (most specific last):
+${
+  element.matchedRules
+    .map((r) => `    ${r.selector}  /* specificity ${r.specificity} */\n      ${r.declarations}`)
+    .join('\n') || '    (none)'
+}
+  markup excerpt:
+    ${element.outerHTMLExcerpt}`,
+    )
+    .join('\n\n')
+
+  const referenceSection = references
+    ? `
+
+## Also pointed at
+These are for reference. Act on the Target above unless the instruction says
+otherwise; these are here so the instruction can refer to them by name.
+
+${references}`
+    : ''
+
   return `## Page
 URL: ${context.url}
 
@@ -271,7 +303,7 @@ ${rules || '  (none)'}
 ${ancestors || '  (none)'}
 
 ## CSS custom properties in scope
-${customProperties || '  (none)'}
+${customProperties || '  (none)'}${referenceSection}
 
 ## Markup excerpt
 ${context.target.outerHTMLExcerpt}`
