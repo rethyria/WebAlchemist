@@ -64,7 +64,13 @@
 
 <div class="panel">
   <header>
-    <span class="title">Writing {kind === 'js' ? 'JavaScript' : 'CSS'}</span>
+    <!--
+      Neutral until the model has said which it is writing. Defaulting to CSS
+      titled every JavaScript run wrongly for its whole duration.
+    -->
+    <span class="title">
+      {kind === null ? 'Generating' : kind === 'js' ? 'Writing JavaScript' : 'Writing CSS'}
+    </span>
     <span class="elapsed">{elapsed}s</span>
   </header>
 
@@ -100,6 +106,14 @@
     flex-direction: column;
     gap: var(--sp-12);
     padding: var(--gutter-sidebar);
+    /*
+     * Without this the panel takes its height from its content — a flex item
+     * defaults to min-height:auto — so the code block below could never be
+     * shorter than the code inside it, and `overflow-y: auto` had nothing to
+     * scroll. The panel simply grew past the bottom of the sidebar instead.
+     * Refining already carried this line; generating did not.
+     */
+    min-height: 0;
   }
 
   header {

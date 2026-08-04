@@ -59,4 +59,33 @@ export interface Mv3UserScriptsApi {
   resetWorldConfiguration(worldId?: string): Promise<void>
 }
 
-export const userScripts = browser.userScripts as unknown as Mv3UserScriptsApi
+/**
+ * Resolved on every call, never captured.
+ *
+ * `browser.userScripts` does not exist until the optional permission is
+ * granted, and Firefox adds the namespace to the *already running* context at
+ * the moment it is. Binding it once at module load therefore captured
+ * `undefined` for the whole life of the background page: the first attempt to
+ * run a script after the user granted permission failed on a namespace that
+ * was, by then, genuinely present. It would start working only once the event
+ * page happened to restart — which, given a 30 second idle timeout, looked
+ * like an intermittent fault rather than a stale binding.
+ */
+function api(): Mv3UserScriptsApi {
+  const namespace = (browser as unknown as { userScripts?: unknown }).userScripts
+  if (!namespace) {
+    throw new Error(
+      'Firefox has not granted the user scripts permission, so no script can be registered.',
+    )
+  }
+  return namespace as Mv3UserScriptsApi
+}
+
+export const userScripts: Mv3UserScriptsApi = {
+  register: (scripts) => api().register(scripts),
+  update: (scripts) => api().update(scripts),
+  unregister: (filter) => api().unregister(filter),
+  getScripts: (filter) => api().getScripts(filter),
+  configureWorld: (properties) => api().configureWorld(properties),
+  resetWorldConfiguration: (worldId) => api().resetWorldConfiguration(worldId),
+}

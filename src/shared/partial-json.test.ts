@@ -58,6 +58,35 @@ describe('extractPartialString', () => {
     expect(extractPartialString(json, 'code')).toBe('right')
   })
 
+  /*
+   * The generating panel titles itself from `kind` while the response is still
+   * arriving, so two things have to hold: it must be readable well before the
+   * code, and a half-arrived value must never be mistaken for a whole one.
+   */
+  it('reads kind before code arrives, and never yields a partial word', () => {
+    const full =
+      '{"name":"Hide the sidebar","kind":"js","world":"USER_SCRIPT",' +
+      '"capabilities":[],"code":"document.body.remove()"}'
+
+    const seen: (string | null)[] = []
+    for (let i = 1; i <= full.length; i += 1) {
+      seen.push(extractPartialString(full.slice(0, i), 'kind'))
+    }
+
+    // Every value the panel would accept is one of the two real kinds; the
+    // intermediate "j" is present but is exactly what the caller filters out.
+    expect(seen.filter((v) => v === 'js' || v === 'css').length).toBeGreaterThan(0)
+    expect(seen.every((v) => v === null || 'js'.startsWith(v) || 'css'.startsWith(v))).toBe(true)
+
+    // Readable strictly earlier than the code, which is the whole point.
+    const kindAt = seen.findIndex((v) => v === 'js')
+    const codeAt = Array.from({ length: full.length }, (_, i) =>
+      extractPartialString(full.slice(0, i + 1), 'code'),
+    ).findIndex((v) => v !== null)
+    expect(kindAt).toBeGreaterThanOrEqual(0)
+    expect(kindAt).toBeLessThan(codeAt)
+  })
+
   it('grows monotonically as chunks arrive', () => {
     const full = '{"code":"line one\\nline two"}'
     let previous = ''

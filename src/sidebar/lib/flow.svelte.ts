@@ -145,6 +145,15 @@ export class Flow {
   elapsed = $state(0)
   /** Characters of reasoning so far. The reasoning itself never crosses. */
   thinkingChars = $state(0)
+  /**
+   * Kind read out of the partial response, before a full result exists.
+   *
+   * The generating panel titled itself from `result`, which is null for the
+   * whole of generation — so every run announced itself as CSS, including the
+   * ones writing JavaScript. `kind` is the second property in the schema, so
+   * it lands early and long before the code does.
+   */
+  streamedKind = $state<TransformKind | null>(null)
   /** Code pulled out of the partial response, shown as it is written. */
   streamed = $state('')
 
@@ -266,21 +275,22 @@ export class Flow {
     const origin = originPermissionForUrl(this.url)
     if (!origin) return
 
-    // First await — the gesture has to still be live when this runs.
-    const granted = await browser.permissions.request({ origins: [origin] })
-    if (!granted) {
-      this.error = {
-        kind: 'request-failed',
-        message: `Web Alchemist needs permission to read ${this.hostname()} before it can point at anything on it.`,
-      }
-      return
-    }
-
-    this.error = null
-    this.hover = null
-    this.picked = null
-    this.step = 'picking'
     try {
+      // First await — the gesture has to still be live when this runs. See
+      // runJs for why the request is inside the try rather than before it.
+      const granted = await browser.permissions.request({ origins: [origin] })
+      if (!granted) {
+        this.error = {
+          kind: 'request-failed',
+          message: `Web Alchemist needs permission to read ${this.hostname()} before it can point at anything on it.`,
+        }
+        return
+      }
+
+      this.error = null
+      this.hover = null
+      this.picked = null
+      this.step = 'picking'
       await send({ type: 'start-picking', tabId: this.tabId })
     } catch (cause) {
       this.step = 'list'
@@ -449,6 +459,7 @@ export class Flow {
 
       this.streamed = ''
       this.thinkingChars = 0
+      this.streamedKind = null
       const run = generateOverPort(
         {
           context,
@@ -476,6 +487,11 @@ export class Flow {
              * and rationale all arrive before a single line of code does.
              */
             this.stage = 'streaming'
+
+            // Only ever the two complete values: a partial read of "js" is "j",
+            // and half a word would title the panel wrongly for a moment.
+            const kind = extractPartialString(accumulated, 'kind')
+            if (kind === 'css' || kind === 'js') this.streamedKind = kind
 
             // The response is a JSON object, so what arrives is a partial
             // document. Only the code field is worth showing.
@@ -576,25 +592,37 @@ export class Flow {
     const draft = this.draft
     if (!draft || this.tabId === null || !this.analysis?.passed) return
 
-    // Before any await: the gesture that reached here has to still be live.
-    const granted = await browser.permissions.request(
-      this.permissionsFor('js', this.matchPattern),
-    )
-    if (!granted) {
-      this.error = {
-        kind: 'request-failed',
-        message:
-          'Running a script needs Firefox’s user scripts permission. Nothing was run, and your description is kept.',
-      }
-      return
-    }
-
+    /*
+     * The whole body is guarded, not just the send.
+     *
+     * permissions.request() used to sit outside this try, and every call site
+     * invokes these methods as `void flow.runJs()`. A throw from the request
+     * therefore became an unhandled rejection that reached nobody: the button
+     * did nothing at all, with no error and no state change. Wrapping it does
+     * not spend the user gesture — a try block introduces no await, so the
+     * request is still issued synchronously from the click.
+     */
     try {
+      const granted = await browser.permissions.request(
+        this.permissionsFor('js', this.matchPattern),
+      )
+      if (!granted) {
+        this.error = {
+          kind: 'request-failed',
+          message:
+            'Running a script needs Firefox’s user scripts permission. Nothing was run, and your description is kept.',
+        }
+        return
+      }
+
       // The background reloads the tab to run it; that reload is ours.
       this.expectedReload = true
       await send({ type: 'preview-js', tabId: this.tabId, transform: draft })
       this.jsRan = true
     } catch (cause) {
+      // Otherwise a reload that never came leaves the flag armed, and the next
+      // genuine refresh is swallowed instead of resetting the panel.
+      this.expectedReload = false
       this.fail(cause)
     }
   }
@@ -773,26 +801,26 @@ export class Flow {
      * Requesting something already granted resolves true without prompting,
      * so there is no need to check first.
      */
-    const granted = await browser.permissions.request(
-      this.permissionsFor(draft.kind, this.matchPattern),
-    )
-    if (!granted) {
-      this.permissionDenied = true
-      return
-    }
-    this.permissionDenied = false
-
-    // The intent and scope are editable right up to this point, so they are
-    // read now rather than at generation time.
-    const transform: Transform = {
-      ...draft,
-      intent: this.intent,
-      match: this.matchPattern,
-      capabilities: this.result?.capabilities ?? draft.capabilities,
-      updatedAt: Date.now(),
-    }
-
     try {
+      const granted = await browser.permissions.request(
+        this.permissionsFor(draft.kind, this.matchPattern),
+      )
+      if (!granted) {
+        this.permissionDenied = true
+        return
+      }
+      this.permissionDenied = false
+
+      // The intent and scope are editable right up to this point, so they are
+      // read now rather than at generation time.
+      const transform: Transform = {
+        ...draft,
+        intent: this.intent,
+        match: this.matchPattern,
+        capabilities: this.result?.capabilities ?? draft.capabilities,
+        updatedAt: Date.now(),
+      }
+
       // The preview and the saved transform would otherwise both be applied,
       // stacking the same rules twice.
       await this.clearPreview()
@@ -884,6 +912,7 @@ export class Flow {
     this.stage = 'context'
     this.elapsed = 0
     this.thinkingChars = 0
+    this.streamedKind = null
     this.streamed = ''
     this.expectedReload = false
   }

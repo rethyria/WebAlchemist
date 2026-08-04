@@ -133,7 +133,15 @@ export async function createAnthropicProvider(provider: Provider): Promise<AiPro
           model: generateModel,
           max_tokens: 16000,
           system: GENERATE_SYSTEM_PROMPT,
-          thinking: { type: 'adaptive' },
+          /*
+           * `display` is an opt-in. On Opus 5 the default omits the reasoning
+           * text entirely, so `thinking_delta` never arrives and the stream is
+           * silent until the answer starts — which is exactly the stretch the
+           * panel had nothing to report. The non-streaming calls below leave
+           * it off: nothing there reads the reasoning, so paying for it would
+           * buy nothing.
+           */
+          thinking: { type: 'adaptive', display: 'summarized' },
           messages: [
             ...request.history.map((turn) => ({
               role: turn.role,

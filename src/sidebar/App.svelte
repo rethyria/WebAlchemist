@@ -329,7 +329,7 @@
       stage={flow.stage}
       reached={(stage) => flow.stageReached(stage)}
       elapsed={flow.elapsed}
-      kind={flow.result?.kind ?? null}
+      kind={flow.result?.kind ?? flow.streamedKind}
       code={flow.streamed}
       withScreenshot={flow.sendScreenshot}
       {contextSize}
