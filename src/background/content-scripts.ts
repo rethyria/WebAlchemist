@@ -37,12 +37,33 @@ interface Registration {
   persistAcrossSessions?: boolean
 }
 
+/**
+ * Patterns that mean every site, which are refused as registration targets.
+ *
+ * A blanket grant must not switch on injection everywhere. Screenshots ask for
+ * `<all_urls>` because captureVisibleTab accepts nothing narrower, and that
+ * grant should buy a screenshot — not a content script on every page the user
+ * visits for as long as they hold it.
+ *
+ * This was previously a side effect rather than a decision: filtering on
+ * `origin.includes('://')` happens to drop `<all_urls>`, which has no scheme
+ * separator, while letting the scheme-wildcard form through unchallenged. The
+ * right outcome for the case that exists today, by accident, and the wrong one
+ * for the case sitting next to it.
+ */
+const ALL_SITES = new Set([
+  '<all_urls>',
+  '*://*/*',
+  '*://*',
+  'http://*/*',
+  'https://*/*',
+])
+
 /** Origins we currently hold, in content-script match-pattern form. */
 async function grantedOrigins(): Promise<string[]> {
   const held = await browser.permissions.getAll()
   const origins = held.origins ?? []
-  // <all_urls> and *://*/* are both possible if the user granted everything.
-  return origins.filter((origin) => origin.includes('://'))
+  return origins.filter((origin) => origin.includes('://') && !ALL_SITES.has(origin))
 }
 
 export async function reconcile(): Promise<{ registered: number }> {
