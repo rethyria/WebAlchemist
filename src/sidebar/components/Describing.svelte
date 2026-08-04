@@ -82,73 +82,52 @@
    */
   let list = $state<HTMLDivElement | null>(null)
 
-  /*
-   * Puts a row's own name on the panel's midline, or as near as the scroll
-   * range allows.
+  /**
+   * One level of nesting, in pixels, and the gutter before the first.
    *
-   * Rows are laid out at their full width rather than clipped, so a deep one
-   * runs off the right of a 264px panel and the list scrolls sideways to
-   * reach it. Where it stops is the question this answers: on the midline,
-   * which leaves the shallower rows above legible to the left and the deeper
-   * rows below to the right. Scrolling the name hard against either edge
-   * would read it at the cost of everything around it, which is the opposite
-   * of what the list is for.
-   *
-   * Only the viewport moves — nothing about the row's own position changes.
-   * The browser clamps the result, so a list with nothing to scroll stays
-   * where it is, and one scrolled to its end gets as close as it can.
+   * A fixed step rather than one scaled to fit the panel. Squeezing deep
+   * trees into the width available made two different depths draw at nearly
+   * the same offset, and it left every row starting left of the midline —
+   * which is to say there was never anything to centre. The tree is allowed
+   * to be wider than the panel instead, and the list scrolls to it.
    */
-  function centre(row: Element | null | undefined): void {
-    const name = row?.firstElementChild
-    if (!list || !name) return
-    const box = name.getBoundingClientRect()
-    const start = box.left - list.getBoundingClientRect().left + list.scrollLeft
-    /*
-     * The second term only bites for a name wider than the panel, where
-     * centring would cut both of its ends: such a name is read from its
-     * beginning instead. Everything that fits is centred exactly, since
-     * centring a box narrower than the view never scrolls past its start.
-     */
-    list.scrollLeft = Math.min(start + box.width / 2 - list.clientWidth / 2, start)
-  }
-
-  const selectedRow = (): Element | null => list?.querySelector('.node.selected') ?? null
-
-  /*
-   * The selection is framed by default: centred down the list, and centred
-   * across it by the same rule the hover uses. It sits between its ancestors
-   * and its descendants, so the middle is the position that shows both.
-   */
-  $effect(() => {
-    void tree
-    const selected = selectedRow()
-    selected?.scrollIntoView({ block: 'center', inline: 'nearest' })
-    centre(selected)
-  })
-
-  /** Hovering is a departure from the selection, so leaving returns to it. */
-  function rest(): void {
-    centre(selectedRow())
-  }
-
-  /*
-   * Indentation is scaled to fit the deepest row rather than clipped at a
-   * level, so nesting stays readable however deep the tree runs. Clipping
-   * drew two different depths as the same line, which is worse than a tight
-   * step: the indent is the only thing saying what contains what.
-   *
-   * Capped at the step a shallow tree already used, so nothing changes for
-   * the common case, and floored so the deepest levels stay distinguishable.
-   */
-  const INDENT_BUDGET = 108
-  let step = $derived.by(() => {
-    const deepest = Math.max(0, ...tree.map((row) => row.indent))
-    if (deepest === 0) return 9
-    return Math.max(3, Math.min(9, INDENT_BUDGET / deepest))
-  })
-
-  /** The gutter every row keeps, scrolled or not. */
+  const STEP = 9
   const GUTTER = 6
+
+  /**
+   * Puts the start of a row's name on the panel's midline, or as near as the
+   * scroll range allows.
+   *
+   * Measured from the indent alone, so the position is a fact about where a
+   * row sits in the tree: two rows at the same depth put the list in the same
+   * place whether they are called `li` or `li.active`. Measuring the name
+   * instead made the offset depend on how long each one happened to be, so
+   * siblings disagreed for no reason a reader could see.
+   *
+   * The midline rather than the left edge because the point is the
+   * surroundings: shallower rows stay legible to the left, deeper ones to the
+   * right. Only the viewport moves — nothing about a row's own position
+   * changes — and the browser clamps the result, so a list with nothing to
+   * scroll stays where it is.
+   */
+  function centre(pad: number): void {
+    if (list) list.scrollLeft = pad - list.clientWidth / 2
+  }
+
+  /*
+   * Hovering a row is a glance, and a pointer crossing the list produces a
+   * row of them. Waiting for the pointer to settle means one scroll where it
+   * stopped, rather than one per row it passed over on the way.
+   */
+  const SETTLE_MS = 120
+  let settle: ReturnType<typeof setTimeout> | undefined
+
+  function centreSoon(pad: number): void {
+    clearTimeout(settle)
+    settle = setTimeout(() => centre(pad), SETTLE_MS)
+  }
+
+  $effect(() => () => clearTimeout(settle))
 
   /*
    * Outermost first, so the list reads down the page's own nesting: ancestors,
@@ -160,7 +139,7 @@
   let rows = $derived(
     tree.map((row) => ({
       ...row,
-      pad: GUTTER + row.indent * step,
+      pad: GUTTER + row.indent * STEP,
       isTarget: row.relation === 'current',
       // The container the current scope resolves to, marked distinctly: it
       // answers a different question from the target.
@@ -174,6 +153,26 @@
       inScope: scopeDepth > 0 && row.above !== undefined && row.above <= scopeDepth,
     })),
   )
+
+  /** Where the selection's name starts, which is the list's resting position. */
+  let selectedPad = $derived(rows.find((row) => row.isTarget)?.pad ?? 0)
+
+  /*
+   * The selection is framed by default: centred down the list, and centred
+   * across it by the same rule the hover uses. It sits between its ancestors
+   * and its descendants, so the middle is the position that shows both.
+   */
+  $effect(() => {
+    void tree
+    clearTimeout(settle)
+    list?.querySelector('.node.selected')?.scrollIntoView({ block: 'center', inline: 'nearest' })
+    centre(selectedPad)
+  })
+
+  /** Hovering is a departure from the selection, so leaving returns to it. */
+  function rest(): void {
+    centreSoon(selectedPad)
+  }
 </script>
 
 <div class="panel">
@@ -210,25 +209,21 @@
                   class:aside={row.relation === 'sibling'}
                   style="padding-left: {row.pad}px"
                   onclick={() => onretarget(path)}
-                  onmouseenter={(event) => {
+                  onmouseenter={() => {
                     onpreview(path)
-                    centre(event.currentTarget)
+                    centreSoon(row.pad)
                   }}
-                  onfocus={(event) => {
+                  onfocus={() => {
                     onpreview(path)
-                    centre(event.currentTarget)
+                    /* Keyboard focus is a decision, not a glance: no wait. */
+                    centre(row.pad)
                   }}
                   onblur={() => onpreview(null)}
                 >
-                <!--
-                  The name is wrapped so its own width can be measured: the
-                  button is stretched to the width of the widest row, and
-                  centring needs this row's extent rather than that one's. It
-                  is written on a single line because whitespace inside it
-                  would be measured too. The badge marks where the pick
-                  started, so the way back to it is visible from wherever the
-                  selection has moved to.
-                --><span class="name">{row.label}{#if row.origin}<span class="origin">picked</span>{/if}</span>
+                {row.label}
+                <!-- Where the pick started, so the way back to it is visible
+                     from wherever the selection has moved to. -->
+                {#if row.origin}<span class="origin">picked</span>{/if}
                 </button>
               {:else}
                 <!-- Children not shown. A count rather than an element: there is
