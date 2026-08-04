@@ -768,6 +768,20 @@ function similarSelectorFor(element: Element): string | null {
   return `${parentSelector} > ${tag}`
 }
 
+/**
+ * Resolves after the next paint.
+ *
+ * One frame callback runs *before* the paint it was scheduled for; the second
+ * is the first thing to run after it. This is the ordinary idiom for "the
+ * screen now shows what I just changed", and here it is the difference between
+ * a screenshot with our highlights in it and one without.
+ */
+function nextPaint(): Promise<void> {
+  return new Promise((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+  })
+}
+
 /** The element the panel is describing, and how far up the chain it applies. */
 let describedElement: Element | null = null
 let lockDepth = 0
@@ -1141,8 +1155,25 @@ async function handleMessage(message: ContentMessage) {
     case 'set-lock-visible':
       // Rebuilt from describedElement rather than restored, so the boxes come
       // back where the elements are now rather than where they were.
-      if (message.visible) updateLock()
-      else lock.hide()
+      if (message.visible) {
+        updateLock()
+        return true
+      }
+      /*
+       * Everything of ours, not just the outline. The hover preview draws its
+       * own boxes and the picker its own sheet, and a capture is a picture of
+       * whatever is on screen — it does not care which of our overlays drew it.
+       */
+      lock.hide()
+      preview.unmount()
+      overlay.unmount()
+      /*
+       * Removing the nodes is not the same as the page having been drawn
+       * without them. captureVisibleTab grabs the frame the compositor has,
+       * so returning as soon as the DOM changed meant the screenshot could
+       * still contain the highlights it had just taken down.
+       */
+      await nextPaint()
       return true
 
     case 'clear-lock':
