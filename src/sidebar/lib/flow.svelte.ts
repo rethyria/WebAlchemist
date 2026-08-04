@@ -603,9 +603,14 @@ export class Flow {
      * request is still issued synchronously from the click.
      */
     try {
-      const granted = await browser.permissions.request(
-        this.permissionsFor('js', this.matchPattern),
-      )
+      /*
+       * The current page, not the transform's match pattern. A preview only
+       * has to run on the tab in front of the user, and that origin was
+       * granted back when picking started — so passing the pattern here would
+       * prompt for a broader grant than the preview needs, at a point where
+       * the user has not yet decided to keep anything.
+       */
+      const granted = await this.requestFor('js', '')
       if (!granted) {
         this.error = {
           kind: 'request-failed',
@@ -763,26 +768,54 @@ export class Flow {
   }
 
   /**
-   * What has to be granted before this transform can actually work.
+   * Asks for what has to be granted before this transform can actually work.
    *
    * The origin grant is what lets `insertCSS` run on later visits. Without it
    * the transform saves, appears in the list, and silently never applies —
    * which is worse than refusing to save it.
+   *
+   * This is two calls, not one, and that is forced on us. Firefox keeps
+   * `userScripts` in OPTIONAL_ONLY_PERMISSIONS, and ext-permissions.js rejects
+   * any request carrying it alongside another permission, *an origin*, or a
+   * data collection entry:
+   *
+   *   Cannot request permission userScripts with another permission
+   *
+   * That check runs before the one that drops already-granted entries, so a
+   * combined request throws even when everything in it is already held. Asking
+   * for both at once could never have worked.
+   *
+   * Both calls are issued before the first await. permissions.request() only
+   * works while the click that reached here is still live, and awaiting one
+   * would spend the gesture the other needs — so they start together and are
+   * awaited together. In practice this shows one prompt, not two: a request
+   * whose contents are already granted is filtered to nothing and resolves
+   * true without a doorhanger.
    */
-  permissionsFor(kind: TransformKind, match: string): browser.permissions.Permissions {
+  requestFor(kind: TransformKind, match: string): Promise<boolean> {
     // A blank pattern would yield `*:///*`, which Firefox rejects outright and
     // which would take the whole request down with it.
     const origin = match
       ? originPermissionFor(match)
       : (originPermissionForUrl(this.url) ?? '')
 
-    return {
-      origins: origin ? [origin] : [],
-      // 'userScripts' is absent from the OptionalPermission union in
-      // @types/firefox-webext-browser, and a union cannot be widened by
-      // declaration merging. Same cast as registry.ts, for the same reason.
-      ...(kind === 'js' ? { permissions: ['userScripts'] } : {}),
-    } as unknown as browser.permissions.Permissions
+    const forOrigin = origin
+      ? browser.permissions.request({ origins: [origin] })
+      : Promise.resolve(true)
+
+    // 'userScripts' is absent from the OptionalPermission union in
+    // @types/firefox-webext-browser, and a union cannot be widened by
+    // declaration merging. Same cast as registry.ts, for the same reason.
+    const forScripts =
+      kind === 'js'
+        ? browser.permissions.request({
+            permissions: ['userScripts'],
+          } as unknown as browser.permissions.Permissions)
+        : Promise.resolve(true)
+
+    return Promise.all([forOrigin, forScripts]).then(
+      ([originGranted, scriptsGranted]) => originGranted && scriptsGranted,
+    )
   }
 
   async save(): Promise<void> {
@@ -802,9 +835,7 @@ export class Flow {
      * so there is no need to check first.
      */
     try {
-      const granted = await browser.permissions.request(
-        this.permissionsFor(draft.kind, this.matchPattern),
-      )
+      const granted = await this.requestFor(draft.kind, this.matchPattern)
       if (!granted) {
         this.permissionDenied = true
         return

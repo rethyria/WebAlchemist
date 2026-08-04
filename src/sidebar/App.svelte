@@ -150,9 +150,17 @@
      * Before any await, so the gesture behind the toggle is still live.
      */
     if (enabled && transform.kind === 'js') {
-      const granted = await browser.permissions.request(
-        flow.permissionsFor('js', transform.match),
-      )
+      // Guarded because this handler is invoked as `void setEnabled(...)`, so
+      // a rejection here would otherwise be swallowed and the toggle would
+      // simply snap back with nothing said. See Flow.requestFor for why this
+      // is two requests rather than one.
+      let granted = false
+      try {
+        granted = await flow.requestFor('js', transform.match)
+      } catch (cause) {
+        flow.error = { kind: 'request-failed', message: String(cause) }
+        return
+      }
       if (!granted) return
     }
 
