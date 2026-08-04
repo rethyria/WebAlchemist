@@ -11,7 +11,6 @@
     cropClipped: boolean
     instruction: string
     sendScreenshot: boolean
-    armingScreenshot: boolean
     choosingRegion: boolean
     /** The captured image, once there is one. */
     shotPreview: string | null
@@ -40,7 +39,6 @@
     cropClipped,
     instruction,
     sendScreenshot,
-    armingScreenshot,
     choosingRegion,
     shotPreview,
     shotClipped,
@@ -187,7 +185,7 @@
     <section class="screenshot">
       <div class="opt-in">
         <Toggle
-          checked={sendScreenshot || armingScreenshot || choosingRegion}
+          checked={sendScreenshot || choosingRegion}
           label="Send a screenshot"
           onchange={onscreenshot}
         />
@@ -196,16 +194,6 @@
 
       {#if choosingRegion}
         <p class="awaiting">Drag the area to capture on the page.</p>
-      {:else if armingScreenshot}
-        <!--
-          The panel cannot photograph the tab. Firefox grants that only to a
-          toolbar-button click, never to a sidebar, so it asks for one rather
-          than failing in a way that looks like a bug.
-        -->
-        <p class="awaiting">
-          Click the Web Alchemist button in the toolbar to capture. Nothing is
-          taken until you do.
-        </p>
       {/if}
 
       <!--

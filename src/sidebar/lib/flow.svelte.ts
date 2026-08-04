@@ -118,14 +118,11 @@ export class Flow {
   /**
    * Whether an image is going with the next request.
    *
-   * This is only ever true once one has actually been captured, so the panel
-   * cannot claim it is sending something it does not have. Ticking the box
-   * sets `armingScreenshot`; the toolbar click that follows is what makes this
-   * true. Per request, and never persisted.
+   * Only ever true once one has actually been captured, so the panel cannot
+   * claim it is sending something it does not have. Per request, and never
+   * persisted.
    */
   sendScreenshot = $state(false)
-  /** Waiting for the toolbar click that can capture. See armScreenshot. */
-  armingScreenshot = $state(false)
   /** True while the user is drawing the region on the page. */
   choosingRegion = $state(false)
   /** The captured image, sent with the next request. */
@@ -417,21 +414,6 @@ export class Flow {
         return
       }
 
-      case 'screenshot-captured':
-        if (event.tabId !== this.tabId) return
-        this.armingScreenshot = false
-        this.acceptShot(event.shot)
-        return
-
-      case 'screenshot-failed':
-        if (event.tabId !== this.tabId) return
-        this.armingScreenshot = false
-        this.sendScreenshot = false
-        this.error = {
-          kind: 'request-failed',
-          message: `The screenshot could not be taken: ${event.message}`,
-        }
-        return
 
       case 'picking-cancelled':
         this.awaitingReference = false
@@ -451,7 +433,6 @@ export class Flow {
     this.step = 'describing'
     // The reset that makes the opt-in per-request rather than sticky.
     this.sendScreenshot = false
-    this.armingScreenshot = false
     this.scopeDepth = 0
     this.scopeCount = 1
     this.scopeContainer = null
@@ -460,7 +441,6 @@ export class Flow {
     this.followUp = ''
     this.references = []
     this.awaitingReference = false
-    this.armingScreenshot = false
     void this.checkVisionSupport()
   }
 
@@ -655,30 +635,45 @@ export class Flow {
        * visible on both the describing and refining panels, so an unticked box
        * is something the user can see rather than a silent downgrade.
        */
-      void this.cancelScreenshot()
+      this.cancelScreenshot()
     }
   }
 
   /**
-   * Asks for a screenshot, which the sidebar cannot take.
+   * Turns screenshots on: one permission prompt, then drag the region.
    *
-   * tabs.captureVisibleTab needs `hasPermission("<all_urls>")` or an activeTab
-   * grant. In MV3 the first is unreachable — granted host patterns live in
-   * allowedOrigins and never enter the permission set that hasPermission
-   * checks — and the second is produced only by a browser-action click.
-   * Nothing in the sidebar grants it, so there is no arrangement of our own
-   * code that lets this happen here.
+   * captureVisibleTab accepts `hasPermission("<all_urls>")` or a live activeTab
+   * grant, and nothing else — a specific host permission does not count, which
+   * is why holding `*://example.com/*` lets us read the whole page but not
+   * photograph it.
    *
-   * So the rect is armed and the user clicks the toolbar button. The panel
-   * says so plainly rather than appearing to have failed.
+   * `<all_urls>` does reach the permission set, but only when granted as an
+   * *origin* at runtime; declaring it in the manifest does not work, because
+   * origin controls keep manifest host permissions out of that set. That
+   * distinction is the whole reason this looked like it needed a toolbar
+   * click, and it did not.
+   *
+   * The request is the first await, so the gesture from the toggle is still
+   * live when it runs.
    */
   async chooseScreenshotRegion(): Promise<void> {
     if (this.tabId === null) return
-    this.choosingRegion = true
-    this.shotPreview = null
-    this.sendScreenshot = false
-    this.armingScreenshot = false
     try {
+      const granted = await browser.permissions.request({ origins: ['<all_urls>'] })
+      if (!granted) {
+        this.sendScreenshot = false
+        this.error = {
+          kind: 'request-failed',
+          message:
+            'Firefox only lets an extension capture a page with access to all sites. Without it, screenshots cannot be taken; everything else still works.',
+        }
+        return
+      }
+
+      this.choosingRegion = true
+      this.shotPreview = null
+      this.shot = null
+      this.sendScreenshot = false
       await send({ type: 'start-picking', tabId: this.tabId, mode: 'region' })
     } catch (cause) {
       this.choosingRegion = false
@@ -693,18 +688,7 @@ export class Flow {
     this.sendScreenshot = true
   }
 
-  /**
-   * Takes the shot as soon as the region is drawn.
-   *
-   * captureVisibleTab needs an activeTab grant, which comes from a click on
-   * the toolbar button and lasts until the tab navigates. Our toolbar button
-   * is what opens the sidebar, so in the ordinary case the grant is already
-   * there and this just works. When it has lapsed — the panel was opened from
-   * the sidebar menu, or the page has navigated since — there is no way to ask
-   * for it from here, so the capture is parked for the next toolbar click and
-   * the panel says so. That fallback is the only reason any of this is visible
-   * to the user at all.
-   */
+  /** Takes the shot as soon as the region is drawn. */
   private async captureRegion(rect: Rect, viewportWidth: number): Promise<void> {
     if (this.tabId === null) return
     try {
@@ -717,40 +701,16 @@ export class Flow {
         }),
       )
     } catch (cause) {
-      const message = cause instanceof BackgroundError ? cause.message : String(cause)
-      if (!/activeTab/i.test(message)) {
-        this.fail(cause)
-        return
-      }
-      await this.armScreenshot(rect, viewportWidth)
-    }
-  }
-
-  private async armScreenshot(rect: Rect, viewportWidth: number): Promise<void> {
-    if (this.tabId === null) return
-    this.armingScreenshot = true
-    try {
-      await send({
-        type: 'arm-screenshot',
-        tabId: this.tabId,
-        rect,
-        viewportWidth,
-      })
-    } catch (cause) {
-      this.armingScreenshot = false
       this.fail(cause)
     }
   }
 
-  /** Drops both the request and anything already captured for this tab. */
-  async cancelScreenshot(): Promise<void> {
-    this.armingScreenshot = false
+  /** Turns it back off and forgets the image. Nothing to revoke. */
+  cancelScreenshot(): void {
     this.choosingRegion = false
     this.sendScreenshot = false
     this.shotPreview = null
     this.shot = null
-    if (this.tabId === null) return
-    await send({ type: 'clear-screenshot', tabId: this.tabId }).catch(() => {})
   }
 
   /**

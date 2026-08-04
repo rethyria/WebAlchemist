@@ -21,7 +21,6 @@
     /** True while the picker is open in the page waiting for a reference. */
     awaitingReference: boolean
     sendScreenshot: boolean
-    armingScreenshot: boolean
     choosingRegion: boolean
     shotPreview: string | null
     shotClipped: boolean
@@ -48,7 +47,6 @@
     references,
     awaitingReference,
     sendScreenshot,
-    armingScreenshot,
     choosingRegion,
     shotPreview,
     shotClipped,
@@ -215,7 +213,7 @@
       {#if visionSupported}
         <div class="shot">
           <Toggle
-            checked={sendScreenshot || armingScreenshot || choosingRegion}
+            checked={sendScreenshot || choosingRegion}
             label="Send a screenshot with this attempt"
             onchange={onscreenshot}
           />
@@ -227,11 +225,6 @@
         </div>
         {#if choosingRegion}
           <p class="shot-awaiting">Drag the area to capture on the page.</p>
-        {:else if armingScreenshot}
-          <p class="shot-awaiting">
-            Click the Web Alchemist button in the toolbar to capture. Nothing is
-            taken until you do.
-          </p>
         {/if}
         {#if shotPreview}
           <img class="shot-image" src={shotPreview} alt="The region that will be sent" />

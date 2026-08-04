@@ -3,37 +3,45 @@
   "name": "Web Alchemist",
   "version": "0.1.0",
   "description": "Describe a change to any webpage and have it written, saved, and repaired when the site changes.",
-
   "browser_specific_settings": {
     "gecko": {
       "id": "@webalchemist",
       "strict_min_version": "140.0",
       "data_collection_permissions": {
-        "required": ["websiteContent"]
+        "required": [
+          "websiteContent"
+        ]
       }
     },
     "gecko_android": {
       "strict_min_version": "142.0"
     }
   },
-
-  "permissions": ["storage", "scripting", "activeTab", "tabs", "webNavigation"],
-
-  "optional_permissions": ["userScripts"],
-
-  "optional_host_permissions": ["*://*/*"],
-
+  "permissions": [
+    "storage",
+    "scripting",
+    "activeTab",
+    "tabs",
+    "webNavigation"
+  ],
+  "optional_permissions": [
+    "userScripts"
+  ],
+  "optional_host_permissions": [
+    "*://*/*",
+    "<all_urls>"
+  ],
   "background": {
-    "scripts": ["src/background/index.ts"],
+    "scripts": [
+      "src/background/index.ts"
+    ],
     "type": "module"
   },
-
   "sidebar_action": {
     "default_title": "Web Alchemist",
     "default_panel": "src/sidebar/index.html",
     "default_icon": "icons/icon.svg"
   },
-
   "action": {
     "default_title": "Web Alchemist",
     "default_icon": {
@@ -41,12 +49,10 @@
       "96": "icons/icon.svg"
     }
   },
-
   "options_ui": {
     "page": "src/options/index.html",
     "open_in_tab": true
   },
-
   "icons": {
     "48": "icons/icon.svg",
     "96": "icons/icon.svg"

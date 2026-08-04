@@ -80,11 +80,8 @@ browser.permissions.onRemoved.addListener(async () => {
 })
 
 /** Clicking the toolbar button opens the sidebar rather than a popup. */
-browser.action.onClicked.addListener((tab) => {
-  // Open first: sidebarAction.open() needs the gesture, and awaiting the
-  // capture before it would spend the click.
+browser.action.onClicked.addListener(() => {
   void browser.sidebarAction.open()
-  void fulfilArmedCapture(tab)
 })
 
 /* ------------------------------------------------------------------ */
@@ -415,22 +412,6 @@ async function handle(
     case 'capture-region':
       return captureWithLockDown(message.tabId, message.rect, message.viewportWidth)
 
-    case 'arm-screenshot':
-      // storage.session, not a variable: the event page is suspended after 30
-      // seconds idle and a trip to the toolbar can easily outlast that, which
-      // would drop the armed capture and make the click do nothing.
-      await browser.storage.session.set({
-        armedCapture: {
-          tabId: message.tabId,
-          rect: message.rect,
-          viewportWidth: message.viewportWidth,
-        },
-      })
-      return true
-
-    case 'clear-screenshot':
-      await browser.storage.session.remove('armedCapture')
-      return true
 
     case 'export-transforms':
       return exportTransforms()
@@ -577,8 +558,6 @@ async function runGeneration(
 browser.tabs.onRemoved.addListener((tabId) => {
   previewedCss.delete(tabId)
   appliedCss.delete(tabId)
-  // An image of a page that no longer exists is not worth keeping.
-  void browser.storage.session.remove('armedCapture')
 })
 
 /* ------------------------------------------------------------------ */
@@ -719,12 +698,6 @@ async function reapply(tabId: number | undefined): Promise<void> {
  * out of storage and out of the panel's state until a request actually wants
  * it, and lets the tab own its lifetime.
  */
-interface ArmedCapture {
-  tabId: number
-  rect: Rect
-  viewportWidth: number
-}
-
 /**
  * Captures with the target outline taken down.
  *
@@ -744,36 +717,6 @@ async function captureWithLockDown(
     return { ...shot, rect }
   } finally {
     await sendToContent(tabId, { type: 'set-lock-visible', visible: true })
-  }
-}
-
-async function fulfilArmedCapture(tab: browser.tabs.Tab): Promise<void> {
-  const stored = await browser.storage.session.get('armedCapture')
-  const armed = stored['armedCapture'] as ArmedCapture | undefined
-  // Only for the tab it was armed on: the click may land anywhere.
-  if (!armed || tab.id === undefined || tab.id !== armed.tabId) return
-  await browser.storage.session.remove('armedCapture')
-
-  try {
-    const shot = await captureWithLockDown(armed.tabId, armed.rect, armed.viewportWidth)
-    // The panel is waiting on this; a closed panel simply means nobody hears.
-    void browser.runtime
-      .sendMessage({ type: 'screenshot-captured', tabId: armed.tabId, shot })
-      .catch(() => {})
-  } catch (cause) {
-    /*
-     * Reported, not swallowed. A silent failure here leaves the panel waiting
-     * for a click that has already happened, which is indistinguishable from
-     * the user simply not having clicked yet — and that is the state this
-     * whole handshake exists to make legible.
-     */
-    void browser.runtime
-      .sendMessage({
-        type: 'screenshot-failed',
-        tabId: armed.tabId,
-        message: cause instanceof Error ? cause.message : String(cause),
-      })
-      .catch(() => {})
   }
 }
 

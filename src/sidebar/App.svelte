@@ -453,7 +453,6 @@
       cropClipped={flow.picked.cropClipped}
       instruction={flow.instruction}
       sendScreenshot={flow.sendScreenshot}
-      armingScreenshot={flow.armingScreenshot}
       choosingRegion={flow.choosingRegion}
       shotPreview={flow.shotPreview}
       shotClipped={flow.shotClipped}
@@ -461,7 +460,7 @@
       {providerLabel}
       onchange={(value) => (flow.instruction = value)}
       onscreenshot={(value) =>
-        void (value ? flow.chooseScreenshotRegion() : flow.cancelScreenshot())}
+        value ? void flow.chooseScreenshotRegion() : flow.cancelScreenshot()}
       onrepick={() => void flow.startPicking()}
       chain={flow.chain}
       depth={flow.chainDepth}
@@ -497,7 +496,6 @@
       references={flow.references}
       awaitingReference={flow.awaitingReference}
       sendScreenshot={flow.sendScreenshot}
-      armingScreenshot={flow.armingScreenshot}
       choosingRegion={flow.choosingRegion}
       shotPreview={flow.shotPreview}
       shotClipped={flow.shotClipped}
@@ -507,7 +505,7 @@
       onaddreference={() => void flow.addReference()}
       onremovereference={(selector) => flow.removeReference(selector)}
       onscreenshot={(value) =>
-        void (value ? flow.chooseScreenshotRegion() : flow.cancelScreenshot())}
+        value ? void flow.chooseScreenshotRegion() : flow.cancelScreenshot()}
       onregenerate={() => void flow.regenerate()}
       onrun={() => void flow.runJs()}
       onreload={() => void flow.reloadAndRetry()}

@@ -92,22 +92,20 @@ export type Message =
   | { type: 'preview-js'; tabId: number; transform: Transform }
   | { type: 'clear-preview-js'; id: string }
   /**
-   * Captures the region now. Throws when the tab holds no activeTab grant.
+   * Captures the region now.
    *
-   * tabs.captureVisibleTab needs either the literal `<all_urls>` permission —
-   * structurally unreachable in MV3, since the permissions schema does not
-   * accept it as a value and manifest parsing keeps it out of the permission
-   * set for any extension with origin controls — or an activeTab grant.
+   * tabs.captureVisibleTab needs `hasPermission("<all_urls>")` or a live
+   * activeTab grant. A specific host permission does not count, which is why
+   * holding `*://example.com/*` — enough to read every byte of the page — does
+   * not let us photograph it.
    *
-   * activeTab comes from a browser-action click and lasts until the tab
-   * navigates, and our toolbar button is what opens the sidebar. So most of
-   * the time the grant is already there and this simply works; `arm-screenshot`
-   * is the fallback for when it is not.
+   * `<all_urls>` reaches the permission set when it is *granted as an origin*
+   * at runtime. Manifest-declared host permissions do not, because origin
+   * controls keep them out, which is what made this look impossible at first.
+   * So the panel asks for it once, from the click that turns screenshots on,
+   * and after that this simply works.
    */
   | { type: 'capture-region'; tabId: number; rect: Rect; viewportWidth: number }
-  /** Parks a capture for the next toolbar click, when activeTab has lapsed. */
-  | { type: 'arm-screenshot'; tabId: number; rect: Rect; viewportWidth: number }
-  | { type: 'clear-screenshot'; tabId: number }
   /**
    * `mode` decides what a confirmed pick means. 'target' replaces what the
    * transform acts on; 'reference' adds an element the follow-up can talk
@@ -178,18 +176,6 @@ export type ContentMessage =
  */
 export type ContentEvent =
   | { type: 'element-hovered'; target: HoverTarget }
-  /**
-   * Not from a content script — the background, telling the panel that the
-   * toolbar click it was waiting for has produced an image. It arrives at the
-   * same listener, so it lives in the same union.
-   */
-  | {
-      type: 'screenshot-captured'
-      tabId: number
-      shot: { dataUrl: string; rect: Rect; clipped: boolean }
-    }
-  /** The armed click happened and the capture failed. Never silent. */
-  | { type: 'screenshot-failed'; tabId: number; message: string }
   /** A reference pick. Carries no anchor or crop: nothing is targeted by it. */
   | { type: 'element-referenced'; element: ElementContext }
   /** A drag in 'region' mode. The rectangle a screenshot would cover. */
