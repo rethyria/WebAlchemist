@@ -45,13 +45,12 @@ export async function send<T>(message: Message): Promise<T> {
 }
 
 /**
- * Runs a generation over a port, reporting the response as it arrives.
+ * Runs a generation over a port, reporting progress as it arrives.
  *
- * The port is not an optimisation. A `sendMessage` round trip has nothing to
- * say between request and response, and — because MV3 makes the background a
- * non-persistent event page — Firefox may suspend it underneath a long fetch,
- * which fails the whole call after the request has already been paid for. An
- * open port both carries progress and keeps the page alive.
+ * A `sendMessage` round trip has nothing to say between request and response,
+ * which is the whole reason for the port. It does not keep the background page
+ * alive — an earlier version of this comment said it did, and that was wrong;
+ * see keepalive.ts for what actually holds off suspension.
  */
 export function generateOverPort(
   request: {
@@ -63,6 +62,7 @@ export function generateOverPort(
   },
   handlers: {
     onSent: () => void
+    onThinking: (characters: number) => void
     onChunk: (accumulated: string) => void
   },
 ): { result: Promise<unknown>; cancel: () => void } {
@@ -75,6 +75,9 @@ export function generateOverPort(
       switch (message['type']) {
         case 'sent':
           handlers.onSent()
+          return
+        case 'thinking':
+          handlers.onThinking(message['characters'] as number)
           return
         case 'chunk':
           handlers.onChunk(message['text'] as string)

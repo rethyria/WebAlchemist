@@ -40,6 +40,20 @@ export interface GenerateRequest {
 /** Raw response text so far, for the panel to show code as it is written. */
 export type StreamListener = (accumulated: string) => void
 
+/**
+ * Notified while the model reasons, before any response text exists.
+ *
+ * Reasoning arrives on a different stream event from output, and on a hard
+ * request it is the whole first half of the wait. Without this the panel had
+ * nothing to say for thirty seconds and sat on "sent", which read as a hang.
+ *
+ * The argument is a character count rather than the reasoning itself: the
+ * panel only needs to show that something is happening, and shipping the text
+ * across the port would put the model's reasoning somewhere it is not
+ * displayed and was never asked for.
+ */
+export type ThinkingListener = (characters: number) => void
+
 export interface AiProvider {
   readonly id: string
 
@@ -52,7 +66,11 @@ export interface AiProvider {
    * the caller falls back to `generate`, and the panel shows an honest
    * indeterminate wait rather than pretending to stream.
    */
-  generateStream?(request: GenerateRequest, onChunk: StreamListener): Promise<GenerationResult>
+  generateStream?(
+    request: GenerateRequest,
+    onChunk: StreamListener,
+    onThinking?: ThinkingListener,
+  ): Promise<GenerationResult>
 
   /**
    * Reviews generated JavaScript against the stated intent.

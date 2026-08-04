@@ -28,6 +28,7 @@ import {
   type AiProvider,
   type GenerateRequest,
   type StreamListener,
+  type ThinkingListener,
 } from './types'
 
 /**
@@ -112,15 +113,18 @@ export async function createAnthropicProvider(provider: Provider): Promise<AiPro
     },
 
     /**
-     * Streaming is not only for the progress display. A non-streaming request
-     * of this length is a single long-lived fetch, and Firefox will suspend a
-     * non-persistent background page underneath one — which surfaced as
-     * "Could not establish connection. Receiving end does not exist." after a
-     * long wait. An open stream keeps the page alive.
+     * Streaming is for the progress display, and for that alone.
+     *
+     * It is *not* what keeps the background page alive — this comment used to
+     * say it was, and that was wrong. Firefox's idle timer is reset by parent
+     * API calls, not by bytes arriving on a fetch, so a stream that is merely
+     * open is as invisible to it as a request that has sent nothing. See
+     * keepalive.ts; every call into here is wrapped in withKeepalive.
      */
     async generateStream(
       request: GenerateRequest,
       onChunk: StreamListener,
+      onThinking?: ThinkingListener,
     ): Promise<GenerationResult> {
       const content = buildGenerationContent(request)
 
@@ -147,6 +151,19 @@ export async function createAnthropicProvider(provider: Provider): Promise<AiPro
         stream.on('text', (delta: string) => {
           accumulated += delta
           onChunk(accumulated)
+        })
+
+        /*
+         * Reasoning is a separate event from output. With adaptive thinking at
+         * high effort it is also the entire first stretch of the request — on
+         * a hard change the model can reason well past thirty seconds before
+         * emitting a single character of the response — so subscribing only to
+         * `text` left the panel with nothing to report for that whole period.
+         */
+        let thought = 0
+        stream.on('thinking', (delta: string) => {
+          thought += delta.length
+          onThinking?.(thought)
         })
 
         return parseJsonResponse<GenerationResult>(await stream.finalMessage())

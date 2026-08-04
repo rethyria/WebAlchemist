@@ -333,6 +333,7 @@
       code={flow.streamed}
       withScreenshot={flow.sendScreenshot}
       {contextSize}
+      thinkingChars={flow.thinkingChars}
       oncancel={() => flow.cancelGenerating()}
     />
   {:else if flow.step === 'refining' && flow.result}

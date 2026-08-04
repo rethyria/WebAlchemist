@@ -25,6 +25,7 @@ import { overlayPaletteFor } from '@shared/accents'
 import { reconcile as reconcileContentScripts } from './content-scripts'
 import { buildProbeTransform } from './csp-probe'
 import { forgetSession, runHealthCheck, shouldCheck } from './health'
+import { withKeepalive } from './keepalive'
 import { resolveActiveProvider, ProviderError } from './providers'
 import {
   hasUserScriptsPermission,
@@ -177,16 +178,18 @@ async function handle(
 
     case 'get-vision-support': {
       const provider = await resolveActiveProvider()
-      return provider.supportsVision()
+      return withKeepalive(() => provider.supportsVision())
     }
 
     case 'generate': {
       const provider = await resolveActiveProvider()
-      return provider.generate({
-        context: message.context,
-        instruction: message.instruction,
-        history: message.history,
-      })
+      return withKeepalive(() =>
+        provider.generate({
+          context: message.context,
+          instruction: message.instruction,
+          history: message.history,
+        }),
+      )
     }
 
     case 'repair': {
@@ -195,17 +198,19 @@ async function handle(
       if (!existing) throw new Error('That transform no longer exists.')
 
       const provider = await resolveActiveProvider()
-      return provider.generate({
-        context: message.context,
-        instruction: existing.intent,
-        history: [],
-        repair: {
-          intent: existing.intent,
-          previousCode: existing.code,
-          previousRationale: existing.rationale,
-          brokenReason: message.brokenReason,
-        },
-      })
+      return withKeepalive(() =>
+        provider.generate({
+          context: message.context,
+          instruction: existing.intent,
+          history: [],
+          repair: {
+            intent: existing.intent,
+            previousCode: existing.code,
+            previousRationale: existing.rationale,
+            brokenReason: message.brokenReason,
+          },
+        }),
+      )
     }
 
     case 'review':
@@ -469,15 +474,15 @@ interface GenerateOverPort {
 /**
  * Generation over a port rather than a one-shot message.
  *
- * Two reasons, and the second is the one that was breaking things:
+ * The port is how progress is reported: sendMessage is one request and one
+ * response, so a panel fed by it can show nothing in between.
  *
- *   1. It is the only way to report progress. sendMessage is one request and
- *      one response, so a panel fed by it can show nothing between them.
- *   2. A connected port keeps the background alive. MV3 makes the background a
- *      non-persistent event page, and Firefox will suspend it underneath a
- *      long-running fetch — which appeared as "Could not establish connection.
- *      Receiving end does not exist." after a long wait, with the request
- *      already paid for.
+ * It is *not* what keeps the background alive. This comment used to claim it
+ * was, and the claim was wrong in a way that cost a whole class of requests:
+ * Firefox exempts only native messaging ports from idle suspension, so an
+ * extension-to-extension port is suspended on schedule no matter how much
+ * traffic crosses it — and until the model's first output token, no traffic
+ * crosses it at all. That is withKeepalive's job; see keepalive.ts.
  */
 async function runGeneration(
   port: browser.runtime.Port,
@@ -487,11 +492,19 @@ async function runGeneration(
     const provider = await resolveActiveProvider()
     port.postMessage({ type: 'sent' })
 
-    const result = provider.generateStream
-      ? await provider.generateStream(request, (accumulated) => {
-          port.postMessage({ type: 'chunk', text: accumulated })
-        })
-      : await provider.generate(request)
+    const result = await withKeepalive(() =>
+      provider.generateStream
+        ? provider.generateStream(
+            request,
+            (accumulated) => {
+              port.postMessage({ type: 'chunk', text: accumulated })
+            },
+            (characters) => {
+              port.postMessage({ type: 'thinking', characters })
+            },
+          )
+        : provider.generate(request),
+    )
 
     port.postMessage({ type: 'done', result })
   } catch (error) {
@@ -550,7 +563,12 @@ async function runReview(
   const provider = await resolveActiveProvider()
   // No page content crosses into this call. That is the entire basis of the
   // reviewer's independence — see REVIEW_SYSTEM_PROMPT.
-  const model = await provider.review({ code, intent })
+  //
+  // This one does not stream, so it is silent for its whole duration, and it
+  // arrives over sendMessage rather than a port — a pending listener promise
+  // resets the idle timer exactly once, giving it 60 seconds before the page
+  // is suspended and the caller is told the receiving end does not exist.
+  const model = await withKeepalive(() => provider.review({ code, intent }))
 
   return { ...analysis, model, passed: model.verdict === 'match' }
 }

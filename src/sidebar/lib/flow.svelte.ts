@@ -72,11 +72,18 @@ interface Picked {
 }
 
 /** Named so the generating checklist can render them in order. */
-export type ProgressStage = 'context' | 'sent' | 'streaming' | 'analysis' | 'preview'
+export type ProgressStage =
+  | 'context'
+  | 'sent'
+  | 'thinking'
+  | 'streaming'
+  | 'analysis'
+  | 'preview'
 
 const STAGE_ORDER: ProgressStage[] = [
   'context',
   'sent',
+  'thinking',
   'streaming',
   'analysis',
   'preview',
@@ -136,6 +143,8 @@ export class Flow {
 
   stage = $state<ProgressStage>('context')
   elapsed = $state(0)
+  /** Characters of reasoning so far. The reasoning itself never crosses. */
+  thinkingChars = $state(0)
   /** Code pulled out of the partial response, shown as it is written. */
   streamed = $state('')
 
@@ -439,6 +448,7 @@ export class Flow {
       }
 
       this.streamed = ''
+      this.thinkingChars = 0
       const run = generateOverPort(
         {
           context,
@@ -451,13 +461,26 @@ export class Flow {
           onSent: () => {
             if (current()) this.stage = 'sent'
           },
+          onThinking: (characters) => {
+            if (!current()) return
+            this.stage = 'thinking'
+            this.thinkingChars = characters
+          },
           onChunk: (accumulated) => {
             if (!current()) return
+            /*
+             * Any text at all means the model has stopped reasoning and
+             * started answering, so the stage advances here rather than below.
+             * Gating it on the code field kept the panel on the previous stage
+             * through the leading part of the JSON — name, kind, capabilities
+             * and rationale all arrive before a single line of code does.
+             */
+            this.stage = 'streaming'
+
             // The response is a JSON object, so what arrives is a partial
             // document. Only the code field is worth showing.
             const code = extractPartialString(accumulated, 'code')
             if (code === null) return
-            this.stage = 'streaming'
             this.streamed = code
           },
         },
@@ -860,6 +883,7 @@ export class Flow {
     this.review = null
     this.stage = 'context'
     this.elapsed = 0
+    this.thinkingChars = 0
     this.streamed = ''
     this.expectedReload = false
   }

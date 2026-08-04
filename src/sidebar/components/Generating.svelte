@@ -12,6 +12,7 @@
     code: string
     withScreenshot: boolean
     contextSize: number
+    thinkingChars: number
     oncancel: () => void
   }
 
@@ -23,6 +24,7 @@
     code,
     withScreenshot,
     contextSize,
+    thinkingChars,
     oncancel,
   }: Props = $props()
 
@@ -38,6 +40,17 @@
       text: `Sent ${(contextSize / 1024).toFixed(1)} kB of page context${
         withScreenshot ? ', with a screenshot' : ', no screenshot'
       }`,
+    },
+    {
+      /*
+       * On a hard change this is most of the wait. Without it the panel sat on
+       * "sent" for the whole reasoning phase, which read as a hang — and was
+       * indistinguishable from the genuine hang it turned out to be masking.
+       */
+      id: 'thinking' as const,
+      text: thinkingChars
+        ? `Thinking — ${thinkingChars.toLocaleString()} characters`
+        : 'Thinking',
     },
     {
       id: 'streaming' as const,
