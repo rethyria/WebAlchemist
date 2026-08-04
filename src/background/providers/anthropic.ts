@@ -14,7 +14,12 @@
 
 import Anthropic from '@anthropic-ai/sdk'
 import type { GenerationResult, ModelReview, PageContext, Provider } from '@shared/types'
-import { GENERATE_SYSTEM_PROMPT, REVIEW_SYSTEM_PROMPT, repairPrompt } from '../prompts'
+import {
+  GENERATE_SYSTEM_PROMPT,
+  REVIEW_SYSTEM_PROMPT,
+  repairPrompt,
+  scopeInstruction,
+} from '../prompts'
 import { readCredentialForRequest } from '../storage'
 import {
   GENERATION_SCHEMA,
@@ -183,7 +188,7 @@ function buildGenerationContent(
     ? repairPrompt(request.repair)
     : request.instruction
 
-  const text = `${instruction}\n\n${describeContext(request.context)}`
+  const text = `${instruction}\n\n${scopeInstruction(request.scope)}\n\n${describeContext(request.context)}`
 
   const shot = request.context.screenshot
   if (!shot) return text

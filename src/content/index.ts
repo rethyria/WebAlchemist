@@ -161,6 +161,7 @@ const OVERLAY_STYLES = `
 
 class Overlay {
   private host: HTMLDivElement | null = null
+  private interactive = true
   private capture: HTMLDivElement | null = null
   private highlight: HTMLDivElement | null = null
   private label: HTMLDivElement | null = null
@@ -168,8 +169,9 @@ class Overlay {
   private crop: HTMLDivElement | null = null
   private hint: HTMLDivElement | null = null
 
-  mount(palette: OverlayPalette): void {
+  mount(palette: OverlayPalette, interactive = true): void {
     if (this.host) return
+    this.interactive = interactive
     this.host = document.createElement('div')
     this.host.setAttribute('data-webalchemist-overlay', '')
     // The accent, handed in from the background where settings live.
@@ -191,15 +193,14 @@ class Overlay {
     this.hint = this.buildHint()
 
     this.hideCrop()
-    root.append(
-      style,
-      this.capture,
-      this.mask,
-      this.highlight,
-      this.label,
-      this.crop,
-      this.hint,
-    )
+    // A preview draws only. Giving it the capture sheet would put a
+    // click-swallowing layer over the page while the user is reading a list.
+    if (this.interactive) {
+      root.append(style, this.capture, this.mask, this.highlight, this.label, this.crop, this.hint)
+    } else {
+      this.highlight.classList.add('locked')
+      root.append(style, this.highlight, this.label)
+    }
     document.documentElement.append(this.host)
   }
 
@@ -301,6 +302,10 @@ function text(tag: string, content: string, className?: string): HTMLElement {
 }
 
 const overlay = new Overlay()
+/** Separate instance: a preview may be shown while the picker is not running. */
+const preview = new Overlay()
+/** Kept so previews and retargets can draw in the user's accent after picking. */
+let palette: OverlayPalette | null = null
 
 /* ------------------------------------------------------------------ */
 /* Picker                                                              */
@@ -501,16 +506,22 @@ function onKeyDown(event: KeyboardEvent): void {
 }
 
 /**
- * The element the panel is currently describing.
+ * The element originally confirmed in the overlay.
  *
- * Held past the end of picking so the ancestor list can retarget without
- * putting the user back into the overlay — the chain is only meaningful
- * relative to the element it was taken from.
+ * Every retarget is measured from here rather than from the current target.
+ * Walking relatively would make the steps cumulative and one-way: after moving
+ * up twice there would be no way back down, because the descendants are no
+ * longer on the path.
  */
-let described: Element | null = null
+let pickedRoot: Element | null = null
+
+function ancestorOf(element: Element | null, levelsUp: number): Element | null {
+  let node = element
+  for (let i = 0; i < levelsUp && node?.parentElement; i += 1) node = node.parentElement
+  return node
+}
 
 function emitPicked(element: Element, region: Rect): void {
-  described = element
   const anchor = captureAnchor(element)
   void send({
     type: 'element-picked',
@@ -533,23 +544,33 @@ function confirmSelection(): void {
   const region = crop ?? boundingRectWithPadding(target)
 
   stopPicking()
+  pickedRoot = target
   emitPicked(target, region)
 }
 
 /**
- * Moves the selection up the tree by `levelsUp` from what is being described.
+ * Selects the ancestor `levelsUp` above the originally picked element.
  *
  * The crop is recomputed rather than carried over: it is the region a
- * screenshot would cover, and after retargeting to a larger ancestor the old
- * rectangle would no longer contain what the user is now pointing at.
+ * screenshot would cover, and after moving to a larger ancestor the old
+ * rectangle would no longer contain what is being pointed at.
  */
 function retarget(levelsUp: number): void {
-  let node: Element | null = described
-  for (let i = 0; i < levelsUp && node?.parentElement; i += 1) {
-    node = node.parentElement
-  }
+  const node = ancestorOf(pickedRoot, levelsUp)
   if (!node) return
   emitPicked(node, boundingRectWithPadding(node))
+}
+
+/** Draws an ancestor without selecting it, for hovering the list. */
+function highlightAncestor(levelsUp: number | null): void {
+  if (levelsUp === null || !palette) {
+    preview.unmount()
+    return
+  }
+  const node = ancestorOf(pickedRoot, levelsUp)
+  if (!node) return
+  preview.mount(palette, false)
+  preview.showElement(node, selectorFor(node))
 }
 
 /** Falls back to the element's box plus padding so the model sees some context. */
@@ -804,13 +825,19 @@ function send(event: ContentEvent): Promise<unknown> {
 browser.runtime.onMessage.addListener(async (message: ContentMessage) => {
   switch (message.type) {
     case 'start-picking':
+      palette = message.palette
+      preview.unmount()
       startPicking(message.palette)
       return true
     case 'cancel-picking':
       stopPicking()
       return true
     case 'retarget':
+      preview.unmount()
       retarget(message.levelsUp)
+      return true
+    case 'highlight-ancestor':
+      highlightAncestor(message.levelsUp)
       return true
     case 'run-health-check':
       return { type: 'health-check-result', states: await runHealthCheck(message.transforms) }

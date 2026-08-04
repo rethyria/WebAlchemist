@@ -54,7 +54,12 @@ export async function send<T>(message: Message): Promise<T> {
  * open port both carries progress and keeps the page alive.
  */
 export function generateOverPort(
-  request: { context: unknown; instruction: string; history: unknown[] },
+  request: {
+    context: unknown
+    instruction: string
+    history: unknown[]
+    scope?: string
+  },
   handlers: {
     onSent: () => void
     onChunk: (accumulated: string) => void

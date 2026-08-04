@@ -19,6 +19,20 @@ export type TransformKind = 'css' | 'js'
 export type TransformOrigin = 'manual' | 'ai'
 export type ExecutionWorld = 'USER_SCRIPT' | 'MAIN'
 
+/**
+ * How broadly a transform is meant to apply.
+ *
+ * uBlock Origin's equivalent is a specificity slider, which works there
+ * because it generates the selector itself and can offer a continuum. Here the
+ * model writes the selector, so this is a statement of intent passed into the
+ * prompt rather than a knob over a value we compute — a slider would be a
+ * control connected to nothing.
+ *
+ * Optional on Transform: records written before it existed read as 'element',
+ * which is the narrower and safer of the two.
+ */
+export type TransformScope = 'element' | 'similar'
+
 /** Capabilities a transform must declare before its code is allowed to use them. */
 export type Capability = 'network' | 'storage' | 'cookies'
 
@@ -90,6 +104,8 @@ export interface Transform {
   /** Empty by default. Anything used beyond this list is a rejection. */
   capabilities: Capability[]
   intent: string
+  /** Absent means 'element'. See TransformScope. */
+  scope?: TransformScope
   rationale: Rationale
   anchor: Anchor
   code: string

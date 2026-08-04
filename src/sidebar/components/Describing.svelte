@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { HoverTarget, Rect } from '@shared/types'
+  import type { HoverTarget, Rect, TransformScope } from '@shared/types'
   import { autogrow } from '../lib/autogrow'
   import Button from './Button.svelte'
   import Label from './Label.svelte'
@@ -16,7 +16,13 @@
     onchange: (instruction: string) => void
     onscreenshot: (send: boolean) => void
     onrepick: () => void
+    /** The chain as first picked, so rows below the current one stay. */
+    chain: string[]
+    depth: number
     onretarget: (levelsUp: number) => void
+    onpreview: (levelsUp: number | null) => void
+    scope: TransformScope
+    onscope: (scope: TransformScope) => void
     ongenerate: () => void
   }
 
@@ -31,21 +37,27 @@
     onchange,
     onscreenshot,
     onrepick,
+    chain,
+    depth,
     onretarget,
+    onpreview,
+    scope,
+    onscope,
     ongenerate,
   }: Props = $props()
 
   let selector = $derived(target.breadcrumb.at(-1) ?? '')
 
   /*
-   * Root first, so the list reads outermost to innermost and the selected
-   * element sits at the bottom. Distance from the end is how many levels up
-   * the content script has to walk.
+   * Root first, so the list reads outermost to innermost with the element
+   * originally picked at the bottom. Distance from the end is how far up the
+   * chain each row sits — an absolute position, so the list moves in both
+   * directions rather than only outwards.
    */
   let ancestors = $derived(
-    target.breadcrumb.map((label, index) => ({
+    chain.map((label, index) => ({
       label,
-      levelsUp: target.breadcrumb.length - 1 - index,
+      levelsUp: chain.length - 1 - index,
       indent: Math.min(index, 6),
     })),
   )
@@ -60,18 +72,21 @@
   </header>
 
   {#if ancestors.length > 1}
+    <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
     <section class="tree">
       <Label>Or target a container it sits in</Label>
-      <ul>
+      <ul onmouseleave={() => onpreview(null)}>
         {#each ancestors as ancestor}
           <li>
             <button
               type="button"
               class="ancestor"
-              class:selected={ancestor.levelsUp === 0}
+              class:selected={ancestor.levelsUp === depth}
               style="padding-left: {6 + ancestor.indent * 9}px"
-              disabled={ancestor.levelsUp === 0}
               onclick={() => onretarget(ancestor.levelsUp)}
+              onmouseenter={() => onpreview(ancestor.levelsUp)}
+              onfocus={() => onpreview(ancestor.levelsUp)}
+              onblur={() => onpreview(null)}
             >
               {ancestor.label}
             </button>
@@ -80,6 +95,30 @@
       </ul>
     </section>
   {/if}
+
+  <section class="scope">
+    <Label>How widely should it apply?</Label>
+    <div class="choices" role="radiogroup" aria-label="How widely should it apply?">
+      <button
+        type="button"
+        role="radio"
+        aria-checked={scope === 'element'}
+        class:selected={scope === 'element'}
+        onclick={() => onscope('element')}
+      >
+        Just this element
+      </button>
+      <button
+        type="button"
+        role="radio"
+        aria-checked={scope === 'similar'}
+        class:selected={scope === 'similar'}
+        onclick={() => onscope('similar')}
+      >
+        Every one like it
+      </button>
+    </div>
+  </section>
 
   <section>
     <Label>What should change?</Label>
@@ -223,16 +262,38 @@
     cursor: pointer;
   }
 
-  .ancestor:hover:not(:disabled) {
+  .ancestor:hover,
+  .ancestor:focus-visible {
     background: var(--accent-wash);
     color: var(--text);
   }
 
-  /* The current target. Disabled because selecting it is a no-op. */
+  /* The current target. Still clickable — it is how you come back to it. */
   .ancestor.selected {
     background: var(--accent-chip);
     color: var(--accent-fg);
-    cursor: default;
+  }
+
+  .choices {
+    display: flex;
+    gap: var(--sp-6);
+  }
+
+  .choices button {
+    flex: 1;
+    padding: 7px 8px;
+    border: 1px solid var(--border);
+    border-radius: var(--r-input);
+    background: transparent;
+    font: 11.5px var(--font-ui);
+    color: var(--text-dim);
+    cursor: pointer;
+  }
+
+  .choices button.selected {
+    border-color: var(--accent-fg);
+    background: var(--accent-wash);
+    color: var(--text);
   }
 
   .screenshot {

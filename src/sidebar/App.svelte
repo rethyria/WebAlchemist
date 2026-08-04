@@ -281,7 +281,12 @@
       onchange={(value) => (flow.instruction = value)}
       onscreenshot={(value) => (flow.sendScreenshot = value)}
       onrepick={() => void flow.startPicking()}
+      chain={flow.chain}
+      depth={flow.chainDepth}
       onretarget={(levelsUp: number) => void flow.retarget(levelsUp)}
+      onpreview={(levelsUp: number | null) => void flow.previewAncestor(levelsUp)}
+      scope={flow.scope}
+      onscope={(next) => (flow.scope = next)}
       ongenerate={() => void flow.generate()}
     />
   {:else if flow.step === 'generating'}

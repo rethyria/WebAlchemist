@@ -38,6 +38,7 @@ import type {
   ReviewResult,
   Transform,
   TransformKind,
+  TransformScope,
 } from '@shared/types'
 import { extractPartialString } from '@shared/partial-json'
 import { BackgroundError, generateOverPort, send } from './messaging.svelte'
@@ -90,7 +91,20 @@ export class Flow {
   hover = $state<HoverTarget | null>(null)
   picked = $state<Picked | null>(null)
 
+  /**
+   * The chain as it was when the element was first confirmed, and how far up
+   * it the selection currently sits.
+   *
+   * Held separately because retargeting replaces `picked` with an ancestor,
+   * whose own chain has no descendants in it — driving the list from that
+   * would delete the rows below the current one and make the move one-way.
+   */
+  chain = $state<string[]>([])
+  chainDepth = $state(0)
+
   instruction = $state('')
+  /** How broadly the result should apply. Persisted, unlike the screenshot. */
+  scope = $state<TransformScope>('element')
   /** Per request. Reset on every entry to `describing`; never persisted. */
   sendScreenshot = $state(false)
   visionSupported = $state(false)
@@ -235,7 +249,11 @@ export class Flow {
         }
         // Retargeting must not wipe what has already been typed — the user is
         // adjusting the target of a description they are partway through.
-        if (!retargeting) this.enterDescribing()
+        if (!retargeting) {
+          this.chain = event.target.breadcrumb
+          this.chainDepth = 0
+          this.enterDescribing()
+        }
         return
       }
 
@@ -256,6 +274,7 @@ export class Flow {
     this.step = 'describing'
     // The reset that makes the opt-in per-request rather than sticky.
     this.sendScreenshot = false
+    this.scope = 'element'
     this.instruction = ''
     this.history = []
     this.followUp = ''
@@ -272,10 +291,21 @@ export class Flow {
     }
   }
 
-  /** Moves the selection up the tree, from the ancestor list. */
+  /** Moves the selection along the chain. Absolute, so it can go back down. */
   async retarget(levelsUp: number): Promise<void> {
-    if (this.tabId === null || levelsUp <= 0) return
+    if (this.tabId === null || levelsUp === this.chainDepth) return
+    this.chainDepth = levelsUp
     await send({ type: 'retarget', tabId: this.tabId, levelsUp }).catch(() => {})
+  }
+
+  /** Draws an ancestor on the page while its row is hovered. */
+  async previewAncestor(levelsUp: number | null): Promise<void> {
+    if (this.tabId === null) return
+    await send({
+      type: 'highlight-ancestor',
+      tabId: this.tabId,
+      levelsUp,
+    }).catch(() => {})
   }
 
   /* ---------------------------------------------------------------- */
@@ -313,7 +343,12 @@ export class Flow {
 
       this.streamed = ''
       const run = generateOverPort(
-        { context, instruction: this.instruction, history: this.history },
+        {
+          context,
+          instruction: this.instruction,
+          history: this.history,
+          scope: this.scope,
+        },
         {
           onSent: () => {
             if (current()) this.stage = 'sent'
@@ -383,6 +418,7 @@ export class Flow {
       ...(result.kind === 'js' ? { world: result.world } : {}),
       capabilities: result.capabilities,
       intent: this.intent,
+      scope: this.scope,
       rationale: result.rationale,
       anchor,
       code: result.code,
@@ -690,6 +726,8 @@ export class Flow {
     this.step = 'list'
     this.hover = null
     this.picked = null
+    this.chain = []
+    this.chainDepth = 0
     this.instruction = ''
     this.sendScreenshot = false
     this.history = []

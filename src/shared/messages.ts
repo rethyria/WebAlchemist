@@ -23,6 +23,7 @@ import type {
   Settings,
   Transform,
   TransformRuntimeState,
+  TransformScope,
 } from './types'
 import type { OverlayPalette } from './accents'
 import type { RefinementTurn } from '@background/providers/types'
@@ -40,6 +41,7 @@ export type Message =
       context: PageContext
       instruction: string
       history: RefinementTurn[]
+      scope?: TransformScope
     }
   | { type: 'repair'; transformId: string; context: PageContext; brokenReason: string }
   | { type: 'review'; code: string; intent: string; declaredCapabilities: Transform['capabilities'] }
@@ -79,6 +81,7 @@ export type Message =
   | { type: 'start-picking'; tabId: number }
   | { type: 'stop-picking'; tabId: number }
   | { type: 'retarget'; tabId: number; levelsUp: number }
+  | { type: 'highlight-ancestor'; tabId: number; levelsUp: number | null }
   /** Runs a check regardless of the configured mode. Always user-initiated. */
   | { type: 'check-now'; tabId: number; url: string }
 
@@ -102,6 +105,8 @@ export type ContentMessage =
   | { type: 'cancel-picking' }
   /** Walks the selection up the tree from the element being described. */
   | { type: 'retarget'; levelsUp: number }
+  /** Draws an ancestor without selecting it. `null` clears. */
+  | { type: 'highlight-ancestor'; levelsUp: number | null }
   | { type: 'apply-transforms'; transforms: Transform[] }
   | { type: 'run-health-check'; transforms: Transform[] }
   | { type: 'url-changed'; url: string }
@@ -153,6 +158,7 @@ export interface Responses {
   'start-picking': boolean
   'stop-picking': boolean
   retarget: boolean
+  'highlight-ancestor': boolean
   'check-now': TransformRuntimeState[]
   'run-csp-probe': boolean
   'clear-csp-probe': boolean

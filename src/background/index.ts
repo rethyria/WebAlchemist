@@ -14,7 +14,13 @@ import type {
   MessageResponse,
 } from '@shared/messages'
 import { matchesUrl } from '@shared/match'
-import type { PageContext, Rect, ReviewResult, Transform } from '@shared/types'
+import type {
+  PageContext,
+  Rect,
+  ReviewResult,
+  Transform,
+  TransformScope,
+} from '@shared/types'
 import type { RefinementTurn } from './providers/types'
 import { overlayPaletteFor } from '@shared/accents'
 import { reconcile as reconcileContentScripts } from './content-scripts'
@@ -310,6 +316,13 @@ async function handle(
       })
       return true
 
+    case 'highlight-ancestor':
+      await sendToContent(message.tabId, {
+        type: 'highlight-ancestor',
+        levelsUp: message.levelsUp,
+      })
+      return true
+
     case 'run-csp-probe': {
       // Registered, never saved. It must not appear in the user's transform
       // list, and it must come back out when the run is over.
@@ -424,6 +437,7 @@ interface GenerateOverPort {
   context: PageContext
   instruction: string
   history: RefinementTurn[]
+  scope?: TransformScope
 }
 
 /**
