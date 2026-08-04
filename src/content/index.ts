@@ -563,6 +563,51 @@ function muffle(event: Event): void {
   event.stopImmediatePropagation()
 }
 
+function detachSwallow(): void {
+  for (const type of SWALLOWED_EVENTS) {
+    document.removeEventListener(type, swallow, true)
+  }
+  for (const type of MUFFLED_EVENTS) {
+    document.removeEventListener(type, muffle, true)
+  }
+}
+
+const TRAILING_EVENTS = ['click', 'auxclick', 'dblclick'] as const
+
+/**
+ * Swallows the one click that arrives *after* picking has ended.
+ *
+ * Confirming a selection happens on mouseup, and mouseup tears the picker
+ * down — but the browser has not dispatched the click yet. Removing the
+ * listeners at that moment leaves nothing to catch it, so the click lands on
+ * whatever was just picked: a button is pressed, a link is followed.
+ *
+ * This was the actual cause of picking activating elements, and it is why
+ * swallowing `click` during picking was not enough on its own. It is also
+ * invisible to any test that dispatches a bare click, because without a
+ * preceding mousedown and mouseup the teardown never runs.
+ *
+ * One shot, then out of the way, so a deliberate click a moment later works.
+ */
+function guardTrailingClick(): void {
+  const swallowOnce = (event: Event) => {
+    swallow(event)
+    cleanup()
+  }
+  const cleanup = () => {
+    clearTimeout(timer)
+    for (const type of TRAILING_EVENTS) {
+      document.removeEventListener(type, swallowOnce, true)
+    }
+  }
+
+  for (const type of TRAILING_EVENTS) {
+    document.addEventListener(type, swallowOnce, { capture: true, passive: false })
+  }
+  // Nothing trailing arrives when picking ends via Escape or Enter.
+  const timer = setTimeout(cleanup, 700)
+}
+
 function startPicking(palette: OverlayPalette): void {
   if (picking) return
   picking = true
@@ -596,12 +641,9 @@ function stopPicking(): void {
   document.removeEventListener('mouseup', onMouseUp, true)
   document.removeEventListener('keydown', onKeyDown, true)
 
-  for (const type of SWALLOWED_EVENTS) {
-    document.removeEventListener(type, swallow, true)
-  }
-  for (const type of MUFFLED_EVENTS) {
-    document.removeEventListener(type, muffle, true)
-  }
+  detachSwallow()
+  // The click completing the mouseup that got us here has not fired yet.
+  guardTrailingClick()
 }
 
 /* ------------------------------------------------------------------ */
