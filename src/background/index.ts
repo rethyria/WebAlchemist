@@ -727,7 +727,18 @@ async function fulfilArmedCapture(tab: browser.tabs.Tab): Promise<void> {
   armedCapture = null
 
   try {
-    const shot = await captureRegion(armed.rect, armed.viewportWidth)
+    /*
+     * The outline is a real element in the page, so capturing with it up puts
+     * our own highlight into the image the model is asked to read — drawn over
+     * the very thing being described. Down for the shot, back up after.
+     */
+    await sendToContent(armed.tabId, { type: 'set-lock-visible', visible: false })
+    let shot
+    try {
+      shot = await captureRegion(armed.rect, armed.viewportWidth)
+    } finally {
+      await sendToContent(armed.tabId, { type: 'set-lock-visible', visible: true })
+    }
     capturedShots.set(armed.tabId, { ...shot, rect: armed.rect })
     // The panel is waiting on this; a closed panel simply means nobody hears.
     void browser.runtime

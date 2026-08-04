@@ -126,6 +126,19 @@ export class Flow {
   sendScreenshot = $state(false)
   /** Waiting for the toolbar click that can capture. See armScreenshot. */
   armingScreenshot = $state(false)
+  /** True while the user is drawing the region on the page. */
+  choosingRegion = $state(false)
+  /** The region drawn for the screenshot, in viewport coordinates. */
+  shotRegion = $state<Rect | null>(null)
+  shotClipped = $state(false)
+  /**
+   * The captured image itself, shown in the panel.
+   *
+   * This is the consent surface. A rectangle's dimensions in text describe
+   * what will be sent; the picture is what was actually taken, including
+   * anything that happened to be inside it.
+   */
+  shotPreview = $state<string | null>(null)
   visionSupported = $state(false)
 
   history = $state<RefinementTurn[]>([])
@@ -397,10 +410,22 @@ export class Flow {
         this.references = [...this.references, event.element]
         return
 
+      case 'region-selected': {
+        if (!this.choosingRegion) return
+        this.choosingRegion = false
+        this.shotRegion = event.rect
+        this.shotClipped = event.clipped
+        // The permission for the capture itself only exists during a toolbar
+        // click, so drawing the region is step one of two. See armScreenshot.
+        void this.armScreenshot(event.rect, event.viewportWidth)
+        return
+      }
+
       case 'screenshot-captured':
         if (event.tabId !== this.tabId) return
         this.armingScreenshot = false
         this.sendScreenshot = true
+        void this.loadShotPreview()
         return
 
       case 'screenshot-failed':
@@ -659,17 +684,43 @@ export class Flow {
    * So the rect is armed and the user clicks the toolbar button. The panel
    * says so plainly rather than appearing to have failed.
    */
-  async armScreenshot(): Promise<void> {
-    const picked = this.picked
-    if (!picked || this.tabId === null) return
-    this.armingScreenshot = true
+  async chooseScreenshotRegion(): Promise<void> {
+    if (this.tabId === null) return
+    this.choosingRegion = true
+    this.shotPreview = null
     this.sendScreenshot = false
+    this.armingScreenshot = false
+    try {
+      await send({ type: 'start-picking', tabId: this.tabId, mode: 'region' })
+    } catch (cause) {
+      this.choosingRegion = false
+      this.fail(cause)
+    }
+  }
+
+  /** Pulls the captured image in for display. Absent is not an error. */
+  private async loadShotPreview(): Promise<void> {
+    if (this.tabId === null) return
+    try {
+      const shot = await send<{ dataUrl: string } | null>({
+        type: 'get-screenshot',
+        tabId: this.tabId,
+      })
+      this.shotPreview = shot?.dataUrl ?? null
+    } catch {
+      this.shotPreview = null
+    }
+  }
+
+  private async armScreenshot(rect: Rect, viewportWidth: number): Promise<void> {
+    if (this.tabId === null) return
+    this.armingScreenshot = true
     try {
       await send({
         type: 'arm-screenshot',
         tabId: this.tabId,
-        rect: picked.crop,
-        viewportWidth: picked.viewportWidth,
+        rect,
+        viewportWidth,
       })
     } catch (cause) {
       this.armingScreenshot = false
@@ -680,7 +731,10 @@ export class Flow {
   /** Drops both the request and anything already captured for this tab. */
   async cancelScreenshot(): Promise<void> {
     this.armingScreenshot = false
+    this.choosingRegion = false
     this.sendScreenshot = false
+    this.shotPreview = null
+    this.shotRegion = null
     if (this.tabId === null) return
     await send({ type: 'clear-screenshot', tabId: this.tabId }).catch(() => {})
   }

@@ -22,6 +22,9 @@
     awaitingReference: boolean
     sendScreenshot: boolean
     armingScreenshot: boolean
+    choosingRegion: boolean
+    shotPreview: string | null
+    shotClipped: boolean
     visionSupported: boolean
     providerLabel: string
     onfollowup: (text: string) => void
@@ -46,6 +49,9 @@
     awaitingReference,
     sendScreenshot,
     armingScreenshot,
+    choosingRegion,
+    shotPreview,
+    shotClipped,
     visionSupported,
     providerLabel,
     onfollowup,
@@ -209,7 +215,7 @@
       {#if visionSupported}
         <div class="shot">
           <Toggle
-            checked={sendScreenshot || armingScreenshot}
+            checked={sendScreenshot || armingScreenshot || choosingRegion}
             label="Send a screenshot with this attempt"
             onchange={onscreenshot}
           />
@@ -219,15 +225,20 @@
             <em>shows the page as it is now, with this change applied</em>
           </span>
         </div>
-        {#if armingScreenshot}
+        {#if choosingRegion}
+          <p class="shot-awaiting">Drag the area to capture on the page.</p>
+        {:else if armingScreenshot}
           <p class="shot-awaiting">
             Click the Web Alchemist button in the toolbar to capture. Nothing is
             taken until you do.
           </p>
-        {:else if sendScreenshot}
+        {/if}
+        {#if shotPreview}
+          <img class="shot-image" src={shotPreview} alt="The region that will be sent" />
           <p class="shot-warning">
-            Captured. Everything in that region goes to {providerLabel}. Off again
-            after this attempt.
+            This image goes to {providerLabel}{shotClipped
+              ? ', clipped at the viewport'
+              : ''}. Off again after this attempt.
           </p>
         {/if}
       {/if}
@@ -536,6 +547,17 @@
     display: block;
     font-style: normal;
     color: var(--text-faint);
+  }
+
+  .shot-image {
+    display: block;
+    width: 100%;
+    max-height: 180px;
+    object-fit: contain;
+    object-position: left top;
+    border: 1px solid var(--border);
+    border-radius: var(--r-input);
+    background: var(--surface-sunken);
   }
 
   .shot-awaiting {

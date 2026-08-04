@@ -34,8 +34,10 @@ import type { RefinementTurn } from '@background/providers/types'
  * 'target' is the element the transform acts on — picking one replaces the
  * previous target, its anchor and its outline. 'reference' only adds context
  * for the next request and changes nothing about what is being transformed.
+ * 'region' selects no element at all: the drag is the screenshot boundary and
+ * nothing else, so nothing under it is highlighted or resolved.
  */
-export type PickMode = 'target' | 'reference'
+export type PickMode = 'target' | 'reference' | 'region'
 
 export type Message =
   /* --- read state --------------------------------------------------- */
@@ -144,6 +146,13 @@ export type ContentMessage =
   | { type: 'start-picking'; palette: OverlayPalette; mode: PickMode }
   | { type: 'cancel-picking' }
   | { type: 'recapture' }
+  /**
+   * Takes the target outline down, and puts it back.
+   *
+   * The outline is a real element in the page, so a screenshot taken with it
+   * up contains our own highlight drawn over the very thing being described.
+   */
+  | { type: 'set-lock-visible'; visible: boolean }
   /** Walks the selection up the tree from the element being described. */
   | { type: 'retarget'; levelsUp: number }
   /** Draws an ancestor without selecting it. `null` clears. */
@@ -175,6 +184,14 @@ export type ContentEvent =
   | { type: 'screenshot-failed'; tabId: number; message: string }
   /** A reference pick. Carries no anchor or crop: nothing is targeted by it. */
   | { type: 'element-referenced'; element: ElementContext }
+  /** A drag in 'region' mode. The rectangle a screenshot would cover. */
+  | {
+      type: 'region-selected'
+      rect: Rect
+      clipped: boolean
+      /** CSS pixels, for scaling the rect against a device-pixel capture. */
+      viewportWidth: number
+    }
   | {
       type: 'element-picked'
       context: PageContext

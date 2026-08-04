@@ -12,6 +12,10 @@
     instruction: string
     sendScreenshot: boolean
     armingScreenshot: boolean
+    choosingRegion: boolean
+    /** The captured image, once there is one. */
+    shotPreview: string | null
+    shotClipped: boolean
     visionSupported: boolean
     providerLabel: string
     onchange: (instruction: string) => void
@@ -37,6 +41,9 @@
     instruction,
     sendScreenshot,
     armingScreenshot,
+    choosingRegion,
+    shotPreview,
+    shotClipped,
     visionSupported,
     providerLabel,
     onchange,
@@ -94,7 +101,6 @@
       }
     }),
   )
-  let cropLabel = $derived(`${Math.round(crop.width)} × ${Math.round(crop.height)}`)
 </script>
 
 <div class="panel">
@@ -181,36 +187,41 @@
     <section class="screenshot">
       <div class="opt-in">
         <Toggle
-          checked={sendScreenshot || armingScreenshot}
-          label="Send a screenshot of this region"
+          checked={sendScreenshot || armingScreenshot || choosingRegion}
+          label="Send a screenshot"
           onchange={onscreenshot}
         />
-        <span class="opt-in-text">Send a screenshot of this region</span>
+        <span class="opt-in-text">Send a screenshot</span>
       </div>
 
-      <!--
-        The panel cannot photograph the tab: Firefox only grants that to a
-        toolbar-button click, never to a sidebar. So it asks for one, rather
-        than failing in a way that looks like a bug.
-      -->
-      {#if armingScreenshot}
+      {#if choosingRegion}
+        <p class="awaiting">Drag the area to capture on the page.</p>
+      {:else if armingScreenshot}
+        <!--
+          The panel cannot photograph the tab. Firefox grants that only to a
+          toolbar-button click, never to a sidebar, so it asks for one rather
+          than failing in a way that looks like a bug.
+        -->
         <p class="awaiting">
           Click the Web Alchemist button in the toolbar to capture. Nothing is
           taken until you do.
         </p>
       {/if}
 
-      {#if sendScreenshot}
-        <div class="preview" aria-hidden="true">
-          <span class="preview-text">crop {cropLabel}</span>
-        </div>
+      <!--
+        The image itself, not its dimensions. This is the consent surface: what
+        is on screen here is exactly what leaves the browser, so it has to be
+        the picture rather than a description of one.
+      -->
+      {#if shotPreview}
+        <img class="shot" src={shotPreview} alt="The region that will be sent" />
         <p class="warning">
-          Everything inside this rectangle is sent to {providerLabel}, including any
-          text, names, or images that happen to be there.
+          This image is sent to {providerLabel}, including any text, names or
+          images that happen to be in it.
         </p>
         <p class="note">
-          {#if cropClipped}
-            Clipped at the viewport — only the visible part is captured.
+          {#if shotClipped}
+            Clipped at the viewport — only the visible part was captured.
           {/if}
           Off again every time you start a new request.
         </p>
@@ -401,23 +412,17 @@
 
   /* Stands in for the capture rather than showing one: taking the screenshot
      to preview it would be the very thing the toggle is asking about. */
-  .preview {
-    display: flex;
-    height: 74px;
-    align-items: center;
-    justify-content: center;
-    border: 1.5px dashed var(--attention);
-    border-radius: var(--r-button);
-    background: repeating-linear-gradient(
-      135deg,
-      var(--surface-raised) 0 6px,
-      var(--surface-sunken) 6px 12px
-    );
-  }
 
-  .preview-text {
-    font: 10.5px var(--font-mono);
-    color: var(--text-dim);
+
+  .shot {
+    display: block;
+    width: 100%;
+    max-height: 220px;
+    object-fit: contain;
+    object-position: left top;
+    border: 1px solid var(--border);
+    border-radius: var(--r-input);
+    background: var(--surface-sunken);
   }
 
   .awaiting {

@@ -379,10 +379,16 @@ class Overlay {
     if (this.dim) this.dim.style.display = 'block'
   }
 
-  setHint(hasCrop: boolean): void {
+  setHint(hasCrop: boolean, region = false): void {
     if (!this.hint) return
     const lead = this.hint.firstElementChild
-    if (lead) lead.textContent = hasCrop ? 'Confirm or redraw' : 'Hover or drag'
+    if (lead) {
+      lead.textContent = region
+        ? 'Drag the area to capture'
+        : hasCrop
+          ? 'Confirm or redraw'
+          : 'Hover or drag'
+    }
     this.hint.querySelector('.redraw')?.setAttribute(
       'style',
       hasCrop ? '' : 'display:none',
@@ -516,6 +522,9 @@ function onMouseMove(event: MouseEvent): void {
     overlay.showCrop(crop)
     return
   }
+  // Nothing under a screenshot region is being selected, so nothing under it
+  // is highlighted or resolved — the rectangle is the whole of the choice.
+  if (pickMode === 'region') return
   // Once a rectangle exists it owns the selection; moving the mouse must not
   // silently retarget underneath it.
   if (crop) return
@@ -538,6 +547,27 @@ function onMouseUp(event: MouseEvent): void {
   const width = Math.abs(event.clientX - dragOrigin.x)
   const height = Math.abs(event.clientY - dragOrigin.y)
   dragOrigin = null
+
+  if (pickMode === 'region') {
+    // Too small to be a deliberate region. Left waiting rather than cancelled:
+    // a stray click while aiming should not throw the user out of the mode.
+    if (width < 12 || height < 12) {
+      crop = null
+      overlay.hideCrop()
+      return
+    }
+    const rect = crop as Rect
+    stopPicking()
+    void send({
+      type: 'region-selected',
+      rect,
+      clipped: exceedsViewport(rect),
+      viewportWidth: window.innerWidth,
+    })
+    // The subject never stopped being the subject.
+    updateLock()
+    return
+  }
 
   // A drag under a few pixels is a click, which confirms what is hovered.
   if (width < 12 || height < 12) {
@@ -598,7 +628,9 @@ function onKeyDown(event: KeyboardEvent): void {
       return
     case 'Enter':
       handled()
-      confirmSelection()
+      // Nothing is selected in region mode, so there is nothing to confirm —
+      // the drag itself is the whole act.
+      if (pickMode !== 'region') confirmSelection()
       return
     case 'Backspace':
       if (!crop) return
@@ -609,6 +641,7 @@ function onKeyDown(event: KeyboardEvent): void {
       publishTarget()
       return
     case 'ArrowUp':
+      if (pickMode === 'region') return
       handled()
       setCurrent(current?.parentElement ?? null)
       return
@@ -941,7 +974,7 @@ function startPicking(palette: OverlayPalette): void {
   picking = true
   crop = null
   overlay.mount(palette)
-  overlay.setHint(false)
+  overlay.setHint(false, pickMode === 'region')
 
   // The picker's own handlers first, so they see the event before it is
   // swallowed below.
@@ -1104,6 +1137,13 @@ async function handleMessage(message: ContentMessage) {
       lockDepth = message.depth
       return updateLock()
     }
+    case 'set-lock-visible':
+      // Rebuilt from describedElement rather than restored, so the boxes come
+      // back where the elements are now rather than where they were.
+      if (message.visible) updateLock()
+      else lock.hide()
+      return true
+
     case 'clear-lock':
       describedElement = null
       lockDepth = 0
