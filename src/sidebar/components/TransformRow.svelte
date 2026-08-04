@@ -7,6 +7,8 @@
     /* Named `runtime`, not `state`: a prop called `state` makes every
        `$state(...)` in this component parse as store access on it. */
     runtime: TransformRuntimeState | undefined
+    /** 1-based place in the list. Later entries win a conflict. */
+    position: number
     expanded: boolean
     /** True while this row is the one being dragged. */
     dragging: boolean
@@ -25,6 +27,7 @@
   let {
     transform,
     runtime,
+    position,
     expanded,
     dragging,
     ontoggle,
@@ -111,7 +114,7 @@
         ongrab()
       }}
       ondragend={ondrop}
-      onkeydown={onHandleKey}>⠿</button
+      onkeydown={onHandleKey}>{position}</button
     >
 
     <Toggle
@@ -151,9 +154,6 @@
       ></span>
       <span class="badge" class:flagged={flagged && transform.kind === 'js'}>
         {transform.kind.toUpperCase()}
-      </span>
-      <span class="badge" class:you={transform.origin === 'manual'}>
-        {transform.origin === 'ai' ? 'AI' : 'you'}
       </span>
     </div>
   </div>
@@ -238,11 +238,15 @@
   }
 
   .handle {
+    /* Fixed width so the column holds still when the list passes nine. */
+    min-width: 1.4ch;
     padding: 0 1px;
     border: none;
     background: none;
-    font: 12px var(--font-mono);
+    font: 11px var(--font-mono);
     color: var(--text-faint);
+    text-align: right;
+    font-variant-numeric: tabular-nums;
     cursor: grab;
   }
 
@@ -313,10 +317,6 @@
     font: 600 9.5px var(--font-mono);
     letter-spacing: 0.04em;
     color: var(--text-dim);
-  }
-
-  .badge.you {
-    opacity: 0.55;
   }
 
   .badge.flagged {

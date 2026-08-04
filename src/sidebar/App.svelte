@@ -522,9 +522,10 @@
     {/if}
 
     <ul class="rows">
-      {#each transforms as transform (transform.id)}
+      {#each transforms as transform, index (transform.id)}
         <TransformRow
           {transform}
+          position={index + 1}
           runtime={stateFor(transform.id)}
           expanded={expandedId === transform.id}
           ontoggle={(enabled) => void setEnabled(transform, enabled)}
