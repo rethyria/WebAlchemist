@@ -174,6 +174,57 @@
     transforms = transforms.map((t) => (t.id === transform.id ? { ...t, enabled } : t))
   }
 
+  /*
+   * Reordering, owned here because this component holds the array.
+   *
+   * The list is sorted by `order` ascending and later entries win a conflict,
+   * so the row at the bottom is the one that takes effect — moving something
+   * down is how you make it win.
+   *
+   * The move happens on hover rather than on drop, so the list reorders under
+   * the pointer and the row lands where it looks like it will. Only the
+   * persist waits for the drop.
+   */
+  let draggingId = $state<string | null>(null)
+
+  function moveTo(id: string, to: number) {
+    const from = transforms.findIndex((t) => t.id === id)
+    if (from === -1 || to < 0 || to >= transforms.length || from === to) return
+    const next = [...transforms]
+    const [moved] = next.splice(from, 1)
+    if (!moved) return
+    next.splice(to, 0, moved)
+    transforms = next
+  }
+
+  function dragOverRow(id: string) {
+    if (draggingId === null || draggingId === id) return
+    moveTo(draggingId, transforms.findIndex((t) => t.id === id))
+  }
+
+  async function persistOrder() {
+    const tab = await activeTab()
+    await send({
+      type: 'reorder-transforms',
+      orderedIds: transforms.map((t) => t.id),
+      // Order decides conflicts, so the page has to be re-evaluated now.
+      ...(tab?.id === undefined ? {} : { tabId: tab.id }),
+    })
+  }
+
+  async function endDrag() {
+    if (draggingId === null) return
+    draggingId = null
+    await persistOrder()
+  }
+
+  async function moveBy(transform: Transform, delta: number) {
+    const from = transforms.findIndex((t) => t.id === transform.id)
+    if (from === -1) return
+    moveTo(transform.id, from + delta)
+    await persistOrder()
+  }
+
   async function renameTransform(transform: Transform, name: string) {
     const tab = await activeTab()
     // save-transform upserts by id, so this is the same path a save takes.
@@ -481,6 +532,11 @@
             (expandedId = expandedId === transform.id ? null : transform.id)}
           onrename={(name) => void renameTransform(transform, name)}
           ondelete={() => void removeTransform(transform)}
+          dragging={draggingId === transform.id}
+          ongrab={() => (draggingId = transform.id)}
+          onhover={() => dragOverRow(transform.id)}
+          ondrop={() => void endDrag()}
+          onmove={(delta) => void moveBy(transform, delta)}
         />
       {/each}
     </ul>

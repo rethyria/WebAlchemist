@@ -8,14 +8,45 @@
        `$state(...)` in this component parse as store access on it. */
     runtime: TransformRuntimeState | undefined
     expanded: boolean
+    /** True while this row is the one being dragged. */
+    dragging: boolean
     ontoggle: (enabled: boolean) => void
     onexpand: () => void
     onrename: (name: string) => void
     ondelete: () => void
+    ongrab: () => void
+    /** The dragged row should come to rest here. */
+    onhover: () => void
+    ondrop: () => void
+    /** Keyboard equivalent of a drag: -1 earlier, +1 later. */
+    onmove: (delta: number) => void
   }
 
-  let { transform, runtime, expanded, ontoggle, onexpand, onrename, ondelete }: Props =
-    $props()
+  let {
+    transform,
+    runtime,
+    expanded,
+    dragging,
+    ontoggle,
+    onexpand,
+    onrename,
+    ondelete,
+    ongrab,
+    onhover,
+    ondrop,
+    onmove,
+  }: Props = $props()
+
+  /*
+   * Reordering is offered by keyboard as well as by drag. A drag-only control
+   * cannot be operated without a pointer, and this one decides which transform
+   * wins a conflict — it is not decoration.
+   */
+  function onHandleKey(event: KeyboardEvent) {
+    if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return
+    event.preventDefault()
+    onmove(event.key === 'ArrowUp' ? -1 : 1)
+  }
 
   let broken = $derived(runtime?.status === 'broken')
   /* JS carrying capabilities, or broken, gets the attention treatment. */
@@ -53,8 +84,36 @@
   }
 </script>
 
-<li class="row" class:expanded>
+<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+<li
+  class="row"
+  class:expanded
+  class:dragging
+  ondragover={(event) => {
+    // Without preventDefault this is not a drop target and the drag is refused.
+    event.preventDefault()
+    onhover()
+  }}
+  ondrop={(event) => {
+    event.preventDefault()
+    ondrop()
+  }}
+>
   <div class="head">
+    <button
+      type="button"
+      class="handle"
+      draggable="true"
+      aria-label="Reorder {transform.name}. Arrow keys move it."
+      ondragstart={(event) => {
+        // Firefox refuses to start a drag with no payload set.
+        event.dataTransfer?.setData('text/plain', transform.id)
+        ongrab()
+      }}
+      ondragend={ondrop}
+      onkeydown={onHandleKey}>⠿</button
+    >
+
     <Toggle
       checked={transform.enabled}
       label="Enable {transform.name}"
@@ -178,6 +237,29 @@
     padding: 9px var(--gutter-sidebar);
   }
 
+  .handle {
+    padding: 0 1px;
+    border: none;
+    background: none;
+    font: 12px var(--font-mono);
+    color: var(--text-faint);
+    cursor: grab;
+  }
+
+  .handle:active {
+    cursor: grabbing;
+  }
+
+  .handle:focus-visible {
+    outline: 1px solid var(--accent-fg);
+    border-radius: 2px;
+  }
+
+  /* The row being carried, so the gap it leaves is legible as it moves. */
+  .row.dragging {
+    opacity: 0.4;
+  }
+
   .rename {
     flex: 1;
     min-width: 0;
@@ -247,7 +329,7 @@
     display: flex;
     flex-direction: column;
     gap: 11px;
-    /* Aligns under the name, past the toggle. */
+    /* Aligns under the name, past the handle and toggle. */
     padding: 0 var(--gutter-sidebar) var(--gutter-sidebar) var(--indent-expanded);
   }
 

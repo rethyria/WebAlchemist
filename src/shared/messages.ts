@@ -63,7 +63,8 @@ export type Message =
   | { type: 'save-transform'; transform: Transform; tabId?: number }
   /** `tabId` lets the change come off the page now rather than on reload. */
   | { type: 'delete-transform'; id: string; tabId?: number }
-  | { type: 'reorder-transforms'; orderedIds: string[] }
+  /** `tabId` re-applies in the new precedence now rather than on reload. */
+  | { type: 'reorder-transforms'; orderedIds: string[]; tabId?: number }
   | { type: 'set-enabled'; id: string; enabled: boolean; tabId?: number }
 
   /* --- settings and credentials ------------------------------------- */

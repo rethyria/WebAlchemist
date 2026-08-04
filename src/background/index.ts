@@ -242,6 +242,10 @@ async function handle(
 
     case 'reorder-transforms':
       await reorderTransforms(message.orderedIds)
+      // Order decides which transform wins a conflict, so a reorder can change
+      // what the page looks like. Same omission delete had: without this the
+      // new precedence only took effect on the next navigation.
+      await reapply(message.tabId)
       return true
 
     case 'set-enabled': {
