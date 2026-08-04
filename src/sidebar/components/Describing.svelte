@@ -85,11 +85,37 @@
    * be found. `nearest` because the row is usually already visible, and moving
    * the list when it did not need to move is its own kind of noise.
    */
-  let list = $state<HTMLUListElement | null>(null)
+  let list = $state<HTMLDivElement | null>(null)
   $effect(() => {
     void tree
     list?.querySelector('.node.selected')?.scrollIntoView({ block: 'nearest' })
   })
+
+  /*
+   * Brings the hovered row's own text into view sideways.
+   *
+   * Rows are laid out at their full width rather than clipped, so a deep row
+   * runs off the right of a 264px panel. Scrolling on hover means the panel
+   * can stay narrow without the names becoming unreadable — the row you are
+   * pointing at is the one you want to read.
+   *
+   * Never scrolled past the start of the label: indentation is the part worth
+   * giving up to make room, the name is not. So a row too long to fit either
+   * way ends up flush left with as much of it showing as there is space for.
+   */
+  function reveal(row: HTMLElement, indent: number): void {
+    const text = row.firstElementChild
+    if (!list || !text) return
+    const end =
+      text.getBoundingClientRect().right - list.getBoundingClientRect().left + list.scrollLeft
+    const overflow = end + 8 - list.clientWidth
+    list.scrollLeft = Math.max(0, Math.min(overflow, indent))
+  }
+
+  /** Back to the left edge, so the indentation reads as a shape again. */
+  function rest(): void {
+    if (list) list.scrollLeft = 0
+  }
 
   const INDENT_BUDGET = 108
   let step = $derived.by(() => {
@@ -135,37 +161,55 @@
     <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
     <section class="tree">
       <Label>Or target another element</Label>
-      <ul bind:this={list} onmouseleave={() => onpreview(null)}>
-        {#each rows as row}
-          <li>
-            {#if row.path}
-              {@const path = row.path}
-              <button
-                type="button"
-                class="node"
-                class:selected={row.isTarget}
-                class:container={row.isContainer}
-                class:in-scope={row.inScope}
-                class:aside={row.relation === 'sibling'}
-                style="padding-left: {row.pad}px"
-                onclick={() => onretarget(path)}
-                onmouseenter={() => onpreview(path)}
-                onfocus={() => onpreview(path)}
-                onblur={() => onpreview(null)}
-              >
-                {row.label}
-                <!-- Where the pick started, so the way back to it is visible
-                     from wherever the selection has moved to. -->
-                {#if row.origin}<span class="origin">picked</span>{/if}
-              </button>
-            {:else}
-              <!-- Children not shown. A count rather than an element: there is
-                   nothing here to select or to draw on the page. -->
-              <span class="more" style="padding-left: {row.pad}px">{row.label}</span>
-            {/if}
-          </li>
-        {/each}
-      </ul>
+      <!-- svelte-ignore a11y_no_static_element_interactions -->
+      <div
+        class="scroll"
+        bind:this={list}
+        onmouseleave={() => {
+          onpreview(null)
+          rest()
+        }}
+      >
+        <ul>
+          {#each rows as row}
+            <li>
+              {#if row.path}
+                {@const path = row.path}
+                <button
+                  type="button"
+                  class="node"
+                  class:selected={row.isTarget}
+                  class:container={row.isContainer}
+                  class:in-scope={row.inScope}
+                  class:aside={row.relation === 'sibling'}
+                  style="padding-left: {row.pad}px"
+                  onclick={() => onretarget(path)}
+                  onmouseenter={(event) => {
+                    onpreview(path)
+                    reveal(event.currentTarget, row.pad)
+                  }}
+                  onfocus={(event) => {
+                    onpreview(path)
+                    reveal(event.currentTarget, row.pad)
+                  }}
+                  onblur={() => onpreview(null)}
+                >
+                  <span class="text">
+                    {row.label}
+                    <!-- Where the pick started, so the way back to it is visible
+                         from wherever the selection has moved to. -->
+                    {#if row.origin}<span class="origin">picked</span>{/if}
+                  </span>
+                </button>
+              {:else}
+                <!-- Children not shown. A count rather than an element: there is
+                     nothing here to select or to draw on the page. -->
+                <span class="more" style="padding-left: {row.pad}px">{row.label}</span>
+              {/if}
+            </li>
+          {/each}
+        </ul>
+      </div>
     </section>
   {/if}
 
@@ -364,18 +408,35 @@
     min-height: 52px;
   }
 
-  .tree ul {
-    display: flex;
+  .scroll {
     flex: 1;
-    flex-direction: column;
     min-height: 0;
-    margin: 0;
-    padding: 0;
-    overflow-y: auto;
-    list-style: none;
+    overflow: auto;
     border: 1px solid var(--border);
     border-radius: var(--r-input);
     background: var(--surface-sunken);
+    scroll-behavior: smooth;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .scroll {
+      scroll-behavior: auto;
+    }
+  }
+
+  /*
+   * As wide as the widest row rather than as wide as the panel, so every row
+   * fills the scrollable width. Without it a short row's highlight would stop
+   * at the panel edge and leave a gap once the list is scrolled across.
+   */
+  .tree ul {
+    display: flex;
+    flex-direction: column;
+    width: max-content;
+    min-width: 100%;
+    margin: 0;
+    padding: 0;
+    list-style: none;
   }
 
   .node {
@@ -388,8 +449,6 @@
     color: var(--text-dim);
     text-align: left;
     white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
     cursor: pointer;
   }
 
