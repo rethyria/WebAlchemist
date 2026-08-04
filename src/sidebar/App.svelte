@@ -202,10 +202,14 @@
     const onTabChange = () => void load()
     browser.tabs.onActivated.addListener(onTabChange)
     const onTabUpdated = (
-      _id: number,
+      id: number,
       change: browser.tabs._OnUpdatedChangeInfo,
       tab: browser.tabs.Tab,
     ) => {
+      // A reload of the run's own page invalidates it, whether or not that
+      // page is the one on screen. `status` catches a plain refresh, which
+      // reports no url change at all.
+      if (change.status === 'loading') flow.pageReloading(id)
       if (change.url && tab.active) void load()
     }
     browser.tabs.onUpdated.addListener(onTabUpdated)

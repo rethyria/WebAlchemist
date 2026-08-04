@@ -142,6 +142,16 @@ export class Flow {
   private cancelGeneration: (() => void) | null = null
 
   /**
+   * Set when we are the ones reloading the page.
+   *
+   * A JS preview works by registering the draft and reloading, and the reload
+   * after that is how a second attempt gets back to a clean page. Those are
+   * the two cases where the run has to survive a reload — every other reload
+   * means the element being described no longer exists.
+   */
+  private expectedReload = false
+
+  /**
    * The tab this run belongs to, and the tab currently on screen.
    *
    * They are separate because a run is about an element in a particular page.
@@ -204,6 +214,23 @@ export class Flow {
   tabClosed(tabId: number): void {
     if (tabId !== this.tabId) return
     this.reset()
+  }
+
+  /**
+   * The owning page started loading again.
+   *
+   * Everything the run refers to is gone with it — the element, the anchor
+   * that was captured from it, the preview, and the outline. Carrying on would
+   * mean describing a page that no longer exists and saving a transform
+   * anchored to it.
+   */
+  pageReloading(tabId: number): void {
+    if (tabId !== this.tabId || this.step === 'list') return
+    if (this.expectedReload) {
+      this.expectedReload = false
+      return
+    }
+    void this.discard()
   }
 
   /* ---------------------------------------------------------------- */
@@ -540,6 +567,8 @@ export class Flow {
     }
 
     try {
+      // The background reloads the tab to run it; that reload is ours.
+      this.expectedReload = true
       await send({ type: 'preview-js', tabId: this.tabId, transform: draft })
       this.jsRan = true
     } catch (cause) {
@@ -603,6 +632,7 @@ export class Flow {
   async reloadAndRetry(): Promise<void> {
     if (this.tabId === null) return
     await this.clearPreview()
+    this.expectedReload = true
     await browser.tabs.reload(this.tabId)
     await this.regenerate()
   }
@@ -831,5 +861,6 @@ export class Flow {
     this.stage = 'context'
     this.elapsed = 0
     this.streamed = ''
+    this.expectedReload = false
   }
 }
