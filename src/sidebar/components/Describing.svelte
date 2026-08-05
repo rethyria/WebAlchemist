@@ -95,23 +95,57 @@
   const GUTTER = 6
 
   /**
-   * Puts the start of a row's name on the panel's midline, or as near as the
-   * scroll range allows.
+   * Rows either side of the pointer that the position tries to take in.
    *
-   * Measured from the indent alone, so the position is a fact about where a
-   * row sits in the tree: two rows at the same depth put the list in the same
-   * place whether they are called `li` or `li.active`. Measuring the name
-   * instead made the offset depend on how long each one happened to be, so
-   * siblings disagreed for no reason a reader could see.
-   *
-   * The midline rather than the left edge because the point is the
-   * surroundings: shallower rows stay legible to the left, deeper ones to the
-   * right. Only the viewport moves — nothing about a row's own position
-   * changes — and the browser clamps the result, so a list with nothing to
-   * scroll stays where it is.
+   * The point of the list is the surroundings, so the position is decided by
+   * a stretch of it rather than by one row. Taken alternately from above and
+   * below, so neither side is preferred.
    */
-  function centre(pad: number): void {
-    if (list) list.scrollLeft = pad - list.clientWidth / 2
+  const NEIGHBOURS = 5
+
+  /** Where each row's name ends, in the list's own coordinates. Measured. */
+  let ends = $state<number[]>([])
+
+  /**
+   * Moves the list the least it takes to show the rows around `index`.
+   *
+   * Two halves. First, how much to show: start from the row itself and take
+   * in neighbours one at a time, above and below alternately, keeping each
+   * one only while the whole stretch still fits across the panel. What comes
+   * out is the widest span of nearby rows that can be read at once, so a deep
+   * row four below pulls the view towards it before the pointer gets there.
+   *
+   * Second, where to put that span: as close to where the list already sits
+   * as showing it allows. Anything already on screen therefore stays put —
+   * moving to a row that could be read without moving is motion for its own
+   * sake, and going from a deep row to a shallow one used to snap left for
+   * exactly that non-reason.
+   *
+   * A name wider than the panel cannot be contained, and falls out of the
+   * arithmetic aligned to its start, which is where reading begins.
+   */
+  function frame(index: number, measured: number[] = ends): void {
+    const row = rows[index]
+    if (!list || !row) return
+
+    const width = list.clientWidth
+    let lo = row.pad
+    let hi = measured[index] ?? row.pad
+
+    for (let step = 1; step <= NEIGHBOURS; step += 1) {
+      for (const at of [index - step, index + step]) {
+        const near = rows[at]
+        if (!near) continue
+        const low = Math.min(lo, near.pad)
+        const high = Math.max(hi, measured[at] ?? near.pad)
+        if (high - low <= width) {
+          lo = low
+          hi = high
+        }
+      }
+    }
+
+    list.scrollLeft = Math.min(Math.max(list.scrollLeft, hi - width), lo)
   }
 
   /*
@@ -122,9 +156,9 @@
   const SETTLE_MS = 120
   let settle: ReturnType<typeof setTimeout> | undefined
 
-  function centreSoon(pad: number): void {
+  function frameSoon(index: number): void {
     clearTimeout(settle)
-    settle = setTimeout(() => centre(pad), SETTLE_MS)
+    settle = setTimeout(() => frame(index), SETTLE_MS)
   }
 
   $effect(() => () => clearTimeout(settle))
@@ -154,24 +188,34 @@
     })),
   )
 
-  /** Where the selection's name starts, which is the list's resting position. */
-  let selectedPad = $derived(rows.find((row) => row.isTarget)?.pad ?? 0)
+  let selectedIndex = $derived(rows.findIndex((row) => row.isTarget))
 
   /*
-   * The selection is framed by default: centred down the list, and centred
-   * across it by the same rule the hover uses. It sits between its ancestors
-   * and its descendants, so the middle is the position that shows both.
+   * The selection is framed by default: centred down the list, and across it
+   * by the same rule the hover uses. It sits between its ancestors and its
+   * descendants, so its surroundings are the ones worth showing when nothing
+   * else is being pointed at.
+   *
+   * Name widths are read here, once per tree, because they are what decides
+   * how much of a stretch fits. Every read happens before anything is
+   * written, so the measuring costs one layout rather than one per row.
    */
   $effect(() => {
     void tree
+    if (!list) return
     clearTimeout(settle)
-    list?.querySelector('.node.selected')?.scrollIntoView({ block: 'center', inline: 'nearest' })
-    centre(selectedPad)
+    const origin = list.getBoundingClientRect().left - list.scrollLeft
+    const measured = [...list.querySelectorAll('.name')].map(
+      (name) => name.getBoundingClientRect().right - origin,
+    )
+    ends = measured
+    list.querySelector('.node.selected')?.scrollIntoView({ block: 'center', inline: 'nearest' })
+    frame(selectedIndex, measured)
   })
 
   /** Hovering is a departure from the selection, so leaving returns to it. */
   function rest(): void {
-    centreSoon(selectedPad)
+    frameSoon(selectedIndex)
   }
 </script>
 
@@ -195,8 +239,12 @@
           rest()
         }}
       >
+        <!--
+          Every row carries a `.name`, the count rows included, so the measured
+          widths line up one-to-one with the rows they came from.
+        -->
         <ul>
-          {#each rows as row}
+          {#each rows as row, index}
             <li>
               {#if row.path}
                 {@const path = row.path}
@@ -211,24 +259,27 @@
                   onclick={() => onretarget(path)}
                   onmouseenter={() => {
                     onpreview(path)
-                    centreSoon(row.pad)
+                    frameSoon(index)
                   }}
                   onfocus={() => {
                     onpreview(path)
                     /* Keyboard focus is a decision, not a glance: no wait. */
-                    centre(row.pad)
+                    frame(index)
                   }}
                   onblur={() => onpreview(null)}
-                >
-                {row.label}
-                <!-- Where the pick started, so the way back to it is visible
-                     from wherever the selection has moved to. -->
-                {#if row.origin}<span class="origin">picked</span>{/if}
+                  ><span class="name"
+                    >{row.label}{#if row.origin}<!--
+                      Where the pick started, so the way back to it is visible
+                      from wherever the selection has moved to.
+                    --><span class="origin">picked</span>{/if}</span
+                  >
                 </button>
               {:else}
                 <!-- Children not shown. A count rather than an element: there is
                      nothing here to select or to draw on the page. -->
-                <span class="more" style="padding-left: {row.pad}px">{row.label}</span>
+                <span class="more" style="padding-left: {row.pad}px"
+                  ><span class="name">{row.label}</span></span
+                >
               {/if}
             </li>
           {/each}
