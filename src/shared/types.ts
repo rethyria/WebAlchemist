@@ -377,6 +377,15 @@ export interface TreeRow {
   above?: number
   /** Absent on 'more' rows, which are a count rather than an element. */
   path?: TreePath
+  /**
+   * On a 'more' row, the node whose children were cut short. Sending it back
+   * asks for that node in full.
+   *
+   * Absent when the row is the whole list running into its ceiling rather
+   * than one node running into a cap, because there is nothing to expand
+   * there — the rows would have nowhere to go.
+   */
+  expand?: TreePath
   /** The element the pick confirmed, marked once the selection has left it. */
   origin?: boolean
 }

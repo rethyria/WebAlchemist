@@ -375,6 +375,9 @@ async function handle(
       })
       return true
 
+    case 'expand-node':
+      return askContent(message.tabId, { type: 'expand-node', path: message.path })
+
     case 'set-lock-scope': {
       // Both numbers come from the page: what the depth resolves to is a fact
       // about the live DOM, not something worth estimating in the panel.

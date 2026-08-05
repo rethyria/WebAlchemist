@@ -25,6 +25,7 @@
     tree: TreeRow[]
     onretarget: (path: TreePath) => void
     onpreview: (path: TreePath | null) => void
+    onexpand: (path: TreePath) => void
     scopeDepth: number
     scopeCount: number
     scopeContainer: string | null
@@ -50,6 +51,7 @@
     tree,
     onretarget,
     onpreview,
+    onexpand,
     scopeDepth,
     scopeCount,
     scopeContainer,
@@ -92,7 +94,17 @@
    * to be wider than the panel instead, and the list scrolls to it.
    */
   const STEP = 9
-  const GUTTER = 6
+
+  /**
+   * Breathing room at both ends of the list.
+   *
+   * It does two jobs, which is why it is one number. As the first row's
+   * padding it keeps the shallowest name off the left edge when the list sits
+   * at rest; as an inset on the arithmetic below it keeps whichever name the
+   * list moved for off the edge it moved towards — which would otherwise be
+   * exactly flush, since that edge is what the move was aiming at.
+   */
+  const EDGE = 10
 
   /**
    * Rows either side of the pointer that the position tries to take in.
@@ -145,7 +157,15 @@
       }
     }
 
-    list.scrollLeft = Math.min(Math.max(list.scrollLeft, hi - width), lo)
+    /*
+     * Whether to move is asked without the margin, and where to land is
+     * answered with it. Asking with it would make the margin a reason to
+     * move: a range already legible but sitting closer than EDGE to an edge
+     * would be shuffled a few pixels to claim room it did not need.
+     */
+    const at = list.scrollLeft
+    if (at <= lo && at >= hi - width) return
+    list.scrollLeft = Math.min(Math.max(at, hi - width + EDGE), lo - EDGE)
   }
 
   /*
@@ -173,7 +193,7 @@
   let rows = $derived(
     tree.map((row) => ({
       ...row,
-      pad: GUTTER + row.indent * STEP,
+      pad: EDGE + row.indent * STEP,
       isTarget: row.relation === 'current',
       // The container the current scope resolves to, marked distinctly: it
       // answers a different question from the target.
@@ -274,9 +294,22 @@
                     --><span class="origin">picked</span>{/if}</span
                   >
                 </button>
+              {:else if row.expand}
+                {@const open = row.expand}
+                <!--
+                  Children a cap left out. Not an element — there is nothing
+                  here to select or to draw on the page — but the cap can be
+                  lifted for the node they belong to.
+                -->
+                <button
+                  type="button"
+                  class="more open"
+                  style="padding-left: {row.pad}px"
+                  onclick={() => onexpand(open)}><span class="name">{row.label}</span></button
+                >
               {:else}
-                <!-- Children not shown. A count rather than an element: there is
-                     nothing here to select or to draw on the page. -->
+                <!-- The list running into its own ceiling rather than a node
+                     into its cap, so there is nothing to ask for. -->
                 <span class="more" style="padding-left: {row.pad}px"
                   ><span class="name">{row.label}</span></span
                 >
@@ -517,7 +550,9 @@
   .node {
     display: block;
     width: 100%;
-    padding: 5px 8px;
+    /* The right half of the pair EDGE makes on the left; padding-left is set
+       per row, from the same number plus the indent. */
+    padding: 5px 10px;
     border: none;
     background: transparent;
     font: 11.5px var(--font-mono);
@@ -555,9 +590,25 @@
 
   .more {
     display: block;
-    padding: 4px 8px;
+    width: 100%;
+    padding: 4px 10px;
+    border: none;
+    background: transparent;
     font: 10.5px var(--font-ui);
     color: var(--text-faint);
+    text-align: left;
+    white-space: nowrap;
+  }
+
+  /* A count that can be asked about, marked as such rather than explained. */
+  .more.open {
+    color: var(--accent-fg);
+    cursor: pointer;
+  }
+
+  .more.open:hover,
+  .more.open:focus-visible {
+    background: var(--accent-wash);
   }
 
   .scope input[type='range'] {

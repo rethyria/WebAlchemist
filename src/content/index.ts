@@ -783,6 +783,18 @@ function pathFor(node: Element): TreePath | null {
   return { up, down }
 }
 
+const pathKey = (path: TreePath): string => `${path.up}:${path.down.join(',')}`
+
+/**
+ * Nodes the user asked to see in full, by path.
+ *
+ * The caps below are what keep a first look at a page readable; they are not
+ * a judgement that the rest does not matter. Asking for one node's children
+ * lifts the cap for that node alone, and only until the next pick — paths are
+ * measured from the picked element, so a new one makes these meaningless.
+ */
+const expanded = new Set<string>()
+
 function nodeAt(path: TreePath): Element | null {
   let node = ancestorOf(pickedRoot, path.up)
   for (const index of path.down) {
@@ -850,6 +862,12 @@ function buildTree(current: Element): TreeRow[] {
 
   let budget = TREE_MAX_ROWS
 
+  /** Whether the user has asked for this node's children in full. */
+  const opened = (node: Element): boolean => {
+    const path = pathFor(node)
+    return path !== null && expanded.has(pathKey(path))
+  }
+
   const walk = (
     out: TreeRow[],
     parent: Element,
@@ -860,7 +878,11 @@ function buildTree(current: Element): TreeRow[] {
     if (allowance(parent, depth) <= 0 || budget <= 0) return
 
     const children = treeChildren(parent)
-    const cap = parent === current ? TREE_MAX_CHILDREN : TREE_MAX_DEEP_CHILDREN
+    const cap = opened(parent)
+      ? children.length
+      : parent === current
+        ? TREE_MAX_CHILDREN
+        : TREE_MAX_DEEP_CHILDREN
     const shown = children.slice(0, cap)
 
     const onward = originBelow
@@ -873,6 +895,8 @@ function buildTree(current: Element): TreeRow[] {
 
     for (const [index, child] of shown.entries()) {
       if (budget <= 0) {
+        // No expand path: this is the list's own ceiling rather than this
+        // node's cap, and asking again would not produce different rows.
         out.push({ label: `+${children.length - index} more`, indent, relation: 'more' })
         return
       }
@@ -889,7 +913,15 @@ function buildTree(current: Element): TreeRow[] {
     }
 
     const hidden = children.length - shown.length
-    if (hidden > 0) out.push({ label: `+${hidden} more`, indent, relation: 'more' })
+    if (hidden > 0) {
+      const path = pathFor(parent)
+      out.push({
+        label: `+${hidden} more`,
+        indent,
+        relation: 'more',
+        ...(path ? { expand: path } : {}),
+      })
+    }
   }
 
   // Expanded before any neighbour, so a page big enough to exhaust the row
@@ -900,9 +932,13 @@ function buildTree(current: Element): TreeRow[] {
   const parent = current.parentElement
   const family = parent ? treeChildren(parent) : [current]
   const at = family.indexOf(current)
-  const from = at < 0 ? 0 : Math.max(0, at - TREE_SIBLINGS_EACH_SIDE)
-  const to = at < 0 ? 0 : Math.min(family.length, at + TREE_SIBLINGS_EACH_SIDE + 1)
+  // The window is a cap on the parent's children like any other, so asking
+  // for that parent in full is what shows every neighbour.
+  const whole = parent !== null && opened(parent)
+  const from = at < 0 || whole ? 0 : Math.max(0, at - TREE_SIBLINGS_EACH_SIDE)
+  const to = at < 0 ? 0 : whole ? family.length : Math.min(family.length, at + TREE_SIBLINGS_EACH_SIDE + 1)
   const near = at < 0 ? [current] : family.slice(from, to)
+  const parentPath = parent ? pathFor(parent) : null
 
   const branches = new Map<Element, TreeRow[]>()
   for (const sibling of near) {
@@ -912,7 +948,14 @@ function buildTree(current: Element): TreeRow[] {
     branches.set(sibling, branch)
   }
 
-  if (from > 0) rows.push({ label: `+${from} more`, indent: level, relation: 'more' })
+  if (from > 0) {
+    rows.push({
+      label: `+${from} more`,
+      indent: level,
+      relation: 'more',
+      ...(parentPath ? { expand: parentPath } : {}),
+    })
+  }
 
   for (const sibling of near) {
     const path = pathFor(sibling)
@@ -938,7 +981,12 @@ function buildTree(current: Element): TreeRow[] {
   }
 
   if (to < family.length) {
-    rows.push({ label: `+${family.length - to} more`, indent: level, relation: 'more' })
+    rows.push({
+      label: `+${family.length - to} more`,
+      indent: level,
+      relation: 'more',
+      ...(parentPath ? { expand: parentPath } : {}),
+    })
   }
 
   return rows
@@ -990,6 +1038,9 @@ function confirmSelection(): void {
     return
   }
 
+  // Paths are measured from the picked element, so what was asked for around
+  // the last one says nothing about this one.
+  expanded.clear()
   pickedRoot = target
   emitPicked(target, region, drawn)
 }
@@ -1419,6 +1470,13 @@ async function handleMessage(message: ContentMessage) {
     case 'highlight-node':
       highlightNode(message.path)
       return true
+    case 'expand-node': {
+      // Answers with the tree rather than announcing a pick: nothing about
+      // what is being described has changed, only how much of it is listed.
+      if (!describedElement || !describedElement.isConnected) return null
+      expanded.add(pathKey(message.path))
+      return buildTree(describedElement)
+    }
     case 'set-lock-scope': {
       lockDepth = message.depth
       return updateLock()

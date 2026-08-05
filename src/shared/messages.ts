@@ -126,6 +126,8 @@ export type Message =
   | { type: 'recapture'; tabId: number }
   | { type: 'retarget'; tabId: number; path: TreePath }
   | { type: 'highlight-node'; tabId: number; path: TreePath | null }
+  /** Asks for one node's children in full, and answers with the new tree. */
+  | { type: 'expand-node'; tabId: number; path: TreePath }
   | { type: 'set-lock-scope'; tabId: number; depth: number }
   | { type: 'clear-lock'; tabId: number }
   /** Runs a check regardless of the configured mode. Always user-initiated. */
@@ -161,6 +163,8 @@ export type ContentMessage =
   | { type: 'retarget'; path: TreePath }
   /** Draws a node without selecting it. `null` clears. */
   | { type: 'highlight-node'; path: TreePath | null }
+  /** Lifts the breadth cap on one node. Selection and target are untouched. */
+  | { type: 'expand-node'; path: TreePath }
   /** Redraws the persistent outline for the current scope. Answers a count. */
   | { type: 'set-lock-scope'; depth: number }
   | { type: 'clear-lock' }
@@ -241,6 +245,7 @@ export interface Responses {
   'stop-picking': boolean
   retarget: boolean
   'highlight-node': boolean
+  'expand-node': TreeRow[]
   'set-lock-scope': { count: number; container: string | null }
   'clear-lock': boolean
   'check-now': TransformRuntimeState[]

@@ -463,6 +463,7 @@
       tree={flow.tree}
       onretarget={(path: TreePath) => void flow.retarget(path)}
       onpreview={(path: TreePath | null) => void flow.previewNode(path)}
+      onexpand={(path: TreePath) => void flow.expand(path)}
       scopeDepth={flow.scopeDepth}
       scopeCount={flow.scopeCount}
       scopeContainer={flow.scopeContainer}

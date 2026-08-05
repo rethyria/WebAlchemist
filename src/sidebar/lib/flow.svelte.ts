@@ -505,6 +505,23 @@ export class Flow {
     }
   }
 
+  /**
+   * Asks for one node's children in full.
+   *
+   * Nothing about the target changes, so this replaces the tree and leaves
+   * everything else — the description being typed, the scope, the crop — as
+   * it was.
+   */
+  async expand(path: TreePath): Promise<void> {
+    if (this.tabId === null) return
+    try {
+      this.tree = await send<TreeRow[]>({ type: 'expand-node', tabId: this.tabId, path })
+    } catch {
+      // The page moved on, or the node is gone. The list stands as it was:
+      // a failed expansion is not worth an error card over.
+    }
+  }
+
   /** Draws a node on the page while its row is hovered. */
   async previewNode(path: TreePath | null): Promise<void> {
     if (this.tabId === null) return
