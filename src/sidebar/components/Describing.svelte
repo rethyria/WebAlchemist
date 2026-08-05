@@ -210,15 +210,23 @@
 
   let selectedIndex = $derived(rows.findIndex((row) => row.isTarget))
 
+  /** The selection the list was last moved for, so it is only moved once. */
+  let framed: string | null = null
+
   /*
    * The selection is framed by default: centred down the list, and across it
    * by the same rule the hover uses. It sits between its ancestors and its
    * descendants, so its surroundings are the ones worth showing when nothing
    * else is being pointed at.
    *
-   * Name widths are read here, once per tree, because they are what decides
-   * how much of a stretch fits. Every read happens before anything is
-   * written, so the measuring costs one layout rather than one per row.
+   * Only when the selection is a different element, though. The tree also
+   * changes when a count row is asked to open, and that is the same selection
+   * with more rows under it — scrolling back to it there would throw away the
+   * place the reader had scrolled to in order to press the thing.
+   *
+   * Name widths are read every time regardless, since new rows have widths of
+   * their own. Every read happens before anything is written, so the
+   * measuring costs one layout rather than one per row.
    */
   $effect(() => {
     void tree
@@ -229,6 +237,12 @@
       (name) => name.getBoundingClientRect().right - origin,
     )
     ends = measured
+
+    const path = rows[selectedIndex]?.path
+    const key = path ? `${path.up}:${path.down.join(',')}` : ''
+    if (key === framed) return
+    framed = key
+
     list.querySelector('.node.selected')?.scrollIntoView({ block: 'center', inline: 'nearest' })
     frame(selectedIndex, measured)
   })
