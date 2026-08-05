@@ -153,7 +153,7 @@
    * row of them. Waiting for the pointer to settle means one scroll where it
    * stopped, rather than one per row it passed over on the way.
    */
-  const SETTLE_MS = 120
+  const SETTLE_MS = 60
   let settle: ReturnType<typeof setTimeout> | undefined
 
   function frameSoon(index: number): void {
