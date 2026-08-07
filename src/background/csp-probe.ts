@@ -12,7 +12,20 @@
 
 import type { Transform } from '@shared/types'
 
-export const PROBE_ORIGIN = 'http://localhost:8787/*'
+/*
+ * No port, in either of these.
+ *
+ * A match pattern's host cannot carry one — `http://localhost:8787/*` is
+ * accepted by `userScripts.register` without complaint and then matches
+ * nothing, which is why this harness reported a clean pass while the probe
+ * had never run. The pattern therefore covers localhost on any port, and the
+ * port lives in the target URL below, which is a real URL and can have one.
+ *
+ * Real transforms were never affected: their patterns come from
+ * `matchPresetsFor`, which builds from `url.hostname` and so has never
+ * included a port.
+ */
+export const PROBE_ORIGIN = 'http://localhost/*'
 const TARGET = 'http://localhost:8787/egress'
 
 /*
@@ -74,7 +87,7 @@ export function buildProbeTransform(): Transform {
     name: 'CSP probe',
     enabled: true,
     order: now,
-    match: 'localhost:8787/*',
+    match: 'localhost/*',
     kind: 'js',
     origin: 'manual',
     world: 'USER_SCRIPT',

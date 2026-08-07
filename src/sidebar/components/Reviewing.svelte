@@ -109,8 +109,12 @@
               {#if finding.capability && capabilities.includes(finding.capability)}
                 That is {finding.capability} this transform declared, so it will work.
               {:else if finding.capability}
-                That is {finding.capability}, which this transform did not declare —
-                it will be blocked at runtime.
+                <!--
+                  Not "blocked at runtime". The browser was measured and does
+                  not stop this; what stops it is this code not being saved.
+                -->
+                That is {finding.capability}, which this transform did not declare,
+                so it cannot be saved as it stands.
               {/if}
             </p>
           </div>
@@ -122,12 +126,18 @@
             {/each}
             <span class="quiet">requested · nothing else</span>
           </div>
+          <!--
+            What "allow" costs, said plainly. The browser does not police any
+            of these once the code is saved — that was measured, not assumed,
+            and the claim used to be the other way round. Approval is the
+            control, so the sentence has to say so.
+          -->
           <p class="quiet">
             {#if capabilities.every((c) => CAPABILITY_ENFORCEMENT[c] === 'csp')}
               Anything it did not ask for is blocked while it runs.
             {:else}
-              The browser can block network access this way, but not storage or
-              cookies — for those, refusing means the code is not saved at all.
+              The browser does not police this once it is saved. Approving is
+              what allows it; refusing means the code is not saved at all.
             {/if}
           </p>
         {/if}

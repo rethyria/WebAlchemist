@@ -1,11 +1,63 @@
 # Verifying the user script world CSP
 
-The capability model rests on one claim that cannot be established by reading
+The capability model rested on one claim that cannot be established by reading
 code: that a transform which declared no capabilities runs in a world whose CSP
 actually stops it reaching the network.
 
-That claim is made in `registry.ts`, in the review UI, and to the user at the
-moment they approve code. This harness is how it gets checked.
+That claim was made in `registry.ts`, in the review UI, and to the user at the
+moment they approve code. This harness is how it got checked.
+
+## The result: it does not
+
+Run on 2026-08-07, Firefox 145 on SteamOS, against a world configured with
+`default-src 'none'; connect-src 'none'; img-src 'none'`:
+
+```
+ESCAPED  fetch        connect-src   probe saw: resolved
+ESCAPED  xhr          connect-src   probe saw: loaded
+ESCAPED  websocket    connect-src   probe saw: error event
+ESCAPED  beacon       connect-src   probe saw: queued
+ESCAPED  eventsource  connect-src   probe saw: error event
+blocked  image        img-src       probe saw: error event
+```
+
+Five of six arrived. The two that reported `error event` still reached the
+server — the socket and the event stream failed for their own reasons after
+the request was made, which is no comfort at all: the bytes left.
+
+**The CSP is applied.** Re-running with `network` declared, so `img-src 'none'`
+becomes `img-src *`, flips the image from blocked to arriving and nothing else
+changes. So the directives are read; Firefox simply does not bind
+`connect-src` — or `default-src` — against these APIs in a user script world.
+
+The consequence, applied in commit form: `network` moved from `csp` to
+`disclosure` in `CAPABILITY_ENFORCEMENT`, and every claim that the browser
+stops an undeclared request was rewritten. The only control over any
+capability is refusing to save the code, which is what an undeclared use
+already triggers. `img-src` is kept because it does close the image-beacon
+channel, and the rest of the directives are kept because they cost nothing and
+a browser that starts honouring them would tighten this for free.
+
+## Two ways this test can lie, and what stops each
+
+`arrived` proves egress. *Nothing* arriving proves egress was blocked only if
+the probe ran, and the probe running is not implied by the page loading. An
+earlier version of this harness had only the page-level control, and reported
+`All egress was contained` for a run in which the user script never executed —
+the exact false pass it was built to prevent. Both controls are now required
+before any verdict is printed:
+
+- the **page control** (`/control`) proves the network path to this server;
+- the **probe report** proves the code under test actually ran.
+
+Missing either is `INCONCLUSIVE`, exit 2.
+
+A third trap, found the same way: a match pattern's host cannot contain a
+port. `http://localhost:8787/*` is accepted by `userScripts.register` without
+complaint and then matches nothing, which is why this ran clean for months
+without ever having run. The probe registers for `localhost/*` and puts the
+port in the target URL, where it is allowed. Real transforms were never
+affected — `matchPresetsFor` builds from `url.hostname`, which has no port.
 
 ## What it proves, and how
 

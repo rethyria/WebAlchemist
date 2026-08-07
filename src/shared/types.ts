@@ -45,18 +45,33 @@ export type Capability = 'network' | 'storage' | 'cookies'
  * Whether a declared capability can actually be enforced at runtime, or is
  * only a disclosure.
  *
- * The enforcement mechanism is the user script world's CSP, and CSP has
- * directives for fetching but none for storage or cookies. So `network` is
- * genuinely contained — a transform that did not declare it runs under
- * `connect-src 'none'` and its request fails whatever the code says. Storage
- * and cookies have no equivalent, and the only real control over them is
- * refusing to save the code at all.
+ * All three are disclosures. This was measured, not assumed — see
+ * `test/csp/README.md`. A user script world configured with
+ * `connect-src 'none'` was made to attempt every form of egress, and five of
+ * six arrived at a server that was watching:
+ *
+ *   fetch        arrived      XMLHttpRequest  arrived
+ *   sendBeacon   arrived      WebSocket       arrived
+ *   EventSource  arrived      new Image().src blocked
+ *
+ * The CSP is applied — declaring `network` flips `img-src 'none'` to
+ * `img-src *` and the image then arrives, so the directives are read — but
+ * Firefox does not enforce `connect-src` against these APIs in a user script
+ * world. `default-src 'none'` does not catch them either.
+ *
+ * So the only channel the browser closes for us is the image beacon, and a
+ * capability that stops one exfiltration route out of six is not one anybody
+ * should be told is enforced. The real control over all three is the same:
+ * refusing to save code that uses what it did not declare, which is what
+ * applyCapabilityPolicy does by raising an undeclared use to `block`.
  *
  * The review UI says which of the two it is at the point of approval, because
- * "allow" means materially different things in each case.
+ * "allow" means materially different things in each case. Kept as a map
+ * rather than collapsed to a constant: the distinction is real, and a future
+ * platform that enforces this would move `network` back.
  */
 export const CAPABILITY_ENFORCEMENT: Record<Capability, 'csp' | 'disclosure'> = {
-  network: 'csp',
+  network: 'disclosure',
   storage: 'disclosure',
   cookies: 'disclosure',
 }

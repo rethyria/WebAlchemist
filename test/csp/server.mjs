@@ -56,6 +56,7 @@ const server = createServer((request, response) => {
    */
   if (url.pathname === '/control') {
     arrived.add('control')
+    armReportTimeout()
     response.writeHead(204, { 'Access-Control-Allow-Origin': '*' })
     response.end()
     return
@@ -97,14 +98,40 @@ function finish() {
 
   if (!arrived.has('control')) {
     console.log('\nINCONCLUSIVE — the control request never arrived.')
-    console.log('The probe did not run, or could not reach this server.')
+    console.log('The page did not load, or could not reach this server.')
     console.log('Nothing can be concluded about the CSP from this run.\n')
     server.close()
     process.exitCode = 2
     return
   }
 
-  console.log('\ncontrol request arrived, so the path to this server works.\n')
+  /*
+   * The second control, and the one this harness was missing.
+   *
+   * The request above is fired by the *page*, which loads whether or not a
+   * user script was ever registered — so it proves the network path and
+   * nothing else. The report below is written by the probe itself, through
+   * the DOM, and is the only evidence that the code under test ran at all.
+   *
+   * Without this check a run where the script never executed printed "All
+   * egress was contained", which is precisely the false pass the whole
+   * arrangement exists to avoid: nothing was attempted, so nothing arriving
+   * says nothing about the CSP.
+   */
+  if (!probeReported || Object.keys(probeReported).length === 0) {
+    console.log('\nINCONCLUSIVE — the probe never reported.')
+    console.log('The page loaded and reached this server, but the user script')
+    console.log('did not run, so no egress was attempted. Nothing arriving')
+    console.log('therefore says nothing about the CSP.\n')
+    console.log('Check that the transform registered and that its match')
+    console.log('pattern covers this page.\n')
+    server.close()
+    process.exitCode = 2
+    return
+  }
+
+  console.log('\ncontrol request arrived, so the path to this server works.')
+  console.log(`the probe ran and reported ${Object.keys(probeReported).length} attempts.\n`)
 
   let escaped = 0
   for (const [method, directive] of METHODS) {
@@ -139,10 +166,29 @@ server.listen(PORT, () => {
   console.log('then use the sidebar\'s "Run CSP probe" button.\n')
 })
 
-// Never hang a CI run or an unattended terminal.
+/*
+ * The clock starts when the page loads, not when the server does.
+ *
+ * Waiting to be triggered is not a timeout — setting up the browser side can
+ * take as long as it takes. What must not hang is the window between the page
+ * appearing and the probe reporting, which is a couple of seconds when it
+ * works at all.
+ */
+let reportTimer = null
+function armReportTimeout() {
+  if (reportTimer || finished) return
+  reportTimer = setTimeout(() => {
+    if (!probeReported) {
+      console.log('\nTimed out waiting for the probe to report.')
+      finish()
+    }
+  }, 30_000)
+}
+
+// Never hang an unattended terminal, however the run goes.
 setTimeout(() => {
-  if (!probeReported) {
-    console.log('\nTimed out waiting for the probe to report.')
+  if (!finished) {
+    console.log('\nNothing happened for fifteen minutes.')
     finish()
   }
-}, 120_000)
+}, 900_000).unref?.()

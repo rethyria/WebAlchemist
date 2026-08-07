@@ -117,7 +117,7 @@
     if (tab?.id === undefined) return
     // Both grants, from this click while the gesture is still live.
     const granted = await browser.permissions.request({
-      origins: ['http://localhost:8787/*'],
+      origins: ['http://localhost/*'],
       permissions: ['userScripts'],
     } as unknown as browser.permissions.Permissions)
     if (!granted) return

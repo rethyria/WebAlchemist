@@ -10,19 +10,29 @@
  *    or every JS transform silently stops working after an update — with no
  *    error, which is the worst possible failure mode.
  *
- * CSP IS THE ENFORCEMENT BOUNDARY, FOR THE PART IT COVERS
- * -------------------------------------------------------
- * Each transform gets its own world, and that world's Content Security Policy
- * is derived from the capabilities the transform declared. A transform that
- * did not declare `network` runs in a world that cannot open a connection at
- * all, so the request fails at runtime regardless of what static analysis or
- * the model reviewer concluded. That capability is not advisory.
+ * CSP IS NOT THE ENFORCEMENT BOUNDARY. IT WAS MEASURED AND IT IS NOT.
+ * --------------------------------------------------------------------
+ * This module used to claim that a transform which did not declare `network`
+ * ran in a world that could not open a connection, and that the capability
+ * was therefore not advisory. That was wrong, and it was wrong in the
+ * direction that matters.
  *
- * `storage` and `cookies` are. CSP has no directive for either, so there is no
- * world configuration that stops `localStorage.setItem` or `document.cookie`.
- * For those two, declaring is disclosure and the only real control is refusing
- * to save the code — which is what an undeclared use triggers, since
- * applyCapabilityPolicy raises it to `block`. See CAPABILITY_ENFORCEMENT.
+ * Run against Firefox with `connect-src 'none'`, five of six egress methods
+ * reached a listening server: fetch, XMLHttpRequest, sendBeacon, WebSocket
+ * and EventSource. Only `new Image().src` was stopped, by `img-src`. The
+ * world CSP is applied — flipping `img-src` opens exactly that one channel —
+ * but `connect-src` does not bind these APIs here, and neither does
+ * `default-src`. See `test/csp/README.md` for the run.
+ *
+ * So all three capabilities are disclosures, and the only real control over
+ * any of them is refusing to save the code — which is what an undeclared use
+ * triggers, since applyCapabilityPolicy raises it to `block`. See
+ * CAPABILITY_ENFORCEMENT.
+ *
+ * The directives are still set. They cost nothing, `img-src` genuinely closes
+ * the image-beacon channel, and a browser that starts honouring the rest
+ * would tighten this without a code change. What is not still done is telling
+ * the user that they are a boundary.
  */
 
 import type { Capability, Transform } from '@shared/types'
@@ -42,10 +52,11 @@ export function worldIdFor(transform: Transform): string {
  * execute. Everything else starts closed and is opened only by an explicit,
  * user-approved declaration.
  *
- * TODO(verify): confirm empirically in Firefox that connect-src in a user
- * script world does block fetch/XHR/WebSocket/sendBeacon as expected. The API
- * documents per-world CSP configuration; the precise directive coverage should
- * be pinned down with a test page before this is relied on in a release.
+ * Directive coverage was measured rather than assumed, which is how the
+ * module header above came to be rewritten: `img-src` is honoured here,
+ * `connect-src` and `default-src` are not. Nothing about this function
+ * changed as a result — the strings were always right — but what may be
+ * claimed about their effect did.
  */
 export function cspForCapabilities(capabilities: Capability[]): string {
   const directives = [
