@@ -6,10 +6,13 @@
     CredentialStatus,
     ReviewResult,
     Settings,
+    Conflict,
     Transform,
     TransformRuntimeState,
     TreePath,
   } from '@shared/types'
+  import type { ConflictSpec } from '@shared/messages'
+  import { parseRules } from '@shared/css'
   import { activeTab, BackgroundError, send } from './lib/messaging.svelte'
   import { Flow } from './lib/flow.svelte'
   import Describing from './components/Describing.svelte'
@@ -26,6 +29,7 @@
   let statuses = $state<CredentialStatus[]>([])
   let transforms = $state<Transform[]>([])
   let runtimeStates = $state<TransformRuntimeState[]>([])
+  let conflicts = $state<Conflict[]>([])
   let url = $state('')
   let expandedId = $state<string | null>(null)
   let loadError = $state<{ message: string; retryable: boolean } | null>(null)
@@ -78,12 +82,47 @@
     return runtimeStates.find((s) => s.id === id)
   }
 
+  function conflictsFor(id: string): Conflict[] {
+    return conflicts.filter((c) => c.loser === id || c.winner === id)
+  }
+
+  /**
+   * Which enabled CSS transforms are overriding each other on this page.
+   *
+   * Parsed here and resolved by the page: only the document knows which
+   * elements a selector reaches, and two transforms that both style
+   * `.comment` on a page with no comments are not in conflict.
+   *
+   * CSS only. Two scripts that fight cannot be told apart from two scripts
+   * that cooperate without running them, and a warning that guessed would be
+   * worse than none.
+   */
+  async function findConflicts() {
+    conflicts = []
+    const tab = await activeTab()
+    if (tab?.id === undefined) return
+
+    const specs: ConflictSpec[] = transforms
+      .filter((t) => t.enabled && t.kind === 'css')
+      .sort((a, b) => a.order - b.order)
+      .map((t) => ({ id: t.id, rules: parseRules(t.code) }))
+    if (specs.length < 2) return
+
+    try {
+      conflicts = await send<Conflict[]>({ type: 'find-conflicts', tabId: tab.id, specs })
+    } catch {
+      // Nothing to say rather than something wrong to say.
+    }
+  }
+
   async function refresh() {
     if (!transformable) {
       transforms = []
+      conflicts = []
       return
     }
     transforms = await send<Transform[]>({ type: 'get-transforms-for-url', url })
+    await findConflicts()
   }
 
   function applySettings(next: Settings) {
@@ -605,6 +644,8 @@
           oneditcode={(code) => editCode(transform, code)}
           ondelete={() => void removeTransform(transform)}
           onrepair={(brokenReason: string) => void flow.repair(transform, brokenReason)}
+          conflicts={conflictsFor(transform.id)}
+          names={Object.fromEntries(transforms.map((t) => [t.id, t.name]))}
           dragging={draggingId === transform.id}
           ongrab={() => (draggingId = transform.id)}
           onhover={() => dragOverRow(transform.id)}

@@ -22,11 +22,13 @@ import type {
   Rect,
   ReviewResult,
   Settings,
+  Conflict,
   Transform,
   TransformRuntimeState,
   TreePath,
   TreeRow,
 } from './types'
+import type { Rule } from './css'
 import type { OverlayPalette } from './accents'
 import type { RefinementTurn } from '@background/providers/types'
 
@@ -133,6 +135,14 @@ export type Message =
    * captured when the transform was written.
    */
   | { type: 'context-for-anchor'; tabId: number; anchor: Anchor }
+  /**
+   * Which of these transforms are overriding each other on this page.
+   *
+   * The rules are parsed in the panel and the elements resolved by the page,
+   * because only the page knows what a selector reaches. Order matters: the
+   * specs are sent in application order.
+   */
+  | { type: 'find-conflicts'; tabId: number; specs: ConflictSpec[] }
   | { type: 'retarget'; tabId: number; path: TreePath }
   | { type: 'highlight-node'; tabId: number; path: TreePath | null }
   /** Asks for one node's children in full, and answers with the new tree. */
@@ -162,6 +172,7 @@ export type ContentMessage =
   | { type: 'cancel-picking' }
   | { type: 'recapture' }
   | { type: 'context-for-anchor'; anchor: Anchor }
+  | { type: 'find-conflicts'; specs: ConflictSpec[] }
   /**
    * Takes the target outline down, and puts it back.
    *
@@ -238,6 +249,12 @@ export type ContentEvent =
  * recapture, the crop a screenshot would use — works without knowing which of
  * the two it came from.
  */
+/** One transform's parsed stylesheet, for conflict detection. */
+export interface ConflictSpec {
+  id: string
+  rules: Rule[]
+}
+
 export interface AnchoredElement {
   context: PageContext
   /** Recaptured from the live element, not the stored one that went stale. */
@@ -264,6 +281,7 @@ export interface Responses {
   repair: GenerationResult
   /** Null when the anchor no longer resolves on this page. */
   'context-for-anchor': AnchoredElement | null
+  'find-conflicts': Conflict[]
   review: ReviewResult
   analyse: ReviewResult
   'preview-js': boolean

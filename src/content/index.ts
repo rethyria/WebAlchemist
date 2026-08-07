@@ -9,9 +9,10 @@
  * sensitive content.
  */
 
-import type { ContentEvent, ContentMessage, PickMode } from '@shared/messages'
+import type { ConflictSpec, ContentEvent, ContentMessage, PickMode } from '@shared/messages'
 import type { OverlayPalette } from '@shared/accents'
 import type {
+  Conflict,
   HoverTarget,
   Rect,
   Transform,
@@ -1104,6 +1105,100 @@ function nextPaint(): Promise<void> {
   })
 }
 
+/* ------------------------------------------------------------------ */
+/* Conflicts                                                           */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Which transforms are fighting each other, on this page, right now.
+ *
+ * The page is the oracle. Comparing selectors as text would call `.comment`
+ * and `div.comment` different and `.comment` on a page with no comments a
+ * conflict; asking the document which elements each selector actually reaches
+ * answers both correctly. Selectors the browser refuses are skipped rather
+ * than guessed at.
+ *
+ * `important` is aggregated per property across a transform's rules, which is
+ * a simplification: a transform could mark a property important in one rule
+ * and not in another. The effect is to call a fight for whoever declared it
+ * anywhere, which is the right way to be wrong here — the surprise being
+ * reported is "the earlier one wins after all".
+ */
+function findConflicts(specs: ConflictSpec[]): Conflict[] {
+  const reach = specs.map((spec) => {
+    const byProperty = new Map<string, { elements: Set<Element>; important: boolean }>()
+
+    for (const rule of spec.rules) {
+      const elements = new Set<Element>()
+      for (const selector of rule.selectors) {
+        try {
+          for (const element of document.querySelectorAll(selector)) elements.add(element)
+        } catch {
+          // Not a selector this browser accepts. Nothing it could conflict with.
+        }
+      }
+      if (elements.size === 0) continue
+
+      for (const declaration of rule.declarations) {
+        const entry = byProperty.get(declaration.property) ?? {
+          elements: new Set<Element>(),
+          important: false,
+        }
+        for (const element of elements) entry.elements.add(element)
+        entry.important ||= declaration.important
+        byProperty.set(declaration.property, entry)
+      }
+    }
+
+    return { id: spec.id, byProperty }
+  })
+
+  const conflicts: Conflict[] = []
+
+  // Specs arrive in application order, so `later` is the one that would win
+  // on order alone.
+  for (let i = 0; i < reach.length; i += 1) {
+    for (let j = i + 1; j < reach.length; j += 1) {
+      const earlier = reach[i]
+      const later = reach[j]
+      if (!earlier || !later) continue
+
+      /** Keyed by who wins, so one pair can produce a record in each direction. */
+      const buckets = new Map<string, { properties: string[]; elements: Set<Element> }>()
+
+      for (const [property, mine] of earlier.byProperty) {
+        const theirs = later.byProperty.get(property)
+        if (!theirs) continue
+
+        const shared = new Set<Element>()
+        for (const element of mine.elements) if (theirs.elements.has(element)) shared.add(element)
+        if (shared.size === 0) continue
+
+        // Later wins, unless the earlier one is important and the later is not.
+        const earlierWins = mine.important && !theirs.important
+        const key = earlierWins ? 'earlier' : 'later'
+        const bucket = buckets.get(key) ?? { properties: [], elements: new Set<Element>() }
+        bucket.properties.push(property)
+        for (const element of shared) bucket.elements.add(element)
+        buckets.set(key, bucket)
+      }
+
+      for (const [key, bucket] of buckets) {
+        const earlierWins = key === 'earlier'
+        conflicts.push({
+          winner: earlierWins ? earlier.id : later.id,
+          loser: earlierWins ? later.id : earlier.id,
+          properties: bucket.properties.sort(),
+          elements: bucket.elements.size,
+          byImportant: earlierWins,
+        })
+      }
+    }
+  }
+
+  return conflicts
+}
+
 /** The element the panel is describing, and how far up the chain it applies. */
 let describedElement: Element | null = null
 let lockDepth = 0
@@ -1494,6 +1589,8 @@ async function handleMessage(message: ContentMessage) {
     case 'highlight-node':
       highlightNode(message.path)
       return true
+    case 'find-conflicts':
+      return findConflicts(message.specs)
     case 'expand-node': {
       // Answers with the tree rather than announcing a pick: nothing about
       // what is being described has changed, only how much of it is listed.

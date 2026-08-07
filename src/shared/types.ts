@@ -143,6 +143,32 @@ export interface TransformRuntimeState {
   failedAssumption?: string
 }
 
+/**
+ * Two transforms setting the same property on the same element.
+ *
+ * Decided against the live page rather than by comparing selectors as text:
+ * `.comment` and `div.comment` are different strings and the same elements,
+ * and only the page knows which elements either of them reaches. Two
+ * transforms that both style `.comment` on a page with no comments on it are
+ * not in conflict, and saying they were would be noise.
+ */
+export interface Conflict {
+  /** The transform whose declarations do not take effect. */
+  loser: string
+  winner: string
+  /** Properties both set on at least one element they both reach. */
+  properties: string[]
+  /** How many elements that is. */
+  elements: number
+  /**
+   * True when the winner is the *earlier* transform, because it declared
+   * `!important` and the later one did not — the case where the order shown
+   * in the list is not the order that applies, and so the one worth saying
+   * out loud.
+   */
+  byImportant: boolean
+}
+
 /* ------------------------------------------------------------------ */
 /* Providers and credentials                                           */
 /* ------------------------------------------------------------------ */

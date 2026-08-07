@@ -360,6 +360,14 @@ async function handle(
     case 'context-for-anchor':
       return askContent(message.tabId, { type: 'context-for-anchor', anchor: message.anchor })
 
+    case 'find-conflicts':
+      // No content script on this page means no answer, not an error: the
+      // list is still perfectly usable without the overlap noted on it.
+      return (await askContent(message.tabId, {
+        type: 'find-conflicts',
+        specs: message.specs,
+      })) ?? []
+
     case 'stop-picking':
       await sendToContent(message.tabId, { type: 'cancel-picking' })
       return true

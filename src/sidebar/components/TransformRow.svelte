@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { Transform, TransformRuntimeState } from '@shared/types'
+  import type { Conflict, Transform, TransformRuntimeState } from '@shared/types'
   import Toggle from './Toggle.svelte'
 
   interface Props {
@@ -20,6 +20,10 @@
     ondelete: () => void
     /** Rebuild from the stored intent. Only reachable while broken. */
     onrepair: (brokenReason: string) => void
+    /** Overlaps involving this transform, in either direction. */
+    conflicts: Conflict[]
+    /** Transform names by id, for naming the other side of a conflict. */
+    names: Record<string, string>
     ongrab: () => void
     /** The dragged row should come to rest here. */
     onhover: () => void
@@ -40,6 +44,8 @@
     oneditcode,
     ondelete,
     onrepair,
+    conflicts,
+    names,
     ongrab,
     onhover,
     ondrop,
@@ -60,6 +66,21 @@
   let broken = $derived(runtime?.status === 'broken')
   /* JS carrying capabilities, or broken, gets the attention treatment. */
   let flagged = $derived(broken || transform.capabilities.length > 0)
+
+  /*
+   * Being overridden is the half worth a mark on the collapsed row: it is the
+   * transform that looks like it is doing nothing, and the reason it is doing
+   * nothing is not visible anywhere else. Overriding something else is worth
+   * saying once the row is open, and no more than that.
+   */
+  let overridden = $derived(conflicts.filter((c) => c.loser === transform.id))
+  let overriding = $derived(conflicts.filter((c) => c.winner === transform.id))
+
+  const nameOf = (id: string): string => names[id] ?? 'another transform'
+  const list = (properties: string[]): string =>
+    properties.length <= 2
+      ? properties.join(' and ')
+      : `${properties.slice(0, 2).join(', ')} and ${properties.length - 2} more`
 
   /*
    * Delete asks first and asks in place. A transform is minutes of work and a
@@ -181,6 +202,18 @@
     {/if}
 
     <div class="meta">
+      {#if overridden.length > 0}
+        <!--
+          The collapsed row is where someone looks when a transform seems to
+          do nothing, so the reason lives here rather than only inside.
+        -->
+        <span
+          class="overridden"
+          title="Overridden by {overridden.map((c) => nameOf(c.winner)).join(', ')}"
+        >
+          overridden
+        </span>
+      {/if}
       <span
         class="dot"
         class:broken
@@ -198,6 +231,36 @@
         <h3 class="label">You wanted</h3>
         <p>{transform.intent}</p>
       </section>
+
+      {#if overridden.length > 0 || overriding.length > 0}
+        <section>
+          <h3 class="label" class:attention={overridden.length > 0}>
+            {overridden.length > 0 ? 'Not applying' : 'Overrides'}
+          </h3>
+          {#each overridden as conflict}
+            <p>
+              {list(conflict.properties)}
+              {conflict.properties.length === 1 ? 'is' : 'are'} set by
+              <b>{nameOf(conflict.winner)}</b> on
+              {conflict.elements === 1 ? 'the same element' : `${conflict.elements} of the same elements`},
+              and it wins{conflict.byImportant
+                ? ' — it marks them !important, so it wins despite being earlier in the list'
+                : ', being later in the list'}.
+            </p>
+          {/each}
+          {#each overriding as conflict}
+            <p class="quiet">
+              This one wins {list(conflict.properties)} over
+              <b>{nameOf(conflict.loser)}</b>{conflict.byImportant
+                ? ', because it marks them !important'
+                : ''}.
+            </p>
+          {/each}
+          {#if overridden.length > 0 && !overridden.some((c) => c.byImportant)}
+            <p class="quiet">Move this one later in the list to win instead.</p>
+          {/if}
+        </section>
+      {/if}
 
       {#if broken}
         <section>
@@ -420,6 +483,25 @@
 
   .assumption {
     margin-top: 3px;
+    color: var(--text-dim);
+  }
+
+  .quiet {
+    font-size: 12px;
+    color: var(--text-dim);
+  }
+
+  /*
+   * Not the attention colour. Being overridden is a fact about the order the
+   * user chose, not a fault — the same colour as a broken transform would say
+   * something went wrong, and nothing has.
+   */
+  .overridden {
+    padding: 2px 5px;
+    border-radius: var(--r-badge);
+    background: rgba(255, 255, 255, 0.08);
+    font: 600 9.5px var(--font-mono);
+    letter-spacing: 0.04em;
     color: var(--text-dim);
   }
 
