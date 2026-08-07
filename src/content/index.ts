@@ -1460,6 +1460,30 @@ async function handleMessage(message: ContentMessage) {
       if (!describedElement || !describedElement.isConnected) return null
       return extractContext(describedElement, captureAnchor(describedElement).selector)
     }
+    case 'context-for-anchor': {
+      /*
+       * The stored anchor locates the element; everything else is taken fresh.
+       * A repair exists because the page changed, so the context that went
+       * with the broken code is the one thing that must not be reused — and
+       * the anchor is recaptured too, since the signals that identify the
+       * element now are what the next health check will look for.
+       */
+      const resolution = resolveAnchor(message.anchor)
+      if (!resolution) return null
+
+      const element = resolution.element
+      describedElement = element
+      const anchor = captureAnchor(element)
+      const region = boundingRectWithPadding(element)
+      return {
+        context: extractContext(element, anchor.selector),
+        anchor,
+        crop: region,
+        cropClipped: exceedsViewport(region),
+        target: describeTarget(element),
+        viewportWidth: window.innerWidth,
+      }
+    }
     case 'cancel-picking':
       stopPicking()
       return true

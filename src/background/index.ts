@@ -357,6 +357,9 @@ async function handle(
     case 'recapture':
       return askContent(message.tabId, { type: 'recapture' })
 
+    case 'context-for-anchor':
+      return askContent(message.tabId, { type: 'context-for-anchor', anchor: message.anchor })
+
     case 'stop-picking':
       await sendToContent(message.tabId, { type: 'cancel-picking' })
       return true

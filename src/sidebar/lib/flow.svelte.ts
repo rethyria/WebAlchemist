@@ -21,7 +21,7 @@
  *   consent to keep doing it.
  */
 
-import type { ContentEvent } from '@shared/messages'
+import type { AnchoredElement, ContentEvent } from '@shared/messages'
 import type { RefinementTurn } from '@background/providers/types'
 import {
   matchPresetsFor,
@@ -559,6 +559,99 @@ export class Flow {
     }
   }
 
+  /**
+   * Rebuilds a transform whose anchor still resolves but whose code stopped
+   * working, from the intent it was written for.
+   *
+   * The three fields are deliberately treated differently. `intent` is the
+   * user's, describes the destination rather than the route, and is kept
+   * whatever the model returns. `rationale` describes an implementation that
+   * no longer exists and is replaced wholesale. `anchor` is recaptured from
+   * the element as it is now, since the old signals are what stopped holding.
+   *
+   * It lands in `refining` rather than saving: this is model-written code
+   * replacing code that already runs on the user's page, so it goes through
+   * the same reading and the same review as anything else. The existing id,
+   * order and creation date ride along in the draft, so approving updates the
+   * transform in place instead of leaving a duplicate behind it.
+   */
+  async repair(transform: Transform, brokenReason: string): Promise<void> {
+    if (this.tabId === null) return
+
+    const token = ++this.generation
+    const current = () => token === this.generation
+
+    this.step = 'generating'
+    this.error = null
+    this.startClock()
+
+    try {
+      this.stage = 'context'
+      const found = await send<AnchoredElement | null>({
+        type: 'context-for-anchor',
+        tabId: this.tabId,
+        anchor: transform.anchor,
+      })
+      if (!found) {
+        throw new Error(
+          `Web Alchemist cannot find the element ${transform.name} was written for on this page, so there is nothing to repair against. Pick it again to write a new transform.`,
+        )
+      }
+      if (!current()) return
+
+      this.picked = { ...found, cropDrawn: false }
+      // What a regeneration from the refining panel will build on.
+      this.matchPattern = transform.match
+      this.intent = transform.intent
+      this.scopeDepth = transform.scopeDepth ?? 0
+      this.instruction = transform.intent
+      this.history = []
+      this.references = []
+      this.draft = transform
+
+      this.stage = 'sent'
+      this.streamed = ''
+      this.thinkingChars = 0
+      this.streamedKind = transform.kind
+      const result = await send<GenerationResult>({
+        type: 'repair',
+        transformId: transform.id,
+        context: found.context,
+        brokenReason,
+      })
+      if (!current()) return
+
+      this.result = result
+      // Not result.intent: the destination was never what broke.
+      this.intent = transform.intent
+      this.draft = this.buildDraft(result, found.anchor)
+
+      this.stage = 'analysis'
+      this.analysis =
+        result.kind === 'js'
+          ? await send<ReviewResult>({
+              type: 'analyse',
+              code: result.code,
+              declaredCapabilities: result.capabilities,
+            })
+          : { static: [], undeclaredCapabilities: [], passed: true }
+      if (!current()) return
+
+      this.stage = 'preview'
+      await this.applyPreview(result)
+      if (!current()) return
+      this.step = 'refining'
+    } catch (cause) {
+      if (!current()) return
+      // Back to the list, which is where a repair is started from. There is no
+      // half-finished description to preserve here.
+      this.step = 'list'
+      this.fail(cause)
+    } finally {
+      this.stopClock()
+    }
+  }
+
   async generate(): Promise<void> {
     const picked = this.picked
     if (!picked || !this.instruction.trim()) return
@@ -825,9 +918,16 @@ export class Flow {
     return {
       id: this.draft?.id ?? crypto.randomUUID(),
       name: result.name,
-      enabled: true,
-      // Appended, so a new transform wins conflicts against existing ones.
-      order: now,
+      // A repair of a disabled transform must not switch it back on, and a
+      // regeneration must not either.
+      enabled: this.draft?.enabled ?? true,
+      /*
+       * Appended, so a new transform wins conflicts against existing ones —
+       * but only when it is new. A repair keeps its place in the order,
+       * because that place is what decides which of two overlapping
+       * transforms wins, and repairing one is no reason to change that.
+       */
+      order: this.draft?.order ?? now,
       match: this.matchPattern,
       kind: result.kind,
       origin: 'ai',

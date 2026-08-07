@@ -18,6 +18,8 @@
     /** Returns a blocking-finding message, or null when the edit was saved. */
     oneditcode: (code: string) => Promise<string | null>
     ondelete: () => void
+    /** Rebuild from the stored intent. Only reachable while broken. */
+    onrepair: (brokenReason: string) => void
     ongrab: () => void
     /** The dragged row should come to rest here. */
     onhover: () => void
@@ -37,6 +39,7 @@
     onrename,
     oneditcode,
     ondelete,
+    onrepair,
     ongrab,
     onhover,
     ondrop,
@@ -206,12 +209,18 @@
         </section>
 
         <!--
-          Repair and Edit stood here and did nothing — their handlers were
-          empty. They are gone rather than left inert: a button that claims a
-          capability the extension does not have is worse than its absence,
-          because it costs the user a click to find out. See #24 and #25.
+          Repair rebuilds the code from the intent above, and lands in the
+          same review the transform went through when it was written — it is
+          model-written code replacing code already running on this page.
         -->
         <div class="actions">
+          <button
+            type="button"
+            class="primary"
+            onclick={() => onrepair(runtime?.brokenReason ?? 'It stopped working.')}
+          >
+            Repair with AI
+          </button>
           <button type="button" class="secondary" onclick={() => ontoggle(false)}>
             Disable
           </button>

@@ -32,7 +32,18 @@
   let checking = $state(false)
   let showSettings = $state(false)
 
-  const flow = new Flow(() => void refresh())
+  const flow = new Flow(() => void afterSave())
+
+  /*
+   * A repaired transform is listed as broken until something looks again, and
+   * the thing that looks is the health check. Re-running it here is also what
+   * gives a newly saved transform a state at all, rather than none until the
+   * next navigation.
+   */
+  async function afterSave() {
+    await refresh()
+    await checkNow()
+  }
 
   /**
    * Whether the active tab is a page we could actually transform.
@@ -593,6 +604,7 @@
           onrename={(name) => void renameTransform(transform, name)}
           oneditcode={(code) => editCode(transform, code)}
           ondelete={() => void removeTransform(transform)}
+          onrepair={(brokenReason: string) => void flow.repair(transform, brokenReason)}
           dragging={draggingId === transform.id}
           ongrab={() => (draggingId = transform.id)}
           onhover={() => dragOverRow(transform.id)}

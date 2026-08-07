@@ -124,6 +124,15 @@ export type Message =
    * changed.
    */
   | { type: 'recapture'; tabId: number }
+  /**
+   * Finds the element a stored anchor refers to, and describes it as if it had
+   * just been picked. Null when the anchor no longer resolves.
+   *
+   * This is how a repair starts: the transform broke because the page moved,
+   * so the model must be shown the page as it is now rather than the context
+   * captured when the transform was written.
+   */
+  | { type: 'context-for-anchor'; tabId: number; anchor: Anchor }
   | { type: 'retarget'; tabId: number; path: TreePath }
   | { type: 'highlight-node'; tabId: number; path: TreePath | null }
   /** Asks for one node's children in full, and answers with the new tree. */
@@ -152,6 +161,7 @@ export type ContentMessage =
   | { type: 'start-picking'; palette: OverlayPalette; mode: PickMode }
   | { type: 'cancel-picking' }
   | { type: 'recapture' }
+  | { type: 'context-for-anchor'; anchor: Anchor }
   /**
    * Takes the target outline down, and puts it back.
    *
@@ -220,6 +230,24 @@ export type ContentEvent =
   | { type: 'picking-cancelled' }
   | { type: 'health-check-result'; states: TransformRuntimeState[] }
 
+/**
+ * An element the page found for us, described the way a pick describes one.
+ *
+ * The same shape `element-picked` carries, so a repair can hand the flow the
+ * same thing a pick would have and everything downstream — regeneration,
+ * recapture, the crop a screenshot would use — works without knowing which of
+ * the two it came from.
+ */
+export interface AnchoredElement {
+  context: PageContext
+  /** Recaptured from the live element, not the stored one that went stale. */
+  anchor: Anchor
+  crop: Rect
+  cropClipped: boolean
+  target: HoverTarget
+  viewportWidth: number
+}
+
 export interface MessageResponse<T> {
   ok: boolean
   data?: T
@@ -234,6 +262,8 @@ export interface Responses {
   'get-vision-support': boolean
   generate: GenerationResult
   repair: GenerationResult
+  /** Null when the anchor no longer resolves on this page. */
+  'context-for-anchor': AnchoredElement | null
   review: ReviewResult
   analyse: ReviewResult
   'preview-js': boolean
