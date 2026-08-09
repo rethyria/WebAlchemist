@@ -20,7 +20,10 @@ export default defineConfig({
       browser: 'firefox',
       // The content script is injected programmatically under activeTab rather
       // than declared in the manifest, so it is listed as an extra input.
-      additionalInputs: ['src/content/index.ts'],
+      // The content script is injected programmatically; the editor page is
+      // opened by URL rather than declared as a manifest surface. Neither is
+      // reachable from the manifest, so both are named here.
+      additionalInputs: ['src/content/index.ts', 'src/editor/index.html'],
       webExtConfig: {
         target: ['firefox-desktop'],
         // Firefox is a flatpak on this machine; scripts/firefox-flatpak stands

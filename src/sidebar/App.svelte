@@ -289,6 +289,20 @@
    * wrong direction for a switch whose whole job is to stop model-written
    * code running.
    */
+  /**
+   * Editing happens in a tab of its own.
+   *
+   * A 264px panel is enough to read a transform and not enough to work on
+   * one. The editor page holds the same gate — static analysis before
+   * anything is stored — with room to see what is being changed, and syntax
+   * colouring so it can be read at all.
+   */
+  async function openEditor(transform: Transform) {
+    await browser.tabs.create({
+      url: browser.runtime.getURL(`src/editor/index.html?id=${encodeURIComponent(transform.id)}`),
+    })
+  }
+
   async function editCode(transform: Transform, code: string): Promise<string | null> {
     if (transform.kind === 'js') {
       const analysis = await send<ReviewResult>({
@@ -641,7 +655,7 @@
           onexpand={() =>
             (expandedId = expandedId === transform.id ? null : transform.id)}
           onrename={(name) => void renameTransform(transform, name)}
-          oneditcode={(code) => editCode(transform, code)}
+          onedit={() => void openEditor(transform)}
           ondelete={() => void removeTransform(transform)}
           onrepair={(brokenReason: string) => void flow.repair(transform, brokenReason)}
           conflicts={conflictsFor(transform.id)}

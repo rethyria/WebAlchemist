@@ -47,6 +47,8 @@ export type Message =
   /* --- read state --------------------------------------------------- */
   | { type: 'get-settings' }
   | { type: 'get-transforms-for-url'; url: string }
+  /** One record by id, for the editor page, which has no page URL of its own. */
+  | { type: 'get-transform'; id: string }
   | { type: 'get-credential-statuses' }
   | { type: 'get-vision-support' }
 
@@ -69,6 +71,15 @@ export type Message =
   | { type: 'save-transform'; transform: Transform; tabId?: number }
   /** `tabId` lets the change come off the page now rather than on reload. */
   | { type: 'delete-transform'; id: string; tabId?: number }
+  /**
+   * Re-applies one transform to every tab it matches.
+   *
+   * The editor is its own tab and is not on any of the pages the transform
+   * affects, so it has no `tabId` to hand back the way the panel does. Saving
+   * from there would otherwise take effect on the next navigation, which reads
+   * as the save not having worked.
+   */
+  | { type: 'reapply-everywhere'; id: string }
   /** `tabId` re-applies in the new precedence now rather than on reload. */
   | { type: 'reorder-transforms'; orderedIds: string[]; tabId?: number }
   | { type: 'set-enabled'; id: string; enabled: boolean; tabId?: number }
@@ -275,6 +286,8 @@ export interface MessageResponse<T> {
 export interface Responses {
   'get-settings': Settings
   'get-transforms-for-url': Transform[]
+  'get-transform': Transform | null
+  'reapply-everywhere': boolean
   'get-credential-statuses': CredentialStatus[]
   'get-vision-support': boolean
   generate: GenerationResult

@@ -173,6 +173,38 @@ async function handle(
     case 'get-transforms-for-url':
       return matchingTransforms(message.url)
 
+    case 'get-transform': {
+      const all = await getAllTransforms()
+      return all.find((t) => t.id === message.id) ?? null
+    }
+
+    /*
+     * Saving from the editor: it is its own tab, so there is no page to hand
+     * back the way the panel does. Every tab the transform matches is brought
+     * up to date instead, which is what "saved" has to mean when the thing
+     * being edited is somewhere else entirely.
+     */
+    case 'reapply-everywhere': {
+      const all = await getAllTransforms()
+      const saved = all.find((t) => t.id === message.id)
+      if (!saved) return false
+
+      if (saved.kind === 'js') {
+        // Registration carries the code, so a changed script has to be
+        // re-registered; the page picks it up on its next load either way.
+        if (saved.enabled) await registerTransform(saved)
+        else await unregisterTransform(saved.id)
+      }
+
+      const tabs = await browser.tabs.query({})
+      for (const tab of tabs) {
+        if (tab.id === undefined || !tab.url) continue
+        if (!matchesUrl(saved.match, tab.url)) continue
+        await applyCssTransforms(tab.id, await transformsForUrl(tab.url))
+      }
+      return true
+    }
+
     case 'get-credential-statuses':
       return getAllCredentialStatuses()
 

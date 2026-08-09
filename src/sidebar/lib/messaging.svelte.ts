@@ -6,43 +6,14 @@
  * from here reaches one.
  */
 
-import type { Message, MessageResponse } from '@shared/messages'
 
-export class BackgroundError extends Error {
-  constructor(
-    message: string,
-    readonly kind: string | undefined,
-    readonly retryable: boolean,
-  ) {
-    super(message)
-    this.name = 'BackgroundError'
-  }
-}
-
-export async function send<T>(message: Message): Promise<T> {
-  /*
-   * Runes deep-proxy the objects they hold, and runtime.sendMessage
-   * structured-clones its argument — which throws on a Proxy:
-   *
-   *   DataCloneError: Proxy object could not be cloned.
-   *
-   * Anything reaching here may have come out of $state, directly or nested
-   * inside a plain object, so the unwrap happens centrally rather than at each
-   * call site where it is one omission away from breaking again. Snapshotting
-   * a value that was never reactive returns it unchanged, so this is safe for
-   * every message.
-   */
-  const payload = $state.snapshot(message) as Message
-  const response = (await browser.runtime.sendMessage(payload)) as MessageResponse<T>
-  if (!response?.ok) {
-    throw new BackgroundError(
-      response?.error?.message ?? 'Something went wrong.',
-      response?.error?.kind,
-      response?.error?.retryable ?? false,
-    )
-  }
-  return response.data as T
-}
+/*
+ * Both live in shared/ now, so the editor page and any future page use the
+ * same implementation — and the same Proxy unwrap. Re-exported rather than
+ * moved outright, since every call site in the sidebar imports from here.
+ */
+import { BackgroundError } from '@shared/messaging.svelte'
+export { BackgroundError, send } from '@shared/messaging.svelte'
 
 /**
  * Runs a generation over a port, reporting progress as it arrives.
