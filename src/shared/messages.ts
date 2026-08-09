@@ -154,6 +154,16 @@ export type Message =
    * specs are sent in application order.
    */
   | { type: 'find-conflicts'; tabId: number; specs: ConflictSpec[] }
+  /**
+   * Takes one saved transform off a tab, or puts every one back with `null`.
+   *
+   * Editing a transform with the AI previews the new version by injecting it,
+   * and the saved copy is injected the same way — so leaving it on would let a
+   * rule the new version dropped go on applying underneath. The suspension is
+   * for the tab and is not remembered: a navigation restores everything, which
+   * is the right way for a live-editing state to expire.
+   */
+  | { type: 'suspend-transform'; tabId: number; id: string | null }
   | { type: 'retarget'; tabId: number; path: TreePath }
   | { type: 'highlight-node'; tabId: number; path: TreePath | null }
   /** Asks for one node's children in full, and answers with the new tree. */
@@ -295,6 +305,7 @@ export interface Responses {
   /** Null when the anchor no longer resolves on this page. */
   'context-for-anchor': AnchoredElement | null
   'find-conflicts': Conflict[]
+  'suspend-transform': boolean
   review: ReviewResult
   analyse: ReviewResult
   'preview-js': boolean

@@ -656,6 +656,7 @@
             (expandedId = expandedId === transform.id ? null : transform.id)}
           onrename={(name) => void renameTransform(transform, name)}
           onedit={() => void openEditor(transform)}
+          oneditwithai={() => void flow.editWithAi(transform)}
           ondelete={() => void removeTransform(transform)}
           onrepair={(brokenReason: string) => void flow.repair(transform, brokenReason)}
           conflicts={conflictsFor(transform.id)}

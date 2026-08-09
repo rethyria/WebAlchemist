@@ -123,6 +123,13 @@ export class Flow {
   }
 
   instruction = $state('')
+  /**
+   * The saved transform currently taken off the page, if any.
+   *
+   * Editing one with the AI suspends it so previews are the whole truth, and
+   * whatever ends the run — saving, discarding, closing — has to put it back.
+   */
+  suspendedId = $state<string | null>(null)
   /** Distance up the ancestor chain the result covers. See ScopeDepth. */
   scopeDepth = $state(0)
   /** What the page says that depth resolves to. Never estimated here. */
@@ -652,6 +659,102 @@ export class Flow {
     }
   }
 
+  /**
+   * Re-opens a saved transform in the authoring flow, to be changed rather
+   * than rebuilt.
+   *
+   * It lands in `refining` with the stored code already in hand, because that
+   * is the panel that asks "what should be different" — the same place a
+   * generation arrives at, so the follow-up field, the review and the save
+   * behave identically. Nothing is sent to the model here; the request only
+   * happens when the user says what to change.
+   *
+   * The existing intent goes in as the instruction and the stored rationale
+   * as the reply to it, so the first follow-up reads as the next turn of the
+   * conversation that produced this code rather than the opening line of a
+   * new one.
+   */
+  async editWithAi(transform: Transform): Promise<void> {
+    if (this.tabId === null) return
+
+    const token = ++this.generation
+    const current = () => token === this.generation
+
+    this.step = 'generating'
+    this.error = null
+    this.stage = 'context'
+    this.startClock()
+
+    try {
+      const found = await send<AnchoredElement | null>({
+        type: 'context-for-anchor',
+        tabId: this.tabId,
+        anchor: transform.anchor,
+      })
+      if (!found) {
+        throw new Error(
+          `Web Alchemist cannot find the element ${transform.name} was written for on this page. Open a page it applies to, or pick the element again.`,
+        )
+      }
+      if (!current()) return
+
+      this.picked = { ...found, cropDrawn: false }
+      this.matchPattern = transform.match
+      this.intent = transform.intent
+      this.scopeDepth = transform.scopeDepth ?? 0
+      this.instruction = transform.intent
+      this.references = []
+      this.followUp = ''
+      this.draft = transform
+
+      this.result = {
+        name: transform.name,
+        kind: transform.kind,
+        world: transform.world ?? 'USER_SCRIPT',
+        capabilities: transform.capabilities,
+        code: transform.code,
+        rationale: transform.rationale,
+        intent: transform.intent,
+      }
+      this.history = [
+        { role: 'user', content: transform.intent },
+        { role: 'assistant', content: transform.rationale.approach },
+      ]
+
+      /*
+       * The saved copy comes off the page for the duration. Both it and any
+       * preview are injected the same way, so leaving it on would let a rule
+       * the new version removed keep applying underneath — a preview that
+       * lies in exactly the direction that matters.
+       */
+      if (transform.kind === 'css') {
+        await send({ type: 'suspend-transform', tabId: this.tabId, id: transform.id })
+        this.suspendedId = transform.id
+      }
+
+      this.analysis =
+        transform.kind === 'js'
+          ? await send<ReviewResult>({
+              type: 'analyse',
+              code: transform.code,
+              declaredCapabilities: transform.capabilities,
+            })
+          : { static: [], undeclaredCapabilities: [], passed: true }
+      if (!current()) return
+
+      await this.applyPreview(this.result)
+      if (!current()) return
+      this.step = 'refining'
+      void this.checkVisionSupport()
+    } catch (cause) {
+      if (!current()) return
+      this.step = 'list'
+      this.fail(cause)
+    } finally {
+      this.stopClock()
+    }
+  }
+
   async generate(): Promise<void> {
     const picked = this.picked
     if (!picked || !this.instruction.trim()) return
@@ -1074,8 +1177,23 @@ export class Flow {
 
   async discard(): Promise<void> {
     await this.clearPreview()
+    await this.resumeSuspended()
     await this.clearLock()
     this.reset()
+  }
+
+  /**
+   * Puts a suspended transform back on the page.
+   *
+   * Idempotent, and safe to call when nothing was suspended, because every
+   * way out of a run calls it and they are not mutually exclusive — a save
+   * runs through the same path a discard does.
+   */
+  private async resumeSuspended(): Promise<void> {
+    const id = this.suspendedId
+    this.suspendedId = null
+    if (id === null || this.tabId === null) return
+    await send({ type: 'suspend-transform', tabId: this.tabId, id: null }).catch(() => {})
   }
 
   /** Drops the connection as well as ignoring the answer. */
@@ -1234,6 +1352,9 @@ export class Flow {
       // The preview and the saved transform would otherwise both be applied,
       // stacking the same rules twice.
       await this.clearPreview()
+      // Before the save, so what goes back on the page is the new version
+      // rather than the one that was taken off.
+      await this.resumeSuspended()
       await this.clearLock()
       await send({
         type: 'save-transform',

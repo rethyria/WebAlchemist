@@ -392,6 +392,17 @@ async function handle(
     case 'context-for-anchor':
       return askContent(message.tabId, { type: 'context-for-anchor', anchor: message.anchor })
 
+    case 'suspend-transform': {
+      const tab = await browser.tabs.get(message.tabId).catch(() => undefined)
+      if (!tab?.url) return false
+      const all = await transformsForUrl(tab.url)
+      await applyCssTransforms(
+        message.tabId,
+        message.id === null ? all : all.filter((t) => t.id !== message.id),
+      )
+      return true
+    }
+
     case 'find-conflicts':
       // No content script on this page means no answer, not an error: the
       // list is still perfectly usable without the overlap noted on it.

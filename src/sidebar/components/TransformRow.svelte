@@ -17,6 +17,8 @@
     onrename: (name: string) => void
     /** Opens the full editor. The panel is too narrow to work in. */
     onedit: () => void
+    /** Re-opens it in the authoring flow, to be changed by describing it. */
+    oneditwithai: () => void
     ondelete: () => void
     /** Rebuild from the stored intent. Only reachable while broken. */
     onrepair: (brokenReason: string) => void
@@ -42,6 +44,7 @@
     onexpand,
     onrename,
     onedit,
+    oneditwithai,
     ondelete,
     onrepair,
     conflicts,
@@ -291,15 +294,25 @@
             </ul>
           {/if}
 
-          <pre>{transform.code}</pre>
           <!--
-            Editing opens a tab. It used to happen in a textarea here, which
-            is a 264px column with no line numbers and no colour — enough to
-            read code in, not to work on it.
+            Above the code, where it is reachable without scrolling past the
+            whole listing first. Editing opens a tab: this used to be a
+            textarea in a 264px column, which is enough to read code in and
+            not to work on it.
           -->
           <div class="actions">
+            <!--
+              Two ways to change it, and they are genuinely different jobs:
+              one edits the code, the other says what should be different and
+              has it rewritten. Both land in the same review before anything
+              replaces what is running.
+            -->
+            <button type="button" class="secondary" onclick={oneditwithai}>
+              Change with AI
+            </button>
             <button type="button" class="secondary" onclick={onedit}>Edit code</button>
           </div>
+          <pre>{transform.code}</pre>
         </div>
       </details>
     </div>
