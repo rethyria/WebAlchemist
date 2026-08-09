@@ -39,6 +39,68 @@ import {
 import { DEFAULT_GENERATE_MODEL, DEFAULT_REVIEW_MODEL } from '@shared/types'
 export { DEFAULT_GENERATE_MODEL, DEFAULT_REVIEW_MODEL }
 
+/**
+ * Request fields that only some models accept, and how to take them back off.
+ *
+ * The panel lets any model be chosen for either role, including by typing an
+ * id that is not in the list, and the models do not agree on what a request
+ * may contain. Picking Haiku 4.5 for the review pass — the cheap option, and
+ * an entirely sensible choice for it — produced a 400 at the moment of saving
+ * a transform, with nothing to say why.
+ *
+ * Rather than a table of which model supports what, which is a thing that
+ * goes stale silently, the API is asked. It names the parameter it rejected,
+ * that parameter comes off, and the request goes again. A model that accepts
+ * everything pays nothing for this; one that does not costs a round trip that
+ * was never going to be billed, since a rejected request runs no inference.
+ *
+ * Matching is on the specific wording of each rejection, so this can only
+ * ever drop a field the API objected to by name. Any other 400 is a real
+ * error and is raised as one.
+ */
+const DOWNGRADES: { readonly rejected: RegExp; readonly without: (body: Body) => Body }[] = [
+  {
+    rejected: /adaptive thinking is not supported/i,
+    without: ({ thinking: _thinking, ...rest }) => rest,
+  },
+  {
+    rejected: /does not support the effort parameter/i,
+    without: (body) => {
+      const config = { ...(body['output_config'] as Body | undefined) }
+      delete config['effort']
+      return { ...body, output_config: config }
+    },
+  },
+]
+
+type Body = Record<string, unknown>
+
+/**
+ * Calls, and on a rejection that names one of the fields above, calls again
+ * without it. At most one attempt per field, so this always terminates.
+ */
+async function withoutUnsupportedFields<T>(
+  body: Body,
+  call: (body: Body) => Promise<T>,
+): Promise<T> {
+  let current = body
+  const spent = new Set<number>()
+
+  for (;;) {
+    try {
+      return await call(current)
+    } catch (error) {
+      const message = error instanceof Anthropic.APIError ? String(error.message ?? '') : ''
+      const index = DOWNGRADES.findIndex(
+        (rule, at) => !spent.has(at) && rule.rejected.test(message),
+      )
+      if (index === -1) throw error
+      spent.add(index)
+      current = (DOWNGRADES[index] as (typeof DOWNGRADES)[number]).without(current)
+    }
+  }
+}
+
 export async function createAnthropicProvider(provider: Provider): Promise<AiProvider> {
   const credential = await readCredentialForRequest(provider.id)
   if (!credential) {
@@ -87,24 +149,30 @@ export async function createAnthropicProvider(provider: Provider): Promise<AiPro
       const content = buildGenerationContent(request)
 
       try {
-        const response = await client.messages.create({
-          model: generateModel,
-          max_tokens: 16000,
-          system: GENERATE_SYSTEM_PROMPT,
-          thinking: { type: 'adaptive' },
-          messages: [
-            ...request.history.map((turn) => ({
-              role: turn.role,
-              content: turn.content,
-            })),
-            { role: 'user' as const, content },
-          ],
-          // effort and format are both fields of output_config.
-          output_config: {
-            effort: 'high',
-            format: { type: 'json_schema', schema: GENERATION_SCHEMA },
+        const response = await withoutUnsupportedFields(
+          {
+            model: generateModel,
+            max_tokens: 16000,
+            system: GENERATE_SYSTEM_PROMPT,
+            thinking: { type: 'adaptive' },
+            messages: [
+              ...request.history.map((turn) => ({
+                role: turn.role,
+                content: turn.content,
+              })),
+              { role: 'user' as const, content },
+            ],
+            // effort and format are both fields of output_config.
+            output_config: {
+              effort: 'high',
+              format: { type: 'json_schema', schema: GENERATION_SCHEMA },
+            },
           },
-        } as Parameters<typeof client.messages.create>[0])
+          (body) =>
+            client.messages.create(
+              body as unknown as Parameters<typeof client.messages.create>[0],
+            ),
+        )
 
         return parseJsonResponse<GenerationResult>(response)
       } catch (error) {
@@ -129,52 +197,68 @@ export async function createAnthropicProvider(provider: Provider): Promise<AiPro
       const content = buildGenerationContent(request)
 
       try {
-        const stream = client.messages.stream({
-          model: generateModel,
-          max_tokens: 16000,
-          system: GENERATE_SYSTEM_PROMPT,
-          /*
-           * `display` is an opt-in. On Opus 5 the default omits the reasoning
-           * text entirely, so `thinking_delta` never arrives and the stream is
-           * silent until the answer starts — which is exactly the stretch the
-           * panel had nothing to report. The non-streaming calls below leave
-           * it off: nothing there reads the reasoning, so paying for it would
-           * buy nothing.
-           */
-          thinking: { type: 'adaptive', display: 'summarized' },
-          messages: [
-            ...request.history.map((turn) => ({
-              role: turn.role,
-              content: turn.content,
-            })),
-            { role: 'user' as const, content },
-          ],
-          output_config: {
-            effort: 'high',
-            format: { type: 'json_schema', schema: GENERATION_SCHEMA },
-          },
-        } as Parameters<typeof client.messages.stream>[0])
-
-        let accumulated = ''
-        stream.on('text', (delta: string) => {
-          accumulated += delta
-          onChunk(accumulated)
-        })
-
         /*
-         * Reasoning is a separate event from output. With adaptive thinking at
-         * high effort it is also the entire first stretch of the request — on
-         * a hard change the model can reason well past thirty seconds before
-         * emitting a single character of the response — so subscribing only to
-         * `text` left the panel with nothing to report for that whole period.
+         * The whole stream is the retryable unit, not just its construction:
+         * a rejected request emits nothing before it fails, so a second
+         * attempt starts from an empty accumulator and the panel never sees
+         * the difference.
          */
-        let thought = 0
-        stream.on('thinking', (delta: string) => {
-          thought += delta.length
-          onThinking?.(thought)
-        })
+        const final = await withoutUnsupportedFields(
+          {
+            model: generateModel,
+            max_tokens: 16000,
+            system: GENERATE_SYSTEM_PROMPT,
+            /*
+             * `display` is an opt-in. On Opus 5 the default omits the reasoning
+             * text entirely, so `thinking_delta` never arrives and the stream is
+             * silent until the answer starts — which is exactly the stretch the
+             * panel had nothing to report. The non-streaming calls below leave
+             * it off: nothing there reads the reasoning, so paying for it would
+             * buy nothing.
+             */
+            thinking: { type: 'adaptive', display: 'summarized' },
+            messages: [
+              ...request.history.map((turn) => ({
+                role: turn.role,
+                content: turn.content,
+              })),
+              { role: 'user' as const, content },
+            ],
+            output_config: {
+              effort: 'high',
+              format: { type: 'json_schema', schema: GENERATION_SCHEMA },
+            },
+          },
+          async (payload) => {
+            const stream = client.messages.stream(
+              payload as unknown as Parameters<typeof client.messages.stream>[0],
+            )
 
-        return parseJsonResponse<GenerationResult>(await stream.finalMessage())
+            let accumulated = ''
+            stream.on('text', (delta: string) => {
+              accumulated += delta
+              onChunk(accumulated)
+            })
+
+            /*
+             * Reasoning is a separate event from output. With adaptive thinking
+             * at high effort it is also the entire first stretch of the request
+             * — on a hard change the model can reason well past thirty seconds
+             * before emitting a single character of the response — so
+             * subscribing only to `text` left the panel with nothing to report
+             * for that whole period.
+             */
+            let thought = 0
+            stream.on('thinking', (delta: string) => {
+              thought += delta.length
+              onThinking?.(thought)
+            })
+
+            return await stream.finalMessage()
+          },
+        )
+
+        return parseJsonResponse<GenerationResult>(final)
       } catch (error) {
         throw toProviderError(error)
       }
@@ -186,17 +270,23 @@ export async function createAnthropicProvider(provider: Provider): Promise<AiPro
       const body = `INTENT (stated by the user):\n${args.intent}\n\nCODE:\n\`\`\`js\n${args.code}\n\`\`\``
 
       try {
-        const response = await client.messages.create({
-          model: reviewModel,
-          max_tokens: 4000,
-          system: REVIEW_SYSTEM_PROMPT,
-          thinking: { type: 'adaptive' },
-          messages: [{ role: 'user', content: body }],
-          output_config: {
-            effort: 'high',
-            format: { type: 'json_schema', schema: REVIEW_SCHEMA },
+        const response = await withoutUnsupportedFields(
+          {
+            model: reviewModel,
+            max_tokens: 4000,
+            system: REVIEW_SYSTEM_PROMPT,
+            thinking: { type: 'adaptive' },
+            messages: [{ role: 'user', content: body }],
+            output_config: {
+              effort: 'high',
+              format: { type: 'json_schema', schema: REVIEW_SCHEMA },
+            },
           },
-        } as Parameters<typeof client.messages.create>[0])
+          (payload) =>
+            client.messages.create(
+              payload as unknown as Parameters<typeof client.messages.create>[0],
+            ),
+        )
 
         return parseJsonResponse<ModelReview>(response)
       } catch (error) {
@@ -369,8 +459,20 @@ function toProviderError(error: unknown): ProviderError {
     })
   }
   if (error instanceof Anthropic.APIError) {
+    /*
+     * The provider's own words, not just its status code.
+     *
+     * This used to read "Provider returned an error (400)." and nothing else,
+     * which told the user nothing and cost a session of bisecting request
+     * bodies against the live API to discover that the message had said
+     * "adaptive thinking is not supported on this model" all along. An error
+     * that names its cause is the difference between a report and a repro.
+     */
+    const detail = String(error.message ?? '').trim()
     return new ProviderError(
-      `Provider returned an error (${error.status ?? 'unknown'}).`,
+      detail
+        ? `Provider returned an error (${error.status ?? 'unknown'}): ${detail}`
+        : `Provider returned an error (${error.status ?? 'unknown'}).`,
       'unknown',
       (error.status ?? 0) >= 500,
       { cause: error },
