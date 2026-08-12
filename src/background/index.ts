@@ -27,6 +27,7 @@ import { reconcile as reconcileContentScripts } from './content-scripts'
 import { buildProbeTransform } from './csp-probe'
 import { forgetSession, runHealthCheck, shouldCheck } from './health'
 import { withKeepalive } from './keepalive'
+import { connect as connectOAuth } from './oauth'
 import { resolveActiveProvider, ProviderError } from './providers'
 import {
   hasUserScriptsPermission,
@@ -40,6 +41,7 @@ import {
   exportTransforms,
   getAllCredentialStatuses,
   getAllTransforms,
+  getCredentialStatus,
   getSettings,
   importTransforms,
   reorderTransforms,
@@ -334,6 +336,33 @@ async function handle(
     case 'clear-credential':
       await clearCredential(message.providerId)
       return true
+
+    case 'connect-oauth': {
+      const settings = await getSettings()
+      const provider = settings.providers.find((p) => p.id === message.providerId)
+      if (!provider) throw new Error('That provider is no longer configured.')
+
+      /*
+       * Anthropic is refused here as well as in the adapter. Anthropic
+       * restricted OAuth to Claude Code and Claude.ai and disabled third-party
+       * tokens; a flow that appeared to work would be one that violated their
+       * terms. Refusing at the point of use rather than only hiding the button
+       * means it stays refused if the button is ever shown by mistake.
+       */
+      if (provider.type === 'anthropic') {
+        throw new Error(
+          'Anthropic does not offer sign-in to third-party applications. Use an API key.',
+        )
+      }
+      if (!provider.oauth) {
+        throw new Error(
+          'This provider has no sign-in endpoints configured. Add them in settings first.',
+        )
+      }
+
+      await setCredential(message.providerId, await connectOAuth(provider.oauth))
+      return getCredentialStatus(message.providerId)
+    }
 
     case 'preview-css':
       await setPreviewCss(message.tabId, message.css)

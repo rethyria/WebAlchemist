@@ -18,6 +18,7 @@ import {
   repairPrompt,
   scopeInstruction,
 } from '../prompts'
+import { credentialFrom, needsRefresh, type TokenPayload } from '../oauth'
 import { readCredentialForRequest, setCredential } from '../storage'
 import {
   GENERATION_SCHEMA,
@@ -204,8 +205,7 @@ async function ensureFreshToken(
     { kind: 'oauth' }
   >,
 ): Promise<string> {
-  const REFRESH_MARGIN_MS = 60_000
-  if (credential.expiresAt - REFRESH_MARGIN_MS > Date.now()) {
+  if (!needsRefresh(credential.expiresAt, Date.now())) {
     return credential.accessToken
   }
 
@@ -227,18 +227,18 @@ async function ensureFreshToken(
     )
   }
 
-  const payload = (await response.json()) as {
-    access_token: string
-    refresh_token?: string
-    expires_in?: number
-  }
-
-  const refreshed = {
-    ...credential,
-    accessToken: payload.access_token,
-    refreshToken: payload.refresh_token ?? credential.refreshToken,
-    expiresAt: Date.now() + (payload.expires_in ?? 3600) * 1000,
-  }
+  /*
+   * Built by the same function the initial exchange uses, so a refresh cannot
+   * drift from a connect — including the part where a response omitting
+   * `refresh_token` means "keep the one you have" rather than "you no longer
+   * have one".
+   */
+  const refreshed = credentialFrom(
+    (await response.json()) as TokenPayload,
+    { authorizationEndpoint: '', tokenEndpoint: credential.tokenEndpoint, clientId: credential.clientId, scopes: [] },
+    Date.now(),
+    credential.refreshToken,
+  )
   await setCredential(providerId, refreshed)
   return refreshed.accessToken
 }

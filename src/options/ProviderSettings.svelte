@@ -28,9 +28,10 @@
     onsave: (settings: Settings) => Promise<void>
     onsetkey: (providerId: string, key: string) => Promise<void>
     onclearkey: (providerId: string) => Promise<void>
+    onconnectoauth: (providerId: string) => Promise<void>
   }
 
-  let { settings, statuses, onsave, onsetkey, onclearkey }: Props = $props()
+  let { settings, statuses, onsave, onsetkey, onclearkey, onconnectoauth }: Props = $props()
 
   let adding = $state(false)
   let draftType = $state<ProviderType>('anthropic')
@@ -42,6 +43,89 @@
   let editingKeyFor = $state<string | null>(null)
   let keyInput = $state('')
   let busy = $state(false)
+
+  /*
+   * Sign-in, for providers that offer it.
+   *
+   * Four fields typed by hand rather than discovered. There is no registry, and
+   * the discovery document that would carry them is an OpenID Connect
+   * convention most OpenAI-compatible endpoints do not publish — so asking for
+   * what the provider's own documentation states beats a lookup that works for
+   * a minority and fails opaquely for everyone else.
+   */
+  let editingOAuthFor = $state<string | null>(null)
+  let oauthDraft = $state({
+    authorizationEndpoint: '',
+    tokenEndpoint: '',
+    clientId: '',
+    scopes: '',
+  })
+  let oauthError = $state<string | null>(null)
+
+  /*
+   * The provider needs this registered before the flow will work, and getting
+   * it wrong is the most likely reason a first attempt fails — so it is shown
+   * rather than left to be discovered from an error page.
+   */
+  let redirectUrl = $derived.by(() => {
+    try {
+      return browser.identity.getRedirectURL()
+    } catch {
+      // `identity` is a required permission, so this should not happen. Saying
+      // so beats rendering "undefined" next to "register this with your
+      // provider".
+      return 'unavailable — the identity permission is missing'
+    }
+  })
+
+  function openOAuth(provider: Provider): void {
+    editingOAuthFor = editingOAuthFor === provider.id ? null : provider.id
+    oauthError = null
+    oauthDraft = {
+      authorizationEndpoint: provider.oauth?.authorizationEndpoint ?? '',
+      tokenEndpoint: provider.oauth?.tokenEndpoint ?? '',
+      clientId: provider.oauth?.clientId ?? '',
+      scopes: (provider.oauth?.scopes ?? []).join(' '),
+    }
+  }
+
+  let oauthDraftValid = $derived(
+    isValidUrl(oauthDraft.authorizationEndpoint) &&
+      isValidUrl(oauthDraft.tokenEndpoint) &&
+      oauthDraft.clientId.trim().length > 0,
+  )
+
+  /**
+   * Saves the endpoints, then runs the flow.
+   *
+   * No permission request, unlike every other capability here. `identity` is
+   * not in Firefox's optional-permission set — the manifest is refused if it is
+   * declared there — so it is held from install and there is nothing to ask
+   * for. See the note in `background/oauth.ts`.
+   */
+  async function connectOAuth(provider: Provider): Promise<void> {
+    oauthError = null
+    busy = true
+    try {
+      const oauth = {
+        authorizationEndpoint: oauthDraft.authorizationEndpoint.trim(),
+        tokenEndpoint: oauthDraft.tokenEndpoint.trim(),
+        clientId: oauthDraft.clientId.trim(),
+        scopes: oauthDraft.scopes.split(/\s+/).filter(Boolean),
+      }
+      await onsave({
+        ...settings,
+        providers: settings.providers.map((p) => (p.id === provider.id ? { ...p, oauth } : p)),
+      })
+
+      await onconnectoauth(provider.id)
+      editingOAuthFor = null
+    } catch (cause) {
+      oauthError = cause instanceof Error ? cause.message : String(cause)
+    } finally {
+      busy = false
+    }
+  }
 
   const TYPES: { value: ProviderType; label: string; hint: string }[] = [
     { value: 'anthropic', label: 'Anthropic', hint: 'api.anthropic.com' },
@@ -206,7 +290,18 @@
             </div>
 
             <div class="state">
-              {#if status?.configured}
+              {#if status?.configured && status.kind === 'oauth'}
+                <span class="configured">Signed in</span>
+                {#if status.expiresAt}
+                  <!--
+                    Shown because a token dies on a schedule and a key does not.
+                    Refresh happens a minute ahead of this automatically; the
+                    date is here so an expiry that cannot be refreshed does not
+                    arrive as an unexplained failure mid-generation.
+                  -->
+                  <span class="expiry">until {new Date(status.expiresAt).toLocaleString()}</span>
+                {/if}
+              {:else if status?.configured}
                 <span class="configured">Key configured</span>
               {:else}
                 <span class="missing">No credential</span>
@@ -233,6 +328,18 @@
             >
               {status?.configured ? 'Replace key' : 'Set key'}
             </Button>
+            {#if provider.type !== 'anthropic'}
+              <!--
+                Anthropic is absent by design, not by oversight. Anthropic
+                restricted OAuth to Claude Code and Claude.ai and disabled
+                third-party tokens, so a sign-in button here would either fail
+                or work by impersonating another application. The background
+                refuses it as well, so hiding the button is not the only guard.
+              -->
+              <Button small onclick={() => openOAuth(provider)}>
+                {provider.oauth ? 'Sign-in settings' : 'Use sign-in instead'}
+              </Button>
+            {/if}
             {#if status?.configured}
               <Button small onclick={() => void onclearkey(provider.id)}>Clear</Button>
             {/if}
@@ -274,6 +381,61 @@
                 onclick={() => void saveKey(provider.id)}
               >
                 Save
+              </Button>
+            </div>
+          {/if}
+
+          {#if editingOAuthFor === provider.id}
+            <div class="oauth">
+              <p class="explain">
+                From the provider's own documentation. Web Alchemist opens their
+                sign-in page and stores the token it returns; the token is held
+                the same way an API key is and never reaches this page.
+              </p>
+              <label>
+                Authorization endpoint
+                <input
+                  bind:value={oauthDraft.authorizationEndpoint}
+                  placeholder="https://provider.example/oauth/authorize"
+                  spellcheck="false"
+                  autocomplete="off"
+                />
+              </label>
+              <label>
+                Token endpoint
+                <input
+                  bind:value={oauthDraft.tokenEndpoint}
+                  placeholder="https://provider.example/oauth/token"
+                  spellcheck="false"
+                  autocomplete="off"
+                />
+              </label>
+              <label>
+                Client ID
+                <input bind:value={oauthDraft.clientId} spellcheck="false" autocomplete="off" />
+              </label>
+              <label>
+                Scopes
+                <input
+                  bind:value={oauthDraft.scopes}
+                  placeholder="space separated, or leave empty"
+                  spellcheck="false"
+                  autocomplete="off"
+                />
+              </label>
+              <p class="explain">
+                Register <code>{redirectUrl}</code> as the redirect URI with the provider.
+              </p>
+              {#if oauthError}
+                <p class="oauth-error">{oauthError}</p>
+              {/if}
+              <Button
+                variant="primary"
+                small
+                disabled={!oauthDraftValid || busy}
+                onclick={() => void connectOAuth(provider)}
+              >
+                {busy ? 'Waiting for the provider…' : 'Sign in'}
               </Button>
             </div>
           {/if}
@@ -485,6 +647,56 @@
 
   .key-field input {
     flex: 1;
+  }
+
+  .expiry {
+    display: block;
+    font: 11px var(--font-ui);
+    color: var(--text-faint);
+  }
+
+  .oauth {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-7);
+    padding: var(--sp-11) var(--sp-13);
+    border: 1px solid var(--border);
+    border-radius: var(--r-card);
+    background: var(--surface-sunken);
+  }
+
+  .oauth label {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-3);
+    font: 600 9.5px var(--font-mono);
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+  }
+
+  .oauth input {
+    font: 12px var(--font-mono);
+    text-transform: none;
+    letter-spacing: normal;
+  }
+
+  .oauth .explain {
+    margin: 0;
+    font: 11.5px/1.5 var(--font-ui);
+    color: var(--text-dim);
+  }
+
+  .oauth code {
+    font: 11px var(--font-mono);
+    color: var(--text);
+    word-break: break-all;
+  }
+
+  .oauth-error {
+    margin: 0;
+    font: 12px/1.5 var(--font-ui);
+    color: var(--attention);
   }
 
   .add {

@@ -59,6 +59,16 @@
     statuses = await call<CredentialStatus[]>({ type: 'get-credential-statuses' })
   }
 
+  /*
+   * The flow runs in the background, not here. The token is a credential, and
+   * credentials never pass through an extension page — see #45. This page asks
+   * for the sign-in and is told whether it worked.
+   */
+  async function connectOAuth(providerId: string) {
+    await call({ type: 'connect-oauth', providerId })
+    statuses = await call<CredentialStatus[]>({ type: 'get-credential-statuses' })
+  }
+
   $effect(() => {
     void load()
   })
@@ -74,6 +84,7 @@
       onsave={save}
       onsetkey={setKey}
       onclearkey={clearKey}
+      onconnectoauth={connectOAuth}
     />
 
     <section>

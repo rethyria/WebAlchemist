@@ -230,12 +230,34 @@ export const ANTHROPIC_MODELS: ModelOption[] = [
   { id: 'claude-haiku-4-5', label: 'Haiku 4.5', price: '$1 / $5', vision: true },
 ]
 
+/**
+ * What an OpenAI-compatible provider needs before it can be signed into.
+ *
+ * Typed in by hand rather than discovered. There is no registry of these, and
+ * the discovery document that would carry them (`/.well-known/
+ * openid-configuration`) is an OpenID Connect convention that most
+ * OpenAI-compatible endpoints do not publish. Asking for four fields the
+ * provider's own documentation states is more honest than a lookup that works
+ * for a minority and fails opaquely for the rest.
+ */
+export interface OAuthConfig {
+  authorizationEndpoint: string
+  tokenEndpoint: string
+  clientId: string
+  scopes: string[]
+}
+
 export interface Provider {
   id: string
   label: string
   type: ProviderType
   /** Required for openai-compatible; ignored for anthropic. */
   baseUrl?: string
+  /**
+   * Present only when this provider is set up for sign-in rather than a key.
+   * Never for Anthropic — see the note on `Credential`.
+   */
+  oauth?: OAuthConfig
   /** Model used to generate transforms. */
   generateModel: string
   /** Model used for the adversarial review pass. */

@@ -22,7 +22,8 @@
     "scripting",
     "activeTab",
     "tabs",
-    "webNavigation"
+    "webNavigation",
+    "identity"
   ],
   "optional_permissions": [
     "userScripts"

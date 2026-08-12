@@ -88,6 +88,16 @@ export type Message =
   | { type: 'save-settings'; settings: Settings }
   | { type: 'set-credential'; providerId: string; credential: Credential }
   | { type: 'clear-credential'; providerId: string }
+  /*
+   * Sign-in runs in the background rather than in the settings page, because
+   * the token must not pass through a page — the same rule the API key follows.
+   * The settings page asks for the flow and is told whether it worked; the
+   * credential itself never leaves this module.
+   *
+   * The `identity` permission request stays in the page, since that needs a
+   * live gesture the background does not have.
+   */
+  | { type: 'connect-oauth'; providerId: string }
 
   /*
    * There are no permission messages. permissions.request() only succeeds
@@ -299,6 +309,8 @@ export interface Responses {
   'get-transform': Transform | null
   'reapply-everywhere': boolean
   'get-credential-statuses': CredentialStatus[]
+  /** The status after signing in, so settings can redraw without a re-fetch. */
+  'connect-oauth': CredentialStatus
   'get-vision-support': boolean
   generate: GenerationResult
   repair: GenerationResult
