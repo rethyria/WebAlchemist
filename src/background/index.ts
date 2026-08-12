@@ -22,6 +22,7 @@ import type {
 } from '@shared/types'
 import type { RefinementTurn } from './providers/types'
 import { overlayPaletteFor } from '@shared/accents'
+import * as badge from './badge'
 import { reconcile as reconcileContentScripts } from './content-scripts'
 import { buildProbeTransform } from './csp-probe'
 import { forgetSession, runHealthCheck, shouldCheck } from './health'
@@ -104,11 +105,19 @@ browser.webNavigation.onCommitted.addListener(async (details) => {
   // than trying to remove a stylesheet that is already gone.
   appliedCss.delete(details.tabId)
   const transforms = await transformsForUrl(details.url)
+
+  /*
+   * Before the early return below, not after. A tab that navigates from a site
+   * with transforms to one without has to lose its badge, and that is the
+   * `transforms.length === 0` case — the one the early return skips.
+   */
+  const settings = await getSettings()
+  await badge.tabNavigated(details.tabId, transforms.length, settings.accent)
+
   if (transforms.length === 0) return
 
   await applyCssTransforms(details.tabId, transforms)
 
-  const settings = await getSettings()
   if (!shouldCheck(settings, details.url)) return
 
   // Deliberately not awaited alongside the CSS application: the check waits up
@@ -200,7 +209,7 @@ async function handle(
       for (const tab of tabs) {
         if (tab.id === undefined || !tab.url) continue
         if (!matchesUrl(saved.match, tab.url)) continue
-        await applyCssTransforms(tab.id, await transformsForUrl(tab.url))
+        await reapply(tab.id)
       }
       return true
     }
@@ -493,6 +502,14 @@ async function handle(
 async function checkAndPublish(tabId: number, transforms: Transform[]): Promise<void> {
   const states = await runHealthCheck(tabId, transforms)
   if (!states) return
+
+  const settings = await getSettings()
+  await badge.healthChecked(
+    tabId,
+    states.filter((state) => state.status === 'broken').length,
+    settings.accent,
+  )
+
   await browser.runtime
     .sendMessage({ type: 'health-check-result', states })
     .catch(() => {})
@@ -563,6 +580,13 @@ interface GenerateOverPort {
   history: RefinementTurn[]
   scopeDepth?: number
   scopeContainer?: string | null
+  /*
+   * Only the badge uses this. A sidebar's port sender carries no tab — the
+   * panel belongs to a window, not a page — so the tab being worked on has to
+   * be stated rather than inferred. Optional because a generation is still
+   * valid without a badge to update.
+   */
+  tabId?: number
 }
 
 /**
@@ -582,6 +606,10 @@ async function runGeneration(
   port: browser.runtime.Port,
   request: GenerateOverPort,
 ): Promise<void> {
+  const { tabId } = request
+  const accent = (await getSettings()).accent
+  if (tabId !== undefined) await badge.generationStarted(tabId, accent)
+
   try {
     const provider = await resolveActiveProvider()
     port.postMessage({ type: 'sent' })
@@ -609,12 +637,17 @@ async function runGeneration(
           ? { message: error.message, kind: error.kind, retryable: error.retryable }
           : { message: error instanceof Error ? error.message : String(error) },
     })
+  } finally {
+    // In `finally` so a failed generation does not leave the tab showing `··`
+    // for as long as the tab is open.
+    if (tabId !== undefined) await badge.generationEnded(tabId, accent)
   }
 }
 
 browser.tabs.onRemoved.addListener((tabId) => {
   previewedCss.delete(tabId)
   appliedCss.delete(tabId)
+  badge.tabClosed(tabId)
 })
 
 /* ------------------------------------------------------------------ */
@@ -734,7 +767,14 @@ async function reapply(tabId: number | undefined): Promise<void> {
   if (tabId === undefined) return
   const tab = await browser.tabs.get(tabId).catch(() => undefined)
   if (!tab?.url) return
-  await applyCssTransforms(tabId, await transformsForUrl(tab.url))
+  const transforms = await transformsForUrl(tab.url)
+  await applyCssTransforms(tabId, transforms)
+
+  // Every mutation that changes what runs — save, delete, reorder, toggle —
+  // reaches here, which is why the count is refreshed here rather than at each
+  // of the four call sites.
+  const settings = await getSettings()
+  await badge.transformCountChanged(tabId, transforms.length, settings.accent)
 }
 
 /* ------------------------------------------------------------------ */

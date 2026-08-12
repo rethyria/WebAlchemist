@@ -788,6 +788,7 @@ export class Flow {
           history: this.history,
           scopeDepth: this.scopeDepth,
           scopeContainer: this.scopeContainer,
+          tabId: this.tabId ?? undefined,
         },
         {
           onSent: () => {

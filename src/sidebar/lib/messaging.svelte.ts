@@ -30,6 +30,8 @@ export function generateOverPort(
     history: unknown[]
     scopeDepth?: number
     scopeContainer?: string | null
+    /* For the toolbar badge: a sidebar port carries no tab of its own. */
+    tabId?: number | undefined
   },
   handlers: {
     onSent: () => void
