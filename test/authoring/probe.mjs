@@ -10,7 +10,7 @@
  * Without it, "the transform saved" only proves that saving works, not that the
  * gate #27 requires is on the hand-written path at all.
  */
-import { open, verdict } from '../crypto/rdp.mjs'
+import { open, uniqueUrl, verdict } from '../crypto/rdp.mjs'
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
@@ -24,6 +24,13 @@ if (!B) {
 }
 
 const NAME = 'Hand-written probe'
+/*
+ * Unique, so the tab this run creates is the tab it measures. A bare hostname
+ * finds whichever example.com tab the profile already had open — this run
+ * passed that way once, by accident, because saving from the editor reapplies
+ * to every matching tab including somebody else's.
+ */
+const PAGE = uniqueUrl('https://example.com/', 'authoring')
 const results = {}
 let editorTab = -1
 let pageTab = -1
@@ -47,7 +54,7 @@ async function openEditor(query) {
 
 try {
   pageTab = Number(
-    await B.run(`browser.tabs.create({ url: 'https://example.com/', active: false }).then(t => t.id)`),
+    await B.run(`browser.tabs.create({ url: ${JSON.stringify(PAGE)}, active: false }).then(t => t.id)`),
   )
   await sleep(4000)
 
@@ -114,7 +121,7 @@ try {
   /* Did it reach the page? */
   await B.run(`browser.tabs.reload(${pageTab}).then(() => 'reloaded')`)
   await sleep(4000)
-  const W = await ctx.tab('example.com')
+  const W = await ctx.tab('wa-probe=authoring')
   results.applied = W
     ? await W.raw(`getComputedStyle(document.querySelector('h1')).letterSpacing`)
     : '(no page tab)'

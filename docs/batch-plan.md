@@ -4,6 +4,50 @@ Written to be executed in one run by a coordinator agent handing work to
 subagents. Every item below says what to build, which files it touches, how it
 gets verified, and what it is blocked on.
 
+---
+
+## Outcome
+
+All eleven items are done. Where each result lives:
+
+| Item | Result |
+|---|---|
+| W1 #46 measurement | `test/crypto/README.md` — the design was rejected on measurement |
+| W2 #44 injection surface | `test/injection/README.md` — 13 channels reach, 13 do not |
+| W3 #45 audit | `src/safety/extension-pages.test.ts` — clean, and now pinned |
+| W11 #40 icons | `docs/icons.md` — spec written, drawing still open |
+| W4 #29 badge | `src/background/badge.ts`, `test/badge/probe.mjs` |
+| W6 #32 OAuth | `src/background/oauth.ts`, 24 unit tests; live flow unexercised |
+| W7 #46 encryption | `src/background/vault.ts` — passphrase mode, off by default |
+| W8 #27 manual authoring | editor create mode, `test/authoring/probe.mjs` |
+| W9 intent editing | `Flow.editIntent`; flow state unexercised |
+| W5 #35 countdown | `src/background/providers/retry-after.ts`, 19 unit tests |
+| W10 #38 light theme | `test/contrast/probe.mjs` — 14 failures found and fixed |
+
+**Four things the plan did not anticipate, all found by controls:**
+
+1. **The automatic health check had never run.** Triggered from
+   `webNavigation.onCommitted`, which fires before a `document_idle` content
+   script exists, so every `sendMessage` threw and the catch returned null —
+   which reads as "nothing to report". Found while chasing the broken badge.
+2. **The OpenAI-compatible adapter was dropping the scope instruction**, so the
+   same request produced a different transform depending on the provider.
+   Found while fencing both adapters.
+3. **`--text-faint` failed in dark mode too** (3.96:1). #38 asked for a light
+   pass; the token had never been measured in either scheme.
+4. **`identity` cannot be an optional permission** in Firefox. The manifest is
+   refused. `web-ext lint` reports only a generic warning.
+
+**What still needs the user**, unchanged from the list at the foot of this
+document: #37, the adversarial run against the generator, a live OAuth round
+trip, and drawing the icons.
+
+Everything else that could not be exercised is named in the probe that would
+have exercised it — the sidebar's own surfaces, and the flow state behind W9,
+both because `sidebarAction.open()` needs a live user gesture.
+
+---
+
 ## Assumptions, stated so they can be corrected
 
 **`#25` in the request is read as `#35`.** The list it answered ran 27, 31, 28,

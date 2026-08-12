@@ -11,7 +11,7 @@
  * gesture that a script does not have. The step it lands on and the pre-filled
  * sentence are therefore UNEXERCISED here.
  */
-import { open, verdict } from '../crypto/rdp.mjs'
+import { open, uniqueUrl, verdict } from '../crypto/rdp.mjs'
 const sleep = ms => new Promise(r => setTimeout(r, ms))
 const rdp = open(); const ctx = await rdp.contexts({ waitMs: 3000 }); const B = ctx.background
 const ID = 'wa-intent-probe'
@@ -30,7 +30,7 @@ console.log('seed:', await B.run(`(async () => {
   return 'seeded'
 })()`))
 
-const tab = Number(await B.run(`browser.tabs.create({ url: 'https://example.com/', active: true }).then(t => t.id)`))
+const tab = Number(await B.run(`browser.tabs.create({ url: ${JSON.stringify(uniqueUrl('https://example.com/', 'intent'))}, active: true }).then(t => t.id)`))
 await sleep(5000)
 
 const answer = await B.long(`browser.tabs.sendMessage(${tab}, { type: 'context-for-anchor', anchor: {

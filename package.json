@@ -14,7 +14,8 @@
     "start:firefox": "web-ext run --source-dir ./dist --target firefox-desktop --firefox ./scripts/firefox-flatpak --firefox-profile ./.web-ext-profile --profile-create-if-missing --keep-profile-changes",
     "lint:ext": "web-ext lint --source-dir ./dist",
     "verify:csp": "VITE_CSP_PROBE=1 vite build && node test/csp/server.mjs",
-    "start:firefox:probe": "VITE_CSP_PROBE=1 vite build && web-ext run --source-dir ./dist --target firefox-desktop --firefox ./scripts/firefox-flatpak --firefox-profile ./.web-ext-profile --profile-create-if-missing --keep-profile-changes"
+    "start:firefox:probe": "VITE_CSP_PROBE=1 vite build && web-ext run --source-dir ./dist --target firefox-desktop --firefox ./scripts/firefox-flatpak --firefox-profile ./.web-ext-profile --profile-create-if-missing --keep-profile-changes",
+    "verify": "node test/run-all.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "0.115.0",

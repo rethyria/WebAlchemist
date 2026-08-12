@@ -136,11 +136,23 @@ export function open(port = 41365, host = '127.0.0.1') {
         refresh: () => send({ to: w.actor, type: 'watchTargets', targetType: 'frame' }).catch(() => {}),
         background: find('_generated_background_page'),
         sidebar: find('src/sidebar'),
+        /**
+         * A content tab, by URL substring.
+         *
+         * Give it something unique. Matching on a bare hostname finds the
+         * *first* tab serving it, which on a real profile is very likely one
+         * the user already had open — a suspend/resume run styled its own new
+         * tab and measured somebody else's, and only the control caught it.
+         * `uniqueUrl` below exists so probes do not have to remember this.
+         */
         async tab(needle) {
           const list = await send({ to: 'root', type: 'listTabs' })
-          const d = (list.tabs || []).find((t) => (t.url || '').includes(needle))
-          if (!d) return null
-          const target = await send({ to: d.actor, type: 'getTarget' })
+          const matches = (list.tabs || []).filter((t) => (t.url || '').includes(needle))
+          if (matches.length === 0) return null
+          if (matches.length > 1) {
+            console.warn(`  [rdp] ${matches.length} tabs match ${JSON.stringify(needle)} — using the first. Use a unique URL.`)
+          }
+          const target = await send({ to: matches[0].actor, type: 'getTarget' })
           return mkEval(target.frame.consoleActor)
         },
         baseUrl() {
@@ -150,6 +162,18 @@ export function open(port = 41365, host = '127.0.0.1') {
       }
     },
   }
+}
+
+/**
+ * A page URL nothing else will match.
+ *
+ * The query string is ignored by the site and by match patterns — `example.com/*`
+ * still matches — but it makes the tab findable without colliding with whatever
+ * the user already had open.
+ */
+export function uniqueUrl(base, label) {
+  const separator = base.includes('?') ? '&' : '?'
+  return `${base}${separator}wa-probe=${label}`
 }
 
 /** Prints a control-then-test verdict block and returns whether all passed. */
