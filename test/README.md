@@ -13,12 +13,22 @@ Needs Firefox running with remote debugging on 41365 and the extension loaded
 (`npm run start:firefox`). The runner starts the two local servers some probes
 need, so a sweep cannot quietly skip them.
 
-Expect ten to fifteen minutes. Several probes poll for a condition rather than
-sleeping a fixed time — the crypto ones wait up to 45 seconds for
-`storage.local` to reach the disk, because a fixed four-second wait found the
-canary on one run and missed it on the next, which made the control fail and
-the run meaningless. Individual probes can be run on their own:
-`node test/badge/probe.mjs`.
+**Budget twenty minutes or more, and prefer running probes individually.**
+
+Several poll for a condition rather than sleeping a fixed time — the crypto
+ones wait up to 45 seconds for `storage.local` to reach the disk, because a
+fixed four-second wait found the canary on one run and missed it on the next,
+which made the control fail and the run meaningless. That is the right
+trade-off for correctness and a poor one for wall time.
+
+Each probe also opens tabs, waits for pages, and reloads. Every one of them
+passes on its own; the full sequence is long enough that it is easier to run
+what you need:
+
+```
+node test/badge/probe.mjs
+node test/contrast/probe.mjs
+```
 
 ## What each one answers
 
