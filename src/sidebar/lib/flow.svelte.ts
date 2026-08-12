@@ -351,7 +351,23 @@ export class Flow {
    * the transform they are about to make will need the same grant to apply on
    * later visits anyway.
    */
-  async startPicking(): Promise<void> {
+  /**
+   * Where a confirmed pick goes.
+   *
+   * 'describe' is the AI path. 'author' skips the model entirely and opens the
+   * editor with an empty body — #27's point being that someone who already
+   * knows the CSS they want should not have to describe it to a model and
+   * wait, and that this has to work when no provider is configured at all.
+   *
+   * The pick still happens, and that is not a formality: the anchor is what
+   * makes a health check and a repair possible later, so a hand-written
+   * transform without one would be a second-class record that silently opts
+   * out of both.
+   */
+  private pickPurpose: 'describe' | 'author' = 'describe'
+
+  async startPicking(purpose: 'describe' | 'author' = 'describe'): Promise<void> {
+    this.pickPurpose = purpose
     if (this.tabId === null) return
 
     const origin = originPermissionForUrl(this.url)
@@ -420,7 +436,9 @@ export class Flow {
         this.tree = event.tree
         // Retargeting must not wipe what has already been typed — the user is
         // adjusting the target of a description they are partway through.
-        if (!retargeting) this.enterDescribing()
+        if (retargeting) return
+        if (this.pickPurpose === 'author') void this.openAuthoring()
+        else this.enterDescribing()
         return
       }
 
@@ -453,6 +471,43 @@ export class Flow {
   /* ---------------------------------------------------------------- */
   /* Describing                                                        */
   /* ---------------------------------------------------------------- */
+
+  /**
+   * Hands the pick to the editor page instead of to the model.
+   *
+   * The draft goes through `storage.session` rather than the URL: an anchor
+   * carries a path, landmarks and class names, and a query string is the wrong
+   * shape for it — long, escaped, and visible in the address bar. Session
+   * storage is memory-only (measured in `test/crypto/session-probe.mjs`) and
+   * the draft is discarded once the editor has read it.
+   *
+   * Nothing is saved here. An empty transform written to storage on the way to
+   * the editor would leave a dead row behind if the tab were closed, and the
+   * panel would be showing something that does nothing.
+   */
+  private async openAuthoring(): Promise<void> {
+    const picked = this.picked
+    if (!picked) return
+
+    const key = crypto.randomUUID()
+    const preset = matchPresetsFor(this.url)[0]?.pattern ?? this.url
+
+    await browser.storage.session.set({
+      [`wa-draft-${key}`]: {
+        anchor: $state.snapshot(picked.anchor),
+        match: preset,
+        target: $state.snapshot(picked.target),
+        url: this.url,
+      },
+    })
+
+    await browser.tabs.create({
+      url: browser.runtime.getURL(`src/editor/index.html?draft=${encodeURIComponent(key)}`),
+    })
+
+    this.step = 'list'
+    await this.clearLock()
+  }
 
   private enterDescribing(): void {
     this.step = 'describing'

@@ -611,6 +611,19 @@
           Select an element
         </button>
         <p class="hint">Or drag a rectangle on the page</p>
+        <!--
+          #27: someone who already knows the CSS they want should not have to
+          describe it to a model and wait. It is also the only path that works
+          with no provider configured, which is exactly the state this empty
+          screen is most often seen in.
+        -->
+        <button
+          type="button"
+          class="link"
+          onclick={() => void flow.startPicking('author')}
+        >
+          Write it myself
+        </button>
         {#if cspProbeEnabled}
           <button type="button" class="link" onclick={() => void runCspProbe()}>
             Run CSP probe
@@ -673,6 +686,9 @@
     <footer>
       <button type="button" class="primary" onclick={() => void flow.startPicking()}>
         Select an element
+      </button>
+      <button type="button" class="link" onclick={() => void flow.startPicking('author')}>
+        Write it myself
       </button>
       <p class="hint">Order decides conflicts — later wins</p>
     </footer>

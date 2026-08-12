@@ -13,9 +13,20 @@
    * — static analysis before the code is stored, and the background re-runs it
    * regardless — with room to see what is being edited.
    */
-  const id = new URLSearchParams(location.search).get('id') ?? ''
+  const params = new URLSearchParams(location.search)
+  const id = params.get('id') ?? ''
+  /*
+   * Create mode (#27). The sidebar puts the pick in session storage and passes
+   * a key, because an anchor carries a path, landmarks and class names and a
+   * query string is the wrong shape to hold one.
+   */
+  const draftKey = params.get('draft') ?? ''
+  const creating = draftKey !== ''
 
   let transform = $state<Transform | null>(null)
+  /* Only choosable while creating: changing it later would invalidate the code. */
+  let kind = $state<'css' | 'js'>('css')
+  let name = $state('')
   let code = $state('')
   let saved = $state('')
   let match = $state('')
@@ -25,7 +36,18 @@
   let saving = $state(false)
   let justSaved = $state(false)
 
-  let dirty = $derived(transform !== null && (code !== saved || match !== savedMatch))
+  /*
+   * Creating is dirty from the start in the sense that leaving loses work, but
+   * Save must not be offered for an empty body — a transform that does nothing
+   * is a row the user has to notice and delete. A name is required for the same
+   * reason the list needs one to show.
+   */
+  let dirty = $derived(
+    transform !== null &&
+      (creating
+        ? code.trim().length > 0 && name.trim().length > 0
+        : code !== saved || match !== savedMatch),
+  )
 
   /*
    * Where it applies, offered as the same four choices the save flow gives.
@@ -53,7 +75,64 @@
     return matchesUrl(match.trim(), `https://${host}/`)
   })
 
+  /**
+   * Builds the record a hand-written transform starts from.
+   *
+   * `origin: 'manual'` is the value `TransformOrigin` has always had and
+   * nothing produced. It matters beyond bookkeeping: the AI-JS kill switch acts
+   * on model-written code, and code the user typed themselves is not in its
+   * scope.
+   *
+   * The rationale is written rather than left blank because it is shown when a
+   * transform breaks, and "no description" at that moment is the least useful
+   * thing it could say.
+   */
+  async function loadDraft() {
+    const stored = await browser.storage.session.get(`wa-draft-${draftKey}`)
+    const draft = stored[`wa-draft-${draftKey}`] as
+      | { anchor: Transform['anchor']; match: string; target?: { label?: string }; url: string }
+      | undefined
+
+    if (!draft) {
+      loadError =
+        'That draft is no longer available. Drafts last until the browser closes — pick the element again to start over.'
+      return
+    }
+
+    const now = Date.now()
+    transform = {
+      id: crypto.randomUUID(),
+      name: '',
+      enabled: true,
+      order: now,
+      match: draft.match,
+      kind: 'css',
+      origin: 'manual',
+      capabilities: [],
+      intent: 'Written by hand.',
+      rationale: {
+        targets: draft.anchor.selector,
+        approach: 'Written by hand, so there is no generated description of it.',
+        assumptions: [],
+      },
+      anchor: draft.anchor,
+      code: '',
+      createdAt: now,
+      updatedAt: now,
+    }
+    code = ''
+    saved = ''
+    match = draft.match
+    savedMatch = draft.match
+    name = ''
+    document.title = 'New transform — Web Alchemist'
+  }
+
   async function load() {
+    if (creating) {
+      await loadDraft()
+      return
+    }
     try {
       const found = await send<Transform | null>({ type: 'get-transform', id })
       if (!found) {
@@ -104,7 +183,7 @@
        * written. The background repeats it on save — this is the copy that can
        * explain itself.
        */
-      if (current.kind === 'js') {
+      if ((creating ? kind : current.kind) === 'js') {
         const analysis = await send<ReviewResult>({
           type: 'analyse',
           code,
@@ -117,19 +196,22 @@
         }
       }
 
-      const next: Transform = {
-        ...current,
-        code,
-        match: wanted,
-        rationale: {
-          targets: current.rationale.targets,
-          // The old prose described the old code. Saying so is better than
-          // leaving a description that quietly stopped being true.
-          approach: 'Edited by hand. Any description of the previous code no longer applies.',
-          assumptions: [],
-        },
-        updatedAt: Date.now(),
-      }
+      const next: Transform = creating
+        ? { ...current, code, match: wanted, kind, name: name.trim(), updatedAt: Date.now() }
+        : {
+            ...current,
+            code,
+            match: wanted,
+            rationale: {
+              targets: current.rationale.targets,
+              // The old prose described the old code. Saying so is better than
+              // leaving a description that quietly stopped being true.
+              approach:
+                'Edited by hand. Any description of the previous code no longer applies.',
+              assumptions: [],
+            },
+            updatedAt: Date.now(),
+          }
 
       // Every tab the transform matches, not just one: this page is not on any
       // of them, and a save that only reached the last-focused tab would look
@@ -143,6 +225,18 @@
       match = wanted
       justSaved = true
       setTimeout(() => (justSaved = false), 2000)
+
+      if (creating) {
+        /*
+         * The draft has served its purpose, and leaving it would mean a second
+         * Save created a duplicate rather than updating what was just written.
+         * Switching the URL to the saved id turns this into an ordinary edit
+         * session, including across a reload.
+         */
+        await browser.storage.session.remove(`wa-draft-${draftKey}`)
+        history.replaceState(null, '', `?id=${encodeURIComponent(next.id)}`)
+        location.reload()
+      }
     } catch (cause) {
       findings = [String(cause instanceof Error ? cause.message : cause)]
     } finally {
@@ -192,10 +286,48 @@
   {:else if transform}
     <header>
       <div class="titles">
-        <h1>{transform.name}</h1>
-        <p class="intent">{transform.intent}</p>
+        {#if creating}
+          <input
+            class="name-field"
+            bind:value={name}
+            placeholder="Name this transform"
+            spellcheck="false"
+            autocomplete="off"
+          />
+          <p class="intent">
+            Written by hand. Nothing is sent to a model, and no page content leaves the
+            browser.
+          </p>
+        {:else}
+          <h1>{transform.name}</h1>
+          <p class="intent">{transform.intent}</p>
+        {/if}
         <div class="facts">
-          <span class="badge">{transform.kind.toUpperCase()}</span>
+          {#if creating}
+            <!--
+              Only choosable now. Changing the kind of an existing transform
+              would leave code that cannot mean anything in its new form.
+            -->
+            <div class="kinds" role="radiogroup" aria-label="Transform kind">
+              {#each ['css', 'js'] as const as option}
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={kind === option}
+                  class="kind"
+                  class:on={kind === option}
+                  onclick={() => (kind = option)}
+                >
+                  {option.toUpperCase()}
+                </button>
+              {/each}
+            </div>
+            {#if kind === 'js'}
+              <span class="badge attention">checked before it is saved</span>
+            {/if}
+          {:else}
+            <span class="badge">{transform.kind.toUpperCase()}</span>
+          {/if}
           {#if transform.capabilities.length > 0}
             <span class="badge attention">{transform.capabilities.join(', ')}</span>
           {/if}
@@ -211,11 +343,13 @@
         {:else if dirty}
           <span class="note">Unsaved changes</span>
         {/if}
-        <button type="button" class="secondary" disabled={!dirty || saving} onclick={revert}>
-          Revert
-        </button>
+        {#if !creating}
+          <button type="button" class="secondary" disabled={!dirty || saving} onclick={revert}>
+            Revert
+          </button>
+        {/if}
         <button type="button" class="primary" disabled={!dirty || saving} onclick={save}>
-          {saving ? 'Saving…' : 'Save'}
+          {#if saving}Saving…{:else if creating}Create{:else}Save{/if}
         </button>
       </div>
     </header>
@@ -265,10 +399,14 @@
       </div>
     {/if}
 
-    <CodeArea value={code} kind={transform.kind} onchange={(next) => (code = next)} />
+    <CodeArea value={code} kind={creating ? kind : transform.kind} onchange={(next) => (code = next)} />
 
     <footer>
-      <span>{transform.kind === 'js' ? 'Checked before it is saved' : 'Applied as written'}</span>
+      <span>
+        {(creating ? kind : transform.kind) === 'js'
+          ? 'Checked before it is saved'
+          : 'Applied as written'}
+      </span>
       <span class="hint">Ctrl+S saves · Tab indents · Esc then Tab leaves the field</span>
     </footer>
   {:else}
@@ -331,6 +469,42 @@
     font: 600 9.5px var(--font-mono);
     letter-spacing: 0.04em;
     color: var(--text-dim);
+  }
+
+  .name-field {
+    width: 100%;
+    padding: 2px 0;
+    border: 0;
+    border-bottom: 1px solid var(--border);
+    background: transparent;
+    font: 600 17px var(--font-ui);
+    color: var(--text);
+  }
+
+  .name-field::placeholder {
+    color: var(--text-faint);
+  }
+
+  .kinds {
+    display: flex;
+    gap: 2px;
+  }
+
+  .kind {
+    padding: 2px 8px;
+    border: 1px solid var(--border);
+    border-radius: var(--r-badge);
+    background: transparent;
+    font: 600 9.5px var(--font-mono);
+    letter-spacing: 0.04em;
+    color: var(--text-dim);
+    cursor: pointer;
+  }
+
+  .kind.on {
+    border-color: var(--accent-fg);
+    background: var(--accent-chip);
+    color: var(--accent-fg);
   }
 
   .badge.attention {
