@@ -67,9 +67,11 @@
 :root[data-accent='amber'] {
   --accent-l: #ffd43b;
   --accent-d: #ffd43b;
-  --accent-fg-l: #8c7420;
+  /* Darkened from #8c7420, which cleared 4.5:1 on plain white and only 3.77:1
+     on its own accent chip — the chip is where this colour is read. */
+  --accent-fg-l: #6b5818;
   --accent-fg-d: #ffd43b;
-  --accent-fg-rgb-l: 140 116 32;
+  --accent-fg-rgb-l: 107 88 24;
   --accent-fg-rgb-d: 255 212 59;
   --accent-text-l: #15141a;
   --accent-text-d: #15141a;
@@ -102,9 +104,10 @@
   --accent-l: #4338ca;
   --accent-d: #4338ca;
   --accent-fg-l: #4338ca;
-  --accent-fg-d: #8c85df;
+  /* Lifted from #8c85df, which was 4.29:1 on its own chip in dark mode. */
+  --accent-fg-d: #9a92f5;
   --accent-fg-rgb-l: 67 56 202;
-  --accent-fg-rgb-d: 140 133 223;
+  --accent-fg-rgb-d: 154 146 245;
   --accent-text-l: #ffffff;
   --accent-text-d: #ffffff;
 }
@@ -152,8 +155,18 @@
 
   /* Text */
   --text: light-dark(#15141a, #fbfbfe);
-  --text-dim: light-dark(rgba(21, 20, 26, 0.62), rgba(251, 251, 254, 0.62));
-  --text-faint: light-dark(rgba(21, 20, 26, 0.45), rgba(251, 251, 254, 0.42));
+  /*
+   * These two were set by eye and both failed measurement — faint at 2.97:1 on
+   * white and 3.96:1 on the dark surface, against a 4.5:1 requirement. Nine of
+   * the ten light-mode failures were this one token.
+   *
+   * Raising faint to 0.60 would have collapsed it into dim at 0.62, so dim goes
+   * up as well. Three steps that are still three steps, and all of them
+   * readable: dim 8.16:1 and faint 4.78:1 on white, 9.73:1 and 6.68:1 on the
+   * dark surface.
+   */
+  --text-dim: light-dark(rgba(21, 20, 26, 0.75), rgba(251, 251, 254, 0.75));
+  --text-faint: light-dark(rgba(21, 20, 26, 0.60), rgba(251, 251, 254, 0.60));
 
   /* Status. No success colour exists by design. */
   --attention: light-dark(#c2521f, #ef8354);
@@ -169,14 +182,27 @@
   /* Washes are mixed from --accent-fg, never the fill: at 7% a saturated fill
      disappears, and the lifted tone is what the design tints with. */
   --accent-wash: rgb(var(--accent-fg-rgb) / 0.09);
-  --accent-chip: rgb(var(--accent-fg-rgb) / 0.15);
+  /*
+   * 0.09, down from 0.15. The chip carries accent-coloured text, so its tint
+   * sets how readable that text is — and at 0.15 the worst accent managed
+   * 4.16:1 in light and 4.57:1 in dark. Measured across all eight accents in
+   * both schemes, 0.09 is where the worst case clears 4.5:1.
+   */
+  --accent-chip: rgb(var(--accent-fg-rgb) / 0.09);
 
   /* Code highlighting */
-  --code-selector: light-dark(#c2521f, #ef8354);
+  /* Darkened from #c2521f, which was 4.09:1 on the sunken code surface. */
+  --code-selector: light-dark(#af4a1c, #ef8354);
   --code-property: light-dark(#1c5fa8, #8ec6ff);
   --code-value: light-dark(#2b6e33, #a3d9a5);
-  --code-comment: light-dark(rgba(21, 20, 26, 0.4), rgba(251, 251, 254, 0.38));
-  --code-line-no: light-dark(rgba(21, 20, 26, 0.38), rgba(251, 251, 254, 0.35));
+  /*
+   * Both were well under threshold on the sunken code surface — comments at
+   * 2.52:1 and line numbers at 2.39:1 in light, 3.50:1 and lower in dark. A
+   * comment is still text, and a line number is the thing you look at when
+   * a finding names a line.
+   */
+  --code-comment: light-dark(rgba(21, 20, 26, 0.60), rgba(251, 251, 254, 0.60));
+  --code-line-no: light-dark(rgba(21, 20, 26, 0.60), rgba(251, 251, 254, 0.60));
   --code-flagged-bg: rgb(from var(--block) r g b / 0.16);
 
   /* Spacing scale, as drawn. */

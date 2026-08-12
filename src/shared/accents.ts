@@ -31,10 +31,10 @@ export interface AccentColours {
 export const ACCENT_COLOURS: Record<Accent, AccentColours> = {
   red: { swatch: '#c92a2a', fgDark: '#dd7979', fgLight: '#c92a2a', on: '#ffffff' },
   orange: { swatch: '#c2410c', fgDark: '#d7825f', fgLight: '#c2410c', on: '#ffffff' },
-  amber: { swatch: '#ffd43b', fgDark: '#ffd43b', fgLight: '#8c7420', on: '#15141a' },
+  amber: { swatch: '#ffd43b', fgDark: '#ffd43b', fgLight: '#6b5818', on: '#15141a' },
   green: { swatch: '#1f7a33', fgDark: '#67a574', fgLight: '#1f7a33', on: '#ffffff' },
   blue: { swatch: '#0060df', fgDark: '#5998ea', fgLight: '#0060df', on: '#ffffff' },
-  indigo: { swatch: '#4338ca', fgDark: '#8c85df', fgLight: '#4338ca', on: '#ffffff' },
+  indigo: { swatch: '#4338ca', fgDark: '#9a92f5', fgLight: '#4338ca', on: '#ffffff' },
   violet: { swatch: '#7c3aed', fgDark: '#aa7ff3', fgLight: '#7c3aed', on: '#ffffff' },
   mono: { swatch: '#f5f3f0', fgDark: '#fbfbfe', fgLight: '#15141a', on: '#15141a' },
 }
