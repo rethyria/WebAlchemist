@@ -19,6 +19,7 @@
     onedit: () => void
     /** Re-opens it in the authoring flow, to be changed by describing it. */
     oneditwithai: () => void
+    oneditintent: () => void
     ondelete: () => void
     /** Rebuild from the stored intent. Only reachable while broken. */
     onrepair: (brokenReason: string) => void
@@ -45,6 +46,7 @@
     onrename,
     onedit,
     oneditwithai,
+    oneditintent,
     ondelete,
     onrepair,
     conflicts,
@@ -302,11 +304,20 @@
           -->
           <div class="actions">
             <!--
-              Two ways to change it, and they are genuinely different jobs:
-              one edits the code, the other says what should be different and
-              has it rewritten. Both land in the same review before anything
-              replaces what is running.
+              Three ways to change it, and they are genuinely different jobs.
+              Edit code changes the code. Change with AI continues the
+              conversation — it has the existing code in hand and asks what
+              should be different about it. Edit description goes back to the
+              start of that conversation and restates what was wanted, so the
+              result is written again from the new sentence rather than adjusted
+              from the old one.
+
+              All three land in the same review before anything replaces what is
+              running.
             -->
+            <button type="button" class="secondary" onclick={oneditintent}>
+              Edit description
+            </button>
             <button type="button" class="secondary" onclick={oneditwithai}>
               Change with AI
             </button>

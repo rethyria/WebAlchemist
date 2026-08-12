@@ -670,6 +670,7 @@
           onrename={(name) => void renameTransform(transform, name)}
           onedit={() => void openEditor(transform)}
           oneditwithai={() => void flow.editWithAi(transform)}
+          oneditintent={() => void flow.editIntent(transform)}
           ondelete={() => void removeTransform(transform)}
           onrepair={(brokenReason: string) => void flow.repair(transform, brokenReason)}
           conflicts={conflictsFor(transform.id)}

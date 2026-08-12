@@ -1577,6 +1577,9 @@ async function handleMessage(message: ContentMessage) {
         cropClipped: exceedsViewport(region),
         target: describeTarget(element),
         viewportWidth: window.innerWidth,
+        // For editing an intent, which re-enters the describing step and needs
+        // the same list a pick would have produced. A repair ignores it.
+        tree: buildTree(element),
       }
     }
     case 'cancel-picking':

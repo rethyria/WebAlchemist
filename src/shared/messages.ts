@@ -310,6 +310,15 @@ export interface AnchoredElement {
   cropClipped: boolean
   target: HoverTarget
   viewportWidth: number
+  /**
+   * The subtree around the element, as a pick would have produced.
+   *
+   * Only the describing step draws this, and only `editIntent` re-enters that
+   * step from a stored anchor — a repair goes straight to generating and never
+   * shows the list. Optional rather than required so the callers that ignore it
+   * are not made to care.
+   */
+  tree?: TreeRow[]
 }
 
 export interface MessageResponse<T> {

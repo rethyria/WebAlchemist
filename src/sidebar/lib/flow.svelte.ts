@@ -729,6 +729,81 @@ export class Flow {
    * conversation that produced this code rather than the opening line of a
    * new one.
    */
+  /**
+   * Goes back to where the intent was written.
+   *
+   * Deliberately not the same as `editWithAi`. That one enters at `refining`,
+   * with the existing code in hand and a conversation already in progress, and
+   * asks what should be different about it. This one goes back to the beginning
+   * of that conversation: the step where the intent was first stated, with the
+   * element resolved and the sentence pre-filled, so changing it regenerates
+   * from the new description rather than adjusting the old result.
+   *
+   * One is continuing the conversation; the other is starting it again from a
+   * different premise. Collapsing them into a text field would lose the
+   * difference — and the difference is the whole request.
+   *
+   * The draft carries the existing record, so approving updates in place and
+   * keeps the id, order, creation date and enabled state, exactly as repair and
+   * AI edit already do.
+   */
+  async editIntent(transform: Transform): Promise<void> {
+    if (this.tabId === null) return
+
+    const token = ++this.generation
+    const current = () => token === this.generation
+
+    this.step = 'generating'
+    this.error = null
+    this.stage = 'context'
+    this.startClock()
+
+    try {
+      const found = await send<AnchoredElement | null>({
+        type: 'context-for-anchor',
+        tabId: this.tabId,
+        anchor: transform.anchor,
+      })
+      if (!found) {
+        throw new Error(
+          `Web Alchemist cannot find the element ${transform.name} was written for on this page. Open a page it applies to, or pick the element again.`,
+        )
+      }
+      if (!current()) return
+
+      this.stopClock()
+      this.picked = { ...found, cropDrawn: false }
+      this.tree = found.tree ?? []
+      this.draft = transform
+      this.matchPattern = transform.match
+
+      /*
+       * enterDescribing clears the instruction, so the pre-fill has to follow
+       * it rather than precede it. Everything else it resets — screenshot
+       * opt-in, references, follow-up — should be reset, because this is the
+       * start of a new description and not a continuation of the old one.
+       */
+      this.enterDescribing()
+      this.instruction = transform.intent
+      this.intent = transform.intent
+      this.scopeDepth = transform.scopeDepth ?? 0
+
+      /*
+       * The saved copy comes off the page while this is open, for the reason
+       * editWithAi suspends it: both it and any preview are injected the same
+       * way, so leaving it on would let a rule the new version removed keep
+       * applying underneath.
+       */
+      if (transform.kind === 'css') {
+        await send({ type: 'suspend-transform', tabId: this.tabId, id: transform.id })
+        this.suspendedId = transform.id
+      }
+    } catch (cause) {
+      this.stopClock()
+      this.fail(cause)
+    }
+  }
+
   async editWithAi(transform: Transform): Promise<void> {
     if (this.tabId === null) return
 
