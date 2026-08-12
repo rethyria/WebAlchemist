@@ -25,7 +25,17 @@ createServer((request, response) => {
   request.on('end', () => {
     console.log(`${request.method} ${request.url} — holding ${HOLD_MS}ms`)
     setTimeout(() => {
-      response.writeHead(503, { 'content-type': 'application/json' })
+      /*
+       * `STATUS=429 RETRY_AFTER=17` turns this into a rate-limit oracle for
+       * W5, which needs a real response carrying a real header — the parsing is
+       * unit-tested, but whether the number survives the trip from the adapter
+       * to the panel's error is not something a unit test can answer.
+       */
+      const status = Number(process.env['STATUS'] ?? 503)
+      const retryAfter = process.env['RETRY_AFTER']
+      const headers = { 'content-type': 'application/json' }
+      if (retryAfter) headers['retry-after'] = retryAfter
+      response.writeHead(status, headers)
       response.end(JSON.stringify({ error: { message: 'stub provider, deliberately unhelpful' } }))
     }, HOLD_MS)
   })

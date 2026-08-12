@@ -324,7 +324,13 @@ export interface AnchoredElement {
 export interface MessageResponse<T> {
   ok: boolean
   data?: T
-  error?: { message: string; kind?: string; retryable?: boolean }
+  error?: {
+    message: string
+    kind?: string
+    retryable?: boolean
+    /** Present only when the provider said how long to wait. See retry-after.ts. */
+    retryInSeconds?: number
+  }
 }
 
 /* Response payload types, keyed for convenience at call sites. */

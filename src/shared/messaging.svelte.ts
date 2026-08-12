@@ -19,6 +19,12 @@ export class BackgroundError extends Error {
     message: string,
     readonly kind: string | undefined,
     readonly retryable: boolean,
+    /**
+     * How long the provider asked us to wait, when it said. Undefined means it
+     * did not — which is not the same as zero, and the panel has to be able to
+     * tell them apart or it counts down from a number nobody supplied.
+     */
+    readonly retryInSeconds?: number,
   ) {
     super(message)
     this.name = 'BackgroundError'
@@ -44,6 +50,7 @@ export async function send<T>(message: Message): Promise<T> {
       response?.error?.message ?? 'Something went wrong.',
       response?.error?.kind,
       response?.error?.retryable ?? false,
+      response?.error?.retryInSeconds,
     )
   }
   return response.data as T

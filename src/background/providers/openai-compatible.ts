@@ -19,6 +19,7 @@ import {
   scopeInstruction,
 } from '../prompts'
 import { credentialFrom, needsRefresh, type TokenPayload } from '../oauth'
+import { retryAfterSeconds } from './retry-after'
 import { readCredentialForRequest, setCredential } from '../storage'
 import {
   GENERATION_SCHEMA,
@@ -99,7 +100,7 @@ export async function createOpenAiCompatibleProvider(
       )
     }
 
-    if (!response.ok) throw httpToProviderError(response.status, provider.label)
+    if (!response.ok) throw httpToProviderError(response.status, provider.label, response.headers)
 
     const payload = (await response.json()) as {
       choices?: { message?: { content?: string }; finish_reason?: string }[]
@@ -243,7 +244,11 @@ async function ensureFreshToken(
   return refreshed.accessToken
 }
 
-function httpToProviderError(status: number, label: string): ProviderError {
+function httpToProviderError(
+  status: number,
+  label: string,
+  headers?: Headers,
+): ProviderError {
   if (status === 401 || status === 403) {
     return new ProviderError(
       `${label} rejected the credential. Check it in settings.`,
@@ -252,10 +257,16 @@ function httpToProviderError(status: number, label: string): ProviderError {
     )
   }
   if (status === 429) {
+    // This ecosystem does not agree on how to say it — `retry-after`, or one of
+    // several `x-ratelimit-reset-*` shapes. retry-after.ts reads whichever came.
+    const seconds = retryAfterSeconds(headers, Date.now())
     return new ProviderError(
-      `Rate limited by ${label}. Wait a moment and try again.`,
+      seconds === null
+        ? `Rate limited by ${label}. Wait a moment and try again.`
+        : `Rate limited by ${label}. It asked for ${seconds} seconds.`,
       'rate-limit',
       true,
+      seconds === null ? undefined : { retryInSeconds: seconds },
     )
   }
   return new ProviderError(

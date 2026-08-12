@@ -21,6 +21,7 @@ import {
   repairPrompt,
   scopeInstruction,
 } from '../prompts'
+import { retryAfterSeconds, type HeaderSource } from './retry-after'
 import { readCredentialForRequest } from '../storage'
 import {
   GENERATION_SCHEMA,
@@ -457,11 +458,20 @@ function toProviderError(error: unknown): ProviderError {
     )
   }
   if (error instanceof Anthropic.RateLimitError) {
+    /*
+     * The SDK exposes the response headers on the error. Reading the wait from
+     * them is what turns #35's placeholder into a countdown — and when they say
+     * nothing, saying nothing is the right answer rather than counting down
+     * from a number we invented.
+     */
+    const seconds = retryAfterSeconds(error.headers as HeaderSource | undefined, Date.now())
     return new ProviderError(
-      'Rate limited by the provider. Wait a moment and try again.',
+      seconds === null
+        ? 'Rate limited by the provider. Wait a moment and try again.'
+        : `Rate limited by the provider. It asked for ${seconds} seconds.`,
       'rate-limit',
       true,
-      { cause: error },
+      { cause: error, ...(seconds === null ? {} : { retryInSeconds: seconds }) },
     )
   }
   if (error instanceof Anthropic.APIConnectionError) {

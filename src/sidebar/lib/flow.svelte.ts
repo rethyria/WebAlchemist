@@ -62,7 +62,13 @@ export type Step =
 export type FlowError =
   | { kind: 'no-provider'; message: string }
   | { kind: 'request-failed'; message: string; detail?: string }
-  | { kind: 'rate-limited'; message: string; retryInSeconds: number }
+  /**
+   * `retryInSeconds` counts down to zero and then the retry fires on its own.
+   *
+   * Null means the provider gave no guidance, and the card falls back to the
+   * manual button rather than counting down from a number nobody supplied.
+   */
+  | { kind: 'rate-limited'; message: string; retryInSeconds: number | null }
   | { kind: 'credential-expired'; message: string }
 
 interface Picked {
@@ -1518,7 +1524,12 @@ export class Flow {
         this.error = { kind: 'credential-expired', message: cause.message }
         return
       case 'rate-limit':
-        this.error = { kind: 'rate-limited', message: cause.message, retryInSeconds: 0 }
+        this.error = {
+          kind: 'rate-limited',
+          message: cause.message,
+          retryInSeconds: cause.retryInSeconds ?? null,
+        }
+        if (cause.retryInSeconds !== undefined) this.startRetryCountdown()
         return
       default:
         this.error = { kind: 'request-failed', message: cause.message }
@@ -1526,12 +1537,58 @@ export class Flow {
   }
 
   dismissError(): void {
+    this.cancelRetryCountdown()
     this.error = null
   }
 
   async retry(): Promise<void> {
+    this.cancelRetryCountdown()
     this.error = null
     await this.generate()
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* The rate-limit countdown                                          */
+  /* ---------------------------------------------------------------- */
+
+  private retryTimer: ReturnType<typeof setInterval> | null = null
+
+  /**
+   * Waits the time the provider asked for, then retries.
+   *
+   * #35's point is that the manual button was standing in for this. Waiting is
+   * what the provider asked for, and a person watching a panel is worse at
+   * timing it than a timer — they either retry too early and are refused again,
+   * or wait far longer than necessary.
+   *
+   * Cancellable, because an automatic request is only acceptable if it can be
+   * stopped. Dismissing the card, retrying by hand, or resetting the flow all
+   * stop it.
+   */
+  private startRetryCountdown(): void {
+    this.cancelRetryCountdown()
+    this.retryTimer = setInterval(() => {
+      const error = this.error
+      if (!error || error.kind !== 'rate-limited' || error.retryInSeconds === null) {
+        this.cancelRetryCountdown()
+        return
+      }
+
+      const left = error.retryInSeconds - 1
+      if (left > 0) {
+        this.error = { ...error, retryInSeconds: left }
+        return
+      }
+
+      this.cancelRetryCountdown()
+      void this.retry()
+    }, 1000)
+  }
+
+  cancelRetryCountdown(): void {
+    if (this.retryTimer === null) return
+    clearInterval(this.retryTimer)
+    this.retryTimer = null
   }
 
   private startClock(): void {

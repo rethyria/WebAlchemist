@@ -100,11 +100,24 @@ export class ProviderError extends Error {
       | 'bad-response'
       | 'unknown',
     readonly retryable: boolean,
-    options?: { cause?: unknown },
+    options?: {
+      cause?: unknown
+      /**
+       * How long the provider asked us to wait, when it said.
+       *
+       * Absent means it did not say — which is different from zero, and the
+       * difference is the point. A zero-second countdown claims to be waiting
+       * and is not. See providers/retry-after.ts.
+       */
+      retryInSeconds?: number
+    },
   ) {
     super(message, options)
     this.name = 'ProviderError'
+    this.retryInSeconds = options?.retryInSeconds
   }
+
+  readonly retryInSeconds: number | undefined
 }
 
 export type ProviderFactory = (provider: Provider) => Promise<AiProvider>

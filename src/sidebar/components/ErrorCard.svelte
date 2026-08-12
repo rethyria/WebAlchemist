@@ -58,10 +58,30 @@
       <span class="title">Rate limited</span>
     </div>
     <p>{error.message}</p>
-    <div class="actions">
-      <Button variant="primary" small onclick={onretry}>Try again</Button>
-      <Button small onclick={ondismiss}>Cancel</Button>
-    </div>
+    {#if error.retryInSeconds !== null}
+      <!--
+        A real countdown, not a label. It reaches zero and the request goes
+        again on its own — which is what the provider asked for, and what a
+        person watching a panel is worse at timing than a timer.
+
+        Waiting is the primary action, so Cancel is the one that has to be
+        clicked: an automatic request is only acceptable if it can be stopped.
+      -->
+      <p class="countdown" aria-live="polite">
+        Trying again in {error.retryInSeconds}
+        {error.retryInSeconds === 1 ? 'second' : 'seconds'}
+      </p>
+      <div class="actions">
+        <Button small onclick={onretry}>Try now</Button>
+        <Button small onclick={ondismiss}>Cancel</Button>
+      </div>
+    {:else}
+      <!-- No guidance from the provider, so nothing to count down from. -->
+      <div class="actions">
+        <Button variant="primary" small onclick={onretry}>Try again</Button>
+        <Button small onclick={ondismiss}>Cancel</Button>
+      </div>
+    {/if}
   {:else}
     <span class="title">Credential expired</span>
     <p>
@@ -74,6 +94,11 @@
 </div>
 
 <style>
+  .countdown {
+    font-variant-numeric: tabular-nums;
+    color: var(--attention);
+  }
+
   .card {
     display: flex;
     flex-direction: column;

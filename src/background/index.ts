@@ -172,7 +172,16 @@ browser.runtime.onMessage.addListener(
         ok: false,
         error:
           error instanceof ProviderError
-            ? { message: error.message, kind: error.kind, retryable: error.retryable }
+            ? {
+                message: error.message,
+                kind: error.kind,
+                retryable: error.retryable,
+                // Only present when the provider said. Absent and zero mean
+                // different things — see providers/retry-after.ts.
+                ...(error.retryInSeconds === undefined
+                  ? {}
+                  : { retryInSeconds: error.retryInSeconds }),
+              }
             : { message: error instanceof Error ? error.message : String(error) },
       }),
     )
@@ -692,7 +701,14 @@ async function runGeneration(
       type: 'error',
       error:
         error instanceof ProviderError
-          ? { message: error.message, kind: error.kind, retryable: error.retryable }
+          ? {
+              message: error.message,
+              kind: error.kind,
+              retryable: error.retryable,
+              ...(error.retryInSeconds === undefined
+                ? {}
+                : { retryInSeconds: error.retryInSeconds }),
+            }
           : { message: error instanceof Error ? error.message : String(error) },
     })
   } finally {

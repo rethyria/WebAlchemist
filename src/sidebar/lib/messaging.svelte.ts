@@ -67,8 +67,16 @@ export function generateOverPort(
             message: string
             kind?: string
             retryable?: boolean
+            retryInSeconds?: number
           }
-          reject(new BackgroundError(error.message, error.kind, error.retryable ?? false))
+          reject(
+            new BackgroundError(
+              error.message,
+              error.kind,
+              error.retryable ?? false,
+              error.retryInSeconds,
+            ),
+          )
         }
       }
     })
