@@ -41,6 +41,20 @@ const MAX_SUBTREE_DEPTH = 4
 const MAX_TEXT_LENGTH = 80
 const MAX_ANCESTORS = 4
 
+/*
+ * Custom property names and values, and the declaration text of matching rules,
+ * are free-form strings the page author chooses. Measuring the extraction
+ * against a hostile fixture (`test/injection/`) showed both reach the model
+ * verbatim, and neither had any bound on count or length — a page could put an
+ * arbitrary amount of arbitrary text into the payload just by declaring it.
+ *
+ * The markup excerpt was already capped three ways. These are the same idea
+ * applied to the channels that were missed.
+ */
+const MAX_CUSTOM_PROPERTIES = 64
+const MAX_CUSTOM_PROPERTY_LENGTH = 120
+const MAX_DECLARATION_LENGTH = 400
+
 /**
  * One element on its own, without the page-level parts.
  *
@@ -124,7 +138,7 @@ function matchedAuthorRules(element: Element): PageContext['target']['matchedRul
       matched.push({
         selector: rule.selectorText,
         specificity: formatSpecificity(rule.selectorText),
-        declarations: rule.style.cssText,
+        declarations: truncate(rule.style.cssText, MAX_DECLARATION_LENGTH),
       })
     }
   }
@@ -145,6 +159,7 @@ function formatSpecificity(selector: string): string {
 function customPropertiesInScope(element: Element): Record<string, string> {
   const computed = getComputedStyle(element)
   const properties: Record<string, string> = {}
+  let count = 0
 
   // computedStyleMap is not available everywhere; walk declared sheets instead.
   for (const sheet of Array.from(document.styleSheets)) {
@@ -158,8 +173,11 @@ function customPropertiesInScope(element: Element): Record<string, string> {
       if (!(rule instanceof CSSStyleRule)) continue
       for (const property of Array.from(rule.style)) {
         if (!property.startsWith('--')) continue
+        if (count >= MAX_CUSTOM_PROPERTIES) return properties
         const value = computed.getPropertyValue(property).trim()
-        if (value) properties[property] = value
+        if (!value) continue
+        if (!(property in properties)) count += 1
+        properties[property] = truncate(value, MAX_CUSTOM_PROPERTY_LENGTH)
       }
     }
   }
@@ -168,10 +186,21 @@ function customPropertiesInScope(element: Element): Record<string, string> {
 }
 
 /**
+ * Marks a cut rather than making one silently.
+ *
+ * A value that stops mid-word reads to the model as the whole value, and it
+ * will write a rule against the truncated form. The ellipsis is what tells it
+ * something was removed.
+ */
+function truncate(value: string, limit: number): string {
+  return value.length <= limit ? value : `${value.slice(0, limit)}…`
+}
+
+/**
  * Bounded rendering of the target's subtree. Depth- and node-capped, with text
  * truncated, so a large region cannot blow the context window.
  */
-function summariseSubtree(element: Element): string {
+export function summariseSubtree(element: Element): string {
   let budget = MAX_SUBTREE_NODES
 
   const render = (node: Element, depth: number): string => {
@@ -206,7 +235,7 @@ function summariseSubtree(element: Element): string {
 }
 
 /** Short human- and model-readable description of an element. */
-function describeElement(element: Element): string {
+export function describeElement(element: Element): string {
   const tag = element.tagName.toLowerCase()
   const id = element.id ? `#${element.id}` : ''
   const role = element.getAttribute('role')

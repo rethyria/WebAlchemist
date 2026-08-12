@@ -17,6 +17,7 @@ import type { GenerationResult, ModelReview, PageContext, Provider } from '@shar
 import {
   GENERATE_SYSTEM_PROMPT,
   REVIEW_SYSTEM_PROMPT,
+  fencePageContent,
   repairPrompt,
   scopeInstruction,
 } from '../prompts'
@@ -303,7 +304,17 @@ function buildGenerationContent(
     ? repairPrompt(request.repair)
     : request.instruction
 
-  const text = `${instruction}\n\n${scopeInstruction(request.scopeDepth, request.scopeContainer ?? null)}\n\n${describeContext(request.context)}`
+  /*
+   * Instruction first, then the page, fenced. The order matters as much as the
+   * fence: what the user asked for is stated before any page-controlled text
+   * has been read, so the request cannot be reframed by content arriving after
+   * it. See `fencePageContent`.
+   */
+  const text = [
+    instruction,
+    scopeInstruction(request.scopeDepth, request.scopeContainer ?? null),
+    fencePageContent(describeContext(request.context)),
+  ].join('\n\n')
 
   const shot = request.context.screenshot
   if (!shot) return text

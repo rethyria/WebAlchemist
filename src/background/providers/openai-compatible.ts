@@ -11,7 +11,13 @@
  */
 
 import type { GenerationResult, ModelReview, Provider } from '@shared/types'
-import { GENERATE_SYSTEM_PROMPT, REVIEW_SYSTEM_PROMPT, repairPrompt } from '../prompts'
+import {
+  GENERATE_SYSTEM_PROMPT,
+  REVIEW_SYSTEM_PROMPT,
+  fencePageContent,
+  repairPrompt,
+  scopeInstruction,
+} from '../prompts'
 import { readCredentialForRequest, setCredential } from '../storage'
 import {
   GENERATION_SCHEMA,
@@ -130,7 +136,24 @@ export async function createOpenAiCompatibleProvider(
       const instruction = request.repair
         ? repairPrompt(request.repair)
         : request.instruction
-      const text = `${instruction}\n\n${JSON.stringify(request.context, null, 2)}`
+
+      /*
+       * Two fixes in one line. The page content is fenced, for the reason in
+       * `fencePageContent` — this adapter had the same undelimited
+       * concatenation the Anthropic one did, and a worse version of it, since
+       * dumping the raw context object hands the model every field verbatim.
+       *
+       * And the scope choice was being dropped entirely. The user picks whether
+       * a change applies to one element or to every element like it inside a
+       * named container, and that choice reached the Anthropic adapter and no
+       * other — so the same request produced a different transform depending on
+       * which provider was configured.
+       */
+      const text = [
+        instruction,
+        scopeInstruction(request.scopeDepth, request.scopeContainer ?? null),
+        fencePageContent(JSON.stringify(request.context, null, 2)),
+      ].join('\n\n')
 
       const shot = request.context.screenshot
       const userContent = shot
