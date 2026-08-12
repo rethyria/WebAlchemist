@@ -98,6 +98,22 @@ export type Message =
    * live gesture the background does not have.
    */
   | { type: 'connect-oauth'; providerId: string }
+  /*
+   * Passphrase mode. The passphrase crosses the message channel exactly once
+   * per operation and is never stored — what is kept is the key derived from
+   * it, in `storage.session`, which was measured not to reach the disk.
+   *
+   * It has to cross: the derivation must happen in the background, because the
+   * background is the only context that reads credentials, and a key derived in
+   * a page would have to be sent instead. Sending the passphrase and deriving
+   * once is a smaller surface than sending a key.
+   */
+  | { type: 'vault-state' }
+  | { type: 'enable-vault'; passphrase: string }
+  | { type: 'disable-vault'; passphrase: string }
+  | { type: 'unlock-vault'; passphrase: string }
+  | { type: 'lock-vault' }
+  | { type: 'discard-vault' }
 
   /*
    * There are no permission messages. permissions.request() only succeeds
@@ -311,6 +327,7 @@ export interface Responses {
   'get-credential-statuses': CredentialStatus[]
   /** The status after signing in, so settings can redraw without a re-fetch. */
   'connect-oauth': CredentialStatus
+  'vault-state': { sealed: boolean; unlocked: boolean }
   'get-vision-support': boolean
   generate: GenerationResult
   repair: GenerationResult

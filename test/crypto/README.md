@@ -100,13 +100,70 @@ The costs are real and land on the user, not on us:
 
 That is why it is offered as a choice rather than imposed as a default.
 
+## What was built instead, and what is verified about it
+
+`src/background/vault.ts`. Passphrase mode, off by default: PBKDF2-HMAC-SHA256
+at 600,000 iterations derives an AES-GCM key, the credential map is stored as
+ciphertext, and the derived key lives in `storage.session`.
+
+`storage.session` is the reason this is usable rather than theoretical. The MV3
+background is an event page torn down whenever it idles, so a derived key cannot
+live in a module variable, and re-deriving after every teardown would mean a
+prompt every few minutes. `session-probe.mjs` measured it: a value written to
+`storage.session` was not found anywhere in the 3823 files of the profile, while
+the same string written to `storage.local` in the same run was found
+immediately. That control is what makes the result mean something. So the user
+unlocks once per browser session.
+
+Verified by `vault-probe.mjs`, through a real browser:
+
+- what `storage.local` holds afterwards is `{"sealed":true,…}` and not a
+  credential map;
+- locking reports locked, and reading credentials then raises rather than
+  returning an empty map;
+- a wrong passphrase is refused — AES-GCM authenticates, so this needs nothing
+  stored to compare against;
+- the credential survives seal → lock → unlock → unseal unchanged.
+
+And by `src/background/vault.test.ts`: fresh IV per encryption, plaintext absent
+from the sealed value in both raw and base64 form, altered ciphertext rejected,
+wrong salt rejected — each with a right-key control, since three rejections
+would otherwise pass against a function that always threw.
+
+## Two things the measurement could NOT establish
+
+**Whether the plaintext is absent from the profile.** The obvious check — write
+a canary credential, seal it, search the profile — is not reliable here. Asked
+for values known to be in `storage.local` right now, the search found a
+transform's id and name and did *not* find that same transform's `code`, or
+`settings.accent`. So some `storage.local` content is findable on disk and some
+is not, and a negative result cannot be attributed to encryption.
+
+The first run of `vault-probe.mjs` did pass its control and did find the canary
+after sealing. Later runs failed the control, which is why this section says
+inconclusive rather than either answer. **The at-rest claim rests on what is
+stored being ciphertext — which is verified at the API level — and not on a
+successful disk search.**
+
+**Residue.** In the run whose control passed, the canary was on disk before
+sealing and still on disk after. That is the expected behaviour of an
+IndexedDB-backed store: writing over a value does not erase the bytes already
+written, and no extension API can compact the database.
+
+So enabling passphrase mode protects everything from that point on and cannot
+retract what was already written. The settings copy says exactly that, and
+suggests replacing the key at the provider — which makes the residue worthless
+without needing to erase it.
+
 ## Reproducing
 
 Requires a running Firefox with remote debugging on 41365 and the extension
 loaded.
 
 ```
-node test/crypto/probe.mjs
+node test/crypto/probe.mjs          # W1: what a non-extractable key buys
+node test/crypto/session-probe.mjs  # whether storage.session reaches disk
+node test/crypto/vault-probe.mjs    # the passphrase vault, end to end
 ```
 
 The probe creates and deletes its own IndexedDB database and touches nothing the

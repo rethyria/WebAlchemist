@@ -10,9 +10,11 @@
   import { ACCENT_COLOURS } from '@shared/accents'
   import Toggle from '@sidebar/components/Toggle.svelte'
   import ProviderSettings from './ProviderSettings.svelte'
+  import VaultSettings from './VaultSettings.svelte'
 
   let settings = $state<Settings | null>(null)
   let statuses = $state<CredentialStatus[]>([])
+  let vault = $state({ sealed: false, unlocked: true })
 
   const HEALTH_MODES: { value: HealthCheckMode; label: string; note: string }[] = [
     { value: 'every-load', label: 'Every page load', note: 'Default' },
@@ -37,6 +39,20 @@
     settings = await call<Settings>({ type: 'get-settings' })
     document.documentElement.dataset['accent'] = settings.accent
     statuses = await call<CredentialStatus[]>({ type: 'get-credential-statuses' })
+    vault = await call<{ sealed: boolean; unlocked: boolean }>({ type: 'vault-state' })
+  }
+
+  /*
+   * Statuses are re-read after every vault operation because they are derived
+   * from the credential map, and locking makes that map unreadable — a stale
+   * "Key configured" next to "Locked" would be two claims that cannot both be
+   * acted on.
+   */
+  async function afterVault() {
+    vault = await call<{ sealed: boolean; unlocked: boolean }>({ type: 'vault-state' })
+    statuses = vault.sealed && !vault.unlocked
+      ? []
+      : await call<CredentialStatus[]>({ type: 'get-credential-statuses' })
   }
 
   async function save(next: Settings) {
@@ -85,6 +101,30 @@
       onsetkey={setKey}
       onclearkey={clearKey}
       onconnectoauth={connectOAuth}
+    />
+
+    <VaultSettings
+      {vault}
+      onenable={async (passphrase) => {
+        await call({ type: 'enable-vault', passphrase })
+        await afterVault()
+      }}
+      ondisable={async (passphrase) => {
+        await call({ type: 'disable-vault', passphrase })
+        await afterVault()
+      }}
+      onunlock={async (passphrase) => {
+        await call({ type: 'unlock-vault', passphrase })
+        await afterVault()
+      }}
+      onlock={async () => {
+        await call({ type: 'lock-vault' })
+        await afterVault()
+      }}
+      ondiscard={async () => {
+        await call({ type: 'discard-vault' })
+        await afterVault()
+      }}
     />
 
     <section>
@@ -143,15 +183,6 @@
       </div>
     </section>
 
-    <section class="disclosure">
-      <h2>How your credentials are stored</h2>
-      <p>
-        Keys are stored as plain text in this browser profile's directory. Browsers offer
-        extensions no access to the operating system keychain, so this data is protected
-        by file permissions and nothing else. Anyone who can read your profile directory
-        can read these keys.
-      </p>
-    </section>
   {/if}
 </main>
 
@@ -264,16 +295,6 @@
     margin: 0 0 var(--sp-3);
   }
 
-  .disclosure {
-    max-width: 600px;
-    padding-left: var(--sp-13);
-    border-left: 3px solid var(--neutral);
-  }
 
-  .disclosure p {
-    margin: 0;
-    font: 12px/1.6 var(--font-ui);
-    color: var(--text-dim);
-  }
 
 </style>

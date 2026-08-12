@@ -38,16 +38,22 @@ import {
 import {
   clearCredential,
   deleteTransform,
+  disableVault,
+  discardVault,
+  enableVault,
   exportTransforms,
   getAllCredentialStatuses,
   getAllTransforms,
   getCredentialStatus,
   getSettings,
   importTransforms,
+  lockVault,
   reorderTransforms,
   saveSettings,
   saveTransform,
   setCredential,
+  unlockVault,
+  vaultState,
 } from './storage'
 
 /* ------------------------------------------------------------------ */
@@ -363,6 +369,29 @@ async function handle(
       await setCredential(message.providerId, await connectOAuth(provider.oauth))
       return getCredentialStatus(message.providerId)
     }
+
+    case 'vault-state':
+      return vaultState()
+
+    case 'enable-vault':
+      await enableVault(message.passphrase)
+      return true
+
+    case 'disable-vault':
+      await disableVault(message.passphrase)
+      return true
+
+    case 'unlock-vault':
+      await unlockVault(message.passphrase)
+      return true
+
+    case 'lock-vault':
+      await lockVault()
+      return true
+
+    case 'discard-vault':
+      await discardVault()
+      return true
 
     case 'preview-css':
       await setPreviewCss(message.tabId, message.css)

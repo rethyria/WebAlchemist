@@ -24,9 +24,17 @@
  * goes looking.
  *
  * The outer limit is lower still. Browser extensions have no equivalent of
- * Electron's safeStorage or an OS keychain, so storage.local is plaintext in
- * the profile directory, protected by file permissions and nothing else. The
- * settings UI says so rather than implying protection we are not providing.
+ * Electron's safeStorage or an OS keychain, so by default storage.local is
+ * plaintext in the profile directory, protected by file permissions and nothing
+ * else. The settings UI says so rather than implying protection we are not
+ * providing.
+ *
+ * Passphrase mode changes the last paragraph and only the last paragraph. When
+ * it is on, what sits in the profile is AES-GCM ciphertext and nothing on disk
+ * decrypts it — see vault.ts, including the measurements that ruled out the
+ * design #46 proposed first. It changes nothing above: an extension page can
+ * still read the plaintext while unlocked, because it can ask this module for
+ * it. The two paragraphs describe different attackers.
  */
 
 import {
@@ -37,6 +45,18 @@ import {
   type Settings,
   type Transform,
 } from '@shared/types'
+import {
+  LockedError,
+  deriveKey,
+  forgetKey,
+  isSealed,
+  randomSalt,
+  recallKey,
+  rememberKey,
+  saltOf,
+  seal,
+  unseal,
+} from './vault'
 
 const KEY_SETTINGS = 'settings'
 const KEY_TRANSFORMS = 'transforms'
@@ -104,9 +124,113 @@ export async function reorderTransforms(orderedIds: string[]): Promise<void> {
 /* Credentials — background-only                                       */
 /* ------------------------------------------------------------------ */
 
+/**
+ * Reads the credential map, decrypting it when passphrase mode is on.
+ *
+ * The stored value is either a plain map or a `Sealed` blob, and which it is
+ * decides everything — so the mode is read from the data rather than from a
+ * settings flag. A flag can disagree with the bytes; the bytes cannot disagree
+ * with themselves.
+ */
 async function readCredentialMap(): Promise<CredentialMap> {
   const stored = await browser.storage.local.get(KEY_CREDENTIALS)
-  return (stored[KEY_CREDENTIALS] as CredentialMap | undefined) ?? {}
+  const value = stored[KEY_CREDENTIALS]
+  if (value === undefined) return {}
+  if (!isSealed(value)) return value as CredentialMap
+
+  const key = await recallKey()
+  if (!key) throw new LockedError()
+  return JSON.parse(await unseal(key, value)) as CredentialMap
+}
+
+/** Writes the map back in whichever form it is currently kept. */
+async function writeCredentialMap(map: CredentialMap): Promise<void> {
+  const stored = await browser.storage.local.get(KEY_CREDENTIALS)
+  const existing = stored[KEY_CREDENTIALS]
+
+  if (!isSealed(existing)) {
+    await browser.storage.local.set({ [KEY_CREDENTIALS]: map })
+    return
+  }
+
+  const key = await recallKey()
+  if (!key) throw new LockedError()
+  await browser.storage.local.set({
+    [KEY_CREDENTIALS]: await seal(key, saltOf(existing), JSON.stringify(map)),
+  })
+}
+
+/** Whether credentials are stored sealed, and whether they can be read now. */
+export async function vaultState(): Promise<{ sealed: boolean; unlocked: boolean }> {
+  const stored = await browser.storage.local.get(KEY_CREDENTIALS)
+  const sealedNow = isSealed(stored[KEY_CREDENTIALS])
+  if (!sealedNow) return { sealed: false, unlocked: true }
+  return { sealed: true, unlocked: (await recallKey()) !== null }
+}
+
+/**
+ * Turns passphrase mode on, sealing whatever is already stored.
+ *
+ * The key is remembered for this session immediately, so enabling does not
+ * lock the user out of the thing they just set up.
+ */
+export async function enableVault(passphrase: string): Promise<void> {
+  const stored = await browser.storage.local.get(KEY_CREDENTIALS)
+  if (isSealed(stored[KEY_CREDENTIALS])) return
+
+  const map = (stored[KEY_CREDENTIALS] as CredentialMap | undefined) ?? {}
+  const salt = randomSalt()
+  const key = await deriveKey(passphrase, salt)
+  await browser.storage.local.set({ [KEY_CREDENTIALS]: await seal(key, salt, JSON.stringify(map)) })
+  await rememberKey(key)
+}
+
+/**
+ * Turns it off, writing the credentials back as plaintext.
+ *
+ * Requires the passphrase rather than the session key. Someone walking up to an
+ * unlocked browser should not be able to strip the protection without knowing
+ * what set it — and since a wrong passphrase fails the AES-GCM tag check, this
+ * verifies without anything to compare against.
+ */
+export async function disableVault(passphrase: string): Promise<void> {
+  const stored = await browser.storage.local.get(KEY_CREDENTIALS)
+  const existing = stored[KEY_CREDENTIALS]
+  if (!isSealed(existing)) return
+
+  const key = await deriveKey(passphrase, saltOf(existing))
+  const map = JSON.parse(await unseal(key, existing)) as CredentialMap
+  await browser.storage.local.set({ [KEY_CREDENTIALS]: map })
+  await forgetKey()
+}
+
+/** Derives and remembers the key for this browser session. */
+export async function unlockVault(passphrase: string): Promise<void> {
+  const stored = await browser.storage.local.get(KEY_CREDENTIALS)
+  const existing = stored[KEY_CREDENTIALS]
+  if (!isSealed(existing)) return
+
+  const key = await deriveKey(passphrase, saltOf(existing))
+  // Decrypt once before remembering, so a wrong passphrase is refused here
+  // rather than accepted and then failing on the next generation.
+  await unseal(key, existing)
+  await rememberKey(key)
+}
+
+export async function lockVault(): Promise<void> {
+  await forgetKey()
+}
+
+/**
+ * The only way out of a forgotten passphrase.
+ *
+ * There is no recovery — that is the property being bought. Discarding the
+ * credentials and starting over is the honest alternative to pretending
+ * otherwise, and it is destructive enough that the UI asks twice.
+ */
+export async function discardVault(): Promise<void> {
+  await browser.storage.local.remove(KEY_CREDENTIALS)
+  await forgetKey()
 }
 
 /**
@@ -127,13 +251,13 @@ export async function setCredential(
 ): Promise<void> {
   const map = await readCredentialMap()
   map[providerId] = credential
-  await browser.storage.local.set({ [KEY_CREDENTIALS]: map })
+  await writeCredentialMap(map)
 }
 
 export async function clearCredential(providerId: string): Promise<void> {
   const map = await readCredentialMap()
   delete map[providerId]
-  await browser.storage.local.set({ [KEY_CREDENTIALS]: map })
+  await writeCredentialMap(map)
 }
 
 /** The only credential shape any other context is allowed to see. */
