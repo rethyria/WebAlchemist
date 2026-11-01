@@ -72,6 +72,14 @@ const ATTACKS: Record<string, string> = {
   '@import uppercase': '@IMPORT "https://evil.example/x.css";',
   '@import with a media query': '@import url(x.css) screen and (min-width: 1px);',
   '@import data url': '@import url(data:text/css,a{color:red});',
+  // A flag that skipped url() inside @namespace was cleared only by ";", so
+  // each of these left every later url() unchecked.
+  '@namespace block then url': '@namespace x{}a{background:url(https://evil.example/a)}',
+  '@namespace block then quoted url': '@namespace x{}a{background:url("https://evil.example/a")}',
+  '@namespace inside @media then url': '@media all{@namespace x}a{background:url(https://evil.example/a)}',
+  '@namespace inside a rule then url': 'b{@namespace x}a{background:url(https://evil.example/a)}',
+  '@namespace without a semicolon then url': '@namespace x a{background:url(https://evil.example/a)}',
+  '@namespace with an external url': '@namespace svg url(http://www.w3.org/2000/svg); svg|a { color: red }',
 }
 
 const LEGITIMATE: Record<string, string> = {
@@ -97,7 +105,7 @@ const LEGITIMATE: Record<string, string> = {
   'text containing url( inside a string': 'a::before { content: "see url(x)" }',
   'url-like identifier': 'a { background: myurl(foo) }',
   'attribute selector': 'input[name=q][value^="a"] { outline: 1px solid red }',
-  '@namespace with a url': '@namespace svg url(http://www.w3.org/2000/svg); svg|a { color: red }',
+  '@namespace with a data url': '@namespace svg url(data:text/plain,x); svg|a { color: red }',
   '@namespace with a string': '@namespace "http://www.w3.org/1999/xhtml"; a { color: red }',
   'gradient with a var': 'a { background: linear-gradient(var(--a), var(--b)) }',
   'image-set with only a gradient': 'a { background: image-set(linear-gradient(red, blue) 1x) }',

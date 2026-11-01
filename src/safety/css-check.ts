@@ -416,7 +416,6 @@ export function checkCss(css: string, options: CssCheckOptions): CssCheckResult 
   // plain parenthesis.
   const stack: (string | null)[] = []
   const consumed = new Set<number>()
-  let inNamespaceRule = false
 
   for (let n = 0; n < tokens.length; n += 1) {
     const token = tokens[n]!
@@ -430,13 +429,12 @@ export function checkCss(css: string, options: CssCheckOptions): CssCheckResult 
           'This CSS imports another stylesheet. The imported file can change after the transform is approved, so @import is never allowed.',
         )
       }
-      // The URL in @namespace names an XML namespace and is never requested.
-      inNamespaceRule = name === 'namespace'
-      continue
-    }
-
-    if (token.type === 'semicolon') {
-      inNamespaceRule = false
+      // There is no exemption for @namespace. Its URL names an XML namespace
+      // and is not requested, but exempting it needed a flag that only a
+      // semicolon cleared, and `@namespace x{}` or a nested `@namespace x}` has
+      // no semicolon, so every later url() was skipped. A namespace URL that
+      // is not a data: URL is refused like any other; the string form
+      // (`@namespace "..."`) holds no url() token and is not checked at all.
       continue
     }
 
@@ -450,7 +448,7 @@ export function checkCss(css: string, options: CssCheckOptions): CssCheckResult 
     }
 
     if (token.type === 'url') {
-      if (!inNamespaceRule) checkUrl(token, 'url()', token.value)
+      checkUrl(token, 'url()', token.value)
       continue
     }
     if (token.type === 'bad-url') {
@@ -488,7 +486,7 @@ export function checkCss(css: string, options: CssCheckOptions): CssCheckResult 
         const next = tokens[m]
         if (next?.type === 'string') {
           consumed.add(m)
-          if (!inNamespaceRule) checkUrl(next, `${name}()`, next.value)
+          checkUrl(next, `${name}()`, next.value)
         } else {
           block(
             token,
