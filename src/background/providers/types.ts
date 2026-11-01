@@ -48,6 +48,12 @@ export interface ReviewArgs {
   /** True when the user changed the intent after the model returned it. */
   intentEditedByUser?: boolean
   /**
+   * True when `intent` is the description from an imported file and has not
+   * been replaced by a generation. The author of the file wrote it, not the
+   * generating model (#56).
+   */
+  intentImported?: boolean
+  /**
    * Every instruction behind this transform, verbatim, in order, each with its
    * source. The message and the background entry point require it; it is
    * optional here only so that adapter tests that exercise transport do not
@@ -66,6 +72,13 @@ export interface GenerateRequest {
    * and does not present it as the user's request (#56).
    */
   instructionImported?: boolean
+  /**
+   * The description of an imported transform, when the run began from one and
+   * `instruction` is a later follow-up. The file's author wrote it, so it is
+   * kept out of `history` and sent in a fenced, labelled section on every
+   * turn (#56).
+   */
+  importedDescription?: string
   /** Distance up the ancestor chain the result should cover. See ScopeDepth. */
   scopeDepth?: number
   /** Selector of the container that depth resolves to, for the prompt. */

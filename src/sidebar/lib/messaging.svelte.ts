@@ -30,6 +30,8 @@ export function generateOverPort(
     instruction: string
     /** True when `instruction` is an imported transform's description, unchanged. */
     instructionImported?: boolean
+    /** The imported description behind a follow-up, sent fenced on every turn. */
+    importedDescription?: string
     history: unknown[]
     scopeDepth?: number
     scopeContainer?: string | null

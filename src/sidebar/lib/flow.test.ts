@@ -1608,6 +1608,162 @@ describe('the description of an imported transform (#56)', () => {
   })
 })
 
+describe('a follow-up on an imported transform (#56)', () => {
+  const importedWithCode = {
+    ...saved,
+    kind: 'js',
+    origin: 'imported',
+    code: 'document.body.remove()',
+    intent: 'IMPORTED INTENT',
+    rationale: { targets: '', approach: 'FILE APPROACH', assumptions: [] },
+  }
+  const handlerFor = (m: any) => {
+    if (m.type === 'context-for-anchor') return { ok: true, data: found }
+    if (m.type === 'analyse' || m.type === 'review') {
+      return { ok: true, data: { static: [], undeclaredCapabilities: [], passed: true } }
+    }
+    return { ok: true, data: null }
+  }
+  const lastReview = () => calls.filter((c) => c.type === 'review').at(-1)
+
+  beforeEach(() => {
+    ports.length = 0
+    ;(globalThis as any).browser.runtime.connect = fakeConnect
+    handler = handlerFor
+  })
+  afterEach(() => {
+    ;(globalThis as any).browser.runtime.connect = realConnect
+  })
+
+  describe('Change with AI', () => {
+    it('keeps the description and the file rationale out of the history and sends the description fenced', async () => {
+      const flow = newFlow()
+      await flow.editWithAi(importedWithCode)
+      flow.followUp = 'make it blue'
+      const run = flow.regenerate()
+      const port = await nextPort(1)
+      expect(port.request.instruction).toBe('make it blue')
+      expect(port.request.history).toEqual([])
+      expect(port.request.importedDescription).toBe('IMPORTED INTENT')
+      expect(JSON.stringify(port.request)).not.toContain('FILE APPROACH')
+      port.emit({ type: 'done', result: { ...cssResult('MODEL APPROACH'), kind: 'js', code: 'x()' } })
+      await run
+
+      // The next turn still carries the description, and the history now holds
+      // only what the user typed and what the model answered.
+      flow.followUp = 'and bigger'
+      const next = flow.regenerate()
+      const second = await nextPort(2)
+      expect(second.request.importedDescription).toBe('IMPORTED INTENT')
+      expect(second.request.history).toEqual([
+        { role: 'user', content: 'make it blue' },
+        { role: 'assistant', content: 'MODEL APPROACH' },
+      ])
+      second.emit({ type: 'done', result: cssResult('A3') })
+      await next
+    })
+
+    it('labels the description as imported for the review, in both the instructions and the intent', async () => {
+      const flow = newFlow()
+      await flow.editWithAi(importedWithCode)
+      await flow.toReview()
+      expect(lastReview().intentImported).toBe(true)
+
+      flow.followUp = 'make it blue'
+      const run = flow.regenerate()
+      const port = await nextPort(1)
+      flow.result = { ...jsResultBase, code: 'x()' } as any
+      await flow.toReview()
+      expect(lastReview().instructions).toEqual([
+        { text: 'IMPORTED INTENT', source: 'imported-description' },
+        { text: 'make it blue', source: 'typed' },
+      ])
+      port.emit({ type: 'done', result: { ...cssResult('M'), kind: 'js', code: 'x()' } })
+      await run
+      // The generator wrote the intent now, so it is no longer called imported.
+      await flow.toReview()
+      expect(lastReview().intentImported).toBeUndefined()
+    })
+
+    it('control: a transform the user saved keeps its turns in the history and sends no imported description', async () => {
+      const flow = newFlow()
+      await flow.editWithAi({ ...importedWithCode, origin: 'ai' })
+      flow.followUp = 'make it blue'
+      void flow.regenerate()
+      const port = await nextPort(1)
+      expect(port.request.history).toEqual([
+        { role: 'user', content: 'IMPORTED INTENT' },
+        { role: 'assistant', content: 'FILE APPROACH' },
+      ])
+      expect(port.request.importedDescription).toBeUndefined()
+    })
+
+    it('puts the history back when the follow-up fails, so the description is still sent next time', async () => {
+      const flow = newFlow()
+      await flow.editWithAi(importedWithCode)
+      flow.followUp = 'make it blue'
+      const failing = flow.regenerate()
+      ;(await nextPort(1)).emit({ type: 'error', error: { message: 'failed', kind: 'network' } })
+      await failing
+      const again = flow.retry()
+      const port = await nextPort(2)
+      expect(port.request.importedDescription).toBe('IMPORTED INTENT')
+      expect(port.request.history).toEqual([])
+      port.emit({ type: 'done', result: cssResult('A2') })
+      await again
+    })
+  })
+
+  describe('Edit description, sent unchanged', () => {
+    const importedJs = { ...saved, kind: 'js', origin: 'imported', code: '', intent: 'IMPORTED INTENT' }
+
+    it('keeps the description out of the history on the follow-up and sends it fenced', async () => {
+      const flow = newFlow()
+      await flow.editIntent(importedJs)
+      const first = flow.generate()
+      const port1 = await nextPort(1)
+      expect(port1.request.instructionImported).toBe(true)
+      port1.emit({ type: 'done', result: cssResult('A1') })
+      await first
+
+      flow.followUp = 'only the banner'
+      const run = flow.regenerate()
+      const port = await nextPort(2)
+      expect(port.request.instruction).toBe('only the banner')
+      expect(port.request.instructionImported).toBe(false)
+      expect(port.request.importedDescription).toBe('IMPORTED INTENT')
+      expect(port.request.history).toEqual([])
+      port.emit({ type: 'done', result: cssResult('A2') })
+      await run
+
+      flow.result = { ...jsResultBase, code: 'x()' } as any
+      await flow.toReview()
+      expect(lastReview().instructions).toEqual([
+        { text: 'IMPORTED INTENT', source: 'imported-description' },
+        { text: 'only the banner', source: 'typed' },
+      ])
+    })
+
+    it('control: a description the user changed is theirs and goes into the history', async () => {
+      const flow = newFlow()
+      await flow.editIntent(importedJs)
+      flow.instruction = 'IMPORTED INTENT, only the banner'
+      const first = flow.generate()
+      ;(await nextPort(1)).emit({ type: 'done', result: cssResult('A1') })
+      await first
+
+      flow.followUp = 'smaller'
+      void flow.regenerate()
+      const port = await nextPort(2)
+      expect(port.request.importedDescription).toBeUndefined()
+      expect(port.request.history).toEqual([
+        { role: 'user', content: 'IMPORTED INTENT, only the banner' },
+        { role: 'assistant', content: 'A1' },
+      ])
+    })
+  })
+})
+
 describe('the review is told where a pre-filled instruction came from (#52)', () => {
   const repaired = {
     ...jsResult,

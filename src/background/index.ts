@@ -1579,6 +1579,8 @@ interface GenerateOverPort {
   instruction: string
   /** True when `instruction` is an imported transform's description, unchanged. See GenerateRequest. */
   instructionImported?: boolean
+  /** The imported description behind a follow-up. See GenerateRequest. */
+  importedDescription?: string
   history: RefinementTurn[]
   scopeDepth?: number
   scopeContainer?: string | null
@@ -1779,6 +1781,7 @@ async function runReview(
   instructions: ReviewInstruction[],
   declared: Transform['capabilities'],
   transformId?: string,
+  intentImported = false,
 ): Promise<ReviewResult> {
   const analysis = runStaticAnalysis(code, declared)
   if (!analysis.passed) return analysis
@@ -1794,7 +1797,7 @@ async function runReview(
   // is suspended and the caller is told the receiving end does not exist.
   let model: ModelReview
   try {
-    model = await withKeepalive(() => provider.review({ code, intent, intentEditedByUser, instructions }))
+    model = await withKeepalive(() => provider.review({ code, intent, intentEditedByUser, intentImported, instructions }))
   } finally {
     // In `finally` so a billed response that failed to parse is still counted.
     await usage.settled()

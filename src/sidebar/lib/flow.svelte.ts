@@ -535,6 +535,21 @@ export class Flow {
    */
   private savedImported = false
   private keptSavedImported = false
+  /**
+   * The description of an imported transform that began this run, kept for the
+   * whole run once the first follow-up is sent (#56). It is the file author's
+   * text, so it is not put in `history` as a turn: it is sent as a labelled
+   * section on every request and to the review as an imported description.
+   * Null when the run did not begin from an unchanged imported description.
+   */
+  private importedDescription: string | null = null
+  /**
+   * True while `result` is the stored code of an imported transform opened with
+   * Change with AI, whose rationale and intent the file's author wrote. Cleared
+   * when a generation replaces the result. The rationale is then not sent as the
+   * assistant's turn, and the review labels the intent as imported.
+   */
+  private resultFromImport = false
 
   /**
    * The element that was selected when "Change" started a new pick, held so
@@ -843,6 +858,8 @@ export class Flow {
     this.instruction = ''
     this.savedInstruction = null
     this.savedImported = false
+    this.importedDescription = null
+    this.resultFromImport = false
     this.history = []
     this.followUp = ''
     this.references = []
@@ -1218,6 +1235,8 @@ export class Flow {
       this.intent = transform.intent
       this.intentBaseline = transform.intent
       this.prefillInstruction(transform.intent, transform.origin === 'imported')
+      this.importedDescription = null
+      this.resultFromImport = transform.origin === 'imported'
       this.references = []
       this.followUp = ''
       this.draft = transform
@@ -1293,6 +1312,8 @@ export class Flow {
     history: RefinementTurn[]
     instruction: string
     followUp: string
+    importedDescription: string | null
+    resultFromImport: boolean
     /**
      * The result the attempt replaced, set when the new result is stored. The
      * marker has to outlive that point, until the new preview is on the page,
@@ -1325,11 +1346,16 @@ export class Flow {
    * it. Later ones are follow-ups, which the user always wrote.
    */
   private reviewInstructions(): ReviewInstruction[] {
+    const imported = this.importedDescription
     const texts = [
+      // The imported description is not in the history, so it is added first,
+      // with its own source.
+      ...(imported === null ? [] : [imported]),
       ...this.history.filter((turn) => turn.role === 'user').map((turn) => turn.content),
       this.instruction,
     ]
     return texts.map((text, index): ReviewInstruction => {
+      if (imported !== null && index === 0) return { text, source: 'imported-description' }
       if (index > 0 || this.savedInstruction === null) return { text, source: 'typed' }
       const unchanged = text === this.savedInstruction
       if (this.savedImported) {
@@ -1353,6 +1379,8 @@ export class Flow {
     this.history = held.history
     this.instruction = held.instruction
     this.followUp = held.followUp
+    this.importedDescription = held.importedDescription
+    this.resultFromImport = held.resultFromImport
   }
 
   /**
@@ -1438,6 +1466,7 @@ export class Flow {
             this.savedInstruction !== null &&
             this.instruction === this.savedInstruction &&
             this.history.length === 0,
+          ...(this.importedDescription === null ? {} : { importedDescription: this.importedDescription }),
           history: this.history,
           scopeDepth: this.scopeDepth,
           scopeContainer: this.scopeContainer,
@@ -1512,6 +1541,7 @@ export class Flow {
         }
       }
       this.result = result
+      this.resultFromImport = false
       this.intent = result.intent
       this.intentBaseline = result.intent
       // Keep the user's scope choice across a regeneration; only seed it once.
@@ -1886,6 +1916,7 @@ export class Flow {
         code: result.code,
         intent: this.intent,
         intentEditedByUser: this.intent !== this.intentBaseline,
+        ...(this.resultFromImport ? { intentImported: true } : {}),
         instructions: this.reviewInstructions(),
         declaredCapabilities: result.capabilities,
         world: result.world,
@@ -2030,11 +2061,27 @@ export class Flow {
       history: this.history,
       instruction: this.instruction,
       followUp: this.followUp,
+      importedDescription: this.importedDescription,
+      resultFromImport: this.resultFromImport,
     }
+    // The first turn of a run that began from an imported description, sent
+    // unchanged, is the file author's text. It is kept for the whole run and
+    // sent fenced and labelled on every request, and it is not put in the
+    // history as the user's turn (#56).
+    const firstTurnImported =
+      this.history.length === 0 &&
+      this.savedImported &&
+      this.savedInstruction !== null &&
+      this.instruction === this.savedInstruction
+    if (firstTurnImported) this.importedDescription = this.instruction
     this.history = [
       ...this.history,
-      { role: 'user', content: this.instruction },
-      { role: 'assistant', content: this.result.rationale.approach },
+      ...(firstTurnImported ? [] : [{ role: 'user' as const, content: this.instruction }]),
+      // The rationale of a stored imported transform is the file author's text
+      // and does not become the assistant's earlier answer.
+      ...(firstTurnImported || this.resultFromImport
+        ? []
+        : [{ role: 'assistant' as const, content: this.result.rationale.approach }]),
     ]
     this.instruction = text
     this.followUp = ''
@@ -2156,6 +2203,7 @@ export class Flow {
         // reviewInstructions).
         intent: this.intent,
         intentEditedByUser: this.intent !== this.intentBaseline,
+        ...(this.resultFromImport ? { intentImported: true } : {}),
         instructions: this.reviewInstructions(),
         declaredCapabilities: result.capabilities,
         world: result.world,
@@ -2569,6 +2617,8 @@ export class Flow {
     this.instruction = ''
     this.savedInstruction = null
     this.savedImported = false
+    this.importedDescription = null
+    this.resultFromImport = false
     this.keptSavedInstruction = null
     this.keptSavedImported = false
     this.sendScreenshot = false

@@ -79,6 +79,8 @@ export type Message =
       intent: string
       /** True when the user changed the intent after the model returned it. */
       intentEditedByUser?: boolean
+      /** True when `intent` is the description from an imported file, not replaced by a generation. */
+      intentImported?: boolean
       /**
        * Every instruction, verbatim and in order, with where it came from. Only
        * the typed ones are the reviewer's yardstick.
