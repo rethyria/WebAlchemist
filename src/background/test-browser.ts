@@ -58,6 +58,8 @@ export interface Harness {
   privateTabs: Set<number>
   /** Tabs that `tabs.get` rejects for, as it does for a tab that has closed. */
   closedTabs: Set<number>
+  /** When true `tabs.get` leaves out cookieStoreId, as Firefox does without the cookies permission. */
+  cookiesWithheld: boolean
   /** The container of each tab; a tab not listed is in 'firefox-default'. */
   tabContainers: Map<number, string>
   calls: {
@@ -93,6 +95,7 @@ export function createHarness(): Harness {
     tabWindows: new Map(),
     privateTabs: new Set(),
     closedTabs: new Set(),
+    cookiesWithheld: false,
     tabContainers: new Map(),
     calls: { insertCSS: [], removeCSS: [], unregister: [], registry: [], setBadgeText: [], sendMessage: [], runtimeMessages: [] },
     listeners: new Map(),
@@ -149,7 +152,9 @@ export function createHarness(): Harness {
         url: h.tabUrls.get(id),
         windowId: h.tabWindows.get(id) ?? 1,
         incognito: h.privateTabs.has(id),
-        cookieStoreId: h.tabContainers.get(id) ?? 'firefox-default',
+        ...(h.cookiesWithheld
+          ? {}
+          : { cookieStoreId: h.tabContainers.get(id) ?? 'firefox-default' }),
       }
     },
     'browser.tabs.query': async () => [...h.tabUrls].map(([id, url]) => ({ id, url })),

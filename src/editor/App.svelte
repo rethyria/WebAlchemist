@@ -3,8 +3,16 @@
   import type { ReviewResult, Settings, Transform } from '@shared/types'
   import { matchPresetsFor, matchesUrl, originPermissionFor } from '@shared/match'
   import { send } from '@shared/messaging.svelte'
-import { CONTAINER_SCOPE_NOTE, DEFAULT_COOKIE_STORE } from '@shared/container'
-import { editorOriginToRequest, permissionRequestsFor, requestAll } from '@shared/permissions'
+  import {
+    CONTAINER_SCOPE_NOTE,
+    CONTAINER_UNREADABLE_NOTE,
+    COOKIES_PERMISSION,
+    EVERY_TAB_LABEL,
+    TAB_CONTAINER_LABEL,
+    containerForSave,
+    type ContainerChoice,
+  } from '@shared/container'
+  import { editorOriginToRequest, permissionRequestsFor, requestAll } from '@shared/permissions'
   import CodeArea from './CodeArea.svelte'
   import { shouldConfirmLeaving } from './unload'
 
@@ -34,11 +42,18 @@ import { editorOriginToRequest, permissionRequestsFor, requestAll } from '@share
   let saved = $state('')
   let match = $state('')
   let savedMatch = $state('')
-  /* '' means every tab. Otherwise a cookie store id; see shared/container.ts. */
-  let container = $state('')
-  let savedContainer = $state('')
-  /* The containers Firefox reports, or none when containers are off. */
-  let containers = $state<{ id: string; name: string }[]>([])
+  /* The container restriction; see shared/container.ts. */
+  let choice = $state<ContainerChoice>('every-tab')
+  let savedChoice = $state<ContainerChoice>('every-tab')
+  /*
+   * The tab the sidebar was showing when it opened this editor. Its container
+   * is what a new restriction records, and it is the only tab this page can
+   * name, because the editor is a tab of its own.
+   */
+  const sourceTabParam = params.get('tab')
+  const sourceTabId = sourceTabParam !== null && /^\d+$/.test(sourceTabParam) ? Number(sourceTabParam) : null
+  /* Whether the cookies permission is held, which reading a container needs. */
+  let hasCookies = $state(true)
   let loadError = $state<string | null>(null)
   let findings = $state<string[]>([])
   let saving = $state(false)
@@ -54,7 +69,7 @@ import { editorOriginToRequest, permissionRequestsFor, requestAll } from '@share
     transform !== null &&
       (creating
         ? code.trim().length > 0 && name.trim().length > 0
-        : code !== saved || match !== savedMatch || container !== savedContainer),
+        : code !== saved || match !== savedMatch || choice !== savedChoice),
   )
 
   /*
@@ -130,8 +145,8 @@ import { editorOriginToRequest, permissionRequestsFor, requestAll } from '@share
     }
     code = ''
     saved = ''
-    container = ''
-    savedContainer = ''
+    choice = 'every-tab'
+    savedChoice = 'every-tab'
     match = draft.match
     savedMatch = draft.match
     name = ''
@@ -154,8 +169,8 @@ import { editorOriginToRequest, permissionRequestsFor, requestAll } from '@share
       saved = found.code
       match = found.match
       savedMatch = found.match
-      container = found.cookieStoreId ?? ''
-      savedContainer = container
+      choice = found.cookieStoreId === undefined ? 'every-tab' : 'tab-container'
+      savedChoice = choice
       document.title = `${found.name} — Web Alchemist`
     } catch (cause) {
       loadError = String(cause instanceof Error ? cause.message : cause)
@@ -163,23 +178,21 @@ import { editorOriginToRequest, permissionRequestsFor, requestAll } from '@share
   }
 
   /**
-   * The record with the chosen container restriction, or with none. JavaScript
+   * The record with the given container restriction, or with none. JavaScript
    * transforms never carry one, because the restriction is not enforced for
    * them and a stored value would say otherwise.
    */
-  function withContainer(base: Transform, kind: 'css' | 'js'): Transform {
+  function withContainer(
+    base: Transform,
+    kind: 'css' | 'js',
+    cookieStoreId: string | undefined,
+  ): Transform {
     const { cookieStoreId: _previous, ...rest } = base
-    return container !== '' && kind === 'css' ? { ...rest, cookieStoreId: container } : rest
+    return cookieStoreId !== undefined && kind === 'css' ? { ...rest, cookieStoreId } : rest
   }
 
-  /** Containers exist only when the person has turned them on in Firefox. */
-  async function loadContainers() {
-    try {
-      const found = (await browser.contextualIdentities?.query({})) ?? []
-      containers = found.map((identity) => ({ id: identity.cookieStoreId, name: identity.name }))
-    } catch {
-      containers = []
-    }
+  async function loadCookiesPermission() {
+    hasCookies = await browser.permissions.contains(COOKIES_PERMISSION).catch(() => false)
   }
 
   async function save() {
@@ -206,17 +219,42 @@ import { editorOriginToRequest, permissionRequestsFor, requestAll } from '@share
        * outright once a gesture has been spent.
        */
       const origin = editorOriginToRequest(creating, wanted, current.match)
+      // The cookies permission is requested here too, in the same call and
+      // before the first await, and only when a container has to be read: a
+      // new restriction, or an old one whose permission was removed.
+      const needsCookies =
+        (creating ? kind : current.kind) === 'css' &&
+        choice === 'tab-container' &&
+        (savedChoice !== 'tab-container' || !hasCookies)
       const granted = await requestAll(
         (permissions) => browser.permissions.request(permissions),
-        permissionRequestsFor(creating ? kind : current.kind, origin),
+        permissionRequestsFor(creating ? kind : current.kind, origin, needsCookies),
       )
       if (!granted) {
         findings = [
           (creating ? kind : current.kind) === 'js'
             ? 'Web Alchemist needs the permission to run JavaScript transforms, and permission for the site it applies to, before it can save this.'
-            : `Web Alchemist needs permission for ${originPermissionFor(wanted)} before it can apply this there.`,
+            : `Web Alchemist needs permission for ${originPermissionFor(wanted)}${needsCookies ? ' and the cookies permission, to read the container,' : ''} before it can apply this there.`,
         ]
         return
+      }
+      if (needsCookies) hasCookies = true
+
+      // Only a restriction that is new is read from the tab; one that is kept
+      // keeps the stored value.
+      const saveKind = creating ? kind : current.kind
+      let storeId: string | undefined
+      if (saveKind === 'css') {
+        const source =
+          choice === 'tab-container' && current.cookieStoreId === undefined && sourceTabId !== null
+            ? await browser.tabs.get(sourceTabId).catch(() => undefined)
+            : undefined
+        const decided = containerForSave(choice, current.cookieStoreId, source?.cookieStoreId)
+        if ('error' in decided) {
+          findings = [decided.error]
+          return
+        }
+        storeId = decided.cookieStoreId
       }
 
       /*
@@ -240,7 +278,7 @@ import { editorOriginToRequest, permissionRequestsFor, requestAll } from '@share
 
       const next: Transform = creating
         ? {
-            ...withContainer(current, kind),
+            ...withContainer(current, kind, storeId),
             code,
             match: wanted,
             kind,
@@ -248,7 +286,7 @@ import { editorOriginToRequest, permissionRequestsFor, requestAll } from '@share
             updatedAt: Date.now(),
           }
         : {
-            ...withContainer(current, current.kind),
+            ...withContainer(current, current.kind, storeId),
             code,
             match: wanted,
             rationale: {
@@ -278,8 +316,8 @@ import { editorOriginToRequest, permissionRequestsFor, requestAll } from '@share
       saved = code
       savedMatch = wanted
       match = wanted
-      savedContainer = next.cookieStoreId ?? ''
-      container = savedContainer
+      savedChoice = next.cookieStoreId === undefined ? 'every-tab' : 'tab-container'
+      choice = savedChoice
       justSaved = true
       setTimeout(() => (justSaved = false), 2000)
 
@@ -305,6 +343,7 @@ import { editorOriginToRequest, permissionRequestsFor, requestAll } from '@share
   function revert() {
     code = saved
     match = savedMatch
+    choice = savedChoice
     findings = []
   }
 
@@ -325,7 +364,7 @@ import { editorOriginToRequest, permissionRequestsFor, requestAll } from '@share
 
   $effect(() => {
     void load()
-    void loadContainers()
+    void loadCookiesPermission()
     void send<Settings>({ type: 'get-settings' })
       .then((settings) => {
         document.documentElement.dataset['accent'] = settings.accent
@@ -451,20 +490,17 @@ import { editorOriginToRequest, permissionRequestsFor, requestAll } from '@share
       {/if}
     </section>
 
-    {#if (creating ? kind : transform.kind) === 'css' && (containers.length > 0 || container !== '')}
+    {#if (creating ? kind : transform.kind) === 'css' && (sourceTabId !== null || savedChoice === 'tab-container')}
       <section class="where">
         <label for="container">Container</label>
-        <select id="container" bind:value={container}>
-          <option value="">Every tab</option>
-          <option value={DEFAULT_COOKIE_STORE}>Tabs outside any container</option>
-          {#each containers as identity}
-            <option value={identity.id}>{identity.name}</option>
-          {/each}
-          {#if container !== '' && container !== DEFAULT_COOKIE_STORE && !containers.some((c) => c.id === container)}
-            <option value={container}>A container that no longer exists</option>
-          {/if}
+        <select id="container" bind:value={choice}>
+          <option value="every-tab">{EVERY_TAB_LABEL}</option>
+          <option value="tab-container">{TAB_CONTAINER_LABEL}</option>
         </select>
         <p class="hint">{CONTAINER_SCOPE_NOTE}</p>
+        {#if savedChoice === 'tab-container' && !hasCookies}
+          <p class="warn">{CONTAINER_UNREADABLE_NOTE}</p>
+        {/if}
       </section>
     {/if}
 

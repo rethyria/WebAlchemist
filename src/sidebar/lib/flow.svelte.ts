@@ -688,7 +688,9 @@ export class Flow {
     })
 
     await browser.tabs.create({
-      url: browser.runtime.getURL(`src/editor/index.html?draft=${encodeURIComponent(key)}`),
+      url: browser.runtime.getURL(
+        `src/editor/index.html?draft=${encodeURIComponent(key)}${this.tabId === null ? '' : `&tab=${this.tabId}`}`,
+      ),
     })
 
     this.step = 'list'

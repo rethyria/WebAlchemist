@@ -164,6 +164,27 @@ describe('a transform restricted to a container', () => {
     expect(h.calls.insertCSS).toHaveLength(0)
   })
 
+  // Without the cookies permission Firefox leaves cookieStoreId out of a tab.
+  // The restriction then cannot be checked, so the transform does not apply,
+  // and a transform with no restriction still does.
+  it('is not applied when the tab does not report its container (permission removed)', async () => {
+    h.local.set('transforms', [restricted(), cssTransform({ id: 'free', name: 'Free', code: 'p { color: blue }' })])
+    h.cookiesWithheld = true
+    await commit()
+    const css = h.calls.insertCSS.map((c) => c.css).join('\n')
+    expect(css).toContain('Free')
+    expect(css).not.toContain('Dark')
+  })
+
+  it('control: the same transforms both apply once the tab reports its container', async () => {
+    h.local.set('transforms', [restricted(), cssTransform({ id: 'free', name: 'Free', code: 'p { color: blue }' })])
+    h.tabContainers.set(TAB, 'firefox-container-2')
+    await commit()
+    const css = h.calls.insertCSS.map((c) => c.css).join('\n')
+    expect(css).toContain('Free')
+    expect(css).toContain('Dark')
+  })
+
   it('control: it is applied in a tab of its own container', async () => {
     h.local.set('transforms', [restricted()])
     h.tabContainers.set(TAB, 'firefox-container-2')

@@ -346,8 +346,12 @@
    * colouring so it can be read at all.
    */
   async function openEditor(transform: Transform) {
+    const tab = await activeTab()
     await browser.tabs.create({
-      url: browser.runtime.getURL(`src/editor/index.html?id=${encodeURIComponent(transform.id)}`),
+      // The tab is named so that the editor can record its container.
+      url: browser.runtime.getURL(
+        `src/editor/index.html?id=${encodeURIComponent(transform.id)}${tab?.id === undefined ? '' : `&tab=${tab.id}`}`,
+      ),
     })
   }
 

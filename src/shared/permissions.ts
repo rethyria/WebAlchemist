@@ -1,3 +1,4 @@
+import { COOKIES_PERMISSION } from './container'
 import { originPermissionFor } from './match'
 import type { TransformKind } from './types'
 
@@ -12,6 +13,7 @@ import type { TransformKind } from './types'
 export function permissionRequestsFor(
   kind: TransformKind,
   origin: string | null,
+  needsCookies = false,
 ): browser.permissions.Permissions[] {
   const requests: browser.permissions.Permissions[] = []
   if (origin) requests.push({ origins: [origin] })
@@ -21,6 +23,8 @@ export function permissionRequestsFor(
   if (kind === 'js') {
     requests.push({ permissions: ['userScripts'] } as unknown as browser.permissions.Permissions)
   }
+  // Only for a container restriction that has to read a tab's container.
+  if (needsCookies) requests.push(COOKIES_PERMISSION)
   return requests
 }
 
