@@ -116,12 +116,15 @@ export function matchPatternsFor(transform: Transform): string[] {
  * A browser match pattern compares the path together with the query string and
  * knows no trailing-slash rule, so the stored path is written out once per form
  * of the page: with and without a trailing slash, and, when the stored path has
- * no query, also with any query. A path that ends in `*` already covers all of
- * these.
+ * no query, also with any query. A path with no query that ends in `*` already
+ * covers all of these.
  */
 function pathsFor(path: string): string[] {
-  if (path.endsWith('*')) return [path]
   const query = path.indexOf('?')
+  // Without a query, a path that ends in `*` already covers every form. With
+  // one, `/search?q=*` does not cover `/search/?q=x`, which the CSS side
+  // matches, so the trailing-slash form is written out too (#95).
+  if (query === -1 && path.endsWith('*')) return [path]
   const base = query === -1 ? path : path.slice(0, query)
   const rest = query === -1 ? '' : path.slice(query)
   const trimmed = base.replace(/\/+$/, '')

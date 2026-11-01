@@ -162,6 +162,20 @@ export function matchesUrl(pattern: string, rawUrl: string): boolean {
 }
 
 /**
+ * The path part of matchesUrl as data, for code that has to repeat the check
+ * where `matchesUrl` is not available, such as a user script in a page. `forms`
+ * are regular expression sources, one per form of the pattern's path, and
+ * `hasQuery` says whether the page's query string is part of the compared text.
+ */
+export function pathMatcherFor(pattern: string): { hasQuery: boolean; forms: string[] } {
+  const { path } = parsePattern(pattern)
+  return {
+    hasQuery: path.includes('?'),
+    forms: pathForms(path).map((form) => patternToRegExp(form).source),
+  }
+}
+
+/**
  * A path as written and with its trailing slash removed, so `/watch` and
  * `/watch/` are the same page whichever of them the pattern or the URL has.
  * A query string stays attached to the end. The root path keeps its slash.

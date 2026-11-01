@@ -199,6 +199,10 @@ describe('the paths a script is registered for (#95)', () => {
     expect(paths('https://example.com/docs*')).toEqual(['/docs*'])
   })
 
+  it('also registers the trailing-slash form of a pattern that has a query and ends in a wildcard', () => {
+    expect(paths('https://example.com/search?q=*')).toEqual(['/search?q=*', '/search/?q=*'])
+  })
+
   it('registers the root page without duplicating the slash', () => {
     expect(paths('https://example.com/')).toEqual(['/', '/?*'])
   })
