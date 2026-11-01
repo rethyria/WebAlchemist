@@ -100,6 +100,9 @@ export interface PlanDeps {
   excludedSites?: readonly string[]
 }
 
+/** The most distinct origins one import asks the browser for access to. */
+export const MAX_IMPORT_ORIGINS = 20
+
 const text = (value: unknown): string => (typeof value === 'string' ? value : '')
 const strings = (value: unknown): string[] =>
   Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === 'string') : []
@@ -209,6 +212,7 @@ export async function planImport(
 
   const items: PlannedTransform[] = []
   const records: Transform[] = []
+  const origins = new Set<string>()
 
   for (const raw of incoming) {
     if (!deps.isValid(raw)) {
@@ -269,6 +273,20 @@ export async function planImport(
       })
       continue
     }
+    // One prompt asks for every origin in the import, so a file cannot ask for
+    // a long list of sites that the user would have to read before approving.
+    const origin = originPermissionFor(raw.match.trim())
+    if (origin !== null && !origins.has(origin) && origins.size >= MAX_IMPORT_ORIGINS) {
+      items.push({
+        ...base,
+        sites: assessed.sites,
+        origin: null,
+        status: 'refused',
+        reason: `This file asks for access to more than ${MAX_IMPORT_ORIGINS} different sites. This record is not imported. Import a smaller file.`,
+      })
+      continue
+    }
+    if (origin !== null) origins.add(origin)
     for (const hash of hashes) seen.add(hash)
 
     const record = sanitiseIncoming(raw, now, mode === 'backup')

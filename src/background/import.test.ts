@@ -133,7 +133,16 @@ describe('imported CSS', () => {
 })
 
 describe('match patterns in the file', () => {
-  it.each(['*://*/*', '<all_urls>', '*://*.com/*', '*://*.co.uk/*'])('refuses %s', async (match) => {
+  it.each([
+    '*://*/*',
+    '<all_urls>',
+    '*://*.com/*',
+    '*://*.co.uk/*',
+    '*://*.example.com/*',
+    '*://*.CO.UK/*',
+    '*://localhost/*',
+    '*://192.168.1.1/*',
+  ])('refuses %s', async (match) => {
     const result = await ask({ type: 'import-transforms', bundle: bundle(cssTransform({ match })) })
     expect(result).toMatchObject({ imported: 0, skipped: 1 })
     expect(result.items[0]).toMatchObject({ status: 'refused', origin: null })
@@ -143,7 +152,7 @@ describe('match patterns in the file', () => {
   it('imports a pattern for one site (control)', async () => {
     const result = await ask({
       type: 'import-transforms',
-      bundle: bundle(cssTransform({ match: '*://*.example.com/*' })),
+      bundle: bundle(cssTransform({ match: '*://www.example.com/*' })),
     })
     expect(result.imported).toBe(1)
   })
@@ -154,7 +163,7 @@ describe('the preview before an import', () => {
     bundle(
       cssTransform({ id: 'a', name: 'Dark', match: 'https://example.com/*', code: GOOD_CSS }),
       cssTransform({ id: 'b', name: 'Everywhere', match: '*://*/*' }),
-      jsRecord({ id: 'c', match: '*://*.shop.example.org/*' }),
+      jsRecord({ id: 'c', match: '*://shop.example.org/*' }),
       cssTransform({ id: 'd', name: 'Leaky', code: EVIL_CSS }),
     )
 
@@ -172,7 +181,7 @@ describe('the preview before an import', () => {
     expect(items[2].intent).toContain('back up the session cookie')
     expect(items[3].reason).toContain('fails the CSS check')
     expect(items[0].origin).toBe('https://example.com/*')
-    expect(items[2].origin).toBe('*://*.shop.example.org/*')
+    expect(items[2].origin).toBe('*://shop.example.org/*')
   })
 
   it('stores nothing', async () => {
@@ -332,5 +341,41 @@ describe('sites on the excluded list (#56, #131)', () => {
   it('imports all three when the list is empty (control)', async () => {
     const result = await ask({ type: 'import-transforms', bundle: file() })
     expect(result.imported).toBe(3)
+  })
+})
+
+describe('how many sites one import asks for (#56)', () => {
+  const records = (hosts: number, perHost = 1) =>
+    bundle(
+      ...Array.from({ length: hosts * perHost }, (_, i) =>
+        cssTransform({
+          id: `r${i}`,
+          name: `Record ${i}`,
+          match: `https://site${i % hosts}.example.org/*`,
+          code: `/* ${i} */ aside { display: none }`,
+        }),
+      ),
+    )
+  const origins = (items: any[]) => new Set(items.filter((i) => i.status === 'import').map((i) => i.origin))
+
+  it('refuses the records beyond twenty different sites, with a plain message', async () => {
+    const { items } = await ask({ type: 'preview-import', bundle: records(23) })
+    expect(origins(items).size).toBe(20)
+    const refused = items.filter((i: any) => i.status === 'refused')
+    expect(refused).toHaveLength(3)
+    expect(refused[0].reason).toContain('more than 20 different sites')
+    expect(refused[0].origin).toBeNull()
+  })
+
+  it('imports twenty different sites (control)', async () => {
+    const { items } = await ask({ type: 'preview-import', bundle: records(20) })
+    expect(origins(items).size).toBe(20)
+    expect(items.every((i: any) => i.status === 'import')).toBe(true)
+  })
+
+  it('counts a site once however many records are for it (control)', async () => {
+    const { items } = await ask({ type: 'preview-import', bundle: records(3, 10) })
+    expect(items.filter((i: any) => i.status === 'import')).toHaveLength(30)
+    expect(origins(items).size).toBe(3)
   })
 })
