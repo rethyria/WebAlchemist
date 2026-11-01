@@ -213,6 +213,7 @@
        * written. The background repeats it on save — this is the copy that can
        * explain itself.
        */
+      let approvalToken: string | undefined
       if ((creating ? kind : current.kind) === 'js') {
         const analysis = await send<ReviewResult>({
           type: 'analyse',
@@ -225,12 +226,16 @@
           return
         }
         // Code the user typed was seen by the user, which is the approval here.
-        await send({
-          type: 'approve-code',
-          code,
-          declaredCapabilities: current.capabilities,
-          ...(current.world ? { world: current.world } : {}),
-        })
+        approvalToken = (
+          await send<{ approvalToken: string }>({
+            type: 'approve-code',
+            code,
+            declaredCapabilities: current.capabilities,
+            ...(current.world ? { world: current.world } : {}),
+            transformId: current.id,
+            match: wanted,
+          })
+        ).approvalToken
       }
 
       /*
@@ -290,7 +295,11 @@
       // Every tab the transform matches, not just one: this page is not on any
       // of them, and a save that only reached the last-focused tab would look
       // like it had not worked.
-      await send({ type: 'save-transform', transform: next })
+      await send({
+        type: 'save-transform',
+        transform: next,
+        ...(approvalToken ? { approvalToken } : {}),
+      })
       await send({ type: 'reapply-everywhere', id: current.id })
 
       transform = next

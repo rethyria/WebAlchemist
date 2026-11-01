@@ -395,6 +395,11 @@ export interface ReviewResult {
    * a site set to list external URLs; `passed` is false while any remain.
    */
   pendingUrls?: string[]
+  /**
+   * One-time token for saving the reviewed code, present on a model review
+   * that was recorded. It is sent back with `save-transform`.
+   */
+  approvalToken?: string
   /** False when anything blocking is outstanding. */
   passed: boolean
 }

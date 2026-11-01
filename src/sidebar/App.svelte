@@ -313,6 +313,7 @@
   }
 
   async function editCode(transform: Transform, code: string): Promise<string | null> {
+    let approvalToken: string | undefined
     if (transform.kind === 'js') {
       const analysis = await send<ReviewResult>({
         type: 'analyse',
@@ -326,12 +327,16 @@
           .join('\n')
       }
       // Code the user typed was seen by the user, which is the approval here.
-      await send({
-        type: 'approve-code',
-        code,
-        declaredCapabilities: transform.capabilities,
-        ...(transform.world ? { world: transform.world } : {}),
-      })
+      approvalToken = (
+        await send<{ approvalToken: string }>({
+          type: 'approve-code',
+          code,
+          declaredCapabilities: transform.capabilities,
+          ...(transform.world ? { world: transform.world } : {}),
+          transformId: transform.id,
+          match: transform.match,
+        })
+      ).approvalToken
     }
 
     const next: Transform = {
@@ -350,6 +355,7 @@
         type: 'save-transform',
         transform: next,
         ...(tab?.id === undefined ? {} : { tabId: tab.id }),
+        ...(approvalToken ? { approvalToken } : {}),
       })
     } catch (cause) {
       return cause instanceof BackgroundError ? cause.message : String(cause)

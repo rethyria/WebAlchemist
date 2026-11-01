@@ -69,6 +69,9 @@ export type Message =
       declaredCapabilities: Transform['capabilities']
       /** Part of what the approval is tied to. Absent means USER_SCRIPT. */
       world?: Transform['world']
+      /** The transform and match pattern the approval token is tied to. */
+      transformId: string
+      match: string
     }
   /**
    * Records that the user wrote this code and is saving it, for JavaScript that
@@ -81,6 +84,9 @@ export type Message =
       code: string
       declaredCapabilities: Transform['capabilities']
       world?: Transform['world']
+      /** The transform and match pattern the approval token is tied to. */
+      transformId: string
+      match: string
     }
   /** Static analysis alone — no model call, so it is free to run before preview. */
   | { type: 'analyse'; code: string; declaredCapabilities: Transform['capabilities'] }
@@ -99,7 +105,13 @@ export type Message =
    * runtime states with status `broken`. Computed on request, never stored.
    */
   | { type: 'get-blocked-states'; url: string }
-  | { type: 'save-transform'; transform: Transform; tabId?: number }
+  /**
+   * `approvalToken` is the one returned by `review` or `approve-code` for this
+   * code, transform and match pattern. JavaScript whose code differs from what
+   * is stored is refused without it, and the token is deleted by a successful
+   * save. CSS and unchanged code need none.
+   */
+  | { type: 'save-transform'; transform: Transform; tabId?: number; approvalToken?: string }
   /** `tabId` lets the change come off the page now rather than on reload. */
   | { type: 'delete-transform'; id: string; tabId?: number }
   /**
@@ -382,6 +394,7 @@ export interface Responses {
   'find-conflicts': Conflict[]
   'suspend-transform': boolean
   review: ReviewResult
+  'approve-code': { approvalToken: string }
   analyse: ReviewResult
   'preview-js': boolean
   'clear-preview-js': boolean

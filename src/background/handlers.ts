@@ -16,7 +16,7 @@
 
 import type { Message } from '@shared/messages'
 import type { ReviewResult, Settings, Transform } from '@shared/types'
-import { mayBeSaved, recordApproval, type ApprovalVerdict } from './approvals'
+import { mayBeSaved, recordApproval, spendApproval, type ApprovalVerdict } from './approvals'
 import { problemWithStoredCode, runStaticAnalysis } from './code-gate'
 import { assertPreviewable, checkCssTransform } from './css-gate'
 
@@ -62,7 +62,7 @@ export async function handleSaveTransform(message: Of<'save-transform'>, deps: S
      * reduced are covered by the approval for the larger set (see approvals.ts).
      */
     const stored = (await deps.getAllTransforms()).find((t) => t.id === message.transform.id)
-    if (!(await mayBeSaved(stored, message.transform))) {
+    if (!(await mayBeSaved(stored, message.transform, message.approvalToken))) {
       throw new Error(
         'This code was not approved in this browser session, so it was not saved. Review it again and save.',
       )
@@ -104,6 +104,9 @@ export async function handleSaveTransform(message: Of<'save-transform'>, deps: S
   await deps.saveTransform(message.transform)
   if (message.transform.kind === 'js') {
     await deps.registerTransform(message.transform)
+    // Spent only now that the save succeeded, so a failed save can be retried
+    // with the same token, and a successful one cannot be repeated with it.
+    if (message.approvalToken) await spendApproval(message.approvalToken)
   }
   // Apply it now rather than on the next navigation. The preview was just taken
   // down, so without this the page visibly reverts on save.
@@ -160,7 +163,11 @@ export async function handleReview(
   const result = await deps.runReview(message.code, message.intent, message.declaredCapabilities)
   if (result.model && trusted) {
     const verdict: ApprovalVerdict = result.model.verdict
-    await record(message.code, message.world, message.declaredCapabilities, verdict)
+    const approvalToken = await record(message.code, message.world, message.declaredCapabilities, verdict, {
+      transformId: message.transformId,
+      match: message.match,
+    })
+    return { ...result, approvalToken }
   }
   return result
 }
@@ -170,19 +177,20 @@ export async function handleApproveCode(
   message: Of<'approve-code'>,
   trusted: boolean,
   deps: Pick<ReviewDeps, 'recordApproval'> = {},
-): Promise<true> {
+): Promise<{ approvalToken: string }> {
   if (!trusted) throw new Error('Only the extension can approve code.')
   const analysis = runStaticAnalysis(message.code, message.declaredCapabilities)
   if (!analysis.passed) {
     throw new Error('Static analysis rejected this code, so it was not approved.')
   }
-  await (deps.recordApproval ?? recordApproval)(
+  const approvalToken = await (deps.recordApproval ?? recordApproval)(
     message.code,
     message.world,
     message.declaredCapabilities,
     'user-written',
+    { transformId: message.transformId, match: message.match },
   )
-  return true
+  return { approvalToken }
 }
 
 /**

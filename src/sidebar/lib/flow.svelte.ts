@@ -1422,6 +1422,11 @@ export class Flow {
         intent: this.intent,
         declaredCapabilities: result.capabilities,
         world: result.world,
+        // The approval token is tied to these two, so the save must send the
+        // same id and pattern. The pattern is not editable between here and
+        // the save: changing it goes back to the saving step, which reviews again.
+        transformId: this.draft?.id ?? '',
+        match: this.matchPattern,
       })
     } catch (cause) {
       this.step = 'saving'
@@ -1449,7 +1454,13 @@ export class Flow {
       declaredCapabilities: [],
     })
     this.analysis = analysis
-    this.review = { ...analysis, ...(this.review?.model ? { model: this.review.model } : {}) }
+    this.review = {
+      ...analysis,
+      ...(this.review?.model ? { model: this.review.model } : {}),
+      // Dropping a capability only reduces what the approval has to cover, so
+      // the token from the review is still the one the save needs.
+      ...(this.review?.approvalToken ? { approvalToken: this.review.approvalToken } : {}),
+    }
   }
 
   /**
@@ -1552,6 +1563,7 @@ export class Flow {
         transform,
         // So it applies to the page now, rather than on the next load.
         ...(this.tabId === null ? {} : { tabId: this.tabId }),
+        ...(this.review?.approvalToken ? { approvalToken: this.review.approvalToken } : {}),
       })
       this.reset()
       this.onSaved()

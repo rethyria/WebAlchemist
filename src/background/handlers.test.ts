@@ -3,6 +3,9 @@ import { DEFAULT_SETTINGS } from '@shared/types'
 import type { Message } from '@shared/messages'
 import type { ReviewResult, Settings, Transform } from '@shared/types'
 import { isApproved, recordApproval } from './approvals'
+
+const BIND = { transformId: 't', match: 'shop.example.com/*' }
+const BIND_FIELDS = BIND
 import {
   applyCssTransforms,
   fromExtensionPage,
@@ -78,17 +81,18 @@ function saveDeps(stored: Transform[] = [], settings: Settings = DEFAULT_SETTING
   return { deps, calls }
 }
 
-const saveMessage = (t: Transform): Extract<Message, { type: 'save-transform' }> => ({
+const saveMessage = (t: Transform, approvalToken?: string): Extract<Message, { type: 'save-transform' }> => ({
   type: 'save-transform',
   transform: t,
   tabId: 1,
+  ...(approvalToken ? { approvalToken } : {}),
 })
 
 describe('handleSaveTransform: JavaScript', () => {
   it('refuses code that static analysis rejects, even when it was approved', async () => {
-    await recordApproval(BAD_JS, undefined, [], 'match')
+    const token = await recordApproval(BAD_JS, undefined, [], 'match', BIND)
     const { deps, calls } = saveDeps()
-    await expect(handleSaveTransform(saveMessage(transform({ code: BAD_JS })), deps)).rejects.toThrow(/Static analysis/)
+    await expect(handleSaveTransform(saveMessage(transform({ code: BAD_JS }), token), deps)).rejects.toThrow(/Static analysis/)
     expect(calls).toEqual([])
   })
 
@@ -99,16 +103,46 @@ describe('handleSaveTransform: JavaScript', () => {
   })
 
   it('control: the same code is saved, registered and applied once it is approved', async () => {
-    await recordApproval(GOOD_JS, undefined, [], 'match')
+    const token = await recordApproval(GOOD_JS, undefined, [], 'match', BIND)
     const { deps, calls } = saveDeps()
-    await handleSaveTransform(saveMessage(transform({})), deps)
+    await handleSaveTransform(saveMessage(transform({}), token), deps)
     expect(calls).toEqual(['save:t', 'register:t', 'reapply'])
   })
 
-  it('refuses a one-character change to approved code', async () => {
-    await recordApproval(GOOD_JS, undefined, [], 'match')
+  it('refuses a token that was issued for another transform or another match pattern', async () => {
+    const token = await recordApproval(GOOD_JS, undefined, [], 'match', { transformId: 'other', match: BIND.match })
     const { deps, calls } = saveDeps()
-    await expect(handleSaveTransform(saveMessage(transform({ code: GOOD_JS + ' ' })), deps)).rejects.toThrow(/not approved/)
+    await expect(handleSaveTransform(saveMessage(transform({}), token), deps)).rejects.toThrow(/not approved/)
+    const wrongSite = await recordApproval(GOOD_JS, undefined, [], 'match', { ...BIND, match: 'evil.example/*' })
+    await expect(handleSaveTransform(saveMessage(transform({}), wrongSite), deps)).rejects.toThrow(/not approved/)
+    expect(calls).toEqual([])
+  })
+
+  it('uses a token up when the save succeeds, so the same approval cannot save twice', async () => {
+    const token = await recordApproval(GOOD_JS, undefined, [], 'match', BIND)
+    const { deps, calls } = saveDeps()
+    await handleSaveTransform(saveMessage(transform({}), token), deps)
+    await expect(handleSaveTransform(saveMessage(transform({}), token), deps)).rejects.toThrow(/not approved/)
+    expect(calls.filter((c) => c === 'save:t')).toHaveLength(1)
+  })
+
+  it('keeps the token when the save fails, so the user can retry', async () => {
+    const token = await recordApproval(GOOD_JS, undefined, [], 'match', BIND)
+    const { deps, calls } = saveDeps()
+    deps.saveTransform = async () => {
+      throw new Error('storage failed')
+    }
+    await expect(handleSaveTransform(saveMessage(transform({}), token), deps)).rejects.toThrow(/storage failed/)
+    const retry = saveDeps()
+    await handleSaveTransform(saveMessage(transform({}), token), retry.deps)
+    expect(retry.calls).toContain('save:t')
+    expect(calls).toEqual([])
+  })
+
+  it('refuses a one-character change to approved code', async () => {
+    const token = await recordApproval(GOOD_JS, undefined, [], 'match', BIND)
+    const { deps, calls } = saveDeps()
+    await expect(handleSaveTransform(saveMessage(transform({ code: GOOD_JS + ' ' }), token), deps)).rejects.toThrow(/not approved/)
     expect(calls).toEqual([])
   })
 
@@ -200,46 +234,54 @@ describe('handleReview and handleApproveCode', () => {
     code,
     intent: 'hide it',
     declaredCapabilities: [],
+    transformId: BIND.transformId,
+    match: BIND.match,
   })
 
-  it('records the approval for a review sent by an extension page', async () => {
-    await handleReview(review(GOOD_JS), true, { runReview: async () => passed })
-    expect(await isApproved(GOOD_JS, undefined, [])).toBe(true)
+  it('records the approval for a review sent by an extension page and returns its token', async () => {
+    const result = await handleReview(review(GOOD_JS), true, { runReview: async () => passed })
+    expect(result.approvalToken).toBeTruthy()
+    expect(await isApproved(result.approvalToken, GOOD_JS, undefined, [], BIND)).toBe(true)
   })
 
   it('records nothing for a review sent by a content script, and still returns the result', async () => {
     const result = await handleReview(review(GOOD_JS), false, { runReview: async () => passed })
     expect(result).toBe(passed)
-    expect(await isApproved(GOOD_JS, undefined, [])).toBe(false)
+    expect(result.approvalToken).toBeUndefined()
+    expect(Object.keys(session)).toEqual([])
   })
 
   it('records nothing when static analysis stopped the review before the model ran', async () => {
     const stopped: ReviewResult = { static: [], undeclaredCapabilities: [], passed: false }
-    await handleReview(review(GOOD_JS), true, { runReview: async () => stopped })
-    expect(await isApproved(GOOD_JS, undefined, [])).toBe(false)
+    const result = await handleReview(review(GOOD_JS), true, { runReview: async () => stopped })
+    expect(result.approvalToken).toBeUndefined()
+    expect(Object.keys(session)).toEqual([])
   })
 
   it('records a disagreeing verdict too, because the user may still choose to save', async () => {
     const mismatch: ReviewResult = { ...passed, model: { verdict: 'mismatch', explanation: 'no' }, passed: false }
-    await handleReview(review(GOOD_JS), true, { runReview: async () => mismatch })
-    expect(await isApproved(GOOD_JS, undefined, [])).toBe(true)
+    const result = await handleReview(review(GOOD_JS), true, { runReview: async () => mismatch })
+    expect(await isApproved(result.approvalToken, GOOD_JS, undefined, [], BIND)).toBe(true)
   })
 
   it('refuses approve-code from a content script and records nothing', async () => {
-    const message: Extract<Message, { type: 'approve-code' }> = { type: 'approve-code', code: GOOD_JS, declaredCapabilities: [] }
+    const message: Extract<Message, { type: 'approve-code' }> = { type: 'approve-code', code: GOOD_JS, declaredCapabilities: [], ...BIND_FIELDS }
     await expect(handleApproveCode(message, false)).rejects.toThrow(/Only the extension/)
-    expect(await isApproved(GOOD_JS, undefined, [])).toBe(false)
+    expect(Object.keys(session)).toEqual([])
   })
 
   it('refuses approve-code for code that fails static analysis', async () => {
-    const message: Extract<Message, { type: 'approve-code' }> = { type: 'approve-code', code: BAD_JS, declaredCapabilities: [] }
+    const message: Extract<Message, { type: 'approve-code' }> = { type: 'approve-code', code: BAD_JS, declaredCapabilities: [], ...BIND_FIELDS }
     await expect(handleApproveCode(message, true)).rejects.toThrow(/Static analysis/)
-    expect(await isApproved(BAD_JS, undefined, [])).toBe(false)
+    expect(Object.keys(session)).toEqual([])
   })
 
-  it('control: approve-code from an extension page records the approval', async () => {
-    await handleApproveCode({ type: 'approve-code', code: GOOD_JS, declaredCapabilities: [] }, true)
-    expect(await isApproved(GOOD_JS, undefined, [])).toBe(true)
+  it('control: approve-code from an extension page records the approval and returns its token', async () => {
+    const { approvalToken } = await handleApproveCode(
+      { type: 'approve-code', code: GOOD_JS, declaredCapabilities: [], ...BIND_FIELDS },
+      true,
+    )
+    expect(await isApproved(approvalToken, GOOD_JS, undefined, [], BIND)).toBe(true)
   })
 })
 
