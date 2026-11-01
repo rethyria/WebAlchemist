@@ -330,12 +330,20 @@ function sameRegistration(held: Mv3RegisteredUserScript, wanted: Mv3RegisteredUs
  * blocked is removed. `previewed` lists the saved ids that have a preview
  * running: the preview registration (`previewIdFor(id)`) stays registered, and
  * the saved registration stays paused, as registerPreview left them.
+ *
+ * A preview is still code that runs on real pages, so the kill switch and the
+ * per-site off switch apply to it (#121). With the kill switch on, every
+ * preview registration is removed and its id is returned in `endedPreviews`,
+ * for the caller to take off the previewed list; nothing is registered in its
+ * place, because the saved script is not allowed to run either. With sites
+ * off, the preview registration is updated with the new `excludeMatches`, and
+ * the unsaved code is kept for the sites that remain on.
  */
 async function reregisterAllNow(
   previewed: string[] = [],
-): Promise<{ registered: number; skipped: number }> {
+): Promise<{ registered: number; skipped: number; endedPreviews: string[] }> {
   if (!(await hasUserScriptsPermission())) {
-    return { registered: 0, skipped: 0 }
+    return { registered: 0, skipped: 0, endedPreviews: [] }
   }
 
   const held = new Map<string, Mv3RegisteredUserScript>()
@@ -346,14 +354,33 @@ async function reregisterAllNow(
   }
 
   const transforms = await getAllTransforms()
-  const keep = previewed.map(previewIdFor)
+  const killed = (await getSettings()).aiJsKillSwitch
+  const endedPreviews = killed ? [...previewed] : []
+  const keep = killed ? [] : previewed.map(previewIdFor)
+  if (!killed) {
+    const offHosts = await getOffHosts()
+    for (const id of keep) {
+      const preview = held.get(id)
+      if (!preview) continue
+      const excludeMatches = offHosts.length > 0 ? excludePatternsFor(offHosts) : undefined
+      if (JSON.stringify(preview.excludeMatches ?? []) === JSON.stringify(excludeMatches ?? [])) continue
+      const { excludeMatches: _old, ...rest } = preview
+      try {
+        await userScripts.update([{ ...rest, ...(excludeMatches ? { excludeMatches } : {}) }])
+      } catch {
+        // A preview that cannot be updated is removed rather than left running
+        // on a site that is now off.
+        await userScripts.unregister({ ids: [id] }).catch(() => {})
+      }
+    }
+  }
   const wanted = new Set<string>()
   let registered = 0
   let skipped = 0
 
   for (const transform of transforms) {
     if (transform.kind !== 'js') continue
-    if (previewed.includes(transform.id)) continue
+    if (!killed && previewed.includes(transform.id)) continue
     try {
       const registration = await registrationFor(transform)
       if (!registration) continue
@@ -381,7 +408,7 @@ async function reregisterAllNow(
     }
   }
 
-  return { registered, skipped }
+  return { registered, skipped, endedPreviews }
 }
 
 /*
@@ -412,4 +439,5 @@ export const registerPreview = (transform: Transform): Promise<void> =>
 export const unregisterPreview = (id: string): Promise<void> => queued(() => unregisterPreviewNow(id))
 export const reregisterAll = (
   previewed: string[] = [],
-): Promise<{ registered: number; skipped: number }> => queued(() => reregisterAllNow(previewed))
+): Promise<{ registered: number; skipped: number; endedPreviews: string[] }> =>
+  queued(() => reregisterAllNow(previewed))

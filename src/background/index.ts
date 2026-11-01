@@ -136,7 +136,8 @@ function endPreviewScript(id: string): Promise<void> {
 /** Rebuilds registrations from storage, leaving preview scripts registered. */
 function reregister(): Promise<void> {
   return inRegistryQueue(async () => {
-    await reregisterAll(await previewedScriptIds())
+    const { endedPreviews } = await reregisterAll(await previewedScriptIds())
+    for (const id of endedPreviews) await removePreviewedScript(id)
   })
 }
 

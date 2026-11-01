@@ -129,3 +129,43 @@ describe('turning off one site', () => {
     )
   })
 })
+
+describe('a JavaScript preview and the switches (#121)', () => {
+  const startPreview = () =>
+    ask({ type: 'preview-js', tabId: A, transform: { ...js, code: 'document.title = "unsaved"' } })
+
+  it('is registered while no switch is on (control)', async () => {
+    await startPreview()
+    expect(h.userScriptsHeld.has('preview-js-a')).toBe(true)
+    expect(h.session.get('wa-preview-scripts')).toEqual(['js-a'])
+  })
+
+  it('is unregistered and taken off the previewed list when the kill switch turns on', async () => {
+    await startPreview()
+    await setSwitch(true)
+    expect(h.userScriptsHeld.has('preview-js-a')).toBe(false)
+    expect(h.userScriptsHeld.has('js-a')).toBe(false)
+    const { previewedScriptIds } = await import('./css-state')
+    expect(await previewedScriptIds()).toEqual([])
+  })
+
+  it('does not bring the saved script back while the kill switch is on', async () => {
+    await startPreview()
+    await setSwitch(true)
+    expect([...h.userScriptsHeld.keys()]).toEqual([])
+  })
+
+  it('is registered with the host excluded when that site is turned off', async () => {
+    await startPreview()
+    await ask({ type: 'set-site-off', url: 'https://a.example/page', off: true })
+    expect(h.userScriptsHeld.get('preview-js-a').excludeMatches).toEqual(['*://a.example/*'])
+    expect(h.userScriptsHeld.get('preview-js-a').js[0].code).toContain('unsaved')
+  })
+
+  it('excludes only the host that was turned off', async () => {
+    await startPreview()
+    await ask({ type: 'set-site-off', url: 'https://b.example/page', off: true })
+    expect(h.userScriptsHeld.get('preview-js-a').excludeMatches).toEqual(['*://b.example/*'])
+    expect(h.userScriptsHeld.has('preview-js-a')).toBe(true)
+  })
+})
