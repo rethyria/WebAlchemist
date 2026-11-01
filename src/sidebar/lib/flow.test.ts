@@ -1024,3 +1024,74 @@ describe('including the drawn region', () => {
     expect(capture?.scrolledTo).toEqual({ x: 0, y: 340 })
   })
 })
+
+describe('cancelling while the preview is applied', () => {
+  beforeEach(() => {
+    ports.length = 0
+    ;(globalThis as any).browser.runtime.connect = fakeConnect
+  })
+  afterEach(() => {
+    ;(globalThis as any).browser.runtime.connect = realConnect
+  })
+
+  /** Holds the first preview-css request until the test lets it through. */
+  function holdPreview() {
+    let release: () => void = () => {}
+    const gate = new Promise<void>((resolve) => (release = resolve))
+    handler = async (m) => {
+      if (m.type === 'preview-css' && m.css === '/* A2 */') await gate
+      return { ok: true, data: null }
+    }
+    return release
+  }
+  const previews = () =>
+    calls.filter((c) => c.type === 'preview-css' || c.type === 'clear-preview-css')
+
+  it('returns to the previous result and puts its CSS back on the page', async () => {
+    const flow = flowAtRefining()
+    flow.followUp = 'second'
+    const release = holdPreview()
+    const run = flow.regenerate()
+    ;(await nextPort(1)).emit({ type: 'done', result: cssResult('A2') })
+    await vi.waitFor(() =>
+      expect(calls.some((c) => c.type === 'preview-css' && c.css === '/* A2 */')).toBe(true),
+    )
+
+    flow.cancelGenerating()
+    // Control: before the fix the marker was already cleared here, so Cancel
+    // discarded the run and the step was 'list'.
+    expect(flow.step).toBe('refining')
+    expect(flow.result?.rationale.approach).toBe('A1')
+    expect(flow.followUp).toBe('second')
+
+    release()
+    await run
+    // The late CSS is removed, then the previous result's CSS is applied.
+    const last = previews().slice(-2)
+    expect(last.map((c) => c.type)).toEqual(['clear-preview-css', 'preview-css'])
+    expect(last[1].css).toBe('/* A1 */')
+    expect(flow.result?.rationale.approach).toBe('A1')
+    expect(flow.step).toBe('refining')
+  })
+
+  it('removes the late CSS of a first generation that was cancelled', async () => {
+    const flow = newFlow()
+    flow.picked = { ...found, cropDrawn: false } as any
+    flow.instruction = 'first'
+    flow.step = 'describing'
+    const release = holdPreview()
+    const run = flow.generate()
+    ;(await nextPort(1)).emit({ type: 'done', result: cssResult('A2') })
+    await vi.waitFor(() =>
+      expect(calls.some((c) => c.type === 'preview-css' && c.css === '/* A2 */')).toBe(true),
+    )
+    flow.cancelGenerating()
+    await vi.waitFor(() => expect(flow.step).toBe('list'))
+
+    release()
+    await run
+    // The last request is a removal, so nothing from the cancelled attempt stays.
+    expect(previews().at(-1)?.type).toBe('clear-preview-css')
+    expect(previews().filter((c) => c.type === 'preview-css')).toHaveLength(1)
+  })
+})

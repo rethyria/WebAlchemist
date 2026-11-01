@@ -1082,12 +1082,34 @@ export class Flow {
    * old result's rationale as the assistant's answer to a request it never
    * answered.
    */
-  private refinement: { history: RefinementTurn[]; instruction: string; followUp: string } | null = null
+  private refinement: {
+    history: RefinementTurn[]
+    instruction: string
+    followUp: string
+    /**
+     * The result the attempt replaced, set when the new result is stored. The
+     * marker has to outlive that point, until the new preview is on the page,
+     * because Cancel during the preview stage must still return to the
+     * previous result and not discard the run.
+     */
+    previous?: {
+      result: GenerationResult | null
+      draft: Transform | null
+      analysis: ReviewResult | null
+      intent: string
+    }
+  } | null = null
 
   private undoRefinement(): void {
     const held = this.refinement
     this.refinement = null
     if (!held) return
+    if (held.previous) {
+      this.result = held.previous.result
+      this.draft = held.previous.draft
+      this.analysis = held.previous.analysis
+      this.intent = held.previous.intent
+    }
     this.history = held.history
     this.instruction = held.instruction
     this.followUp = held.followUp
@@ -1192,6 +1214,14 @@ export class Flow {
           : { static: [], undeclaredCapabilities: [], passed: true }
       if (!current()) return
 
+      if (this.refinement) {
+        this.refinement.previous = {
+          result: this.result,
+          draft: this.draft,
+          analysis: this.analysis,
+          intent: this.intent,
+        }
+      }
       this.result = result
       this.intent = result.intent
       // Keep the user's scope choice across a regeneration; only seed it once.
@@ -1201,18 +1231,29 @@ export class Flow {
         ''
       this.draft = this.buildDraft(result, picked.anchor)
       this.analysis = analysis
-      this.refinement = null
 
       this.stage = 'preview'
       await this.applyPreview(result)
-      if (!current()) return
+      if (!current()) {
+        // Cancelled, discarded or reset while the preview was being applied.
+        // The request to add the new CSS may have been processed after that
+        // happened, and nothing else knows about it: discard and reset read
+        // previewedCss, which was still empty while the request was in flight.
+        await this.removeLatePreview()
+        return
+      }
+      this.refinement = null
       this.step = 'refining'
     } catch (cause) {
       if (!current()) return
       // Back where they started, with what they typed intact — a failed
       // request should not cost the user their description.
       this.step = from === 'refining' ? 'refining' : 'describing'
+      // A failure while the new preview was applied has already removed the
+      // previous result's CSS, so it is put back along with the result.
+      const replacedResult = this.refinement?.previous !== undefined
       this.undoRefinement()
+      if (replacedResult) await this.removeLatePreview()
       this.fail(cause, again)
     } finally {
       this.stopClock()
@@ -1421,6 +1462,22 @@ export class Flow {
     await this.clearPreview()
     await send({ type: 'preview-css', tabId: this.tabId, css: result.code })
     this.previewedCss = result.code
+  }
+
+  /**
+   * Takes out CSS that a cancelled attempt applied after it was cancelled, and
+   * for a refinement that went back to its previous result, puts that result's
+   * CSS on the page again, since applyPreview had already removed it.
+   */
+  private async removeLatePreview(): Promise<void> {
+    if (this.tabId === null) return
+    await send({ type: 'clear-preview-css', tabId: this.tabId, css: '' }).catch(() => {})
+    this.previewedCss = null
+    const back = this.step === 'refining' ? this.result : null
+    if (back?.kind === 'css') {
+      await send({ type: 'preview-css', tabId: this.tabId, css: back.code }).catch(() => {})
+      this.previewedCss = back.code
+    }
   }
 
   /**
