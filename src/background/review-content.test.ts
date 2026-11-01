@@ -121,6 +121,22 @@ describe('reviewContent with a saved description', () => {
   })
 })
 
+describe('the label on the intent field (#52)', () => {
+  const base = { code: 'x', intent: 'Hide the promo', instructions: [] }
+
+  it('says the generating model wrote it when the user did not change it', () => {
+    const text = reviewContent(base, 'n')
+    expect(text).toContain('written by the generating model, not by the user')
+    expect(text).not.toContain('edited by the user')
+  })
+
+  it('says the user edited it when the user did', () => {
+    const text = reviewContent({ ...base, intentEditedByUser: true }, 'n')
+    expect(text).toContain('first written by the generating model, then edited by the user')
+    expect(text).not.toContain('written by the generating model, not by the user')
+  })
+})
+
 describe('the review system prompt', () => {
   it('names the user as the yardstick and the code as data', () => {
     expect(REVIEW_SYSTEM_PROMPT).toMatch(/user's instructions are the yardstick/)

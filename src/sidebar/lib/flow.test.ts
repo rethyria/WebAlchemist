@@ -1511,3 +1511,42 @@ describe('the review is told where a pre-filled instruction came from (#52)', ()
     expect(lastReview().instructions).toEqual([{ text: 'STORED INTENT', source: 'typed' }])
   })
 })
+
+describe('the review is told whether the user edited the intent (#52)', () => {
+  const lastReview = () => calls.filter((c) => c.type === 'review').at(-1)
+  const handlers = (m: any) => {
+    if (m.type === 'review') return { ok: true, data: { static: [], undeclaredCapabilities: [], passed: true } }
+    return { ok: true, data: null }
+  }
+
+  it('flags an intent that differs from the one the model returned', async () => {
+    const flow = flowAtApprove()
+    flow.intentBaseline = 'model intent'
+    flow.intent = 'edited intent'
+    handler = handlers
+    await flow.toReview()
+    expect(lastReview().intentEditedByUser).toBe(true)
+  })
+
+  it('control: does not flag an intent left as the model returned it', async () => {
+    const flow = flowAtApprove()
+    flow.intentBaseline = 'model intent'
+    flow.intent = 'model intent'
+    handler = handlers
+    await flow.toReview()
+    expect(lastReview().intentEditedByUser).toBe(false)
+  })
+
+  it('control: does not flag a stored intent after Repair, which differs from the new result', async () => {
+    const flow = newFlow()
+    handler = (m) => {
+      if (m.type === 'context-for-anchor') return { ok: true, data: found }
+      if (m.type === 'repair') return { ok: true, data: { result: { ...jsResult, intent: 'new model intent' } } }
+      return handlers(m)
+    }
+    await flow.repair({ ...saved, kind: 'js', intent: 'STORED' }, 'broken')
+    await flow.toReview()
+    expect(lastReview().intent).toBe('STORED')
+    expect(lastReview().intentEditedByUser).toBe(false)
+  })
+})

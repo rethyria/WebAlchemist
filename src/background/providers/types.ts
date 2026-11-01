@@ -36,6 +36,8 @@ export interface ReviewArgs {
   code: string
   /** The generator's summary of the intent. The model wrote it. */
   intent: string
+  /** True when the user changed the intent after the model returned it. */
+  intentEditedByUser?: boolean
   /**
    * Every instruction behind this transform, verbatim, in order, each with its
    * source. The message and the background entry point require it; it is

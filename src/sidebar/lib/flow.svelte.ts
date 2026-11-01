@@ -242,6 +242,12 @@ export class Flow {
   permissionDenied = $state(false)
 
   intent = $state('')
+  /**
+   * What `intent` was before the user could edit it: the model's `result.intent`
+   * after a generation, or the stored intent after Repair or Edit with AI. The
+   * review is told the intent was edited by the user when the two differ.
+   */
+  intentBaseline = ''
   matchPattern = $state('')
   review = $state<ReviewResult | null>(null)
 
@@ -884,6 +890,7 @@ export class Flow {
       // What a regeneration from the refining panel will build on.
       this.matchPattern = transform.match
       this.intent = transform.intent
+      this.intentBaseline = transform.intent
       this.prefillInstruction(transform.intent)
       this.history = []
       this.references = []
@@ -908,6 +915,7 @@ export class Flow {
       this.result = result
       // Not result.intent: the destination was never what broke.
       this.intent = transform.intent
+      this.intentBaseline = transform.intent
       this.draft = this.buildDraft(result, found.anchor)
 
       this.stage = 'analysis'
@@ -1013,6 +1021,7 @@ export class Flow {
       this.enterDescribing()
       this.prefillInstruction(transform.intent)
       this.intent = transform.intent
+      this.intentBaseline = transform.intent
       await this.restoreScopeDepth(transform)
       if (!current()) return
 
@@ -1069,6 +1078,7 @@ export class Flow {
       this.picked = { ...found, cropDrawn: false }
       this.matchPattern = transform.match
       this.intent = transform.intent
+      this.intentBaseline = transform.intent
       this.prefillInstruction(transform.intent)
       this.references = []
       this.followUp = ''
@@ -1153,6 +1163,7 @@ export class Flow {
       draft: Transform | null
       analysis: ReviewResult | null
       intent: string
+      intentBaseline: string
     }
   } | null = null
 
@@ -1194,6 +1205,7 @@ export class Flow {
       this.draft = held.previous.draft
       this.analysis = held.previous.analysis
       this.intent = held.previous.intent
+      this.intentBaseline = held.previous.intentBaseline
     }
     this.history = held.history
     this.instruction = held.instruction
@@ -1309,10 +1321,12 @@ export class Flow {
           draft: this.draft,
           analysis: this.analysis,
           intent: this.intent,
+          intentBaseline: this.intentBaseline,
         }
       }
       this.result = result
       this.intent = result.intent
+      this.intentBaseline = result.intent
       // Keep the user's scope choice across a regeneration; only seed it once.
       this.matchPattern ||=
         this.matchPresets.find((p) => p.recommended)?.pattern ??
@@ -1811,6 +1825,7 @@ export class Flow {
         // pre-filled stored intent the user has not changed (see
         // reviewInstructions).
         intent: this.intent,
+        intentEditedByUser: this.intent !== this.intentBaseline,
         instructions: this.reviewInstructions(),
         declaredCapabilities: result.capabilities,
         transformId: this.transformKey(),
@@ -2159,6 +2174,7 @@ export class Flow {
     this.analysis = null
     this.permissionDenied = false
     this.intent = ''
+    this.intentBaseline = ''
     this.matchPattern = ''
     this.review = null
     this.stage = 'context'

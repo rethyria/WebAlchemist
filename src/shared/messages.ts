@@ -74,6 +74,8 @@ export type Message =
       code: string
       /** The generator's summary of the intent. */
       intent: string
+      /** True when the user changed the intent after the model returned it. */
+      intentEditedByUser?: boolean
       /**
        * Every instruction, verbatim and in order, with where it came from. Only
        * the typed ones are the reviewer's yardstick.
