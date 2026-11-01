@@ -5,6 +5,9 @@ describe('hostOfUrl', () => {
   it('returns the lower-case host without port, path or query', () => {
     expect(hostOfUrl('https://WWW.Example.com:8443/a?b=1#c')).toBe('www.example.com')
   })
+  it('drops one trailing dot', () => {
+    expect(hostOfUrl('https://www.example.com./a')).toBe('www.example.com')
+  })
   it('returns null for addresses that are not websites', () => {
     expect(hostOfUrl('about:blank')).toBeNull()
     expect(hostOfUrl('moz-extension://abc/page.html')).toBeNull()

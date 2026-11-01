@@ -9,6 +9,11 @@ describe('normalizeExcludedEntry', () => {
     expect(normalizeExcludedEntry('  mail.test  ')).toBe('mail.test')
   })
 
+  it('drops one trailing dot, so a fully qualified name is the same entry', () => {
+    expect(normalizeExcludedEntry('bank.example.')).toBe('bank.example')
+    expect(normalizeExcludedEntry('https://bank.example./login')).toBe('bank.example')
+  })
+
   it('refuses text that is not a site name', () => {
     expect(normalizeExcludedEntry('')).toBeNull()
     expect(normalizeExcludedEntry('   ')).toBeNull()
@@ -23,6 +28,10 @@ describe('excludedHostFor', () => {
   it('covers the host and its subdomains', () => {
     expect(excludedHostFor(list, 'https://bank.example/')).toBe('bank.example')
     expect(excludedHostFor(list, 'https://login.bank.example/a')).toBe('login.bank.example')
+  })
+  it('covers a host written with a trailing dot, and its subdomains', () => {
+    expect(excludedHostFor(list, 'https://bank.example./')).toBe('bank.example')
+    expect(excludedHostFor(list, 'https://login.bank.example./a')).toBe('login.bank.example')
   })
   it('does not cover another host that ends with the same letters (control)', () => {
     expect(excludedHostFor(list, 'https://notbank.example/')).toBeNull()

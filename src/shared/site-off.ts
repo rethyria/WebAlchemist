@@ -11,7 +11,10 @@
 export function hostOfUrl(rawUrl: string): string | null {
   try {
     const url = new URL(rawUrl)
-    return url.protocol === 'http:' || url.protocol === 'https:' ? url.hostname.toLowerCase() : null
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return null
+    // A fully qualified name ends with a dot and reaches the same site, so
+    // https://bank.example./ must not slip past a list entry for bank.example (#131).
+    return url.hostname.toLowerCase().replace(/\.$/, '')
   } catch {
     return null
   }
