@@ -7,6 +7,7 @@
 import type { ImportResult } from '@background/storage'
 import type { PlannedTransform } from '@background/transfer'
 import { MIN_PASSPHRASE_LENGTH } from '@shared/vault-policy'
+import { t } from '@shared/i18n'
 
 /** `web-alchemist-share-2026-11-01.json`: the mode and the local date, with `-encrypted` for an encrypted file. */
 export function exportFileName(mode: string, now: Date, encrypted = false): string {
@@ -44,7 +45,7 @@ export function parseBundleText(text: string): unknown {
   try {
     return JSON.parse(text)
   } catch {
-    throw new Error('This file is not valid JSON, so it cannot be a Web Alchemist export.')
+    throw new Error(t('optFileNotJson'))
   }
 }
 
@@ -78,41 +79,41 @@ export function requestImportOrigins(
  * contains, since the user cannot see that from the button.
  */
 export const EXPORT_WARNING =
-  'The file contains text taken from the pages the transforms were written for (the start of the text of each element they target), the descriptions of the transforms, and the addresses they apply to. On a mail, banking or health site that text can be personal. The file is saved as plain text unless it is encrypted with a passphrase. Anyone with the passphrase and the file can read it, and a forgotten passphrase cannot be recovered.'
+  t('optExportWarning')
 
 /** The reason a passphrase for an export cannot be used yet, or null when it can. */
 export function passphraseProblem(passphrase: string, confirmation: string): string | null {
   if (passphrase.length < MIN_PASSPHRASE_LENGTH) {
-    return `The passphrase must be at least ${MIN_PASSPHRASE_LENGTH} characters long.`
+    return t('optPassphraseShort', MIN_PASSPHRASE_LENGTH)
   }
-  if (passphrase !== confirmation) return 'The two passphrases are not the same.'
+  if (passphrase !== confirmation) return t('optPassphraseMismatch')
   return null
 }
 
-/** One sentence for the number of records, such as "3 transforms". */
-const count = (n: number): string => `${n} ${n === 1 ? 'transform' : 'transforms'}`
-
 /** What the user is told after an import. */
 export function describeResult(result: ImportResult, accessGranted: boolean): string {
-  const parts = [`Imported ${count(result.imported)}. They are all turned off.`]
-  if (result.needsRegeneration.length > 0) {
+  const parts = [
+    result.imported === 1 ? t('optResultImportedOne') : t('optResultImported', result.imported),
+  ]
+  const regenerating = result.needsRegeneration.length
+  if (regenerating > 0) {
     parts.push(
-      `${count(result.needsRegeneration.length)} ${result.needsRegeneration.length === 1 ? 'has' : 'have'} no code and ${result.needsRegeneration.length === 1 ? 'needs' : 'need'} regenerating from the description.`,
+      regenerating === 1 ? t('optResultRegenOne') : t('optResultRegen', regenerating),
     )
   }
   const awaiting = result.items.filter((item) => item.status === 'import' && item.needsApproval).length
   if (awaiting > 0) {
+    parts.push(awaiting === 1 ? t('optResultAwaitingOne') : t('optResultAwaiting', awaiting))
+  }
+  if (result.settingsRestored) parts.push(t('optResultSettings'))
+  if (result.duplicates > 0) {
     parts.push(
-      `${count(awaiting)} ${awaiting === 1 ? 'was' : 'were'} restored with JavaScript code. Each stays off until its code has been read and approved in the sidebar.`,
+      result.duplicates === 1 ? t('optResultDuplicateOne') : t('optResultDuplicates', result.duplicates),
     )
   }
-  if (result.settingsRestored) parts.push('The accent colour and health check mode were restored.')
-  if (result.duplicates > 0) parts.push(`${count(result.duplicates)} already saved and skipped.`)
-  if (result.skipped > 0) parts.push(`${count(result.skipped)} refused.`)
-  if (!accessGranted && result.imported > 0) {
-    parts.push(
-      'Access to the sites was not granted, so the imported transforms show "No access to this site" until it is.',
-    )
+  if (result.skipped > 0) {
+    parts.push(result.skipped === 1 ? t('optResultRefusedOne') : t('optResultRefused', result.skipped))
   }
+  if (!accessGranted && result.imported > 0) parts.push(t('optResultNoAccess'))
   return parts.join(' ')
 }

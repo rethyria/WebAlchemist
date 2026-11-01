@@ -1,6 +1,8 @@
 import type { CatalogueEntry } from './define'
 import { disclosureMessages } from './disclosure'
+import { editorMessages } from './editor'
 import { manifestMessages } from './manifest'
+import { optionsMessages } from './options'
 import { sharedMessages } from './shared'
 import { sidebarMessages } from './sidebar'
 
@@ -14,7 +16,9 @@ import { sidebarMessages } from './sidebar'
  */
 export const EN_CATALOGUE = {
   ...disclosureMessages,
+  ...editorMessages,
   ...manifestMessages,
+  ...optionsMessages,
   ...sharedMessages,
   ...sidebarMessages,
 } as const satisfies Record<string, CatalogueEntry>

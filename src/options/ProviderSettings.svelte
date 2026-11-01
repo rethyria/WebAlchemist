@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from '@shared/i18n'
   import { radioGroup } from '@shared/radio-group'
   import { focusOnMount } from '@sidebar/lib/focus'
   /**
@@ -90,7 +91,7 @@
       // The identity API is missing in this browser, or its permission was not
       // granted. Saying so beats rendering "undefined" next to "register this
       // with your provider".
-      return 'unavailable in this browser'
+      return t('optRedirectUnavailable')
     }
   })
 
@@ -144,8 +145,8 @@
     { value: 'anthropic', label: 'Anthropic', hint: 'api.anthropic.com' },
     {
       value: 'openai-compatible',
-      label: 'OpenAI-compatible',
-      hint: 'Any endpoint speaking the OpenAI chat API',
+      label: t('optTypeOpenAi'),
+      hint: t('optTypeOpenAiHint'),
     },
   ]
 
@@ -169,7 +170,7 @@
     try {
       return new URL(provider.baseUrl ?? '').host
     } catch {
-      return provider.baseUrl ?? 'not set'
+      return provider.baseUrl ?? t('optHostNotSet')
     }
   }
 
@@ -284,16 +285,15 @@
 </script>
 
 <section>
-  <h2>Providers</h2>
+  <h2>{t('optProviders')}</h2>
 
   {#if settings.providers.length === 0 && !adding}
     <div class="none">
       <p>
-        No provider is set up. Nothing can be generated until one is — Anthropic,
-        or any endpoint speaking the OpenAI chat API.
+        {t('optNoProvider')}
       </p>
       <Button variant="primary" small onclick={() => (adding = true)}>
-        Add a provider
+        {t('errAddProvider')}
       </Button>
     </div>
   {:else}
@@ -306,10 +306,10 @@
             <div class="identity">
               <div class="name-line">
                 <span class="name">{provider.label}</span>
-                {#if active}<span class="chip">ACTIVE</span>{/if}
+                {#if active}<span class="chip">{t('settingsActive')}</span>{/if}
               </div>
               <span class="host">
-                {hostFor(provider)} · {status?.kind === 'oauth' ? 'OAuth' : 'API key'}
+                {hostFor(provider)} · {status?.kind === 'oauth' ? t('optOauth') : t('optApiKey')}
               </span>
             </div>
 
@@ -321,10 +321,10 @@
                   a request that will fail is the misleading state this replaces.
                 -->
                 <span class="missing">
-                  {status.kind === 'oauth' ? 'Sign in again' : 'Enter the key again'} for this provider
+                  {status.kind === 'oauth' ? t('settingsSignInAgain') : t('settingsEnterKeyAgain')}
                 </span>
               {:else if status?.configured && status.kind === 'oauth'}
-                <span class="configured">Signed in</span>
+                <span class="configured">{t('optSignedIn')}</span>
                 {#if status.expiresAt}
                   <!--
                     Shown because a token dies on a schedule and a key does not.
@@ -333,17 +333,17 @@
                     arrive as an unexplained failure mid-generation.
                   -->
                   <span class="expiry">
-                    until {new Date(status.expiresAt).toLocaleString()}{status.renewable === false
-                      ? ', then sign in again'
-                      : ''}
+                    {status.renewable === false
+                      ? t('optUntilThenSignIn', new Date(status.expiresAt).toLocaleString())
+                      : t('optUntil', new Date(status.expiresAt).toLocaleString())}
                   </span>
                 {:else if status.renewable === false}
-                  <span class="expiry">no refresh token; sign in again when it ends</span>
+                  <span class="expiry">{t('optNoRefresh')}</span>
                 {/if}
               {:else if status?.configured}
-                <span class="configured">Key configured</span>
+                <span class="configured">{t('settingsKeyConfigured')}</span>
               {:else}
-                <span class="missing">No credential</span>
+                <span class="missing">{t('settingsNoCredential')}</span>
               {/if}
             </div>
           </div>
@@ -355,7 +355,7 @@
                 onclick={() =>
                   void onchange({ kind: 'fields', fields: { activeProviderId: provider.id } })}
               >
-                Make active
+                {t('optMakeActive')}
               </Button>
             {/if}
             <Button
@@ -365,7 +365,7 @@
                 keyInput = ''
               }}
             >
-              {status?.configured ? 'Replace key' : 'Set key'}
+              {status?.configured ? t('optReplaceKey') : t('optSetKey')}
             </Button>
             {#if provider.type !== 'anthropic'}
               <!--
@@ -376,24 +376,24 @@
                 refuses it as well, so hiding the button is not the only guard.
               -->
               <Button small onclick={() => openOAuth(provider)}>
-                {provider.oauth ? 'Sign-in settings' : 'Use sign-in instead'}
+                {provider.oauth ? t('optSignInSettings') : t('optUseSignIn')}
               </Button>
             {/if}
             {#if status?.configured}
-              <Button small onclick={() => void onclearkey(provider.id)}>Clear</Button>
+              <Button small onclick={() => void onclearkey(provider.id)}>{t('optClear')}</Button>
             {/if}
-            <Button small onclick={() => void removeProvider(provider)}>Remove</Button>
+            <Button small onclick={() => void removeProvider(provider)}>{t('optRemove')}</Button>
           </div>
 
           <div class="models" id={active ? 'models' : undefined}>
             <ModelPicker
-              label="Writes the code"
+              label={t('settingsWritesCode')}
               value={provider.generateModel}
               onchange={(model) => void setModel(provider, 'generateModel', model)}
             />
             <ModelPicker
-              label="Reviews the code"
-              hint="code and intent only"
+              label={t('settingsReviewsCode')}
+              hint={t('settingsReviewNote')}
               value={provider.reviewModel}
               onchange={(model) => void setModel(provider, 'reviewModel', model)}
             />
@@ -405,9 +405,9 @@
               read, so the totals show tokens only until a price is entered.
             -->
             <div class="price">
-              <span class="price-label">Price, US dollars per million tokens (optional)</span>
+              <span class="price-label">{t('optPriceLabel')}</span>
               <label>
-                Input
+                {t('optPriceInput')}
                 <input
                   type="number"
                   min="0"
@@ -421,7 +421,7 @@
                 />
               </label>
               <label>
-                Output
+                {t('optPriceOutput')}
                 <input
                   type="number"
                   min="0"
@@ -443,8 +443,8 @@
                 type="password"
                 bind:value={keyInput}
                 placeholder={status?.configured
-                  ? 'New key — replaces the stored one'
-                  : 'Paste the key'}
+                  ? t('optKeyReplacePlaceholder')
+                  : t('optKeyPastePlaceholder')}
                 autocomplete="off"
                 spellcheck="false"
                 onkeydown={(event) => {
@@ -457,7 +457,7 @@
                 disabled={!keyInput.trim() || busy}
                 onclick={() => void saveKey(provider.id)}
               >
-                Save
+                {t('optSave')}
               </Button>
             </div>
           {/if}
@@ -465,43 +465,41 @@
           {#if editingOAuthFor === provider.id}
             <div class="oauth">
               <p class="explain">
-                From the provider's own documentation. Web Alchemist opens their
-                sign-in page and stores the token it returns; the token is held
-                the same way an API key is and never reaches this page.
+                {t('optOauthExplain')}
               </p>
               <label>
-                Authorization endpoint
+                {t('optOauthAuthEndpoint')}
                 <input
                   bind:value={oauthDraft.authorizationEndpoint}
-                  placeholder="https://provider.example/oauth/authorize"
+                  placeholder={t('optOauthAuthPlaceholder')}
                   spellcheck="false"
                   autocomplete="off"
                 />
               </label>
               <label>
-                Token endpoint
+                {t('optOauthTokenEndpoint')}
                 <input
                   bind:value={oauthDraft.tokenEndpoint}
-                  placeholder="https://provider.example/oauth/token"
+                  placeholder={t('optOauthTokenPlaceholder')}
                   spellcheck="false"
                   autocomplete="off"
                 />
               </label>
               <label>
-                Client ID
+                {t('optOauthClientId')}
                 <input bind:value={oauthDraft.clientId} spellcheck="false" autocomplete="off" />
               </label>
               <label>
-                Scopes
+                {t('optOauthScopes')}
                 <input
                   bind:value={oauthDraft.scopes}
-                  placeholder="space separated, or leave empty"
+                  placeholder={t('optOauthScopesPlaceholder')}
                   spellcheck="false"
                   autocomplete="off"
                 />
               </label>
               <p class="explain">
-                Register <code>{redirectUrl}</code> as the redirect URI with the provider.
+                {t('optRedirect', redirectUrl)}
               </p>
               {#if oauthError}
                 <p class="oauth-error">{oauthError}</p>
@@ -512,7 +510,7 @@
                 disabled={!oauthDraftValid || busy}
                 onclick={() => void connectOAuth(provider)}
               >
-                {busy ? 'Waiting for the provider…' : 'Sign in'}
+                {busy ? t('optWaiting') : t('optSignIn')}
               </Button>
             </div>
           {/if}
@@ -521,13 +519,13 @@
     </ul>
 
     {#if !adding}
-      <Button small onclick={() => (adding = true)}>Add another provider</Button>
+      <Button small onclick={() => (adding = true)}>{t('optAddAnother')}</Button>
     {/if}
   {/if}
 
   {#if adding}
     <div class="add">
-      <div class="types" role="radiogroup" aria-label="Provider type" use:radioGroup>
+      <div class="types" role="radiogroup" aria-label={t('optProviderType')} use:radioGroup>
         {#each TYPES as type}
           <button
             type="button"
@@ -544,57 +542,57 @@
       </div>
 
       <label>
-        <span class="field-label">Name</span>
+        <span class="field-label">{t('optFieldName')}</span>
         <input
           type="text"
           bind:value={draftLabel}
           use:focusOnMount
-          placeholder={draftType === 'anthropic' ? 'Anthropic' : 'Local llama.cpp'}
+          placeholder={draftType === 'anthropic' ? t('optNameAnthropic') : t('optNameLocal')}
           autocomplete="off"
         />
       </label>
 
       {#if draftType === 'openai-compatible'}
         <label>
-          <span class="field-label">Base URL</span>
+          <span class="field-label">{t('optBaseUrl')}</span>
           <input
             type="url"
             bind:value={draftBaseUrl}
-            placeholder="https://example.com/v1"
+            placeholder={t('optBaseUrlPlaceholder')}
             autocomplete="off"
             spellcheck="false"
           />
           {#if draftBaseUrl && !isValidUrl(draftBaseUrl)}
             <span class="field-error">
-              Needs to be an https URL, or localhost.
+              {t('optBaseUrlError')}
             </span>
           {/if}
         </label>
       {/if}
 
       <label>
-        <span class="field-label">API key</span>
+        <span class="field-label">{t('optApiKeyLabel')}</span>
         <input
           type="password"
           bind:value={draftKey}
-          placeholder="Paste the key"
+          placeholder={t('optKeyPastePlaceholder')}
           autocomplete="off"
           spellcheck="false"
         />
         <span class="field-note">
-          Stored as plain text in this browser profile — see below.
+          {t('optKeyPlain')}
         </span>
       </label>
 
       <div class="add-actions">
-        <Button small onclick={resetDraft}>Cancel</Button>
+        <Button small onclick={resetDraft}>{t('cancel')}</Button>
         <Button
           variant="primary"
           small
           disabled={!draftValid || busy}
           onclick={() => void addProvider()}
         >
-          Add provider
+          {t('optAddProvider')}
         </Button>
       </div>
     </div>
@@ -793,10 +791,8 @@
     color: var(--text-dim);
   }
 
-  .oauth code {
-    font: 11px var(--font-mono);
-    color: var(--text);
-    word-break: break-all;
+  .oauth .explain {
+    overflow-wrap: anywhere;
   }
 
   .oauth-error {

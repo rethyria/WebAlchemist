@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from '@shared/i18n'
   /**
    * The sites the extension can read, with the transforms that depend on each.
    *
@@ -42,7 +43,7 @@
     removing = origin
     try {
       const removed = await browser.permissions.remove({ origins: [origin] })
-      if (!removed) error = `Access to ${origin} could not be removed.`
+      if (!removed) error = t('optAccessNotRemoved', origin)
       await refresh()
     } catch (cause) {
       error = String(cause instanceof Error ? cause.message : cause)
@@ -53,8 +54,10 @@
 
   const describeCount = (count: number): string =>
     count === 0
-      ? 'No transforms use this site'
-      : `${count} ${count === 1 ? 'transform uses' : 'transforms use'} this site`
+      ? t('optUsesNone')
+      : count === 1
+        ? t('optUsesOne')
+        : t('optUsesMany', count)
 
   $effect(() => {
     void refresh()
@@ -70,10 +73,9 @@
 </script>
 
 <section>
-  <h2>Site access</h2>
+  <h2>{t('optSiteAccessTitle')}</h2>
   <p class="subtitle">
-    The sites Web Alchemist can read and change. Removing access stops its transforms from
-    running there until access is granted again.
+    {t('optSiteAccessBody')}
   </p>
 
   {#if error}
@@ -81,7 +83,7 @@
   {/if}
 
   {#if loaded && grants.length === 0}
-    <p class="empty">Web Alchemist has no access to any site.</p>
+    <p class="empty">{t('optNoAccess')}</p>
   {:else}
     <ul>
       {#each grants as grant (grant.origin)}
@@ -91,7 +93,7 @@
             <span class="count">{describeCount(grant.transforms)}</span>
           </div>
           <Button small disabled={removing === grant.origin} onclick={() => void remove(grant)}>
-            Remove access
+            {t('optRemoveAccess')}
           </Button>
         </li>
       {/each}

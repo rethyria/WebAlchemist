@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from '@shared/i18n'
   /**
    * What model calls have used, from the totals the background records.
    *
@@ -28,28 +29,28 @@
   )
 
   function labelOf(providerId: string): string {
-    return providers.find((p) => p.id === providerId)?.label ?? 'Removed provider'
+    return providers.find((p) => p.id === providerId)?.label ?? t('optUsageRemovedProvider')
   }
 
   function summary(totals: UsageTotals): string {
     const parts: string[] = []
     if (totals.reportedCalls > 0) {
       parts.push(
-        `${formatTokens(totals.inputTokens)} tokens in, ${formatTokens(totals.outputTokens)} out`,
+        t('usageTokens', formatTokens(totals.inputTokens), formatTokens(totals.outputTokens)),
       )
     }
     const unreported = totals.calls - totals.reportedCalls
     if (unreported > 0) {
       parts.push(
         totals.reportedCalls === 0
-          ? 'not reported'
-          : `${unreported} of ${totals.calls} calls not reported`,
+          ? t('optUsageNotReported')
+          : t('optUsageSomeNotReported', unreported, totals.calls),
       )
     }
     if (totals.pricedCalls > 0) {
       parts.push(
         totals.pricedCalls < totals.reportedCalls
-          ? `${formatCost(totals.costUsd)} (${totals.pricedCalls} of ${totals.reportedCalls} calls priced)`
+          ? t('optUsageCostPartial', formatCost(totals.costUsd), totals.pricedCalls, totals.reportedCalls)
           : formatCost(totals.costUsd),
       )
     }
@@ -58,26 +59,26 @@
 </script>
 
 <section>
-  <h2>Usage</h2>
+  <h2>{t('optUsageTitle')}</h2>
   {#if months.length === 0}
-    <p class="body">No model calls have been recorded.</p>
+    <p class="body">{t('optUsageNone')}</p>
   {:else}
-    <h3>Per provider, by month (UTC)</h3>
+    <h3>{t('optUsagePerProvider')}</h3>
     <ul>
       {#each months as month}
         {#each Object.entries(usage.months[month] ?? {}) as [providerId, totals]}
           <li>
             <span class="name">{month} · {labelOf(providerId)}</span>
-            <span class="figures">{totals.calls} {totals.calls === 1 ? 'call' : 'calls'}, {summary(totals)}</span>
+            <span class="figures">{totals.calls === 1 ? t('optUsageCallOne', summary(totals)) : t('optUsageCalls', totals.calls, summary(totals))}</span>
           </li>
         {/each}
       {/each}
     </ul>
-    <h3>Per transform</h3>
+    <h3>{t('optUsagePerTransform')}</h3>
     <ul>
       {#each transformIds as id}
         <li>
-          <span class="name">{id === NOT_SAVED_USAGE_ID ? 'Drafts that were not saved' : (transformNames[id] ?? 'Transform not saved or deleted')}</span>
+          <span class="name">{id === NOT_SAVED_USAGE_ID ? t('optUsageDrafts') : (transformNames[id] ?? t('optUsageDeleted'))}</span>
           <span class="figures">{summary(usage.transforms[id] as UsageTotals)}</span>
         </li>
       {/each}

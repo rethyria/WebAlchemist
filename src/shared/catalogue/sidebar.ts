@@ -752,12 +752,6 @@ export const sidebarMessages = defineMessages({
     description: 'Which pages the transform applies to, followed by a sentence about variants of the address.',
     placeholders: ['SCHEMES', 'SITES', 'PAGES', 'VARIANTS'],
   },
-  versionRowWorld: {
-    message: 'World',
-  },
-  versionRowCapabilities: {
-    message: 'Capabilities',
-  },
   revNoneDeclared: {
     message: 'None declared. Code that uses network, storage or cookies without declaring it cannot be saved.',
     description: 'Says that the code declares no capabilities.',

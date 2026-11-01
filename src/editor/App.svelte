@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from '@shared/i18n'
   import { radioGroup } from '@shared/radio-group'
   import { focusOnMount } from '@sidebar/lib/focus'
   import '@shared/tokens.css'
@@ -183,7 +184,7 @@
 
     if (!draft) {
       loadError =
-        'That draft is no longer available. Drafts last until the browser closes — pick the element again to start over.'
+        t('edDraftGone')
       return
     }
 
@@ -197,10 +198,10 @@
       kind: 'css',
       origin: 'manual',
       capabilities: [],
-      intent: 'Written by hand.',
+      intent: t('edWrittenByHandIntent'),
       rationale: {
         targets: draft.anchor.selector,
-        approach: 'Written by hand, so there is no generated description of it.',
+        approach: t('edWrittenByHandApproach'),
         assumptions: [],
       },
       anchor: draft.anchor,
@@ -215,7 +216,7 @@
     match = draft.match
     savedMatch = draft.match
     name = ''
-    document.title = 'New transform — Web Alchemist'
+    document.title = t('edTitleNew')
   }
 
   async function load() {
@@ -226,7 +227,7 @@
     try {
       const found = await send<Transform | null>({ type: 'get-transform', id })
       if (!found) {
-        loadError = 'That transform no longer exists. It may have been deleted.'
+        loadError = t('edTransformGone')
         return
       }
       transform = found
@@ -238,7 +239,7 @@
       savedWorld = world
       choice = found.cookieStoreId === undefined ? 'every-tab' : 'tab-container'
       savedChoice = choice
-      document.title = `${found.name} — Web Alchemist`
+      document.title = t('edTitleNamed', found.name)
       await loadVersions()
     } catch (cause) {
       loadError = String(cause instanceof Error ? cause.message : cause)
@@ -321,7 +322,7 @@
         permissionRequestsFor(current.kind, editorOriginToRequest(false, version.match, current.match)),
       )
       if (!granted) {
-        findings = ['Web Alchemist needs permission for the site this version applies to before it can restore it.']
+        findings = [t('edNeedsPermissionRestore')]
         return
       }
       const approval = await approvalForRestore(current, version)
@@ -399,8 +400,8 @@
       if (!granted) {
         findings = [
           (creating ? kind : current.kind) === 'js'
-            ? 'Web Alchemist needs the permission to run JavaScript transforms, and permission for the site it applies to, before it can save this.'
-            : `Web Alchemist needs permission for ${originPermissionFor(wanted)}${needsCookies ? ' and the cookies permission, to read the container,' : ''} before it can apply this there.`,
+            ? t('edNeedsPermissionJs')
+            : t(needsCookies ? 'edNeedsPermissionCookies' : 'edNeedsPermission', originPermissionFor(wanted)),
         ]
         return
       }
@@ -438,7 +439,7 @@
         })
         const blocking = analysis.static.filter((f) => f.severity === 'block')
         if (blocking.length > 0) {
-          findings = blocking.map((f) => `Line ${f.line}: ${f.explanation}`)
+          findings = blocking.map((f) => t('edFindingLine', f.line, f.explanation))
           return
         }
         // Code the user typed was seen by the user, which is the approval here.
@@ -469,13 +470,13 @@
           approvedUrls: approveListed ? [...(approvedCssUrls ?? []), ...pendingUrls] : (approvedCssUrls ?? []),
         })
         if (check.static.length > 0) {
-          findings = check.static.map((f) => `Line ${f.line}: ${f.explanation}`)
+          findings = check.static.map((f) => t('edFindingLine', f.line, f.explanation))
           return
         }
         if (!check.passed) {
           pendingUrls = check.pendingUrls ?? []
           approveListed = false
-          findings = ['This CSS loads addresses outside the site. Tick the box below to approve them, then save again.']
+          findings = [t('edCssNeedsApproval')]
           return
         }
         if (approveListed) approvedCssUrls = [...(approvedCssUrls ?? []), ...pendingUrls]
@@ -504,7 +505,7 @@
               // The old prose described the old code. Saying so is better than
               // leaving a description that quietly stopped being true.
               approach:
-                'Edited by hand. Any description of the previous code no longer applies.',
+                t('appEditedByHand'),
               assumptions: [],
             },
             updatedAt: Date.now(),
@@ -609,7 +610,7 @@
 <main>
   {#if loadError}
     <div class="empty">
-      <h1>Nothing to edit</h1>
+      <h1>{t('edNothingTitle')}</h1>
       <p>{loadError}</p>
     </div>
   {:else if transform}
@@ -620,13 +621,12 @@
             class="name-field"
             use:focusOnMount
             bind:value={name}
-            placeholder="Name this transform"
+            placeholder={t('edNamePlaceholder')}
             spellcheck="false"
             autocomplete="off"
           />
           <p class="intent">
-            Written by hand. Nothing is sent to a model, and no page content leaves the
-            browser.
+            {t('edHandNote')}
           </p>
         {:else}
           <h1 use:focusOnMount>{transform.name}</h1>
@@ -638,7 +638,7 @@
               Only choosable now. Changing the kind of an existing transform
               would leave code that cannot mean anything in its new form.
             -->
-            <div class="kinds" role="radiogroup" aria-label="Transform kind" use:radioGroup>
+            <div class="kinds" role="radiogroup" aria-label={t('edKindLabel')} use:radioGroup>
               {#each ['css', 'js'] as const as option}
                 <button
                   type="button"
@@ -653,7 +653,7 @@
               {/each}
             </div>
             {#if kind === 'js'}
-              <span class="badge attention">checked before it is saved</span>
+              <span class="badge attention">{t('edCheckedBadge')}</span>
             {/if}
           {:else}
             <span class="badge">{transform.kind.toUpperCase()}</span>
@@ -662,32 +662,32 @@
             <span class="badge attention">{transform.capabilities.join(', ')}</span>
           {/if}
           {#if !transform.enabled}
-            <span class="badge">disabled</span>
+            <span class="badge">{t('edDisabledBadge')}</span>
           {/if}
         </div>
       </div>
 
       <div class="actions">
         <!-- Persistent, so the confirmation is a change that is read out. -->
-        <span class="sr-only" role="status">{justSaved ? 'Saved.' : ''}</span>
+        <span class="sr-only" role="status">{justSaved ? t('edSavedAnnounce') : ''}</span>
         {#if justSaved}
-          <span class="note">Saved</span>
+          <span class="note">{t('edSaved')}</span>
         {:else if dirty}
-          <span class="note">Unsaved changes</span>
+          <span class="note">{t('edUnsaved')}</span>
         {/if}
         {#if !creating}
           <button type="button" class="secondary" disabled={!dirty || saving} onclick={revert}>
-            Revert
+            {t('edRevert')}
           </button>
         {/if}
         <button type="button" class="primary" disabled={!dirty || saving} onclick={save}>
-          {#if saving}Saving…{:else if creating}Create{:else}Save{/if}
+          {#if saving}{t('edSaving')}{:else if creating}{t('edCreate')}{:else}{t('edSave')}{/if}
         </button>
       </div>
     </header>
 
     <section class="where">
-      <label for="match">Applies to</label>
+      <label for="match">{t('edAppliesTo')}</label>
       <input
         id="match"
         value={match}
@@ -713,25 +713,25 @@
           exists to make visible elsewhere.
         -->
         <p class="warn">
-          This no longer covers {parsePattern(savedMatch).host}, where it was written.
+          {t('edNoLongerCovers', parsePattern(savedMatch).host)}
         </p>
       {:else if match.trim() !== savedMatch}
         <p class="hint">
-          Saving asks for permission to read {originPermissionFor(match.trim() || savedMatch)}.
+          {t('edSavingAsks', originPermissionFor(match.trim() || savedMatch))}
         </p>
       {/if}
     </section>
 
     {#if (creating ? kind : transform.kind) === 'js'}
       <section class="where">
-        <span class="label">World</span>
+        <span class="label">{t('versionRowWorld')}</span>
         {#if transform?.worldResetFromModel}
           <p class="warn">{WORLD_RESET_NOTICE}</p>
         {/if}
         <p class="hint">
-          Now: {WORLD_NAMES[world]}.
+          {t('edNow', WORLD_NAMES[world])}
           {#if world === 'MAIN' && savedWorld === 'MAIN'}
-            This transform was saved to run in the page's own world and keeps doing so.
+            {t('edKeepsMain')}
           {/if}
         </p>
         <label>
@@ -740,10 +740,10 @@
             checked={world === 'MAIN'}
             onchange={(event) => (world = event.currentTarget.checked ? 'MAIN' : 'USER_SCRIPT')}
           />
-          Run in the page's own world (MAIN)
+          {t('edRunInMain')}
         </label>
         {#if world === 'MAIN'}
-          <p class="warn">Running in the page's own world has these risks:</p>
+          <p class="warn">{t('approvalRisksIntro')}</p>
           <ul class="hint">
             {#each MAIN_WORLD_RISKS as risk}
               <li>{risk}</li>
@@ -755,7 +755,7 @@
 
     {#if (creating ? kind : transform.kind) === 'css' && (sourceTabId !== null || savedChoice === 'tab-container')}
       <section class="where">
-        <label for="container">Container</label>
+        <label for="container">{t('edContainer')}</label>
         <select id="container" bind:value={choice}>
           <option value="every-tab">{EVERY_TAB_LABEL}</option>
           <option value="tab-container">{TAB_CONTAINER_LABEL}</option>
@@ -769,28 +769,26 @@
 
     {#if (creating ? kind : transform.kind) === 'css'}
       <details class="advanced">
-        <summary>Advanced: addresses CSS may load</summary>
-        <label for="css-mode">For {cssSiteHost ?? 'this site'}</label>
+        <summary>{t('edAdvanced')}</summary>
+        <label for="css-mode">{cssSiteHost ? t('edForSite', cssSiteHost) : t('edForThisSite')}</label>
         <select
           id="css-mode"
           value={cssMode}
           disabled={!cssPolicyKey}
           onchange={(event) => void setCssMode(event.currentTarget.value as CssUrlMode)}
         >
-          <option value="block">Only data: addresses (default)</option>
-          <option value="same-origin">Data: addresses and addresses on the same site</option>
-          <option value="list-external">Same site, and other addresses that are approved one by one</option>
+          <option value="block">{t('edCssBlock')}</option>
+          <option value="same-origin">{t('edCssSame')}</option>
+          <option value="list-external">{t('edCssList')}</option>
         </select>
         <p class="hint">
-          CSS that loads an address makes the browser send a request on every visit, and a
-          request can carry information about the page. @import is never allowed.
-          {#if !cssPolicyKey}This pattern has no fixed host name, or covers every site under a public
-            suffix such as .com, so the default applies.{/if}
+          {t('edCssHint')}
+          {#if !cssPolicyKey}{t('edCssNoKey')}{/if}
         </p>
       </details>
       {#if pendingUrls.length > 0}
         <div class="findings">
-          <strong>Needs approval.</strong>
+          <strong>{t('edNeedsApproval')}</strong>
           <ul>
             {#each pendingUrls as url}
               <li><code>{url}</code></li>
@@ -798,7 +796,7 @@
           </ul>
           <label>
             <input type="checkbox" bind:checked={approveListed} />
-            Approve loading {pendingUrls.length === 1 ? 'this address' : 'these addresses'}
+            {t(pendingUrls.length === 1 ? 'edApproveLoadingOne' : 'edApproveLoadingMany')}
           </label>
         </div>
       {/if}
@@ -807,7 +805,7 @@
     {#if findings.length > 0}
       <!-- An alert, so a save that fails is read out when the message appears. -->
       <div class="findings" role="alert">
-        <strong>Not saved.</strong>
+        <strong>{t('edNotSaved')}</strong>
         {#each findings as finding}
           <p>{finding}</p>
         {/each}
@@ -818,7 +816,7 @@
 
     {#if !creating && versions.length > 0}
       <details class="versions">
-        <summary>Earlier versions ({versions.length})</summary>
+        <summary>{t('edEarlierVersions', versions.length)}</summary>
         <ul>
           {#each versions as version (version.id)}
             <li>
@@ -834,7 +832,7 @@
                   mainRestoreConfirmed = false
                 }}
               >
-                Review this version
+                {t('edReviewVersion')}
               </button>
             </li>
           {/each}
@@ -842,16 +840,14 @@
         {#if reviewing && transform}
           {@const differences = compareWithCurrent(transform, reviewing)}
           <section class="review" aria-labelledby="review-title">
-            <h2 id="review-title" use:focusOnMount>Version from {new Date(reviewing.savedAt).toLocaleString()}</h2>
+            <h2 id="review-title" use:focusOnMount>{t('edVersionFrom', new Date(reviewing.savedAt).toLocaleString())}</h2>
             <p class="hint">
-              Restoring replaces the code, match pattern, capabilities and world of this transform
-              with the values of this version. The current state is kept as a version, so a restore
-              can be undone.
+              {t('edRestoreExplain')}
             </p>
             <table>
-              <caption>Current values and the values of this version</caption>
+              <caption>{t('edTableCaption')}</caption>
               <thead>
-                <tr><th scope="col">Item</th><th scope="col">Current</th><th scope="col">This version</th><th scope="col">Difference</th></tr>
+                <tr><th scope="col">{t('edColItem')}</th><th scope="col">{t('edColCurrent')}</th><th scope="col">{t('edColVersion')}</th><th scope="col">{t('edColDifference')}</th></tr>
               </thead>
               <tbody>
                 {#each differences as row (row.label)}
@@ -863,13 +859,13 @@
                   </tr>
                 {/each}
                 <tr>
-                  <th scope="row">Code</th>
-                  <td colspan="2">Shown below</td>
-                  <td>{reviewing.code === transform.code ? 'Same' : 'Different'}</td>
+                  <th scope="row">{t('edRowCode')}</th>
+                  <td colspan="2">{t('edShownBelow')}</td>
+                  <td>{reviewing.code === transform.code ? t('versionSame') : t('versionDifferent')}</td>
                 </tr>
               </tbody>
             </table>
-            <h3>Code in this version</h3>
+            <h3>{t('edCodeInVersion')}</h3>
             <pre class="version-code">{reviewing.code}</pre>
             {#if restoreNeedsMainConfirmation(transform.kind, reviewing)}
               <MainRestoreRisks bind:confirmed={mainRestoreConfirmed} disabled={restoring} />
@@ -879,16 +875,16 @@
                 type="button"
                 disabled={restoring || saving || restoreRefusal(transform.kind, reviewing, mainRestoreConfirmed) !== null}
                 onclick={() => void restore(reviewing!)}>
-                Restore this version
+                {t('edRestore')}
               </button>
               <button type="button" class="secondary" disabled={restoring} onclick={() => (reviewing = null)}>
-                Cancel
+                {t('cancel')}
               </button>
             </div>
           </section>
         {/if}
         {#if dirty}
-          <p class="hint">Save or revert the changes in the editor before restoring a version.</p>
+          <p class="hint">{t('edSaveFirst')}</p>
         {/if}
       </details>
     {/if}
@@ -896,13 +892,13 @@
     <footer>
       <span>
         {(creating ? kind : transform.kind) === 'js'
-          ? 'Checked before it is saved'
-          : 'Applied as written'}
+          ? t('edFootJs')
+          : t('edFootCss')}
       </span>
-      <span class="hint">Ctrl+S saves · Tab indents · Esc then Tab leaves the field</span>
+      <span class="hint">{t('edShortcuts')}</span>
     </footer>
   {:else}
-    <div class="empty"><p>Loading…</p></div>
+    <div class="empty"><p>{t('edLoading')}</p></div>
   {/if}
 </main>
 

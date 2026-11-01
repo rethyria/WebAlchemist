@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from '@shared/i18n'
   /**
    * The sites on which picking and generation are refused (#131).
    *
@@ -39,11 +40,11 @@
   async function add() {
     const host = normalizeExcludedEntry(draft)
     if (host === null) {
-      error = `"${draft.trim()}" is not a site name. Enter a name such as example.com.`
+      error = t('optNotSiteName', draft.trim())
       return
     }
     if (sites.includes(host)) {
-      error = `${host} is already on the list.`
+      error = t('optAlreadyListed', host)
       return
     }
     if (await replace([...sites, host])) draft = ''
@@ -55,11 +56,9 @@
 </script>
 
 <section>
-  <h2>Excluded sites</h2>
+  <h2>{t('optExcludedTitle')}</h2>
   <p class="subtitle">
-    On these sites, and on their subdomains, Web Alchemist does not pick elements or generate
-    transforms, and does not ask for permission to read them. The list is empty until sites
-    are added.
+    {t('optExcludedBody')}
   </p>
 
   {#if error}
@@ -67,7 +66,7 @@
   {/if}
 
   <div class="add">
-    <label for="excluded-site">Site name</label>
+    <label for="excluded-site">{t('optSiteName')}</label>
     <input
       id="excluded-site"
       bind:value={draft}
@@ -75,18 +74,18 @@
       autocomplete="off"
       onkeydown={(event) => event.key === 'Enter' && void add()}
     />
-    <Button small onclick={() => void add()}>Add site</Button>
+    <Button small onclick={() => void add()}>{t('optAddSite')}</Button>
   </div>
 
   {#if loaded && sites.length === 0}
-    <p class="empty">No sites are excluded.</p>
+    <p class="empty">{t('optNoneExcluded')}</p>
   {:else}
     <ul>
       {#each sites as site (site)}
         <li>
           <span class="host">{site}</span>
           <Button small onclick={() => void replace(sites.filter((s) => s !== site))}>
-            Remove
+            {t('optRemove')}
           </Button>
         </li>
       {/each}

@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { accentName } from '@shared/accents'
+  import { t } from '@shared/i18n'
   import { radioGroup } from '@shared/radio-group'
   import '@shared/tokens.css'
   import {
@@ -45,9 +47,9 @@
   let transformNames = $state<Record<string, string>>({})
 
   const HEALTH_MODES: { value: HealthCheckMode; label: string; note: string }[] = [
-    { value: 'every-load', label: 'Every page load', note: 'Default' },
-    { value: 'once-per-session', label: 'Once per site per session', note: 'Cheaper' },
-    { value: 'manual', label: 'Manual only', note: 'Nothing runs on its own' },
+    { value: 'every-load', label: t('settingsHealthEvery'), note: t('optHealthDefault') },
+    { value: 'once-per-session', label: t('settingsHealthOnce'), note: t('optHealthCheaper') },
+    { value: 'manual', label: t('settingsHealthManual'), note: t('optHealthNothing') },
   ]
 
   /*
@@ -59,7 +61,7 @@
 
   async function call<T>(message: unknown): Promise<T> {
     const response = await browser.runtime.sendMessage(message)
-    if (!response?.ok) throw new Error(response?.error?.message ?? 'Request failed.')
+    if (!response?.ok) throw new Error(response?.error?.message ?? t('optRequestFailed'))
     return response.data as T
   }
 
@@ -149,19 +151,17 @@
 </script>
 
 <main>
-  <h1>Web Alchemist settings</h1>
+  <h1>{t('optTitle')}</h1>
 
   {#if loadError}
     <p class="load-error" role="alert">
-      The stored credentials could not be read: {loadError} The credential status below is not
-      known.
+      {t('optLoadError', loadError)}
     </p>
   {/if}
 
   {#if bindingError}
     <p class="load-error" role="alert">
-      The vault change was made, but the stored keys could not be checked against their providers: {bindingError}
-      The check is repeated when a stored key is next used.
+      {t('optBindingError', bindingError)}
     </p>
   {/if}
 
@@ -229,14 +229,14 @@
     <ExportImport {call} />
 
     <section>
-      <h2>Accent</h2>
-      <div class="swatches" role="radiogroup" aria-label="Accent colour" use:radioGroup>
+      <h2>{t('optAccent')}</h2>
+      <div class="swatches" role="radiogroup" aria-label={t('settingsAccent')} use:radioGroup>
         {#each ACCENTS as accent}
           <button
             type="button"
             role="radio"
             aria-checked={settings.accent === accent}
-            aria-label={accent}
+            aria-label={accentName(accent)}
             class="swatch"
             class:selected={settings.accent === accent}
             style="--swatch: {ACCENT_COLOURS[accent].swatch}"
@@ -247,8 +247,8 @@
     </section>
 
     <section>
-      <h2>Health check</h2>
-      <div class="radios" role="radiogroup" aria-label="Health check" use:radioGroup>
+      <h2>{t('optHealth')}</h2>
+      <div class="radios" role="radiogroup" aria-label={t('optHealth')} use:radioGroup>
         {#each HEALTH_MODES as mode}
           <button
             type="button"

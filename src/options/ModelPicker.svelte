@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from '@shared/i18n'
   /**
    * A select over known models, with an escape hatch to type any id.
    *
@@ -42,14 +43,14 @@
     {#each ANTHROPIC_MODELS as model}
       <option value={model.id}>{model.label}</option>
     {/each}
-    <option value={CUSTOM}>Other…</option>
+    <option value={CUSTOM}>{t('optModelOther')}</option>
   </select>
 
   {#if showCustom}
     <input
       type="text"
       {value}
-      placeholder="model id"
+      placeholder={t('optModelId')}
       autocomplete="off"
       spellcheck="false"
       onchange={(event) => onchange(event.currentTarget.value.trim())}
@@ -57,8 +58,8 @@
   {/if}
 
   <span class="meta">
-    {#if known}{known.price} per Mtok{#if !known.vision} · no images{/if}{:else}
-      not a known model — cost and image support unknown
+    {#if known}{t(known.vision ? 'optModelPrice' : 'optModelPriceNoImages', known.price)}{:else}
+      {t('optModelUnknown')}
     {/if}{#if hint} · {hint}{/if}
   </span>
 </div>

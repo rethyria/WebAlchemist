@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
+import { EN_CATALOGUE } from './catalogue'
 import {
   ENFORCEMENT_NOTICE,
   firstRunDisclosure,
@@ -170,9 +171,10 @@ describe('the credential fields are unreachable until acknowledged', () => {
     // would not cover it. Control: ProviderSettings itself does contain them.
     const provider = read('../options/ProviderSettings.svelte')
     expect(provider).toMatch(/type="password"/)
-    expect(provider).toMatch(/Sign in/)
+    expect(provider).toMatch(/optSignIn/)
+    expect(EN_CATALOGUE.optSignIn.message).toBe('Sign in')
     for (const path of ['../options/App.svelte', '../options/VaultSettings.svelte', '../sidebar/App.svelte', '../sidebar/components/Settings.svelte']) {
-      expect(read(path)).not.toMatch(/placeholder="sk-|API key<\/span>/)
+      expect(read(path)).not.toMatch(/placeholder="sk-|optApiKeyLabel/)
     }
     expect(read('../sidebar/components/Settings.svelte')).not.toMatch(/type="password"/)
     expect(read('../sidebar/App.svelte')).not.toMatch(/type="password"/)

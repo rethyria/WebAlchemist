@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from '@shared/i18n'
   /**
    * Passphrase mode, and the disclosure that goes with whichever mode is on.
    *
@@ -96,7 +97,7 @@
        * other way for it to fail with well-formed stored data.
        */
       const raw = cause instanceof Error ? cause.message : String(cause)
-      error = /operation|decrypt/i.test(raw) ? 'That passphrase is not the one that was set.' : raw
+      error = /operation|decrypt/i.test(raw) ? t('optVaultWrongPassphrase') : raw
     } finally {
       busy = false
     }
@@ -104,32 +105,24 @@
 </script>
 
 <section>
-  <h2>How your credentials are stored</h2>
+  <h2>{t('optVaultTitle')}</h2>
   <p class="body">{DISCLOSURE_TRANSFORMS}</p>
 
   {#if !vault.sealed}
     <p class="body">{DISCLOSURE_PLAIN}</p>
     <p class="body">
-      A passphrase changes that. Your keys are encrypted with it, and nothing stored on
-      this machine can decrypt them without it — so reading the profile directory yields
-      ciphertext and nothing else. You unlock once each time you start the browser.
+      {t('optVaultAbout')}
     </p>
     <p class="body caution">
-      There is no way to recover a forgotten passphrase. That is what makes it worth
-      something, and it means losing it means re-entering your keys.
+      {t('optVaultNoRecovery')}
     </p>
     <p class="body caution">
-      Turning this on encrypts your keys from that point on. It cannot erase the copy
-      already written to this profile — browsers give extensions no way to reclaim that
-      space, and it stays readable until the browser reuses it. If that matters to you,
-      replace the key at your provider after turning this on.
+      {t('optVaultOldCopy')}
     </p>
   {:else}
     <p class="body">{DISCLOSURE_SEALED}</p>
     <p class="body">
-      This protects the profile at rest. It does not protect against software already
-      running inside this extension while it is unlocked, which can ask for the keys the
-      same way the extension itself does.
+      {t('optVaultLimits')}
     </p>
     <p class="body">
       <strong>{vault.unlocked ? STATUS_UNLOCKED : STATUS_LOCKED}</strong>
@@ -141,7 +134,7 @@
 
   {#if vault.sealed}
     <label class="idle">
-      Lock automatically after
+      {t('optVaultIdleBefore')}
       <select
         value={idleMinutes}
         onchange={(event) => void onidlechange(Number(event.currentTarget.value))}
@@ -150,31 +143,30 @@
           <option value={option.minutes}>{option.label}</option>
         {/each}
       </select>
-      without a request to a provider
+      {t('optVaultIdleAfter')}
     </label>
     <p class="note">
-      Locking stops generation until the passphrase is entered again. With Never selected, the
-      vault stays unlocked until the browser closes or it is locked by hand.
+      {t('optVaultLockNote')}
     </p>
   {/if}
 
   <div class="actions">
     {#if !vault.sealed}
-      <Button small onclick={() => open('enable')}>Protect with a passphrase</Button>
+      <Button small onclick={() => open('enable')}>{t('optVaultProtect')}</Button>
     {:else}
       {#if vault.unlocked}
-        <Button small onclick={() => void onlock()}>Lock now</Button>
+        <Button small onclick={() => void onlock()}>{t('optVaultLockNow')}</Button>
       {:else}
-        <Button small onclick={() => open('unlock')}>Unlock</Button>
+        <Button small onclick={() => open('unlock')}>{t('optVaultUnlock')}</Button>
       {/if}
-      <Button small onclick={() => open('disable')}>Remove the passphrase</Button>
+      <Button small onclick={() => open('disable')}>{t('optVaultRemove')}</Button>
     {/if}
   </div>
 
   {#if panel}
     <div class="panel">
       <label>
-        {panel === 'enable' ? 'New passphrase' : 'Passphrase'}
+        {panel === 'enable' ? t('optVaultNewPassphrase') : t('optVaultPassphrase')}
         <input
           type="password"
           bind:value={passphrase}
@@ -188,7 +180,7 @@
 
       {#if panel === 'enable'}
         <label>
-          Type it again
+          {t('optVaultAgain')}
           <input
             type="password"
             bind:value={confirmation}
@@ -200,15 +192,15 @@
           />
         </label>
         {#if passphrase.length > 0 && passphrase.length < MINIMUM}
-          <p class="note">At least {MINIMUM} characters. Length matters more than symbols here.</p>
+          <p class="note">{t('optVaultMinimum', MINIMUM)}</p>
         {:else if confirmation.length > 0 && passphrase !== confirmation}
-          <p class="note">The two do not match.</p>
+          <p class="note">{t('optVaultMismatch')}</p>
         {/if}
       {/if}
 
       {#if panel === 'disable'}
         <p class="note">
-          Your keys go back to being stored as plain text in this profile.
+          {t('optVaultPlainAgain')}
         </p>
       {/if}
 
@@ -219,16 +211,16 @@
       <div class="actions">
         <Button variant="primary" small disabled={!canSubmit} onclick={() => void submit()}>
           {#if busy}
-            Working…
+            {t('optVaultWorking')}
           {:else if panel === 'enable'}
-            Encrypt my keys
+            {t('optVaultEncrypt')}
           {:else if panel === 'disable'}
-            Remove it
+            {t('optVaultRemoveIt')}
           {:else}
-            Unlock
+            {t('optVaultUnlock')}
           {/if}
         </Button>
-        <Button small onclick={() => open(null)}>Cancel</Button>
+        <Button small onclick={() => open(null)}>{t('cancel')}</Button>
       </div>
 
       {#if panel === 'unlock' && vault.sealed && !vault.unlocked}
@@ -243,18 +235,17 @@
         <div class="forgotten">
           {#if !discardArmed}
             <button type="button" class="link" onclick={() => (discardArmed = true)}>
-              I have forgotten it
+              {t('optVaultForgotten')}
             </button>
           {:else}
             <p class="note">
-              There is no recovery. Discarding deletes the stored keys so you can enter them
-              again; your transforms are not affected.
+              {t('optVaultDiscardNote')}
             </p>
             <div class="actions">
               <Button small onclick={() => void discard()}>
-                Discard the stored keys
+                {t('optVaultDiscard')}
               </Button>
-              <Button small onclick={() => (discardArmed = false)}>Keep them</Button>
+              <Button small onclick={() => (discardArmed = false)}>{t('optVaultKeep')}</Button>
             </div>
           {/if}
         </div>

@@ -360,4 +360,28 @@ export const sharedMessages = defineMessages({
     description: 'Shown when the extension refuses to ask for access to an excluded site. $HOST$ is a site name.',
     placeholders: ['HOST'],
   },
+  idle5: {
+    message: '5 minutes',
+    description: 'Choice of how long the vault stays unlocked without a request to a provider.',
+  },
+  idle15: {
+    message: '15 minutes',
+    description: 'Choice of how long the vault stays unlocked without a request to a provider.',
+  },
+  idle30: {
+    message: '30 minutes',
+    description: 'Choice of how long the vault stays unlocked without a request to a provider.',
+  },
+  idle60: {
+    message: '1 hour',
+    description: 'Choice of how long the vault stays unlocked without a request to a provider.',
+  },
+  idle480: {
+    message: '8 hours',
+    description: 'Choice of how long the vault stays unlocked without a request to a provider.',
+  },
+  idleNever: {
+    message: 'Never',
+    description: 'Choice of how long the vault stays unlocked without a request to a provider.',
+  },
 })

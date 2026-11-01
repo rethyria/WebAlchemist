@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from '@shared/i18n'
   /**
    * Export and import of transforms (#31).
    *
@@ -74,9 +75,7 @@
         revokeObjectURL: (url) => URL.revokeObjectURL(url),
         createAnchor: () => document.createElement('a'),
       })
-      notice = encrypt
-        ? 'Saved an encrypted file. It can be imported only with the passphrase.'
-        : 'Saved a file that is not encrypted.'
+      notice = encrypt ? t('optSavedEncrypted') : t('optSavedPlain')
       pendingMode = null
       exportPassphrase = ''
       exportConfirmation = ''
@@ -187,24 +186,16 @@
     }
   }
 
-  const kindLabel = (item: PlannedTransform) => (item.kind === 'js' ? 'JavaScript' : 'CSS')
+  const kindLabel = (item: PlannedTransform) => (item.kind === 'js' ? t('optKindJs') : 'CSS')
 </script>
 
 <section>
-  <h2>Export and import</h2>
+  <h2>{t('optExportTitle')}</h2>
   <p class="subtitle">
-    Export to share saves your transforms to a JSON file that can be given to someone else.
-    JavaScript is saved as its description only, without code. Back up also saves the JavaScript
-    code and the accent colour and health check mode, so that the set can be restored on another
-    computer. Neither file contains credentials or provider settings. Both files hold text and
-    addresses taken from the pages the transforms were written for, and either can be encrypted
-    with a passphrase when it is saved.
+    {t('optExportBody1')}
   </p>
   <p class="subtitle">
-    Import reads such a file and shows what it would add before anything is saved. Imported
-    transforms are always turned off. Imported JavaScript from a shared file has no code until
-    its description has been read and code has been generated and reviewed here. JavaScript code
-    from a backup stays off until the code has been read and approved.
+    {t('optExportBody2')}
   </p>
 
   {#if error}
@@ -215,15 +206,15 @@
   {/if}
 
   <div class="buttons">
-    <Button disabled={busy} onclick={() => startExport('share')}>Export to share</Button>
-    <Button disabled={busy} onclick={() => startExport('backup')}>Back up</Button>
-    <Button disabled={busy} onclick={() => fileInput?.click()}>Import from file</Button>
+    <Button disabled={busy} onclick={() => startExport('share')}>{t('optExportShare')}</Button>
+    <Button disabled={busy} onclick={() => startExport('backup')}>{t('optBackUp')}</Button>
+    <Button disabled={busy} onclick={() => fileInput?.click()}>{t('optImportFile')}</Button>
     <input
       bind:this={fileInput}
       type="file"
       accept=".json,application/json"
       class="file"
-      aria-label="File to import"
+      aria-label={t('optFileLabel')}
       onchange={(event) => void onFileChosen(event)}
     />
   </div>
@@ -233,7 +224,7 @@
       <h3>{pendingMode === 'backup' ? 'Back up' : 'Export to share'}</h3>
       <p class="subtitle">{EXPORT_WARNING}</p>
       <div class="field">
-        <label for="export-passphrase">Passphrase</label>
+        <label for="export-passphrase">{t('optVaultPassphrase')}</label>
         <input
           id="export-passphrase"
           type="password"
@@ -242,7 +233,7 @@
         />
       </div>
       <div class="field">
-        <label for="export-confirmation">Repeat the passphrase</label>
+        <label for="export-confirmation">{t('optRepeatPassphrase')}</label>
         <input
           id="export-confirmation"
           type="password"
@@ -259,21 +250,21 @@
           disabled={busy || exportProblem !== null}
           onclick={() => void runExport(pendingMode!, true)}
         >
-          Save encrypted file
+          {t('optSaveEncrypted')}
         </Button>
         <Button disabled={busy} onclick={() => void runExport(pendingMode!, false)}>
-          Save without encryption
+          {t('optSavePlain')}
         </Button>
-        <Button disabled={busy} onclick={() => (pendingMode = null)}>Cancel</Button>
+        <Button disabled={busy} onclick={() => (pendingMode = null)}>{t('cancel')}</Button>
       </div>
     </div>
   {/if}
 
   {#if encryptedFile !== null}
     <div class="preview">
-      <h3>{encryptedFile.name} is encrypted</h3>
+      <h3>{t('optIsEncrypted', encryptedFile.name)}</h3>
       <div class="field">
-        <label for="import-passphrase">Passphrase</label>
+        <label for="import-passphrase">{t('optVaultPassphrase')}</label>
         <input
           id="import-passphrase"
           type="password"
@@ -288,25 +279,23 @@
           disabled={busy || importPassphrase === ''}
           onclick={() => void openEncrypted()}
         >
-          Decrypt and show contents
+          {t('optDecrypt')}
         </Button>
-        <Button disabled={busy} onclick={cancel}>Cancel</Button>
+        <Button disabled={busy} onclick={cancel}>{t('cancel')}</Button>
       </div>
     </div>
   {/if}
 
   {#if bundle !== null}
     <div class="preview">
-      <h3>Contents of {fileName}</h3>
+      <h3>{t('optContentsOf', fileName)}</h3>
       {#if previewMode === 'backup'}
         <p class="subtitle">
-          This file is a backup. JavaScript code in it is restored, but each script stays off
-          until its code has been read and approved. Code that fails the static analysis is not
-          restored.
+          {t('optBackupNote')}
         </p>
       {/if}
       {#if items.length === 0}
-        <p class="subtitle">The file holds no transforms.</p>
+        <p class="subtitle">{t('optNoTransforms')}</p>
       {:else}
         <ul>
           {#each items as item, index (index)}
@@ -315,35 +304,33 @@
                 <span class="name">{item.name}</span>
                 <span class="kind">{kindLabel(item)}</span>
               </div>
-              {#if item.sites}<p>Applies to: {item.sites}</p>{/if}
+              {#if item.sites}<p>{t('optAppliesTo', item.sites)}</p>{/if}
               {#if item.status === 'refused'}
-                <p class="problem">Will not be imported. {item.reason}</p>
+                <p class="problem">{t('optWillNotImport', item.reason ?? '')}</p>
               {:else if item.status === 'duplicate'}
-                <p>Will be skipped. {item.reason}</p>
+                <p>{t('optWillSkip', item.reason ?? '')}</p>
               {:else}
                 {#if item.needsApproval}
-                  <p>Code restored; it stays off until you approve it.</p>
+                  <p>{t('optCodeRestored')}</p>
                   {#if item.world === 'MAIN'}
                     <p class="problem">
-                      This code is set to run in the page's own world (MAIN), where the page can
-                      read and change it. The risks are listed when you approve it.
+                      {t('optMainNote')}
                     </p>
                   {/if}
                   <details>
-                    <summary>Show code</summary>
+                    <summary>{t('optShowCode')}</summary>
                     <pre>{item.code}</pre>
                   </details>
                 {:else if item.kind === 'js'}
                   <p>
-                    {item.reason ?? 'Code not imported; will need regenerating.'}
-                    {item.reason ? ' It will need regenerating.' : ''}
+                    {item.reason ? t('optReasonRegen', item.reason) : t('optCodeNotImported')}
                   </p>
                 {:else if item.needsRegeneration}
-                  <p class="problem">{item.reason} It will need regenerating.</p>
+                  <p class="problem">{t('optReasonRegen', item.reason ?? '')}</p>
                 {/if}
                 {#if item.kind === 'js' && item.intent}
                   <p class="quiet">
-                    Description written by the author of the file, not by you: {JSON.stringify(item.intent)}
+                    {t('optAuthorDescription', JSON.stringify(item.intent))}
                   </p>
                 {/if}
               {/if}
@@ -353,21 +340,25 @@
         {#if previewSettings}
           <label class="check">
             <input type="checkbox" bind:checked={restoreSettings} />
-            Also restore the accent colour ({previewSettings.accent}) and the health check mode
-            ({previewSettings.healthCheckMode})
+            {t('optRestoreSettings', previewSettings.accent, previewSettings.healthCheckMode)}
           </label>
         {/if}
         <p class="subtitle">
           {importable.length === 0
-            ? 'Nothing in this file can be imported.'
-            : `${importable.length} of ${items.length} will be imported, turned off. Importing asks for access to ${originsToRequest(items).length === 1 ? 'this site' : 'these sites'}: ${originsToRequest(items).join(', ')}.`}
+            ? t('optNothingImportable')
+            : t(
+                originsToRequest(items).length === 1 ? 'optWillImportOne' : 'optWillImportMany',
+                importable.length,
+                items.length,
+                originsToRequest(items).join(', '),
+              )}
         </p>
       {/if}
       <div class="buttons">
         <Button variant="primary" disabled={busy || importable.length === 0} onclick={confirmImport}>
-          Import {importable.length} {importable.length === 1 ? 'transform' : 'transforms'}
+          {importable.length === 1 ? t('optImportOne') : t('optImportMany', importable.length)}
         </Button>
-        <Button disabled={busy} onclick={cancel}>Cancel</Button>
+        <Button disabled={busy} onclick={cancel}>{t('cancel')}</Button>
       </div>
     </div>
   {/if}

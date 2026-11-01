@@ -108,3 +108,25 @@ describe('the English catalogue', () => {
     expect(file['a']!.placeholders).toEqual({ name: { content: '$1' }, n2: { content: '$2' } })
   })
 })
+
+describe('the surface files of the catalogue', () => {
+  it('define no key twice', async () => {
+    const modules = import.meta.glob('./catalogue/*.ts', { eager: true }) as Record<
+      string,
+      Record<string, Record<string, unknown>>
+    >
+    const seen = new Map<string, string>()
+    const repeated: string[] = []
+    for (const [path, module] of Object.entries(modules)) {
+      if (path.endsWith('/index.ts') || path.endsWith('/define.ts')) continue
+      for (const exported of Object.values(module)) {
+        if (typeof exported !== 'object' || exported === null) continue
+        for (const key of Object.keys(exported)) {
+          if (seen.has(key)) repeated.push(`${key} in ${seen.get(key)} and ${path}`)
+          else seen.set(key, path)
+        }
+      }
+    }
+    expect(repeated).toEqual([])
+  })
+})

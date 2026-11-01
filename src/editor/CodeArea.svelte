@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from '@shared/i18n'
   import { highlight } from '@shared/highlight'
   import { indentEdit } from './indent'
 
@@ -98,7 +99,7 @@
       spellcheck="false"
       autocapitalize="off"
       autocomplete="off"
-      aria-label="Transform code"
+      aria-label={t('edCodeLabel')}
       oninput={(event) => onchange(event.currentTarget.value)}
       onscroll={sync}
       onkeydown={onKeyDown}

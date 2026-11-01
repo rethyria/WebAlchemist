@@ -1,3 +1,4 @@
+import { t } from './i18n'
 /**
  * The shortest passphrase the vault accepts.
  *
@@ -26,10 +27,10 @@ export const DEFAULT_VAULT_IDLE_MINUTES = 30
 
 /** The choices offered in settings, shortest first, with "never" last. */
 export const VAULT_IDLE_OPTIONS: { minutes: number; label: string }[] = [
-  { minutes: 5, label: '5 minutes' },
-  { minutes: 15, label: '15 minutes' },
-  { minutes: 30, label: '30 minutes' },
-  { minutes: 60, label: '1 hour' },
-  { minutes: 480, label: '8 hours' },
-  { minutes: 0, label: 'Never' },
+  { minutes: 5, label: t('idle5') },
+  { minutes: 15, label: t('idle15') },
+  { minutes: 30, label: t('idle30') },
+  { minutes: 60, label: t('idle60') },
+  { minutes: 480, label: t('idle480') },
+  { minutes: 0, label: t('idleNever') },
 ]
