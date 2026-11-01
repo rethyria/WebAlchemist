@@ -503,6 +503,64 @@ describe('a refinement that does not complete', () => {
     expect(flow.history.map((turn) => turn.content)).toEqual(['first', 'A1'])
     expect(flow.result?.rationale.approach).toBe('A2')
   })
+
+  it('returns to refining with the previous result and the follow-up when Cancel is used', async () => {
+    const flow = flowAtRefining()
+    flow.followUp = 'second'
+    const run = flow.regenerate()
+    const port = await nextPort(1)
+    expect(flow.step).toBe('generating')
+
+    flow.cancelGenerating()
+    expect(port.disconnected).toBe(true)
+    expect(flow.step).toBe('refining')
+    expect(flow.result?.rationale.approach).toBe('A1')
+    expect(flow.followUp).toBe('second')
+    expect(flow.instruction).toBe('first')
+    expect(flow.history).toEqual([])
+
+    // An answer that still arrives must not replace the result on screen.
+    port.emit({ type: 'done', result: cssResult('A2') })
+    await Promise.race([run, new Promise((resolve) => setTimeout(resolve, 20))])
+    expect(flow.result?.rationale.approach).toBe('A1')
+    expect(flow.step).toBe('refining')
+  })
+
+  it('keeps the previous result when Cancel is used during the analysis', async () => {
+    const flow = flowAtRefining()
+    flow.analysis = { static: [], undeclaredCapabilities: [], passed: true } as any
+    let release: () => void = () => {}
+    const gate = new Promise<void>((resolve) => (release = resolve))
+    handler = async (m) => {
+      if (m.type !== 'analyse') return { ok: true, data: null }
+      await gate
+      return { ok: true, data: { static: [], undeclaredCapabilities: [], passed: false } }
+    }
+    flow.followUp = 'second'
+    const run = flow.regenerate()
+    ;(await nextPort(1)).emit({ type: 'done', result: { ...jsResult, code: 'new code' } })
+    await vi.waitFor(() => expect(calls.some((c) => c.type === 'analyse')).toBe(true))
+
+    flow.cancelGenerating()
+    release()
+    await run
+    expect(flow.step).toBe('refining')
+    expect(flow.result?.rationale.approach).toBe('A1')
+    expect(flow.analysis?.passed).toBe(true)
+    expect(flow.draft).toBeNull()
+  })
+
+  it('still discards the run when the first generation is cancelled', async () => {
+    const flow = newFlow()
+    flow.picked = { ...found, cropDrawn: false } as any
+    flow.instruction = 'first'
+    flow.step = 'describing'
+    void flow.generate()
+    await nextPort(1)
+    flow.cancelGenerating()
+    await vi.waitFor(() => expect(flow.step).toBe('list'))
+    expect(flow.picked).toBeNull()
+  })
 })
 
 describe('changing the element from the describing step', () => {

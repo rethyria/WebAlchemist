@@ -989,6 +989,9 @@ export class Flow {
     try {
       this.stage = 'context'
       const context: PageContext = { ...(await this.liveContext(picked)) }
+      // Cancel can arrive while the page is being read; without this the
+      // cancelled run still opened a port and sent the request.
+      if (!current()) return
       if (this.references.length > 0) context.references = [...this.references]
 
       // Already captured and already on screen in the panel; nothing is taken
@@ -1047,17 +1050,14 @@ export class Flow {
       this.cancelGeneration = null
       if (!current()) return
 
-      this.result = result
-      this.intent = result.intent
-      // Keep the user's scope choice across a regeneration; only seed it once.
-      this.matchPattern ||=
-        this.matchPresets.find((p) => p.recommended)?.pattern ??
-        this.matchPresets[0]?.pattern ??
-        ''
-      this.draft = this.buildDraft(result, picked.anchor)
-
+      /*
+       * Nothing about the new result is stored until the analysis has come
+       * back and the run is still current. Cancel is available during the
+       * analysis, and it returns to the previous result; storing the new
+       * result first would have left it paired with the old preview.
+       */
       this.stage = 'analysis'
-      this.analysis =
+      const analysis: ReviewResult =
         result.kind === 'js'
           ? await send<ReviewResult>({
               type: 'analyse',
@@ -1066,6 +1066,16 @@ export class Flow {
             })
           : { static: [], undeclaredCapabilities: [], passed: true }
       if (!current()) return
+
+      this.result = result
+      this.intent = result.intent
+      // Keep the user's scope choice across a regeneration; only seed it once.
+      this.matchPattern ||=
+        this.matchPresets.find((p) => p.recommended)?.pattern ??
+        this.matchPresets[0]?.pattern ??
+        ''
+      this.draft = this.buildDraft(result, picked.anchor)
+      this.analysis = analysis
       this.refinement = null
 
       this.stage = 'preview'
@@ -1427,6 +1437,21 @@ export class Flow {
   cancelGenerating(): void {
     this.cancelGeneration?.()
     this.cancelGeneration = null
+    /*
+     * A refinement has a result, a preview and a conversation worth keeping,
+     * so cancelling it goes back to refining with the follow-up text restored
+     * for editing. Discarding the run here threw all of that away for a
+     * request that was only slow. A first generation has nothing to return to.
+     */
+    if (this.refinement && this.result) {
+      // Ends the attempt: its callbacks and its result are ignored from here.
+      this.generation += 1
+      this.stopClock()
+      this.clearShot()
+      this.undoRefinement()
+      this.step = 'refining'
+      return
+    }
     void this.discard()
   }
 
