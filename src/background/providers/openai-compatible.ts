@@ -222,18 +222,55 @@ function isLoopback(baseUrl: string): boolean {
   }
 }
 
-/** Refreshes an OAuth token a minute ahead of expiry and persists the result. */
-async function ensureFreshToken(
-  providerId: string,
-  credential: Extract<
-    NonNullable<Awaited<ReturnType<typeof readCredentialForRequest>>>,
-    { kind: 'oauth' }
-  >,
-): Promise<string> {
-  if (!needsRefresh(credential.expiresAt, Date.now())) {
-    return credential.accessToken
-  }
+/**
+ * Refreshes that are running now, one per provider.
+ *
+ * Providers rotate refresh tokens, so a second request with the token the first
+ * one used is rejected, and a provider that follows RFC 9700 section 4.14.2
+ * answers reuse by revoking the whole grant. Callers that arrive while a
+ * refresh is running wait for it instead of sending their own.
+ */
+const refreshesInFlight = new Map<string, Promise<string>>()
 
+type OAuthCredential = Extract<
+  NonNullable<Awaited<ReturnType<typeof readCredentialForRequest>>>,
+  { kind: 'oauth' }
+>
+
+function ensureFreshToken(providerId: string, credential: OAuthCredential): Promise<string> {
+  if (!needsRefresh(credential.expiresAt, Date.now())) {
+    return Promise.resolve(credential.accessToken)
+  }
+  const running = refreshesInFlight.get(providerId)
+  if (running) return running
+
+  const started = (async () => {
+    /*
+     * The credential is read again, because the caller's copy may be older than
+     * a refresh that finished between its read and this point. Without this, a
+     * caller that missed the in-flight window would refresh with a token that
+     * has already been spent.
+     */
+    const latest = await readCredentialForRequest(providerId)
+    // Removed or replaced while this call was starting. Refreshing the old
+    // copy would store it again and undo the removal.
+    if (latest?.kind !== 'oauth') {
+      throw new ProviderError('The sign-in for this provider was removed. Reconnect it in settings.', 'no-credential', false)
+    }
+    if (!needsRefresh(latest.expiresAt, Date.now())) return latest.accessToken
+    return refreshToken(providerId, latest)
+  })().finally(() => {
+    refreshesInFlight.delete(providerId)
+  })
+  refreshesInFlight.set(providerId, started)
+  return started
+}
+
+/** Refreshes an OAuth token a minute ahead of expiry and persists the result. */
+async function refreshToken(
+  providerId: string,
+  credential: OAuthCredential,
+): Promise<string> {
   /*
    * The header call no longer sits inside the chat request's `try`, so a
    * transport failure here has to be classified on its own. It used to be

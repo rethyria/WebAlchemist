@@ -184,3 +184,94 @@ describe('a token endpoint that answers with something that is not JSON', () => 
     expect((chat[1].headers as Record<string, string>)['Authorization']).toBe('Bearer a2')
   })
 })
+
+describe('concurrent OAuth refreshes', () => {
+  /*
+   * A token endpoint that rotates refresh tokens: only the newest is valid, and
+   * presenting an older one is rejected. This is the behaviour that turns two
+   * simultaneous refreshes into a failure.
+   */
+  function rotatingServer() {
+    const used: string[] = []
+    let current = 0
+    const spy = stubFetch(async (url, init) => {
+      if (url.includes('/token')) {
+        const sent = new URLSearchParams(init.body as URLSearchParams).get('refresh_token')!
+        used.push(sent)
+        // A slow endpoint, so that overlapping callers are in flight together.
+        await new Promise((resolve) => setTimeout(resolve, 10))
+        if (sent !== `r${current}`) return new Response('{"error":"invalid_grant"}', { status: 400 })
+        current += 1
+        return new Response(
+          JSON.stringify({ access_token: `a${current}`, refresh_token: `r${current}`, expires_in: 3600 }),
+        )
+      }
+      return new Response(
+        JSON.stringify({ choices: [{ message: { content: '{"verdict":"match","explanation":""}' } }] }),
+      )
+    })
+    return { used, spy }
+  }
+
+  const expired = {
+    kind: 'oauth' as const,
+    accessToken: 'a',
+    refreshToken: 'r0',
+    expiresAt: 0,
+    tokenEndpoint: 'https://auth.example.com/token',
+    clientId: 'c',
+  }
+
+  it('sends one refresh request for two overlapping calls, and both succeed', async () => {
+    await storage.setCredential('p1', expired)
+    const { used } = rotatingServer()
+    const adapter = await createOpenAiCompatibleProvider(provider)
+
+    const results = await Promise.allSettled([adapter.review(REVIEW_ARGS), adapter.review(REVIEW_ARGS)])
+
+    expect(used).toEqual(['r0'])
+    expect(results.map((r) => r.status)).toEqual(['fulfilled', 'fulfilled'])
+    expect(await storage.readCredentialForRequest('p1')).toMatchObject({ refreshToken: 'r1' })
+  })
+
+  it('shares one failed refresh between callers and then allows a new attempt', async () => {
+    await storage.setCredential('p1', expired)
+    let tokenCalls = 0
+    stubFetch(async () => {
+      tokenCalls += 1
+      await new Promise((resolve) => setTimeout(resolve, 10))
+      return new Response('{}', { status: 400 })
+    })
+    const adapter = await createOpenAiCompatibleProvider(provider)
+
+    const results = await Promise.allSettled([adapter.review(REVIEW_ARGS), adapter.review(REVIEW_ARGS)])
+    expect(tokenCalls).toBe(1)
+    expect(results.every((r) => r.status === 'rejected')).toBe(true)
+
+    await adapter.review(REVIEW_ARGS).catch(() => undefined)
+    expect(tokenCalls).toBe(2)
+  })
+
+  it('does not refresh again for a call that starts after the refresh finished', async () => {
+    await storage.setCredential('p1', expired)
+    const { used } = rotatingServer()
+    const adapter = await createOpenAiCompatibleProvider(provider)
+
+    await adapter.review(REVIEW_ARGS)
+    await adapter.review(REVIEW_ARGS)
+
+    expect(used).toEqual(['r0'])
+  })
+
+  // The control: with a token that is not near expiry no refresh is needed, so
+  // the single request above is caused by the expiry and not by the stub.
+  it('control: a token that is not near expiry causes no refresh at all', async () => {
+    await storage.setCredential('p1', { ...expired, expiresAt: Date.now() + 60 * 60 * 1000 })
+    const { used } = rotatingServer()
+    const adapter = await createOpenAiCompatibleProvider(provider)
+
+    await Promise.all([adapter.review(REVIEW_ARGS), adapter.review(REVIEW_ARGS)])
+
+    expect(used).toEqual([])
+  })
+})
