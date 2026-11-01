@@ -121,12 +121,30 @@ export async function readSuspended(tabId: number): Promise<string | undefined> 
   return typeof value === 'string' ? value : undefined
 }
 
-export async function writeSuspended(tabId: number, id: string): Promise<void> {
+/*
+ * The window whose sidebar paused the transform, stored with the pause as a
+ * preview's window is. Looking up the tab's window when the sidebar closes
+ * gives the wrong answer for a tab that was moved to another window after the
+ * pause, and a closed tab has no window to look up at all.
+ */
+const pauseWindowKey = (tabId: number) => `wa-pause-window-${tabId}`
+
+export async function writeSuspended(
+  tabId: number,
+  id: string,
+  windowId?: number,
+): Promise<void> {
   await browser.storage.session.set({ [`${SUSPENDED_PREFIX}${tabId}`]: id })
+  if (windowId !== undefined) await browser.storage.session.set({ [pauseWindowKey(tabId)]: windowId })
+}
+
+export async function suspendedWindow(tabId: number): Promise<number | undefined> {
+  const value = (await browser.storage.session.get(pauseWindowKey(tabId)))[pauseWindowKey(tabId)]
+  return typeof value === 'number' ? value : undefined
 }
 
 export async function forgetSuspended(tabId: number): Promise<void> {
-  await browser.storage.session.remove(`${SUSPENDED_PREFIX}${tabId}`)
+  await browser.storage.session.remove([`${SUSPENDED_PREFIX}${tabId}`, pauseWindowKey(tabId)])
 }
 
 /*

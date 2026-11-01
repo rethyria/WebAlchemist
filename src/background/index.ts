@@ -40,6 +40,7 @@ import {
   previewScriptWindow,
   previewWindow,
   suspendedTabIds,
+  suspendedWindow,
   takeArchivedPreview,
   readCss,
   readSuspended,
@@ -679,7 +680,7 @@ async function handle(
       // Recorded before applying: every later evaluation of this tab reads the
       // record, so a route change cannot bring the paused version back.
       if (message.id === null) await forgetSuspended(message.tabId)
-      else await writeSuspended(message.tabId, message.id)
+      else await writeSuspended(message.tabId, message.id, tab?.windowId)
       await applyCssTransforms(message.tabId, () => cssTransformsFor(message.tabId, url))
       return true
     }
@@ -882,10 +883,13 @@ async function clearPreviewsWhere(
     await unregisterPreview(id)
     await removePreviewedScript(id)
   }
-  // A pause belongs to the window the tab is in: the sidebar that paused it is
-  // the one that resumes it, and a sidebar that closed cannot.
+  // A pause belongs to the window whose sidebar set it: that sidebar is the one
+  // that resumes it, and a sidebar that closed cannot. The window stored with
+  // the pause is used; the tab's current window is only the answer for a pause
+  // stored without one.
   for (const tabId of await suspendedTabIds()) {
-    if (!ownerIsGone(await windowOfTab(tabId))) continue
+    const owner = (await suspendedWindow(tabId)) ?? (await windowOfTab(tabId))
+    if (!ownerIsGone(owner)) continue
     await forgetSuspended(tabId)
     await reapply(tabId)
   }

@@ -341,3 +341,42 @@ describe('a paused transform when its window\'s sidebar closes (#83)', () => {
     }
   })
 })
+
+describe('a pause is assigned to the window it was set in (#83)', () => {
+  const dark = cssTransform()
+
+  async function pauseThenMoveTab() {
+    vi.useFakeTimers()
+    h.local.set('transforms', [dark])
+    h.tabWindows.set(TAB, 1)
+    await h.boot()
+    await commit()
+    await h.onMessage({ type: 'suspend-transform', tabId: TAB, id: dark.id })
+    expect(h.calls.insertCSS).toHaveLength(1)
+    // The tab is dragged into window 2 after window 1's sidebar paused it.
+    h.tabWindows.set(TAB, 2)
+    const port1 = sidebarPort(1)
+    const port2 = sidebarPort(2)
+    h.listeners.get('browser.runtime.onConnect')!(port1)
+    h.listeners.get('browser.runtime.onConnect')!(port2)
+    return { port1, port2 }
+  }
+  afterEach(() => vi.useRealTimers())
+
+  it('is lifted when the window that set it closes, wherever the tab is now', async () => {
+    const { port1 } = await pauseThenMoveTab()
+    port1.drop()
+    await vi.advanceTimersByTimeAsync(50)
+    expect(h.calls.insertCSS).toHaveLength(2)
+    expect(h.session.get(`wa-pause-window-${TAB}`)).toBeUndefined()
+  })
+
+  it('control: stays paused when only the other window closes', async () => {
+    // Before the change the tab's current window decided, so this was the
+    // window whose closing lifted the pause.
+    const { port2 } = await pauseThenMoveTab()
+    port2.drop()
+    await vi.advanceTimersByTimeAsync(50)
+    expect(h.calls.insertCSS).toHaveLength(1)
+  })
+})
