@@ -24,8 +24,17 @@ import type { RefinementTurn } from './providers/types'
 import { overlayPaletteFor } from '@shared/accents'
 import * as badge from './badge'
 import { blockedStates, problemWithStoredCode, runStaticAnalysis } from './code-gate'
-import { mayBeSaved, recordApproval } from './approvals'
-import { assertPreviewable, checkCssForPage, checkCssTransform, pageUrlFor } from './css-gate'
+import { checkCssForPage, checkCssTransform, pageUrlFor } from './css-gate'
+import {
+  applyCssTransforms as applyCssTransformsFor,
+  fromExtensionPage,
+  handleApproveCode,
+  handlePreviewCss,
+  handleReview,
+  handleSaveTransform,
+  type CssApplyDeps,
+  type SaveDeps,
+} from './handlers'
 import { reconcile as reconcileContentScripts } from './content-scripts'
 import { buildProbeTransform } from './csp-probe'
 import { forgetSession, runHealthCheck, shouldCheck } from './health'
@@ -277,35 +286,11 @@ async function handle(
       )
     }
 
-    case 'review': {
-      const result = await runReview(message.code, message.intent, message.declaredCapabilities)
-      /*
-       * The approval is recorded here, in the background, where the review
-       * happened, and not by the sidebar after the fact. Any verdict counts: a
-       * disagreement is shown to the user, who may still choose to save, so
-       * what is recorded is that this code was reviewed and shown. Nothing is
-       * recorded when static analysis rejected the code and no review ran.
-       */
-      if (result.model && fromExtensionPage(sender)) {
-        await recordApproval(
-          message.code,
-          message.world,
-          message.declaredCapabilities,
-          result.model.verdict,
-        )
-      }
-      return result
-    }
+    case 'review':
+      return handleReview(message, fromExtensionPage(sender, browser.runtime.getURL('')), { runReview })
 
-    case 'approve-code': {
-      if (!fromExtensionPage(sender)) throw new Error('Only the extension can approve code.')
-      const analysis = runStaticAnalysis(message.code, message.declaredCapabilities)
-      if (!analysis.passed) {
-        throw new Error('Static analysis rejected this code, so it was not approved.')
-      }
-      await recordApproval(message.code, message.world, message.declaredCapabilities, 'user-written')
-      return true
-    }
+    case 'approve-code':
+      return handleApproveCode(message, fromExtensionPage(sender, browser.runtime.getURL('')))
 
     case 'analyse':
       return runStaticAnalysis(message.code, message.declaredCapabilities)
@@ -323,82 +308,8 @@ async function handle(
       )
     }
 
-    case 'save-transform': {
-      /*
-       * Re-run the gate here rather than trusting that the caller did, exactly
-       * as preview-js does. This stopped being a formality when transform code
-       * became hand-editable: the sidebar is no longer only ever sending back
-       * something it just analysed, so the last point before code is persisted
-       * and registered has to check it for itself.
-       */
-      if (message.transform.kind === 'js') {
-        const analysis = runStaticAnalysis(
-          message.transform.code,
-          message.transform.capabilities,
-        )
-        if (!analysis.passed) {
-          throw new Error('Static analysis rejected this code, so it was not saved.')
-        }
-
-        /*
-         * The code must be the code that was approved. Static analysis alone
-         * cannot say that: it passes for any code that is not caught, and the
-         * review and the panel's approval are what the user relied on. A
-         * transform whose code is unchanged from what is stored is let
-         * through, so a rename or a toggle does not need a new review, and
-         * capabilities that were only reduced are covered by the approval for
-         * the larger set (see approvals.ts).
-         */
-        const stored = (await getAllTransforms()).find((t) => t.id === message.transform.id)
-        if (!(await mayBeSaved(stored, message.transform))) {
-          throw new Error(
-            'This code was not approved in this browser session, so it was not saved. Review it again and save.',
-          )
-        }
-      }
-
-      if (message.transform.kind === 'css') {
-        /*
-         * The same reasoning as the JavaScript gate above, and one more: the
-         * approval panel's CSS check is advisory, so the editor, a rename and
-         * any later caller all arrive here, and this is the last point before
-         * the CSS is stored and injected on every visit.
-         *
-         * A transform whose code and approvals are unchanged is let through,
-         * so renaming or reordering a stored transform is not refused because
-         * of a rule that was already there. It still does not apply: the same
-         * check runs again every time stored CSS is injected.
-         */
-        const stored = (await getAllTransforms()).find((t) => t.id === message.transform.id)
-        const unchanged =
-          stored !== undefined &&
-          stored.code === message.transform.code &&
-          JSON.stringify(stored.approvedCssUrls ?? []) ===
-            JSON.stringify(message.transform.approvedCssUrls ?? [])
-        if (!unchanged) {
-          const tab =
-            message.tabId === undefined
-              ? undefined
-              : await browser.tabs.get(message.tabId).catch(() => undefined)
-          const check = checkCssTransform(message.transform, await getSettings(), tab?.url)
-          if (!check.passed) {
-            throw new Error(
-              check.static[0]?.explanation ??
-                'This CSS loads external addresses that were not approved, so it was not saved.',
-            )
-          }
-        }
-      }
-
-      await saveTransform(message.transform)
-      if (message.transform.kind === 'js') {
-        await registerTransform(message.transform)
-      }
-      // Apply it now rather than on the next navigation. The preview was just
-      // taken down, so without this the page visibly reverts on save.
-      await reapply(message.tabId)
-      return true
-    }
+    case 'save-transform':
+      return handleSaveTransform(message, saveDeps)
 
     case 'delete-transform':
       await unregisterTransform(message.id)
@@ -497,14 +408,12 @@ async function handle(
       await discardVault()
       return true
 
-    case 'preview-css': {
-      // Before anything is injected, and enforced here rather than in the
-      // sidebar: the sidebar's own check is only a courtesy to the user.
-      const tab = await browser.tabs.get(message.tabId).catch(() => undefined)
-      assertPreviewable(message.css, await getSettings(), tab?.url, message.approvedUrls)
-      await setPreviewCss(message.tabId, message.css)
-      return true
-    }
+    case 'preview-css':
+      return handlePreviewCss(message, {
+        getSettings,
+        tabUrl: tabUrlOf,
+        setPreviewCss,
+      })
 
     case 'clear-preview-css':
       await setPreviewCss(message.tabId, null)
@@ -919,45 +828,18 @@ const appliedCss = new Map<number, string>()
 /**
  * CSS is applied by the background script rather than the content script:
  * insertCSS at the USER origin needs no page-side code, survives re-renders
- * without observers, and cannot be tampered with from the page.
+ * without observers, and cannot be tampered with from the page. The logic,
+ * including the check of stored CSS, is in handlers.ts so it can be tested.
  */
-async function applyCssTransforms(
-  tabId: number,
-  transforms: Transform[],
-  tabUrl: string,
-): Promise<void> {
-  /*
-   * Stored CSS is checked again here, against the page it is about to be
-   * injected into. It was checked when saved, but the rules and the site's
-   * setting can change afterwards, and CSS saved before the check existed was
-   * never checked at all. One that fails is left out, and the rest still apply.
-   * The panel lists it as not running (see blockedStates).
-   */
-  const settings = await getSettings()
-  const css = transforms
-    .filter((t) => t.kind === 'css' && t.enabled)
-    .filter((t) => problemWithStoredCode(t, settings, tabUrl) === null)
-    .sort((a, b) => a.order - b.order)
-    .map((t) => `/* ${t.name} */\n${t.code}`)
-    .join('\n\n')
+const cssApplyDeps: CssApplyDeps = {
+  getSettings,
+  insertCss: (tabId, css) => browser.scripting.insertCSS({ target: { tabId }, css, origin: 'USER' }),
+  removeCss: (tabId, css) => browser.scripting.removeCSS({ target: { tabId }, css, origin: 'USER' }),
+  applied: appliedCss,
+}
 
-  const previous = appliedCss.get(tabId)
-  if (previous !== undefined && previous !== css) {
-    await browser.scripting
-      .removeCSS({ target: { tabId }, css: previous, origin: 'USER' })
-      .catch(() => {})
-    appliedCss.delete(tabId)
-  }
-
-  if (!css || previous === css) return
-
-  try {
-    await browser.scripting.insertCSS({ target: { tabId }, css, origin: 'USER' })
-    appliedCss.set(tabId, css)
-  } catch {
-    // No host permission for this origin yet, which is expected until the user
-    // saves their first transform for the site.
-  }
+function applyCssTransforms(tabId: number, transforms: Transform[], tabUrl: string): Promise<void> {
+  return applyCssTransformsFor(cssApplyDeps, tabId, transforms, tabUrl)
 }
 
 /** Recomputes and applies whatever should be running in this tab right now. */
@@ -973,6 +855,22 @@ async function reapply(tabId: number | undefined): Promise<void> {
   // of the four call sites.
   const settings = await getSettings()
   await badge.transformCountChanged(tabId, transforms.length, settings.accent)
+}
+
+/** The URL of a tab, or undefined when there is no such tab or it has no URL. */
+async function tabUrlOf(tabId: number | undefined): Promise<string | undefined> {
+  if (tabId === undefined) return undefined
+  const tab = await browser.tabs.get(tabId).catch(() => undefined)
+  return tab?.url
+}
+
+const saveDeps: SaveDeps = {
+  getAllTransforms,
+  getSettings,
+  tabUrl: tabUrlOf,
+  saveTransform,
+  registerTransform,
+  reapply,
 }
 
 /* ------------------------------------------------------------------ */
@@ -1075,15 +973,6 @@ async function sendToContent(tabId: number, message: ContentMessage): Promise<vo
     // No content script in that tab, which is normal — it is only injected
     // under activeTab or on origins the user has granted.
   }
-}
-
-/**
- * True when a message came from one of this extension's own pages (the
- * sidebar, the editor, the options page) and not from a content script, whose
- * sender URL is the web page it runs in.
- */
-function fromExtensionPage(sender: browser.runtime.MessageSender): boolean {
-  return sender.url?.startsWith(browser.runtime.getURL('')) === true
 }
 
 /** Exposed for tests and for the sidebar's manual health-check action. */
