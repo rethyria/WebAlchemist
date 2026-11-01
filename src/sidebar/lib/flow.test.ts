@@ -307,3 +307,48 @@ describe('repeating a failed request', () => {
     expect(flow.canRetry).toBe(false)
   })
 })
+
+describe('resetting the flow', () => {
+  afterEach(() => vi.useRealTimers())
+
+  it('clears the error card and stops the rate-limit countdown', async () => {
+    vi.useFakeTimers()
+    const flow = flowAtApprove()
+    handler = (m) =>
+      m.type === 'review' ? failure('rate-limit', { retryInSeconds: 5 }) : { ok: true, data: null }
+    await flow.toReview()
+    expect(flow.error?.kind).toBe('rate-limited')
+
+    await flow.discard()
+    expect(flow.step).toBe('list')
+    expect(flow.error).toBeNull()
+
+    const reviewsBefore = calls.filter((c) => c.type === 'review').length
+    await vi.advanceTimersByTimeAsync(6000)
+    expect(flow.error).toBeNull()
+    expect(calls.filter((c) => c.type === 'review').length).toBe(reviewsBefore)
+  })
+
+  it('clears a plain error card so no retry is offered for a run that is gone', async () => {
+    const flow = flowAtApprove()
+    handler = (m) => (m.type === 'review' ? failure('network') : { ok: true, data: null })
+    await flow.toReview()
+    expect(flow.error).not.toBeNull()
+    await flow.discard()
+    expect(flow.error).toBeNull()
+    expect(flow.canRetry).toBe(false)
+  })
+
+  it('stops the countdown when the tab closes', async () => {
+    vi.useFakeTimers()
+    const flow = flowAtApprove()
+    handler = (m) =>
+      m.type === 'review' ? failure('rate-limit', { retryInSeconds: 5 }) : { ok: true, data: null }
+    await flow.toReview()
+    flow.tabClosed(1)
+    expect(flow.error).toBeNull()
+    await vi.advanceTimersByTimeAsync(6000)
+    expect(calls.filter((c) => c.type === 'review').length).toBe(1)
+  })
+})
+

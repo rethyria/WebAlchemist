@@ -1668,6 +1668,10 @@ export class Flow {
 
   reset(): void {
     this.stopClock()
+    // The countdown's own comment says resetting the flow stops it, but this
+    // did not. A card and a timer that outlive the run it belonged to end by
+    // calling retry() with nothing to repeat.
+    this.dismissError()
     this.generation += 1
     // The run is over, so the all-sites grant it may have taken goes back.
     this.cancelScreenshot()
