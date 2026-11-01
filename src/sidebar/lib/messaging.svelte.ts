@@ -28,6 +28,8 @@ export function generateOverPort(
   request: {
     context: unknown
     instruction: string
+    /** True when `instruction` is an imported transform's description, unchanged. */
+    instructionImported?: boolean
     history: unknown[]
     scopeDepth?: number
     scopeContainer?: string | null

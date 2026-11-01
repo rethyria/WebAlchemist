@@ -23,8 +23,17 @@ export interface RefinementTurn {
  *  - `saved-description-edited`: pre-filled the same way, then changed by the
  *    user before sending. The user read and wrote the final text, so it counts
  *    as theirs, and the reviewer is told how it started.
+ *  - `imported-description`, `imported-description-edited`: the same two cases
+ *    for a transform that came from an imported file, so the text was written
+ *    by the author of that file. The reviewer is told that, which is more than
+ *    "a model or an earlier session wrote it" (#56).
  */
-export type InstructionSource = 'typed' | 'saved-description' | 'saved-description-edited'
+export type InstructionSource =
+  | 'typed'
+  | 'saved-description'
+  | 'saved-description-edited'
+  | 'imported-description'
+  | 'imported-description-edited'
 
 export interface ReviewInstruction {
   text: string
@@ -51,6 +60,12 @@ export interface GenerateRequest {
   context: PageContext
   /** The user's latest instruction. */
   instruction: string
+  /**
+   * True when `instruction` is the description of an imported transform, sent
+   * as it was imported. The author of the file wrote it, so the prompt says so
+   * and does not present it as the user's request (#56).
+   */
+  instructionImported?: boolean
   /** Distance up the ancestor chain the result should cover. See ScopeDepth. */
   scopeDepth?: number
   /** Selector of the container that depth resolves to, for the prompt. */

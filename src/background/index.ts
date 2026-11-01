@@ -22,9 +22,11 @@ import type {
   PageContext,
   Rect,
   ReviewResult,
+  Settings,
   Transform,
   TransformRuntimeState,
 } from '@shared/types'
+import { NEEDS_REGENERATING_NOTE, needsRegenerating } from '@shared/transform-state'
 import type { RefinementTurn, ReviewInstruction } from './providers/types'
 import { overlayPaletteFor } from '@shared/accents'
 import * as badge from './badge'
@@ -103,6 +105,7 @@ import {
   getUsage,
   handleVaultIdleAlarm,
   importTransforms,
+  previewImport,
   lockVault,
   reorderTransforms,
   saveSettings,
@@ -580,6 +583,14 @@ async function handle(
       const transforms = await getAllTransforms()
       const existing = transforms.find((t) => t.id === message.transformId)
       if (!existing) throw new Error('That transform no longer exists.')
+      // A repair sends the stored description to the model without showing it.
+      // For an imported transform that description was written by the author
+      // of the file, so it goes through Edit description, which shows it first.
+      if (existing.origin === 'imported') {
+        throw new Error(
+          'This transform came from an imported file. Use Edit description to read its description before it is used.',
+        )
+      }
 
       const usage = createUsageRecorder(existing.id)
       let result: GenerationResult
@@ -703,6 +714,12 @@ async function handle(
       return true
 
     case 'set-enabled': {
+      // Turning on a transform with no code would store enabled: true while
+      // nothing runs, which the list then shows as a working transform.
+      if (message.enabled) {
+        const stored = (await getAllTransforms()).find((t) => t.id === message.id)
+        if (stored && needsRegenerating(stored)) throw new Error(NEEDS_REGENERATING_NOTE)
+      }
       // One queued update rather than a read followed by saveTransform: the
       // read has to be inside the queue or a concurrent save is overwritten.
       const next = await updateTransform(message.id, { enabled: message.enabled })
@@ -1060,23 +1077,36 @@ async function handle(
     case 'export-transforms':
       return exportTransforms()
 
+    case 'preview-import': {
+      const settings = await getSettings()
+      return previewImport(message.bundle, (t) => cssProblemOf(t, settings))
+    }
+
     case 'import-transforms': {
       /*
        * Shared CSS arrives with its code, so it gets the same check as CSS
-       * written here. One that fails is imported without code and disabled,
-       * the way shared JavaScript is, so the row is kept and nothing runs.
-       * The check uses the importer's own settings for the site, so a site
-       * set to allow more is not held to the default.
+       * written here. One that fails is imported without code, the way shared
+       * JavaScript is, so the row is kept and nothing runs. The check uses the
+       * importer's own settings for the site, so a site set to allow more is
+       * not held to the default. Every imported record is disabled (see
+       * sanitiseIncoming).
        */
       const settings = await getSettings()
-      const result = await importTransforms(
-        message.bundle as Awaited<ReturnType<typeof exportTransforms>>,
-        (t) => !checkCssTransform(t, settings).passed,
-      )
+      const result = await importTransforms(message.bundle, (t) => cssProblemOf(t, settings))
       await reregister()
       return result
     }
   }
+}
+
+/** The first reason CSS fails the check for the settings given, or null when it passes. */
+function cssProblemOf(t: Pick<Transform, 'code' | 'match'>, settings: Settings): string | null {
+  const check = checkCssTransform(t, settings)
+  if (check.passed) return null
+  return (
+    check.static.find((f) => f.severity === 'block')?.explanation ??
+    'It loads addresses outside the site that were not approved.'
+  )
 }
 
 /**
@@ -1425,6 +1455,8 @@ browser.runtime.onConnect.addListener((port) => {
 interface GenerateOverPort {
   context: PageContext
   instruction: string
+  /** True when `instruction` is an imported transform's description, unchanged. See GenerateRequest. */
+  instructionImported?: boolean
   history: RefinementTurn[]
   scopeDepth?: number
   scopeContainer?: string | null

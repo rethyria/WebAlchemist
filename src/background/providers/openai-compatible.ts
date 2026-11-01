@@ -24,6 +24,7 @@ import {
   fenceSavedTransform,
   pageDataSections,
   randomNonce,
+  generationInstruction,
   repairPrompt,
   reviewContent,
   scopeInstruction,
@@ -241,7 +242,7 @@ export async function createOpenAiCompatibleProvider(
       // One value for every fence and section name in this request, so the
       // instruction can name sections the page's own text cannot imitate.
       const nonce = randomNonce()
-      const instruction = request.repair ? repairPrompt(nonce) : request.instruction
+      const instruction = request.repair ? repairPrompt(nonce) : generationInstruction(request, nonce)
 
       /*
        * Two fixes in one line. The page content is fenced, for the reason in

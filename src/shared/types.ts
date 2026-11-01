@@ -18,7 +18,13 @@ import { DEFAULT_VAULT_IDLE_MINUTES } from './vault-policy'
 export const SCHEMA_VERSION = 1
 
 export type TransformKind = 'css' | 'js'
-export type TransformOrigin = 'manual' | 'ai'
+/**
+ * Who wrote the transform's code or description. `imported` marks a record that
+ * came in from a file: its intent and code were written by someone else. It is
+ * treated as model-written wherever that matters (the kill switch, the labels
+ * sent to the generator and reviewer), and never as the user's own work.
+ */
+export type TransformOrigin = 'manual' | 'ai' | 'imported'
 export type ExecutionWorld = 'USER_SCRIPT' | 'MAIN'
 
 /**

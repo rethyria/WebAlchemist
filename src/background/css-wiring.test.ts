@@ -163,11 +163,11 @@ describe('importing transforms (#50)', () => {
     expect(imported().enabled).toBe(false)
   })
 
-  it('imports CSS that passes the check as it is (control)', async () => {
+  it('imports CSS that passes the check with its code, disabled (control)', async () => {
     const bundle = await bundleOf({ code: 'aside { display: none }' })
     await ask({ type: 'import-transforms', bundle })
     expect(imported().code).toBe('aside { display: none }')
-    expect(imported().enabled).toBe(true)
+    expect(imported().enabled).toBe(false)
   })
 
   it('ignores the approvals that came in the file, even where the site lists addresses', async () => {

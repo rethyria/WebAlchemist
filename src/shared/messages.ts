@@ -36,6 +36,8 @@ import type { Rule } from './css'
 import type { ScrollOffset } from './region'
 import type { OverlayPalette } from './accents'
 import type { RefinementTurn, ReviewInstruction } from '@background/providers/types'
+import type { ExportBundle, ImportResult } from '@background/storage'
+import type { PlannedTransform } from '@background/transfer'
 
 /**
  * What a confirmed pick means.
@@ -317,6 +319,7 @@ export type Message =
 
   /* --- portability --------------------------------------------------- */
   | { type: 'export-transforms' }
+  | { type: 'preview-import'; bundle: unknown }
   | { type: 'import-transforms'; bundle: unknown }
 
 /** Sent from background to content script. */
@@ -489,8 +492,9 @@ export interface Responses {
   analyse: ReviewResult
   'preview-js': boolean
   'clear-preview-js': boolean
-  'export-transforms': { schemaVersion: number; exportedAt: number; transforms: Transform[] }
-  'import-transforms': { imported: number; skipped: number; needsRegeneration: string[] }
+  'export-transforms': ExportBundle
+  'preview-import': { items: PlannedTransform[] }
+  'import-transforms': ImportResult
   'capture-region': {
     dataUrl: string
     rect: Rect

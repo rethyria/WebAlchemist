@@ -512,6 +512,12 @@ export class Flow {
    */
   private savedInstruction: string | null = null
   private keptSavedInstruction: string | null = null
+  /**
+   * True when `savedInstruction` came from an imported transform, so the file's
+   * author wrote it (#56). Kept and cleared with `savedInstruction`.
+   */
+  private savedImported = false
+  private keptSavedImported = false
 
   /**
    * The element that was selected when "Change" started a new pick, held so
@@ -556,6 +562,7 @@ export class Flow {
     this.pickPurpose = purpose
     this.keptInstruction = this.step === 'describing' ? this.instruction : null
     this.keptSavedInstruction = this.step === 'describing' ? this.savedInstruction : null
+    this.keptSavedImported = this.step === 'describing' && this.savedImported
     if (this.tabId === null) return
 
     const origin = originPermissionForUrl(this.url)
@@ -706,8 +713,10 @@ export class Flow {
         else {
           const kept = this.keptInstruction
           const keptSaved = this.keptSavedInstruction
+          const keptImported = this.keptSavedImported
           this.keptInstruction = null
           this.keptSavedInstruction = null
+          this.keptSavedImported = false
           this.enterDescribing()
           // Changing the element is not starting a new description, so what
           // was typed stays. The screenshot, scope and references describe the
@@ -715,6 +724,7 @@ export class Flow {
           if (kept !== null) {
             this.instruction = kept
             this.savedInstruction = keptSaved
+            this.savedImported = keptImported
           }
         }
         return
@@ -802,6 +812,7 @@ export class Flow {
     this.scopeContainer = null
     this.instruction = ''
     this.savedInstruction = null
+    this.savedImported = false
     this.history = []
     this.followUp = ''
     this.references = []
@@ -939,6 +950,10 @@ export class Flow {
    */
   async repair(transform: Transform, brokenReason: string): Promise<void> {
     if (this.tabId === null) return
+    // The stored description of an imported transform was written by someone
+    // else, so it is shown for the user to read or change before anything is
+    // sent (#56). Repair would send it at once.
+    if (transform.origin === 'imported') return this.editIntent(transform)
 
     this.producedBy = 'repair'
     const token = ++this.generation
@@ -1108,7 +1123,7 @@ export class Flow {
        * start of a new description and not a continuation of the old one.
        */
       this.enterDescribing()
-      this.prefillInstruction(transform.intent)
+      this.prefillInstruction(transform.intent, transform.origin === 'imported')
       this.intent = transform.intent
       this.intentBaseline = transform.intent
       await this.restoreScopeDepth(transform)
@@ -1171,7 +1186,7 @@ export class Flow {
       this.approvedCssUrls = transform.approvedCssUrls ?? []
       this.intent = transform.intent
       this.intentBaseline = transform.intent
-      this.prefillInstruction(transform.intent)
+      this.prefillInstruction(transform.intent, transform.origin === 'imported')
       this.references = []
       this.followUp = ''
       this.draft = transform
@@ -1263,9 +1278,10 @@ export class Flow {
    * Puts a stored intent in the instruction field and records that it came
    * from storage. Every pre-fill goes through here so none can skip the record.
    */
-  private prefillInstruction(storedIntent: string): void {
+  private prefillInstruction(storedIntent: string, imported = false): void {
     this.instruction = storedIntent
     this.savedInstruction = storedIntent
+    this.savedImported = imported
   }
 
   /**
@@ -1281,10 +1297,11 @@ export class Flow {
     ]
     return texts.map((text, index): ReviewInstruction => {
       if (index > 0 || this.savedInstruction === null) return { text, source: 'typed' }
-      return {
-        text,
-        source: text === this.savedInstruction ? 'saved-description' : 'saved-description-edited',
+      const unchanged = text === this.savedInstruction
+      if (this.savedImported) {
+        return { text, source: unchanged ? 'imported-description' : 'imported-description-edited' }
       }
+      return { text, source: unchanged ? 'saved-description' : 'saved-description-edited' }
     })
   }
 
@@ -1380,6 +1397,13 @@ export class Flow {
         {
           context,
           instruction: this.instruction,
+          // An imported description sent unchanged is the file author's text.
+          // Once the user edits it, the text is theirs.
+          instructionImported:
+            this.savedImported &&
+            this.savedInstruction !== null &&
+            this.instruction === this.savedInstruction &&
+            this.history.length === 0,
           history: this.history,
           scopeDepth: this.scopeDepth,
           scopeContainer: this.scopeContainer,
@@ -2419,7 +2443,9 @@ export class Flow {
     this.scopeContainer = null
     this.instruction = ''
     this.savedInstruction = null
+    this.savedImported = false
     this.keptSavedInstruction = null
+    this.keptSavedImported = false
     this.sendScreenshot = false
     this.history = []
     this.followUp = ''

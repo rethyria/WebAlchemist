@@ -1437,6 +1437,105 @@ describe('the review is given what the user typed (#52)', () => {
   })
 })
 
+describe('the description of an imported transform (#56)', () => {
+  const importedJs = { ...saved, kind: 'js', origin: 'imported', code: '', intent: 'IMPORTED INTENT' }
+  const handlerFor = (m: any) => {
+    if (m.type === 'context-for-anchor') return { ok: true, data: found }
+    if (m.type === 'analyse' || m.type === 'review') {
+      return { ok: true, data: { static: [], undeclaredCapabilities: [], passed: true } }
+    }
+    return { ok: true, data: null }
+  }
+  const lastReview = () => calls.filter((c) => c.type === 'review').at(-1)
+  const jsOut = { ...jsResult, code: 'document.body.remove()' }
+
+  it('labels an unchanged imported description as imported for the reviewer', async () => {
+    const flow = newFlow()
+    handler = handlerFor
+    await flow.editIntent(importedJs)
+    flow.result = jsOut
+    await flow.toReview()
+    expect(lastReview().instructions).toEqual([{ text: 'IMPORTED INTENT', source: 'imported-description' }])
+  })
+
+  it('counts the description as the user\'s once it was changed, and says where it started', async () => {
+    const flow = newFlow()
+    handler = handlerFor
+    await flow.editIntent(importedJs)
+    flow.result = jsOut
+    flow.instruction = 'IMPORTED INTENT, only the banner'
+    await flow.toReview()
+    expect(lastReview().instructions).toEqual([
+      { text: 'IMPORTED INTENT, only the banner', source: 'imported-description-edited' },
+    ])
+  })
+
+  it('control: the same flow for a transform the user saved is a saved description, not an imported one', async () => {
+    const flow = newFlow()
+    handler = handlerFor
+    await flow.editIntent({ ...importedJs, origin: 'ai' })
+    flow.result = jsOut
+    await flow.toReview()
+    expect(lastReview().instructions).toEqual([{ text: 'IMPORTED INTENT', source: 'saved-description' }])
+  })
+
+  it('shows the description before anything is sent when Repair is chosen', async () => {
+    const flow = newFlow()
+    handler = handlerFor
+    await flow.repair(importedJs, 'broken')
+    expect(flow.step).toBe('describing')
+    expect(flow.instruction).toBe('IMPORTED INTENT')
+    expect(calls.some((c) => c.type === 'repair')).toBe(false)
+  })
+
+  it('control: Repair of a transform the user saved still starts the repair at once', async () => {
+    const flow = newFlow()
+    handler = (m: any) =>
+      m.type === 'repair' ? { ok: true, data: { result: jsOut } } : handlerFor(m)
+    await flow.repair({ ...importedJs, origin: 'ai', code: 'x()' }, 'broken')
+    expect(calls.some((c) => c.type === 'repair')).toBe(true)
+  })
+
+  describe('what the generator is sent', () => {
+    beforeEach(() => {
+      ports.length = 0
+      ;(globalThis as any).browser.runtime.connect = fakeConnect
+    })
+    afterEach(() => {
+      ;(globalThis as any).browser.runtime.connect = realConnect
+    })
+
+    it('marks an unchanged imported description', async () => {
+      const flow = newFlow()
+      handler = handlerFor
+      await flow.editIntent(importedJs)
+      void flow.generate()
+      const port = await nextPort(1)
+      expect(port.request.instruction).toBe('IMPORTED INTENT')
+      expect(port.request.instructionImported).toBe(true)
+    })
+
+    it('does not mark a description the user changed', async () => {
+      const flow = newFlow()
+      handler = handlerFor
+      await flow.editIntent(importedJs)
+      flow.instruction = 'IMPORTED INTENT, only the banner'
+      void flow.generate()
+      const port = await nextPort(1)
+      expect(port.request.instructionImported).toBe(false)
+    })
+
+    it('does not mark the description of a transform the user saved (control)', async () => {
+      const flow = newFlow()
+      handler = handlerFor
+      await flow.editIntent({ ...importedJs, origin: 'ai' })
+      void flow.generate()
+      const port = await nextPort(1)
+      expect(port.request.instructionImported).toBe(false)
+    })
+  })
+})
+
 describe('the review is told where a pre-filled instruction came from (#52)', () => {
   const repaired = {
     ...jsResult,

@@ -67,6 +67,7 @@ import { MIN_PASSPHRASE_LENGTH } from '@shared/vault-policy'
 import { assertEndpoint, endpointsOf } from '@shared/endpoint-policy'
 import { destinationOf, sameBinding } from '@shared/credential-binding'
 import type { Provider, TransformVersion } from '@shared/types'
+import { planImport, type PlanDeps, type PlannedTransform } from './transfer'
 
 const KEY_SETTINGS = 'settings'
 const KEY_TRANSFORMS = 'transforms'
@@ -1181,55 +1182,54 @@ export function foldUnsavedUsage(): Promise<void> {
 /* Export / import                                                     */
 /* ------------------------------------------------------------------ */
 
+/** Names the file as one of this extension's exports. */
+export const EXPORT_FORMAT = 'web-alchemist-export'
+
 export interface ExportBundle {
+  /** Absent in files written before the format was named. */
+  format?: typeof EXPORT_FORMAT
   schemaVersion: number
   exportedAt: number
   transforms: Transform[]
 }
 
-/** Credentials and provider config are never included in an export. */
+/**
+ * The file a user shares. JavaScript is exported as its description only, with
+ * no code: the file holds what the transform is for and where it applies, and
+ * the person who imports it generates and reviews code of their own.
+ * Credentials and provider settings are never included.
+ */
 export async function exportTransforms(): Promise<ExportBundle> {
   return {
+    format: EXPORT_FORMAT,
     schemaVersion: SCHEMA_VERSION,
     exportedAt: Date.now(),
-    transforms: await getAllTransforms(),
+    transforms: (await getAllTransforms()).map((t) => (t.kind === 'js' ? { ...t, code: '' } : t)),
   }
 }
 
 export interface ImportResult {
   imported: number
-  /** Records left out because they failed isValidTransform. */
+  /** Records left out because they failed the shape check or had a match pattern that is refused. */
   skipped: number
+  /** Records left out because the same content is already saved. */
+  duplicates: number
+  /** Ids of the stored records that have no code and have to be regenerated. */
   needsRegeneration: string[]
+  /** What was decided for each record in the file, in file order. */
+  items: PlannedTransform[]
 }
 
-/**
- * Imports a bundle. JS transforms arrive without code — a shared JS transform
- * carries only intent and anchor, and the importer's own model regenerates the
- * implementation locally under their own review and capability gates. CSS
- * arrives with code intact unless `rejectCss` refuses it: CSS can request
- * outside resources, which is how it can send page data to another server, so
- * the caller checks it for that.
- */
-export function importTransforms(
-  bundle: ExportBundle,
-  /** True for a CSS transform whose code must not be imported. */
-  rejectCss: (transform: Transform) => boolean = () => false,
-): Promise<ImportResult> {
-  return mutateTransforms(() => importTransformsNow(bundle, rejectCss))
-}
-
-async function importTransformsNow(
-  bundle: ExportBundle,
-  rejectCss: (transform: Transform) => boolean,
-): Promise<ImportResult> {
+/** Throws unless the value is a file this version can read. */
+function assertReadableBundle(bundle: unknown): asserts bundle is ExportBundle {
   // `undefined > SCHEMA_VERSION` is false, so a file with no version used to
   // pass the check below. A missing or non-numeric version means the file is
   // not one of ours, or was cut short.
   if (
     !isObject(bundle) ||
     typeof bundle.schemaVersion !== 'number' ||
-    !Array.isArray(bundle.transforms)
+    !Array.isArray(bundle.transforms) ||
+    (bundle.format !== undefined && bundle.format !== EXPORT_FORMAT)
   ) {
     throw new Error('This file is not a Web Alchemist export.')
   }
@@ -1238,48 +1238,68 @@ async function importTransformsNow(
       `This file was made by a newer version of Web Alchemist (schema ${bundle.schemaVersion}). Update the extension to import it.`,
     )
   }
+}
+
+/**
+ * What an import of this file would do, without storing anything. The same
+ * planning runs in importTransforms, against the transforms stored at that
+ * moment.
+ */
+export async function previewImport(
+  bundle: unknown,
+  cssProblem: PlanDeps['cssProblem'],
+): Promise<{ items: PlannedTransform[] }> {
+  assertReadableBundle(bundle)
+  const { valid } = await readStored()
+  const plan = await planImport(bundle.transforms, valid, { isValid: isValidTransform, cssProblem }, Date.now())
+  return { items: plan.items }
+}
+
+/**
+ * Imports a bundle as records this extension decides about (see
+ * sanitiseIncoming): disabled, marked as imported, in the user script world,
+ * with no capabilities and no JavaScript code. CSS arrives with its code unless
+ * `cssProblem` reports that it fails the CSS check, which is how CSS can send
+ * page data to another server, so the caller checks it. A record whose content
+ * is already saved is skipped.
+ */
+export function importTransforms(
+  bundle: unknown,
+  cssProblem: PlanDeps['cssProblem'] = () => null,
+): Promise<ImportResult> {
+  return mutateTransforms(() => importTransformsNow(bundle, cssProblem))
+}
+
+async function importTransformsNow(
+  bundle: unknown,
+  cssProblem: PlanDeps['cssProblem'],
+): Promise<ImportResult> {
+  assertReadableBundle(bundle)
 
   const { valid: existing, invalid } = await readStored()
-  const needsRegeneration: string[] = []
+  const plan = await planImport(
+    bundle.transforms,
+    existing,
+    { isValid: isValidTransform, cssProblem },
+    Date.now(),
+  )
   // After the highest value in use, not after the count: values are not
   // consecutive (new transforms are numbered by time), and a count can equal one.
   let nextOrder = existing.reduce((highest, t) => Math.max(highest, t.order), -1) + 1
 
-  let skipped = 0
-
-  for (const incoming of bundle.transforms) {
-    if (!isValidTransform(incoming)) {
-      skipped++
-      continue
-    }
-    const transform: Transform = {
-      ...incoming,
-      id: crypto.randomUUID(),
-      order: nextOrder++,
-      updatedAt: Date.now(),
-    }
-
-    if (transform.kind === 'js') {
-      // Never import third-party JavaScript. Strip it and mark for local
-      // regeneration from the intent.
-      transform.code = ''
-      transform.enabled = false
-      needsRegeneration.push(transform.id)
-    }
-
-    // An approval in a shared file was given by the sender, not by the person
-    // importing it, so it counts for nothing here.
-    delete transform.approvedCssUrls
-
-    if (transform.kind === 'css' && rejectCss(transform)) {
-      transform.code = ''
-      transform.enabled = false
-      needsRegeneration.push(transform.id)
-    }
-
-    existing.push(transform)
+  const needsRegeneration: string[] = []
+  for (const record of plan.records) {
+    const stored: Transform = { ...record, id: crypto.randomUUID(), order: nextOrder++ }
+    if (stored.code === '') needsRegeneration.push(stored.id)
+    existing.push(stored)
   }
 
   await writeTransforms(existing, invalid)
-  return { imported: bundle.transforms.length - skipped, skipped, needsRegeneration }
+  return {
+    imported: plan.records.length,
+    skipped: plan.items.filter((item) => item.status === 'refused').length,
+    duplicates: plan.items.filter((item) => item.status === 'duplicate').length,
+    needsRegeneration,
+    items: plan.items,
+  }
 }
