@@ -14,8 +14,11 @@ function deps(over: Partial<OpenPanelDeps> = {}) {
     openSidebar: vi.fn(async () => {}),
     extensionBase: () => BASE,
     listTabs: vi.fn(async () => [] as { id?: number; url?: string }[]),
-    createTab: vi.fn(async () => ({})),
+    createTab: vi.fn(async (_url: string) => ({ id: 60 }) as { id?: number } | undefined),
     activateTab: vi.fn(async () => ({})),
+    reloadTab: vi.fn(async () => ({})),
+    recordedPage: vi.fn(async (_id: number) => undefined as number | undefined),
+    recordPanel: vi.fn(async (_panel: number, _page: number) => {}),
     ...over,
   }
   return d
@@ -67,6 +70,40 @@ describe('toolbar action on Android', () => {
     await openPanel({ id: 42 }, d)
     expect(d.activateTab).toHaveBeenCalledWith(9)
     expect(d.createTab).not.toHaveBeenCalled()
+  })
+
+  it('records the new panel tab with its page tab (#128)', async () => {
+    const d = deps({ os: () => 'android' })
+    await openPanel({ id: 42 }, d)
+    expect(d.recordPanel).toHaveBeenCalledWith(60, 42)
+  })
+
+  it('records nothing when the new tab has no id', async () => {
+    const d = deps({ os: () => 'android', createTab: vi.fn(async () => ({})) })
+    await openPanel({ id: 42 }, d)
+    expect(d.recordPanel).not.toHaveBeenCalled()
+  })
+
+  it('leaves the record of an open panel tab alone when it already names the page', async () => {
+    const url = `${BASE}src/sidebar/index.html?tab=42`
+    const d = deps({
+      os: () => 'android',
+      listTabs: async () => [{ id: 9, url }],
+      recordedPage: vi.fn(async () => 42),
+    })
+    await openPanel({ id: 42 }, d)
+    expect(d.recordPanel).not.toHaveBeenCalled()
+    expect(d.reloadTab).not.toHaveBeenCalled()
+    expect(d.activateTab).toHaveBeenCalledWith(9)
+  })
+
+  it('records a restored panel tab that has no record and reloads it (#128)', async () => {
+    const url = `${BASE}src/sidebar/index.html?tab=42`
+    const d = deps({ os: () => 'android', listTabs: async () => [{ id: 9, url }] })
+    await openPanel({ id: 42 }, d)
+    expect(d.recordPanel).toHaveBeenCalledWith(9, 42)
+    expect(d.reloadTab).toHaveBeenCalledWith(9)
+    expect(d.activateTab).toHaveBeenCalledWith(9)
   })
 
   it('opens nothing when the click names no tab', async () => {

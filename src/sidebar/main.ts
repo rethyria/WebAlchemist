@@ -1,6 +1,6 @@
 import { mount } from 'svelte'
 import App from './App.svelte'
-import { resolveBinding, setBoundTab } from '@shared/panel-binding'
+import { panelPageKey, resolveBinding, setBoundTab } from '@shared/panel-binding'
 
 const target = document.getElementById('app')
 if (!target) throw new Error('Sidebar root element is missing.')
@@ -16,6 +16,15 @@ async function start(): Promise<void> {
     location.search,
     browser.runtime.getURL(''),
     (id) => browser.tabs.get(id),
+    {
+      ownTabId: async () => (await browser.tabs.getCurrent())?.id,
+      recordedPage: async (panelTabId) => {
+        const key = panelPageKey(panelTabId)
+        const value = (await browser.storage.session.get(key))[key]
+        return typeof value === 'number' ? value : undefined
+      },
+      wait: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+    },
   )
   if (binding.kind === 'refused') {
     const message = document.createElement('p')

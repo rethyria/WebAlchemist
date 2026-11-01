@@ -31,6 +31,7 @@ import type { RefinementTurn, ReviewInstruction } from './providers/types'
 import { overlayPaletteFor } from '@shared/accents'
 import * as badge from './badge'
 import { openPanel } from './open-panel'
+import { panelPageKey } from '@shared/panel-binding'
 import { SCREENSHOTS_UNAVAILABLE } from '@shared/android-limits'
 import { recordRunTab, takeRunTabs, windowsWithRunTabs } from './run-tabs'
 import { isUrlOff, setHostOff } from './site-off'
@@ -272,6 +273,14 @@ browser.action.onClicked.addListener((tab) => {
     listTabs: () => browser.tabs.query({}),
     createTab: (url) => browser.tabs.create({ url, active: true }),
     activateTab: (id) => browser.tabs.update(id, { active: true }),
+    reloadTab: (id) => browser.tabs.reload(id),
+    recordedPage: async (panelTabId) => {
+      const key = panelPageKey(panelTabId)
+      const value = (await browser.storage.session.get(key))[key]
+      return typeof value === 'number' ? value : undefined
+    },
+    recordPanel: (panelTabId, pageTabId) =>
+      browser.storage.session.set({ [panelPageKey(panelTabId)]: pageTabId }),
   })
 })
 

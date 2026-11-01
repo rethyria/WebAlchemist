@@ -37,16 +37,55 @@ export type Binding =
   | { kind: 'refused'; message: string }
 
 /**
+ * The record that links a panel tab to its page tab. The background writes it
+ * to `storage.session` when it creates the panel tab, and the panel reads it
+ * back. Tab ids are reused after a restart, so a panel tab that Firefox
+ * restores carries an address (`?tab=<id>`) that may now name an unrelated tab;
+ * the record does not survive a restart, so such a panel finds none.
+ */
+const PANEL_PAGE_PREFIX = 'wa-panel-page-'
+
+export function panelPageKey(panelTabId: number): string {
+  return `${PANEL_PAGE_PREFIX}${panelTabId}`
+}
+
+/** The panel tab ids that have a record, with the page tab each one works on. */
+export function panelPagesFromStorage(stored: Record<string, unknown>): Map<number, number> {
+  const pages = new Map<number, number>()
+  for (const [key, value] of Object.entries(stored)) {
+    if (!key.startsWith(PANEL_PAGE_PREFIX) || typeof value !== 'number') continue
+    const panel = Number(key.slice(PANEL_PAGE_PREFIX.length))
+    if (Number.isInteger(panel)) pages.set(panel, value)
+  }
+  return pages
+}
+
+export interface PanelLink {
+  /** The id of the tab this panel document is shown in (`tabs.getCurrent()`). */
+  ownTabId(): Promise<number | undefined>
+  /** The page tab the background recorded for a panel tab. */
+  recordedPage(panelTabId: number): Promise<number | undefined>
+  /** Waits between reads of the record, which the background may not have written yet. */
+  wait(ms: number): Promise<void>
+}
+
+/** The background writes the record just after it creates the tab, so the panel may load first. */
+const LINK_ATTEMPTS = 10
+const LINK_WAIT_MS = 100
+
+/**
  * Decides how the panel binds to a page tab, from its own query string.
  *
- * A bound panel is accepted only when the tab exists and is not a page of the
- * extension. `getTab` is `browser.tabs.get`; `extensionBase` is
+ * A bound panel is accepted only when the tab exists, is not a page of the
+ * extension, and the background's record for this panel tab names the same
+ * page tab. `getTab` is `browser.tabs.get`; `extensionBase` is
  * `browser.runtime.getURL('')`.
  */
 export async function resolveBinding(
   search: string,
   extensionBase: string,
   getTab: (id: number) => Promise<{ id?: number | undefined; url?: string | undefined }>,
+  link: PanelLink,
 ): Promise<Binding> {
   const id = boundTabFromSearch(search)
   if (id === null) return { kind: 'docked' }
@@ -63,6 +102,21 @@ export async function resolveBinding(
     return {
       kind: 'refused',
       message: `This panel cannot work on a page of Web Alchemist. ${reopen}`,
+    }
+  }
+  const own = await link.ownTabId().catch(() => undefined)
+  let recorded: number | undefined
+  if (own !== undefined) {
+    for (let attempt = 0; attempt < LINK_ATTEMPTS; attempt += 1) {
+      recorded = await link.recordedPage(own).catch(() => undefined)
+      if (recorded !== undefined) break
+      await link.wait(LINK_WAIT_MS)
+    }
+  }
+  if (recorded !== id) {
+    return {
+      kind: 'refused',
+      message: `This panel is not linked to that page, which can happen when Firefox restores a tab after a restart. ${reopen}`,
     }
   }
   return { kind: 'bound', tabId: id }

@@ -36,6 +36,15 @@ describe('toolbar action', () => {
     expect(h.calls.sidebarOpen).toBe(0)
   })
 
+  it('records the panel tab and its page tab in storage.session (#128)', async () => {
+    h.os = 'android'
+    await h.boot()
+    click({ id: 3 })
+    await settle()
+    // The harness creates every tab with id 500.
+    expect(h.session.get('wa-panel-page-500')).toBe(3)
+  })
+
   it('shows the panel tab that is already open for that page', async () => {
     h.os = 'android'
     h.tabUrls.set(8, `${ORIGIN}src/sidebar/index.html?tab=3`)
@@ -44,6 +53,7 @@ describe('toolbar action', () => {
     await settle()
     expect(h.calls.tabsUpdate).toEqual([8])
     expect(h.calls.tabsCreate).toEqual([])
+    expect(h.session.get('wa-panel-page-8')).toBe(3)
   })
 })
 
