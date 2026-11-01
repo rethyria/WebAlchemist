@@ -46,7 +46,12 @@ import type {
   UsageReport,
 } from '@shared/types'
 import { extractPartialString } from '@shared/partial-json'
+import { excludedHostFor, excludedSiteMessage, SENSITIVE_PAGE_MESSAGE } from '@shared/excluded-sites'
 import { BackgroundError, generateOverPort, send } from './messaging.svelte'
+
+/** An address without its fragment, so that scrolling to an anchor is not a new page. */
+const pageKey = (url: string): string => url.split('#')[0] ?? url
+
 
 export type Step =
   | 'list'
@@ -91,6 +96,11 @@ export type FlowError =
   | { kind: 'model-unavailable'; message: string; descriptionKept?: boolean }
   /** No credit or a billing problem. Retrying cannot help until the user fixes it. */
   | { kind: 'billing'; message: string; descriptionKept?: boolean }
+  /**
+   * The page has a password or payment field. The retry action of the card is
+   * "send the page content anyway", and dismissing it sends nothing.
+   */
+  | { kind: 'sensitive-page'; message: string }
 
 interface Picked {
   context: PageContext
@@ -473,6 +483,15 @@ export class Flow {
     return true
   }
 
+  /**
+   * The user's excluded sites, kept here so that startPicking can check them
+   * before its first await. The origin permission request has to be that first
+   * await, so the list cannot be read from the background at that point.
+   */
+  excludedSites: string[] = []
+  /** The page, without its fragment, for which the user chose to send its content. */
+  private sensitiveConfirmedFor: string | null = null
+
   async startPicking(purpose: 'describe' | 'author' = 'describe'): Promise<void> {
     this.pickPurpose = purpose
     this.keptInstruction = this.step === 'describing' ? this.instruction : null
@@ -480,6 +499,13 @@ export class Flow {
 
     const origin = originPermissionForUrl(this.url)
     if (!origin) return
+
+    // Before the permission request: an excluded site is never asked for access.
+    const excluded = excludedHostFor(this.excludedSites, this.url)
+    if (excluded !== null) {
+      this.show({ kind: 'request-failed', message: excludedSiteMessage(excluded) })
+      return
+    }
 
     /*
      * Held next to keptInstruction, before the first await. It used to be set
@@ -880,6 +906,14 @@ export class Flow {
       await this.restoreScopeDepth(transform)
       if (!current()) return
 
+      if (await this.needsSensitiveConfirmation()) {
+        if (!current()) return
+        await this.discard()
+        this.warnAboutSensitivePage(() => this.repair(transform, brokenReason))
+        return
+      }
+      if (!current()) return
+
       this.stage = 'sent'
       this.streamed = ''
       this.thinkingChars = 0
@@ -1167,6 +1201,26 @@ export class Flow {
    * repeating plain generate() would send the restored instruction, not the
    * follow-up that failed.
    */
+  /**
+   * True when the user has to confirm before this page's content is sent: the
+   * page has a password or payment field and has not been confirmed already.
+   * Asked of the page itself, not of the extracted context, so the check adds
+   * nothing to what is sent.
+   */
+  private async needsSensitiveConfirmation(): Promise<boolean> {
+    if (this.tabId === null) return false
+    if (this.sensitiveConfirmedFor === pageKey(this.url)) return false
+    return (await send<boolean>({ type: 'page-has-sensitive-fields', tabId: this.tabId })) === true
+  }
+
+  /** Shows the warning. Confirming it records the page and repeats `again`. */
+  private warnAboutSensitivePage(again: () => Promise<void>): void {
+    this.show({ kind: 'sensitive-page', message: SENSITIVE_PAGE_MESSAGE }, async () => {
+      this.sensitiveConfirmedFor = pageKey(this.url)
+      await again()
+    })
+  }
+
   async generate(again: () => Promise<void> = () => this.generate()): Promise<void> {
     const picked = this.picked
     if (!picked || !this.instruction.trim()) return
@@ -1187,6 +1241,17 @@ export class Flow {
       // cancelled run still opened a port and sent the request.
       if (!current()) return
       if (this.references.length > 0) context.references = [...this.references]
+
+      // Before anything is sent. The step goes back to where the run started,
+      // as a failure does, so the description is kept while the user decides.
+      if (await this.needsSensitiveConfirmation()) {
+        if (!current()) return
+        this.step = from === 'refining' ? 'refining' : 'describing'
+        this.undoRefinement()
+        this.warnAboutSensitivePage(again)
+        return
+      }
+      if (!current()) return
 
       // Already captured and already on screen in the panel; nothing is taken
       // at request time that the user has not seen.

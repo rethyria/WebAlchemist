@@ -111,6 +111,11 @@ export type Message =
   | { type: 'save-settings'; settings: Settings }
   /* The per-site off switch, by the host of `url`. */
   | { type: 'get-site-off'; url: string }
+  /* The sites on which picking and generation are refused (#131). */
+  | { type: 'get-excluded-sites' }
+  | { type: 'set-excluded-sites'; sites: string[] }
+  /** Asks the page in the tab whether it has a password or payment field. */
+  | { type: 'page-has-sensitive-fields'; tabId: number }
   | { type: 'set-site-off'; url: string; off: boolean }
   | { type: 'set-credential'; providerId: string; credential: Credential }
   | { type: 'clear-credential'; providerId: string }
@@ -291,6 +296,8 @@ export type ContentMessage =
   | { type: 'url-changed'; url: string }
   /** Answered only by a live instance; the background uses it to avoid reinjecting. */
   | { type: 'ping' }
+  /** Answers whether the page has a password or payment field. Never reads a value. */
+  | { type: 'sensitive-fields' }
   /** Answers the current scroll offset and viewport size. */
   | { type: 'get-viewport' }
 

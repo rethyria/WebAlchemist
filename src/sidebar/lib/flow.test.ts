@@ -1358,3 +1358,155 @@ describe('reload and try again with a script that has run (#114)', () => {
     expect(generate).toHaveBeenCalledTimes(1)
   })
 })
+
+/* -------------------------------------------------------------------- */
+/* Excluded sites and the sensitive-page warning (#131)                  */
+/* -------------------------------------------------------------------- */
+
+describe('picking on an excluded site', () => {
+  const requests: unknown[] = []
+  const realRequest = (globalThis as any).browser.permissions.request
+  beforeEach(() => {
+    requests.length = 0
+    ;(globalThis as any).browser.permissions.request = async (p: unknown) => {
+      requests.push(p)
+      return true
+    }
+  })
+  afterEach(() => {
+    ;(globalThis as any).browser.permissions.request = realRequest
+  })
+
+  it('shows a message and requests no permission and starts nothing', async () => {
+    const flow = newFlow()
+    flow.excludedSites = ['example.com']
+    await flow.startPicking()
+    expect(requests).toEqual([])
+    expect(calls.filter((c) => c.type === 'start-picking')).toEqual([])
+    expect(flow.step).toBe('list')
+    expect(flow.error).toMatchObject({ kind: 'request-failed' })
+    expect((flow.error as any).message).toContain('www.example.com')
+  })
+
+  it('refuses writing by hand as well', async () => {
+    const flow = newFlow()
+    flow.excludedSites = ['example.com']
+    await flow.startPicking('author')
+    expect(requests).toEqual([])
+  })
+
+  it('requests the permission and starts picking on a host that is not excluded (control)', async () => {
+    const flow = newFlow()
+    flow.excludedSites = ['other.test']
+    await flow.startPicking()
+    expect(requests).toHaveLength(1)
+    expect(calls.filter((c) => c.type === 'start-picking')).toHaveLength(1)
+  })
+
+  it('picks again once the host is removed from the list', async () => {
+    const flow = newFlow()
+    flow.excludedSites = ['example.com']
+    await flow.startPicking()
+    expect(requests).toEqual([])
+    flow.dismissError()
+    flow.excludedSites = []
+    await flow.startPicking()
+    expect(requests).toHaveLength(1)
+  })
+})
+
+describe('generating on a page with password or payment fields', () => {
+  beforeEach(() => {
+    ports.length = 0
+    ;(globalThis as any).browser.runtime.connect = fakeConnect
+  })
+  afterEach(() => {
+    ;(globalThis as any).browser.runtime.connect = realConnect
+  })
+
+  const withSensitiveFields = (present: boolean) => {
+    handler = (m) => (m.type === 'page-has-sensitive-fields' ? { ok: true, data: present } : { ok: true, data: null })
+  }
+  function flowAtDescribing() {
+    const flow = newFlow()
+    flow.picked = { ...found, cropDrawn: false } as any
+    flow.instruction = 'make it red'
+    flow.step = 'describing'
+    return flow
+  }
+
+  it('warns and sends nothing until the user confirms', async () => {
+    withSensitiveFields(true)
+    const flow = flowAtDescribing()
+    await flow.generate()
+    expect(ports).toHaveLength(0)
+    expect(flow.error).toMatchObject({ kind: 'sensitive-page' })
+    // The description is kept while the user decides.
+    expect(flow.step).toBe('describing')
+    expect(flow.instruction).toBe('make it red')
+  })
+
+  it('sends the request after the user confirms', async () => {
+    withSensitiveFields(true)
+    const flow = flowAtDescribing()
+    await flow.generate()
+    const confirm = flow.retry()
+    ;(await nextPort(1)).emit({ type: 'error', error: { message: 'stop here', kind: 'network' } })
+    await confirm
+    expect(ports).toHaveLength(1)
+  })
+
+  it('does not ask again for the same page once confirmed', async () => {
+    withSensitiveFields(true)
+    const flow = flowAtDescribing()
+    await flow.generate()
+    const confirm = flow.retry()
+    ;(await nextPort(1)).emit({ type: 'error', error: { message: 'stop here', kind: 'network' } })
+    await confirm
+    flow.dismissError()
+    const second = flow.generate()
+    ;(await nextPort(2)).emit({ type: 'error', error: { message: 'stop here', kind: 'network' } })
+    await second
+    expect(ports).toHaveLength(2)
+  })
+
+  it('sends nothing when the user cancels', async () => {
+    withSensitiveFields(true)
+    const flow = flowAtDescribing()
+    await flow.generate()
+    flow.dismissError()
+    expect(flow.error).toBeNull()
+    expect(ports).toHaveLength(0)
+  })
+
+  it('generates with no warning on a page without such fields (control)', async () => {
+    withSensitiveFields(false)
+    const flow = flowAtDescribing()
+    const run = flow.generate()
+    ;(await nextPort(1)).emit({ type: 'error', error: { message: 'stop here', kind: 'network' } })
+    await run
+    expect(ports).toHaveLength(1)
+    expect(flow.error).not.toMatchObject({ kind: 'sensitive-page' })
+  })
+
+  it('asks the page, not the extracted context', async () => {
+    withSensitiveFields(true)
+    const flow = flowAtDescribing()
+    await flow.generate()
+    const asked = calls.filter((c) => c.type === 'page-has-sensitive-fields')
+    expect(asked).toEqual([{ type: 'page-has-sensitive-fields', tabId: 1 }])
+  })
+
+  it('warns before a repair sends the page, and sends nothing', async () => {
+    handler = (m) => {
+      if (m.type === 'context-for-anchor') return { ok: true, data: found }
+      if (m.type === 'page-has-sensitive-fields') return { ok: true, data: true }
+      return { ok: true, data: null }
+    }
+    const flow = newFlow()
+    await flow.repair(saved, 'broken')
+    expect(calls.filter((c) => c.type === 'repair')).toEqual([])
+    expect(flow.error).toMatchObject({ kind: 'sensitive-page' })
+    expect(flow.step).toBe('list')
+  })
+})

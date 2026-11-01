@@ -30,6 +30,8 @@ import { overlayPaletteFor } from '@shared/accents'
 import * as badge from './badge'
 import { recordRunTab, takeRunTabs } from './run-tabs'
 import { isUrlOff, setHostOff } from './site-off'
+import { excludedHostOf, getExcludedSites, setExcludedSites } from './excluded-sites'
+import { excludedSiteMessage } from '@shared/excluded-sites'
 import { hostOfUrl } from '@shared/site-off'
 import { isSidebarPortName, windowOfSidebarPort } from '@shared/sidebar-port'
 import { documentOf, forgetTab, inTabQueue, startDocument } from './tab-queue'
@@ -425,6 +427,7 @@ async function handle(
     }
 
     case 'repair': {
+      await refuseExcludedUrl(message.context.url)
       const transforms = await getAllTransforms()
       const existing = transforms.find((t) => t.id === message.transformId)
       if (!existing) throw new Error('That transform no longer exists.')
@@ -547,6 +550,15 @@ async function handle(
       await reapplyOpenTabs(() => true)
       return { reloadTabs: await countTabsWithJavaScript(() => true) }
     }
+
+    case 'get-excluded-sites':
+      return getExcludedSites()
+
+    case 'set-excluded-sites':
+      return setExcludedSites(message.sites)
+
+    case 'page-has-sensitive-fields':
+      return (await askContent(message.tabId, { type: 'sensitive-fields' })) === true
 
     case 'get-site-off':
       return isUrlOff(message.url)
@@ -678,6 +690,9 @@ async function handle(
       return true
 
     case 'start-picking': {
+      // The panel checks this first so that no permission is requested; this
+      // is the check for any other caller of the message.
+      await refuseExcludedTab(message.tabId)
       await recordRunTabOf(message.tabId)
       // Inject only when nothing is answering. executeScript re-runs the file
       // unconditionally, and a second instance brings a second overlay and a
@@ -981,6 +996,17 @@ void (async () => {
   await clearPreviewsWhere(ownerIsGone)
 })()
 
+/** Throws the message to show when the address is on the excluded list. */
+async function refuseExcludedUrl(url: string): Promise<void> {
+  const host = await excludedHostOf(url)
+  if (host !== null) throw new Error(excludedSiteMessage(host))
+}
+
+async function refuseExcludedTab(tabId: number): Promise<void> {
+  const tab = await browser.tabs.get(tabId).catch(() => undefined)
+  if (tab?.url) await refuseExcludedUrl(tab.url)
+}
+
 /** Records the tab of a run under the window it is in, so closing that window's sidebar can clean it. */
 async function recordRunTabOf(tabId: number): Promise<void> {
   const tab = await browser.tabs.get(tabId).catch(() => undefined)
@@ -1083,6 +1109,7 @@ async function runGeneration(
   const usage = createUsageRecorder(request.transformId)
 
   try {
+    await refuseExcludedUrl(request.context.url)
     const provider = await resolveActiveProvider(usage.listener)
     port.postMessage({ type: 'sent' })
 

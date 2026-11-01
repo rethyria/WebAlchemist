@@ -217,6 +217,7 @@
     loadError = null
     try {
       applySettings(await send<Settings>({ type: 'get-settings' }))
+      flow.excludedSites = await send<string[]>({ type: 'get-excluded-sites' })
       await refreshVault()
       statuses = await send<CredentialStatus[]>({ type: 'get-credential-statuses' })
 
@@ -487,8 +488,12 @@
       changes: Record<string, browser.storage.StorageChange>,
       area: string,
     ) => {
-      if (area !== 'local' || !changes['settings']) return
-      applySettings(changes['settings'].newValue as Settings)
+      if (area !== 'local') return
+      // The list is edited on the settings page while this panel is open.
+      if (changes['wa-excluded-sites']) {
+        flow.excludedSites = (changes['wa-excluded-sites'].newValue as string[] | undefined) ?? []
+      }
+      if (changes['settings']) applySettings(changes['settings'].newValue as Settings)
     }
     browser.storage.onChanged.addListener(onStored)
 

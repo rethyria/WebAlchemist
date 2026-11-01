@@ -13,6 +13,7 @@
   import { KILL_SWITCH_LABEL, KILL_SWITCH_NOTE, killSwitchNotice, reloadTabsOf } from '@shared/kill-switch'
   import Toggle from '@sidebar/components/Toggle.svelte'
   import ProviderSettings from './ProviderSettings.svelte'
+  import ExcludedSites from './ExcludedSites.svelte'
   import SiteAccess from './SiteAccess.svelte'
   import UsageSettings from './UsageSettings.svelte'
   import VaultSettings from './VaultSettings.svelte'
@@ -172,6 +173,8 @@
     />
 
     <SiteAccess loadTransforms={() => call<Transform[]>({ type: 'get-all-transforms' })} />
+
+    <ExcludedSites />
 
     <section>
       <h2>Accent</h2>
