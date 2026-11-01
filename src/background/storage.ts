@@ -58,6 +58,7 @@ import {
   unseal,
 } from './vault'
 import { MIN_PASSPHRASE_LENGTH } from '@shared/vault-policy'
+import { assertEndpoint, endpointsOf } from '@shared/endpoint-policy'
 
 const KEY_SETTINGS = 'settings'
 const KEY_TRANSFORMS = 'transforms'
@@ -77,6 +78,13 @@ export async function getSettings(): Promise<Settings> {
 }
 
 export async function saveSettings(settings: Settings): Promise<void> {
+  // Checked here and not only in the settings page: this is reached by a
+  // message that any extension context can send.
+  for (const provider of settings.providers) {
+    for (const [what, url] of endpointsOf(provider)) {
+      assertEndpoint(url, `${what} of ${provider.label}`)
+    }
+  }
   await browser.storage.local.set({ [KEY_SETTINGS]: settings })
 }
 
@@ -506,6 +514,9 @@ export async function setCredential(
   providerId: string,
   credential: Credential,
 ): Promise<void> {
+  // The refresh token is sent to this address on every refresh, so it is
+  // checked where the credential is saved as well as where it is used.
+  if (credential.kind === 'oauth') assertEndpoint(credential.tokenEndpoint, 'token endpoint')
   await withCredentialLock(async () => {
     const map = await readCredentialMap()
     map[providerId] = credential

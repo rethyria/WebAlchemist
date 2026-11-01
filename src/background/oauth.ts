@@ -25,6 +25,7 @@
  */
 
 import type { Credential, OAuthConfig } from '@shared/types'
+import { assertEndpoint } from '@shared/endpoint-policy'
 
 /** RFC 7636 §4.1: 43–128 characters from the unreserved set. */
 const VERIFIER_BYTES = 32
@@ -187,6 +188,12 @@ export function credentialFrom(
  * as thin as it is — every decision worth testing has been moved above.
  */
 export async function connect(config: OAuthConfig): Promise<Extract<Credential, { kind: 'oauth' }>> {
+  // Before anything is opened or sent. Settings are checked when saved, but
+  // this is the last point before the authorization code and the verifier
+  // leave the extension, so it does not rely on that having happened.
+  assertEndpoint(config.authorizationEndpoint, 'authorization endpoint')
+  assertEndpoint(config.tokenEndpoint, 'token endpoint')
+
   const redirectUri = browser.identity.getRedirectURL()
   const { verifier, challenge } = await createPkce()
   const state = randomState()

@@ -19,6 +19,7 @@ import {
   scopeInstruction,
 } from '../prompts'
 import { credentialFrom, needsRefresh, type TokenPayload } from '../oauth'
+import { endpointProblem, isLoopbackHostname } from '@shared/endpoint-policy'
 import { retryAfterSeconds } from './retry-after'
 import { readCredentialForRequest, setCredential } from '../storage'
 import {
@@ -35,6 +36,14 @@ export async function createOpenAiCompatibleProvider(
   if (!provider.baseUrl) {
     throw new ProviderError(
       `${provider.label} has no base URL configured.`,
+      'no-credential',
+      false,
+    )
+  }
+  const baseProblem = endpointProblem(provider.baseUrl)
+  if (baseProblem) {
+    throw new ProviderError(
+      `The base URL for ${provider.label} is not allowed. ${baseProblem} Change it in settings.`,
       'no-credential',
       false,
     )
@@ -215,8 +224,7 @@ export async function createOpenAiCompatibleProvider(
 
 function isLoopback(baseUrl: string): boolean {
   try {
-    const { hostname } = new URL(baseUrl)
-    return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]'
+    return isLoopbackHostname(new URL(baseUrl).hostname)
   } catch {
     return false
   }
@@ -276,6 +284,17 @@ async function refreshToken(
    * transport failure here has to be classified on its own. It used to be
    * reported as a network failure by that outer `catch`, and still is.
    */
+  // The endpoint comes from the stored credential, which an older version or
+  // another context may have written without the check in setCredential.
+  const endpointIssue = endpointProblem(credential.tokenEndpoint)
+  if (endpointIssue) {
+    throw new ProviderError(
+      `The sign-in server address is not allowed. ${endpointIssue} Reconnect this provider in settings.`,
+      'auth',
+      false,
+    )
+  }
+
   let response: Response
   try {
     response = await fetch(credential.tokenEndpoint, {

@@ -19,6 +19,7 @@
     type ProviderType,
     type Settings,
   } from '@shared/types'
+  import { endpointProblem } from '@shared/endpoint-policy'
   import ModelPicker from './ModelPicker.svelte'
   import Button from '@sidebar/components/Button.svelte'
 
@@ -143,12 +144,8 @@
   )
 
   function isValidUrl(value: string): boolean {
-    try {
-      const url = new URL(value)
-      return url.protocol === 'https:' || url.hostname === 'localhost'
-    } catch {
-      return false
-    }
+    // The same rule the background enforces; see endpoint-policy.ts.
+    return endpointProblem(value) === null
   }
 
   function statusFor(providerId: string): CredentialStatus | undefined {
