@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from '@shared/i18n'
   import { firstRunDisclosure } from '@shared/disclosure'
   import type { VaultView } from '@shared/vault-disclosure'
   import Button from './Button.svelte'
@@ -35,11 +36,10 @@
 
 <section class="disclosure" aria-labelledby="first-run-title">
   <svelte:element this={level === 1 ? 'h1' : 'h2'} id="first-run-title" tabindex="-1" use:focusIf={takeFocus}>
-    Before you add a key
+    {t('firstRunTitle')}
   </svelte:element>
   <p class="lead">
-    Web Alchemist sends page content to an AI model provider that you choose. Read what
-    is sent and what is stored before you enter an API key or sign in.
+    {t('firstRunLead')}
   </p>
 
   {#each sections as section}
@@ -56,13 +56,13 @@
   {/each}
 
   <div class="actions">
-    <Button variant="primary" onclick={onacknowledge}>I have read this</Button>
+    <Button variant="primary" onclick={onacknowledge}>{t('firstRunAcknowledge')}</Button>
     {#if onwriteitmyself}
-      <button type="button" class="link" onclick={onwriteitmyself}>Write it myself instead</button>
+      <button type="button" class="link" onclick={onwriteitmyself}>{t('firstRunWriteMyself')}</button>
     {/if}
   </div>
   {#if onwriteitmyself}
-    <p class="note">Writing a transform by hand needs no provider and sends nothing.</p>
+    <p class="note">{t('firstRunHandNote')}</p>
   {/if}
 </section>
 

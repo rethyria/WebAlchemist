@@ -1,4 +1,3 @@
-import { t } from './i18n'
 /**
  * Checks of the match patterns in an imported file, and a description of the
  * sites a pattern covers in plain words (#56).
@@ -13,6 +12,7 @@ import { t } from './i18n'
  */
 
 import { parsePattern } from './match'
+import { t } from './i18n'
 
 const HOST_LABEL = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/i
 const IPV4 = /^\d{1,3}(\.\d{1,3}){3}$/

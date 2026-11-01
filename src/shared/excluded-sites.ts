@@ -1,4 +1,3 @@
-import { t } from './i18n'
 /**
  * The user's list of sites on which picking and generation are refused (#131).
  *
@@ -9,6 +8,7 @@ import { t } from './i18n'
  */
 
 import { excludePatternsFor, hostOfUrl } from './site-off'
+import { t } from './i18n'
 
 /**
  * Turns what the user typed into a host name, or null when it is not one. An
@@ -72,7 +72,7 @@ export function excludedHostForPattern(entries: readonly string[], pattern: stri
 
 /** What the panel says when it refuses to ask for access to an excluded site. */
 export function excludedAccessMessage(host: string): string {
-  return `${host} is on your list of excluded sites, so Web Alchemist does not ask for access to it. Remove it from the list in the settings first.`
+  return t('excludedAccessMessage', host)
 }
 
 /**

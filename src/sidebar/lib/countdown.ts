@@ -1,3 +1,4 @@
+import { t } from '@shared/i18n'
 /**
  * The wait, in seconds, that a screen reader is told about during a rate-limit
  * countdown.
@@ -22,5 +23,5 @@ export function announcedSeconds(seconds: number): number {
  * at exactly 30 seconds.
  */
 export function announcement(seconds: number): string {
-  return `Trying again in up to ${announcedSeconds(seconds)} seconds`
+  return t('retryAnnouncement', announcedSeconds(seconds))
 }

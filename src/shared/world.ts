@@ -1,4 +1,3 @@
-import { t } from './i18n'
 /**
  * What the approval panel and the editor say about the world a script runs in.
  *
@@ -8,6 +7,7 @@ import { t } from './i18n'
  */
 
 import type { ExecutionWorld, GenerationResult, Transform } from './types'
+import { t } from './i18n'
 
 /** The risks of the MAIN world, in the order they are shown. */
 export const MAIN_WORLD_RISKS: readonly string[] = [

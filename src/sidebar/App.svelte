@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from '@shared/i18n'
   import '@shared/tokens.css'
   import type { ContentEvent } from '@shared/messages'
   import { originPermissionFor } from '@shared/match'
@@ -229,7 +230,7 @@
       siteOff = off
       const waiting = answer?.reloadTabs ?? 0
       if (!off && waiting > 0) {
-        siteNotice = `Reload ${waiting === 1 ? '1 open tab' : `${waiting} open tabs`} of this site to run JavaScript transforms there again.`
+        siteNotice = waiting === 1 ? t('appReloadOneTab') : t('appReloadTabs', waiting)
       }
       await refresh()
     } catch (cause) {
@@ -545,7 +546,7 @@
       code,
       rationale: {
         targets: transform.rationale.targets,
-        approach: 'Edited by hand. Any description of the previous code no longer applies.',
+        approach: t('appEditedByHand'),
         assumptions: [],
       },
     }
@@ -707,7 +708,7 @@
 
 <div class="panel">
   <header class="chrome">
-    <span class="brand">Web Alchemist</span>
+    <span class="brand">{t('appBrand')}</span>
     <button
       type="button"
       class="chrome-link"
@@ -716,7 +717,7 @@
         if (showSettings) refreshVault().catch(() => undefined)
       }}
     >
-      {showSettings ? 'Done' : 'Settings'}
+      {showSettings ? t('appDone') : t('appSettings')}
     </button>
   </header>
 
@@ -725,9 +726,9 @@
       <p>{loadError.message}</p>
       <div class="load-actions">
         {#if loadError.retryable}
-          <button type="button" onclick={load}>Try again</button>
+          <button type="button" onclick={load}>{t('tryAgain')}</button>
         {/if}
-        <button type="button" onclick={openSettingsPage}>Settings</button>
+        <button type="button" onclick={openSettingsPage}>{t('appSettings')}</button>
       </div>
     </div>
   {/if}
@@ -744,9 +745,7 @@
 
   {#if blockedCount > 0 && !showSettings && transformable && flow.step === 'list' && !flow.awayFromOwner}
     <p class="broken-banner" role="status">
-      {blockedCount}
-      {blockedCount === 1 ? 'transform is' : 'transforms are'} blocked by the current safety check and
-      {blockedCount === 1 ? 'is' : 'are'} not running. This count covers every site.
+      {t(blockedCount === 1 ? 'appBlockedOne' : 'appBlockedMany', blockedCount)}
     </p>
   {/if}
 
@@ -761,26 +760,24 @@
     />
   {:else if flow.awayFromOwner}
     <div class="paused">
-      <h1>Still describing something on {flow.ownerHost}</h1>
+      <h1>{t('appPausedTitle', flow.ownerHost)}</h1>
       <p>
-        This run is about an element on that page, so it stays there rather than
-        following you here. Go back to carry on, or discard it and start fresh.
+        {t('appPausedBody')}
       </p>
       <div class="paused-actions">
         <button type="button" class="primary" onclick={() => void flow.returnToOwner()}>
-          Back to {flow.ownerHost}
+          {t('appBackTo', flow.ownerHost)}
         </button>
         <button type="button" class="secondary" onclick={() => void flow.discard()}>
-          Discard it
+          {t('appDiscardIt')}
         </button>
       </div>
     </div>
   {:else if !transformable}
     <div class="empty">
-      <h1>Nothing to change here</h1>
+      <h1>{t('appNothingTitle')}</h1>
       <p>
-        This is a browser page, not a website. Open a site and the panel will show
-        what can be changed on it.
+        {t('appNothingBody')}
       </p>
     </div>
   {:else if flow.step === 'list' && disclosureNeeded === true && (showDisclosure || transforms.length === 0)}
@@ -912,16 +909,15 @@
         <span class="bar mid"></span>
         <span class="bar target"></span>
       </div>
-      <h1 data-list-focus tabindex="-1">Point at something on this page and say what you want changed.</h1>
+      <h1 data-list-focus tabindex="-1">{t('appEmptyTitle')}</h1>
       <p>
-        An AI writes the CSS or JavaScript. It is saved for {host || 'this site'} and
-        applied on every visit. You approve the code before it runs.
+        {host ? t('appEmptyBody', host) : t('appEmptyBodyNoHost')}
       </p>
       <div class="cta">
         <button type="button" class="primary" onclick={() => describe(() => void flow.startPicking())}>
-          Select an element
+          {t('appSelect')}
         </button>
-        <p class="hint">Or drag a rectangle on the page</p>
+        <p class="hint">{t('appDragHint')}</p>
         <!--
           #27: someone who already knows the CSS they want should not have to
           describe it to a model and wait. It is also the only path that works
@@ -933,7 +929,7 @@
           class="link"
           onclick={() => void flow.startPicking('author')}
         >
-          Write it myself
+          {t('appWriteMyself')}
         </button>
         {#if cspProbeEnabled}
           <button type="button" class="link" onclick={() => void runCspProbe()}>
@@ -953,16 +949,16 @@
         type="button"
         class="check"
         disabled={checking}
-        title="Check whether these still work"
+        title={t('appCheckTitle')}
         onclick={() => void checkNow()}
       >
-        {checking ? 'Checking…' : 'Check'}
+        {checking ? t('appChecking') : t('appCheck')}
       </button>
-      <span class="count">{activeCount} active</span>
+      <span class="count">{t('appActive', activeCount)}</span>
     </header>
 
     {#if siteOff}
-      <p class="hint off-note" role="status">Everything is turned off on this site.</p>
+      <p class="hint off-note" role="status">{t('appSiteOff')}</p>
     {/if}
 
     <!-- Persistent, so a health check that finds a broken transform is read out once. -->
@@ -970,8 +966,7 @@
 
     {#if brokenCount > 0}
       <p class="broken-banner">
-        {brokenCount}
-        {brokenCount === 1 ? 'transform' : 'transforms'} stopped working
+        {t(brokenCount === 1 ? 'appBrokenOne' : 'appBroken', brokenCount)}
       </p>
     {/if}
 
@@ -1008,21 +1003,19 @@
 
     <footer>
       <button type="button" class="primary" onclick={() => describe(() => void flow.startPicking())}>
-        Select an element
+        {t('appSelect')}
       </button>
       <button type="button" class="link" onclick={() => void flow.startPicking('author')}>
-        Write it myself
+        {t('appWriteMyself')}
       </button>
-      <p class="hint">Order decides conflicts — later wins</p>
+      <p class="hint">{t('appOrderHint')}</p>
     </footer>
     <div class="site-off">
       <button type="button" class="link" onclick={() => void setSiteOff(!siteOff)}>
-        {siteOff ? 'Turn everything back on for this site' : 'Turn off everything on this site'}
+        {siteOff ? t('appTurnOn') : t('appTurnOff')}
       </button>
       <p class="hint">
-        {siteOff
-          ? 'No transform runs on this site while this is off. They stay saved.'
-          : 'Stops every CSS and JavaScript transform on this site. Open tabs of this site that ran JavaScript are reloaded.'}
+        {siteOff ? t('appSiteOffNote') : t('appSiteOnNote')}
       </p>
       {#if siteNotice}<p class="hint" role="status">{siteNotice}</p>{/if}
     </div>

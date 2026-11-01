@@ -1,4 +1,3 @@
-import { t } from './i18n'
 /**
  * Reporting the errors of JavaScript transforms (#123).
  *
@@ -19,6 +18,7 @@ import { t } from './i18n'
  */
 
 import type { Transform, TransformRuntimeState } from './types'
+import { t } from './i18n'
 
 const MAX_MESSAGE = 200
 

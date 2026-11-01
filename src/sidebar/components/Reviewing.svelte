@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from '@shared/i18n'
   import { CAPABILITY_ENFORCEMENT } from '@shared/types'
   import type { GenerationResult, ReviewResult } from '@shared/types'
   import Button from './Button.svelte'
@@ -85,7 +86,7 @@
 
 <div class="panel">
   <header>
-    <Label>Step 3 of 3 · Approve</Label>
+    <Label>{t('revStep3')}</Label>
     <h1 use:focusOnMount>{result.name}</h1>
   </header>
 
@@ -93,36 +94,35 @@
   <p class="sr-only" role="status">{reviewAnnouncement(review, result.kind)}</p>
 
   {#if review === null}
-    <p class="waiting">Reading the code…</p>
+    <p class="waiting">{t('revReading')}</p>
   {:else}
     {#if result.kind === 'js'}
       <div class="card" class:attention={world.showRisks}>
         <div class="card-head">
           {#if world.showRisks}<span class="dot attention" aria-hidden="true"></span>{/if}
           <div class="card-body">
-            <span class="card-title">Runs in: {WORLD_NAMES[world.world]}</span>
+            <span class="card-title">{t('revRunsIn', WORLD_NAMES[world.world])}</span>
             {#if world.requestPending}
               <p class="finding">
-                The model asked to run this code in the page's own world. It stays in the
-                isolated world until you allow it here.
+                {t('revModelAskedMain')}
               </p>
               <p class="finding">
-                {world.reason ? `Reason given: ${world.reason}` : 'No reason was given.'}
+                {world.reason ? t('revReasonGiven', world.reason) : t('revNoReason')}
               </p>
             {:else if world.runsInMain}
               <p class="finding">
-                This code runs in the page's own world.
-                {#if world.reason}Reason given: {world.reason}{/if}
+                {t('revRunsInMain')}
+                {#if world.reason}{t('revReasonGiven', world.reason)}{/if}
               </p>
             {:else}
               <p class="finding">
-                The code runs apart from the page's own scripts, and the page cannot change it.
+                {t('revRunsIsolated')}
               </p>
             {/if}
           </div>
         </div>
         {#if world.showRisks}
-          <p class="finding">Running in the page's own world has these risks:</p>
+          <p class="finding">{t('approvalRisksIntro')}</p>
           <ul class="risks">
             {#each MAIN_WORLD_RISKS as risk}
               <li>{risk}</li>
@@ -131,11 +131,11 @@
           <div>
             {#if world.runsInMain}
               <Button small full onclick={() => onworld('USER_SCRIPT')}>
-                Run in the isolated world instead
+                {t('revRunIsolated')}
               </Button>
             {:else}
               <Button small full onclick={() => onworld('MAIN')}>
-                Allow the page's own world
+                {t('revAllowMain')}
               </Button>
             {/if}
           </div>
@@ -147,19 +147,18 @@
       <div class="card block">
         <div class="card-head">
           <span class="dot block" aria-hidden="true"></span>
-          <span class="card-title">This cannot be saved as it is</span>
+          <span class="card-title">{t('revBlockedTitle')}</span>
         </div>
         {#each blocking as finding}
           <p class="finding">
-            Line {finding.line} uses <code>{finding.api}</code>. {finding.explanation}
+            {t('revBlockedFinding', finding.line, finding.api, finding.explanation)}
           </p>
         {/each}
         <p class="quiet">
           {#if refused}
-            You refused what this code needs, so it will not be saved. Go back and
-            describe what you want without it.
+            {t('revRefused')}
           {:else}
-            Go back and describe what you want differently.
+            {t('revGoBackDifferent')}
           {/if}
         </p>
       </div>
@@ -170,13 +169,9 @@
         <div class="card-head">
           <span class="dot attention" aria-hidden="true"></span>
           <div class="card-body">
-            <span class="card-title">This CSS loads addresses outside this site</span>
+            <span class="card-title">{t('revUrlsTitle')}</span>
             <p class="finding">
-              The browser requests
-              {pendingUrls.length === 1 ? 'this address' : 'these addresses'} on every
-              visit. A request can carry information about the page, and the server
-              that receives it can see it. Only the addresses listed here will be
-              allowed to load.
+              {t(pendingUrls.length === 1 ? 'revUrlsBodyOne' : 'revUrlsBodyMany')}
             </p>
           </div>
         </div>
@@ -195,16 +190,15 @@
           <div class="card-body">
             <span class="card-title">{finding.explanation}</span>
             <p class="finding">
-              Line {finding.line} uses <code>{finding.api}</code>.
+              {t('revWarnLine', finding.line, finding.api)}
               {#if finding.capability && capabilities.includes(finding.capability)}
-                That is {finding.capability} this transform declared, so it will work.
+                {t('revWarnDeclared', finding.capability)}
               {:else if finding.capability}
                 <!--
                   Not "blocked at runtime". The browser was measured and does
                   not stop this; what stops it is this code not being saved.
                 -->
-                That is {finding.capability}, which this transform did not declare,
-                so it cannot be saved as it stands.
+                {t('revWarnUndeclared', finding.capability)}
               {/if}
             </p>
           </div>
@@ -214,7 +208,7 @@
             {#each capabilities as capability}
               <span class="chip">{capability}</span>
             {/each}
-            <span class="quiet">requested · nothing else</span>
+            <span class="quiet">{t('revRequested')}</span>
           </div>
           <!--
             What "allow" costs, said plainly. The browser does not police any
@@ -224,10 +218,9 @@
           -->
           <p class="quiet">
             {#if capabilities.every((c) => CAPABILITY_ENFORCEMENT[c] === 'csp')}
-              Anything it did not ask for is blocked while it runs.
+              {t('revCspBlocks')}
             {:else}
-              The browser does not police this once it is saved. Approving is
-              what allows it; refusing means the code is not saved at all.
+              {t('revNotEnforced')}
             {/if}
           </p>
         {/if}
@@ -240,67 +233,60 @@
           <span class="dot attention" aria-hidden="true"></span>
           <div class="card-body">
             <span class="card-title">
-              The second model does not agree this matches your description
+              {t('revMismatchTitle')}
             </span>
             <p class="finding">{review.model.explanation}</p>
           </div>
         </div>
-        <p class="quiet">You asked for: {intent}</p>
+        <p class="quiet">{t('revYouAskedFor', intent)}</p>
       </div>
     {/if}
 
     <dl class="rows">
       <div class="row">
-        <dt>Runs on</dt>
+        <dt>{t('revRunsOn')}</dt>
         <dd>
-          {where.schemes}; {where.sites}; {where.pages}.{#if where.variants} {where.variants}{/if}
+          {where.variants ? t('revWhereVariants', where.schemes, where.sites, where.pages, where.variants) : t('revWhere', where.schemes, where.sites, where.pages)}
         </dd>
       </div>
       {#if result.kind === 'js'}
         <div class="row">
-          <dt>World</dt>
+          <dt>{t('versionRowWorld')}</dt>
           <dd>{WORLD_NAMES[world.world]}</dd>
         </div>
       {/if}
       <div class="row">
-        <dt>Capabilities</dt>
+        <dt>{t('versionRowCapabilities')}</dt>
         <dd>
           {#if capabilities.length === 0}
-            None declared. Code that uses network, storage or cookies without declaring it cannot be saved.
+            {t('revNoneDeclared')}
           {:else}
             {capabilities.join(', ')}
           {/if}
         </dd>
       </div>
       <div class="row">
-        <dt>{result.kind === 'css' ? 'CSS check' : 'Code scan'}</dt>
+        <dt>{result.kind === 'css' ? t('revCssCheck') : t('revCodeScan')}</dt>
         <dd>
           {#if findingCount === 0}
-            No known patterns found.
-            {#if result.kind === 'js'}
-              The scan looks for known patterns and cannot prove the code harmless. The
-              code still runs with access to this page.
-            {:else}
-              The check looks for addresses the CSS would load.
-            {/if}
+            {t(result.kind === 'js' ? 'revNoFindingsJs' : 'revNoFindingsCss')}
           {:else}
-            {findingCount}
-            {findingCount === 1 ? 'finding' : 'findings'}, listed above.
+            {t(findingCount === 1 ? 'revFindingsOne' : 'revFindings', findingCount)}
           {/if}
         </dd>
       </div>
       <div class="row">
-        <dt>Second model</dt>
+        <dt>{t('revSecondModel')}</dt>
         <dd>
           {#if result.kind === 'css'}
-            CSS is not sent to a second model.
+            {t('revCssNotReviewed')}
           {:else if !review.model}
-            Not reviewed.
+            {t('revNotReviewed')}
           {:else if review.model.verdict === 'match'}
-            Read the code and agreed it does what you described.
-            {#if review.model.explanation}Its note: {review.model.explanation}{/if}
+            {t('revModelAgreed')}
+            {#if review.model.explanation}{t('revModelNote', review.model.explanation)}{/if}
           {:else}
-            Verdict: {review.model.verdict}. {review.model.explanation}
+            {t('revVerdict', review.model.verdict, review.model.explanation)}
           {/if}
         </dd>
       </div>
@@ -310,12 +296,12 @@
   <details bind:open={codeOpen}>
     <summary>
       <span class="caret" aria-hidden="true">{codeOpen ? '▾' : '▸'}</span>
-      {result.kind === 'js' ? 'Code to be run, and rationale' : 'Code and rationale'}
-      <span class="meta">{lineCount} lines · {result.kind.toUpperCase()}</span>
+      {result.kind === 'js' ? t('revCodeToRun') : t('savingCodeAndRationale')}
+      <span class="meta">{t('savingMeta', lineCount, result.kind.toUpperCase())}</span>
     </summary>
     <div class="detail">
       <CodeBlock code={result.code} kind={result.kind} flagged={flaggedLines} />
-      <Label>Assumes</Label>
+      <Label>{t('refAssumes')}</Label>
       <ul class="assumptions">
         {#each result.rationale.assumptions as assumption}
           <li>{assumption}</li>
@@ -325,8 +311,7 @@
   </details>
 
   <p class="grant">
-    Saving asks Firefox for permission to run on <code>{origin}</code>{#if result.kind === 'js'}, and to
-      run user scripts{/if}. Without it the transform saves but never applies.
+    {t(result.kind === 'js' ? 'revGrantJs' : 'revGrant', origin)}
   </p>
 
   {#if permissionDenied}
@@ -334,10 +319,9 @@
       <div class="card-head">
         <span class="dot attention" aria-hidden="true"></span>
         <div class="card-body">
-          <span class="card-title">Permission was declined</span>
+          <span class="card-title">{t('revDeclinedTitle')}</span>
           <p class="finding">
-            Nothing was saved. A transform without this grant would sit in the list
-            looking active and do nothing on every visit.
+            {t('revDeclinedBody')}
           </p>
         </div>
       </div>
@@ -346,12 +330,12 @@
 
   <div class="submit">
     {#if blocking.length > 0}
-      <Button full onclick={onback}>Back</Button>
+      <Button full onclick={onback}>{t('back')}</Button>
     {:else if pendingUrls.length > 0}
       <div class="split">
-        <Button grow={1} small onclick={onback}>Back</Button>
+        <Button grow={1} small onclick={onback}>{t('back')}</Button>
         <Button variant="primary" grow={1.3} small disabled={!shown} onclick={onapproveurls}>
-          Approve {pendingUrls.length === 1 ? 'this address' : 'these addresses'}
+          {t(pendingUrls.length === 1 ? 'revApproveAddress' : 'revApproveAddresses')}
         </Button>
       </div>
     {:else if capabilities.length > 0}
@@ -364,15 +348,15 @@
             onrefuse()
           }}
         >
-          Refuse {capabilities.join(' and ')}
+          {t('revRefuse', capabilities.join(' and '))}
         </Button>
         <Button variant="primary" grow={1.3} small disabled={!shown} onclick={onsave}>
-          Allow and save
+          {t('revAllowSave')}
         </Button>
       </div>
     {:else}
       <Button variant="primary" full disabled={review === null || !shown} onclick={onsave}>
-        Save transform
+        {t('revSave')}
       </Button>
     {/if}
   </div>

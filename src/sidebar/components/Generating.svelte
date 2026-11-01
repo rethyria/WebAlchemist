@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from '@shared/i18n'
   import type { ProgressStage } from '../lib/flow.svelte'
   import type { TransformKind } from '@shared/types'
   import Button from './Button.svelte'
@@ -40,12 +41,10 @@
    * screenshot went with it.
    */
   let steps = $derived([
-    { id: 'context' as const, text: 'Read the element and its ancestors' },
+    { id: 'context' as const, text: t('generatingStepContext') },
     {
       id: 'sent' as const,
-      text: `Sent ${(contextSize / 1024).toFixed(1)} kB of page context${
-        withScreenshot ? ', with a screenshot' : ', no screenshot'
-      }`,
+      text: t(withScreenshot ? 'generatingStepSentShot' : 'generatingStepSentNoShot', (contextSize / 1024).toFixed(1)),
     },
     {
       /*
@@ -55,15 +54,15 @@
        */
       id: 'thinking' as const,
       text: thinkingChars
-        ? `Thinking — ${thinkingChars.toLocaleString()} characters`
-        : 'Thinking',
+        ? t('generatingStepThinkingCount', thinkingChars.toLocaleString())
+        : t('generatingStepThinking'),
     },
     {
       id: 'streaming' as const,
-      text: code ? `Writing code — ${code.split('\n').length} lines so far` : 'Writing code',
+      text: code ? t('generatingStepWritingLines', code.split('\n').length) : t('generatingStepWriting'),
     },
-    { id: 'analysis' as const, text: 'Static analysis' },
-    { id: 'preview' as const, text: 'Preview on the page' },
+    { id: 'analysis' as const, text: t('generatingStepAnalysis') },
+    { id: 'preview' as const, text: t('generatingStepPreview') },
   ])
 
 </script>
@@ -75,7 +74,7 @@
       titled every JavaScript run wrongly for its whole duration.
     -->
     <span class="title" role="heading" aria-level="1" use:focusOnMount>
-      {kind === null ? 'Generating' : kind === 'js' ? 'Writing JavaScript' : 'Writing CSS'}
+      {kind === null ? t('generatingTitle') : kind === 'js' ? t('generatingTitleJs') : t('generatingTitleCss')}
     </span>
     <span class="elapsed">{elapsed}s</span>
   </header>
@@ -91,7 +90,7 @@
   -->
   <p class="sr-only" role="status">{generationAnnouncement(stage)}</p>
 
-  <div class="bar" role="progressbar" aria-label="Working"><div class="sweep"></div></div>
+  <div class="bar" role="progressbar" aria-label={t('generatingBarLabel')}><div class="sweep"></div></div>
 
   <ol class="steps">
     {#each steps as step}
@@ -110,7 +109,7 @@
 
   <AddressNote address={sentAddress} />
 
-  <Button full onclick={oncancel}>Cancel</Button>
+  <Button full onclick={oncancel}>{t('cancel')}</Button>
 </div>
 
 <style>

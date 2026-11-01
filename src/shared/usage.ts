@@ -1,4 +1,3 @@
-import { t } from './i18n'
 /**
  * Pure helpers for token usage and cost. No storage and no browser APIs, so
  * the background, the sidebar and the settings page share one implementation
@@ -12,6 +11,7 @@ import {
   type TokenUsage,
   type UsageTotals,
 } from './types'
+import { t } from './i18n'
 
 /**
  * The price of an Anthropic model, read from the "$5 / $25" string that the

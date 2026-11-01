@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from '@shared/i18n'
   /**
    * The panel in which the user reads JavaScript that was restored from a
    * backup, with the world it runs in, before approving it (#124). For code
@@ -21,9 +22,9 @@
 </script>
 
 <div class="approval">
-  <p>It runs in: {WORLD_NAMES[worldOf(transform)]}.</p>
+  <p>{t('approvalRunsIn', WORLD_NAMES[worldOf(transform)])}</p>
   {#if inMain}
-    <p>Running in the page's own world has these risks:</p>
+    <p>{t('approvalRisksIntro')}</p>
     <ul class="risks">
       {#each MAIN_WORLD_RISKS as risk}
         <li>{risk}</li>
@@ -31,18 +32,18 @@
     </ul>
     <label>
       <input type="checkbox" bind:checked={risksRead} />
-      I have read the risks and want this code to run in the page's own world
+      {t('approvalRisksRead')}
     </label>
   {/if}
   <pre>{transform.code}</pre>
   {#if transform.capabilities.length > 0}
-    <p>It declares these capabilities: {transform.capabilities.join(', ')}.</p>
+    <p>{t('approvalCapabilities', transform.capabilities.join(', '))}</p>
   {/if}
   <div class="actions">
     <button type="button" class="primary" disabled={inMain && !risksRead} onclick={onapprove}>
-      Approve and turn on
+      {t('approvalApprove')}
     </button>
-    <button type="button" class="secondary" onclick={oncancel}>Cancel</button>
+    <button type="button" class="secondary" onclick={oncancel}>{t('cancel')}</button>
   </div>
 </div>
 

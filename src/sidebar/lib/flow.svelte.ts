@@ -59,6 +59,7 @@ import type { PickerAction } from '@shared/picker-keys'
 import { BackgroundError, generateOverPort, send } from './messaging.svelte'
 import { screenshotsAvailable } from '@shared/panel-binding'
 import { jsPreviewGate, reviewKey } from './preview-gate'
+import { t } from '@shared/i18n'
 
 /** An address without its fragment, so that scrolling to an anchor is not a new page. */
 const pageKey = (url: string): string => url.split('#')[0] ?? url
@@ -645,7 +646,7 @@ export class Flow {
         this.rePickFrom = null
         this.show({
           kind: 'request-failed',
-          message: `Web Alchemist needs permission to read ${this.hostname()} before it can point at anything on it.`,
+          message: t('flowNeedsPermission', this.hostname()),
         })
         return
       }
@@ -671,7 +672,7 @@ export class Flow {
     try {
       return new URL(this.url).hostname
     } catch {
-      return 'this site'
+      return t('flowThisSite')
     }
   }
 
@@ -1033,7 +1034,7 @@ export class Flow {
       })
       if (!found) {
         throw new Error(
-          `Web Alchemist cannot find the element ${transform.name} was written for on this page, so there is nothing to repair against. Pick it again to write a new transform.`,
+          t('flowElementGoneRepair', transform.name),
         )
       }
       if (!current()) return
@@ -1165,7 +1166,7 @@ export class Flow {
       })
       if (!found) {
         throw new Error(
-          `Web Alchemist cannot find the element ${transform.name} was written for on this page. Open a page it applies to, or pick the element again.`,
+          t('flowElementGone', transform.name),
         )
       }
       if (!current()) return
@@ -1237,7 +1238,7 @@ export class Flow {
       })
       if (!found) {
         throw new Error(
-          `Web Alchemist cannot find the element ${transform.name} was written for on this page. Open a page it applies to, or pick the element again.`,
+          t('flowElementGone', transform.name),
         )
       }
       if (!current()) return
@@ -1660,7 +1661,7 @@ export class Flow {
       this.show({
         kind: 'request-failed',
         message:
-          'Firefox only lets an extension capture a page with access to all sites. Without it, screenshots cannot be taken; everything else still works.',
+          t('flowScreenshotNeedsAllSites'),
       })
     }
     return granted
@@ -1990,7 +1991,7 @@ export class Flow {
         this.show({
           kind: 'request-failed',
           message:
-            'Running a script needs Firefox’s user scripts permission. Nothing was run.',
+            t('flowNeedsUserScripts'),
         })
         return
       }
@@ -2002,7 +2003,7 @@ export class Flow {
         this.ourReload = 'none'
         this.show({
           kind: 'request-failed',
-          message: 'The review that allows a preview has no approval, so nothing was run. Read the code again.',
+          message: t('flowPreviewNoApproval'),
         })
         return
       }

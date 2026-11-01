@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { accentName } from '@shared/accents'
+  import { t } from '@shared/i18n'
   import { radioGroup } from '@shared/radio-group'
   import { focusOnMount } from '../lib/focus'
   /**
@@ -35,25 +37,25 @@
 
 
   const HEALTH_MODES: { value: HealthCheckMode; label: string; note?: string }[] = [
-    { value: 'every-load', label: 'Every page load', note: 'default' },
-    { value: 'once-per-session', label: 'Once per site per session' },
-    { value: 'manual', label: 'Manual only' },
+    { value: 'every-load', label: t('settingsHealthEvery'), note: t('settingsHealthDefault') },
+    { value: 'once-per-session', label: t('settingsHealthOnce') },
+    { value: 'manual', label: t('settingsHealthManual') },
   ]
 
   let active = $derived(settings.providers.find((p) => p.id === settings.activeProviderId))
   let activeStatus = $derived(statuses.find((s) => s.providerId === active?.id))
 </script>
 
-<div class="panel" role="region" aria-label="Settings" use:focusOnMount>
+<div class="panel" role="region" aria-label={t('settingsRegion')} use:focusOnMount>
   <section>
-    <Label>Accent colour</Label>
-    <div class="swatches" role="radiogroup" aria-label="Accent colour" use:radioGroup>
+    <Label>{t('settingsAccent')}</Label>
+    <div class="swatches" role="radiogroup" aria-label={t('settingsAccent')} use:radioGroup>
       {#each ACCENTS as accent}
         <button
           type="button"
           role="radio"
           aria-checked={settings.accent === accent}
-          aria-label={accent}
+          aria-label={accentName(accent)}
           class="swatch"
           class:selected={settings.accent === accent}
           style="--swatch: {ACCENT_COLOURS[accent].swatch}"
@@ -65,47 +67,47 @@
   </section>
 
   <section>
-    <Label>Provider</Label>
+    <Label>{t('settingsProvider')}</Label>
     {#if active}
       <div class="card">
         <div class="card-head">
           <span class="card-title">{active.label}</span>
-          <span class="chip">ACTIVE</span>
+          <span class="chip">{t('settingsActive')}</span>
         </div>
         <span class="mono">
           {active.type === 'anthropic' ? 'api.anthropic.com' : (active.baseUrl ?? '')} ·
-          {activeStatus?.kind === 'oauth' ? 'oauth' : 'api key'}
+          {activeStatus?.kind === 'oauth' ? t('settingsOauth') : t('settingsApiKey')}
         </span>
         <span class="state">
           {#if activeStatus?.needsReentry}
-            {activeStatus.kind === 'oauth' ? 'Sign in again' : 'Enter the key again'} for this provider
+            {activeStatus.kind === 'oauth' ? t('settingsSignInAgain') : t('settingsEnterKeyAgain')}
           {:else}
-            {activeStatus?.configured ? 'Key configured' : 'No credential'}
+            {activeStatus?.configured ? t('settingsKeyConfigured') : t('settingsNoCredential')}
           {/if}
         </span>
       </div>
       <div class="models">
         <div class="model">
-          <span class="model-role">Writes the code</span>
+          <span class="model-role">{t('settingsWritesCode')}</span>
           <span class="mono">{active.generateModel}</span>
         </div>
         <div class="model">
-          <span class="model-role">Reviews the code</span>
+          <span class="model-role">{t('settingsReviewsCode')}</span>
           <span class="mono">{active.reviewModel}</span>
-          <span class="model-note">code and intent only</span>
+          <span class="model-note">{t('settingsReviewNote')}</span>
         </div>
       </div>
     {:else}
       <p class="note">
-        No provider is set up. Nothing can be generated until one is.
+        {t('settingsNoProvider')}
       </p>
-      <button type="button" class="link" onclick={onfullpage}>Add a provider →</button>
+      <button type="button" class="link" onclick={onfullpage}>{t('settingsAddProvider')}</button>
     {/if}
   </section>
 
   <section>
-    <Label>Check for broken transforms</Label>
-    <div class="modes" role="radiogroup" aria-label="Check for broken transforms" use:radioGroup>
+    <Label>{t('settingsHealth')}</Label>
+    <div class="modes" role="radiogroup" aria-label={t('settingsHealth')} use:radioGroup>
       {#each HEALTH_MODES as mode}
         <button
           type="button"
@@ -131,15 +133,14 @@
   -->
   <div class="kill">
     <div class="kill-text">
-      <span class="card-title">Keep screenshot permission</span>
+      <span class="card-title">{t('settingsKeepShot')}</span>
       <span class="note">
-        Screenshots need access to all sites. Kept on, you are not asked again —
-        and you stop being asked per site when saving transforms too.
+        {t('settingsKeepShotNote')}
       </span>
     </div>
     <Toggle
       checked={settings.keepScreenshotPermission}
-      label="Keep screenshot permission"
+      label={t('settingsKeepShot')}
       onchange={(keepScreenshotPermission) =>
         onsave({ ...settings, keepScreenshotPermission })}
     />
@@ -159,7 +160,7 @@
   </div>
 
   <div class="disclosure">
-    <span class="card-title">Where your keys are stored</span>
+    <span class="card-title">{t('settingsWhereStored')}</span>
     <span class="note">{disclosure.text}</span>
     {#if disclosure.status}
       <span class="note"><strong>{disclosure.status}</strong></span>
@@ -170,9 +171,9 @@
 
   <footer>
     <button type="button" class="link" onclick={onfullpage}>
-      Open the full settings page →
+      {t('settingsOpenFull')}
     </button>
-    <span class="note">Adding providers, and export / import, live there.</span>
+    <span class="note">{t('settingsFullNote')}</span>
   </footer>
 </div>
 

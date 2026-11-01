@@ -1,10 +1,10 @@
-import { t } from './i18n'
 /**
  * States of a stored transform that the list and the background both need to
  * agree on.
  */
 
 import type { Transform } from './types'
+import { t } from './i18n'
 
 /**
  * True when a transform has no code to run and has to be generated again from

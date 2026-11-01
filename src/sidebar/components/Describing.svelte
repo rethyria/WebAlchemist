@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from '@shared/i18n'
   import type { HoverTarget, Rect, TreePath, TreeRow } from '@shared/types'
   import { autogrow } from '../lib/autogrow'
   import { focusOnMount } from '../lib/focus'
@@ -263,14 +264,14 @@
 <div class="panel">
   <header>
     <span class="selector">{selector}</span>
-    <span class="locked">locked</span>
-    <button type="button" class="change" onclick={onrepick}>Change</button>
+    <span class="locked">{t('describingLocked')}</span>
+    <button type="button" class="change" onclick={onrepick}>{t('describingChange')}</button>
   </header>
 
   {#if rows.length > 1}
     <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
     <section class="tree">
-      <Label>Or target another element</Label>
+      <Label>{t('describingTreeLabel')}</Label>
       <!-- svelte-ignore a11y_no_static_element_interactions -->
       <div
         class="scroll"
@@ -312,7 +313,7 @@
                     >{row.label}{#if row.origin}<!--
                       Where the pick started, so the way back to it is visible
                       from wherever the selection has moved to.
-                    --><span class="origin">picked</span>{/if}</span
+                    --><span class="origin">{t('describingOrigin')}</span>{/if}</span
                   >
                 </button>
               {:else if row.expand}
@@ -344,39 +345,40 @@
 
   {#if maxDepth > 0}
     <section class="scope">
-      <Label>How widely should it apply?</Label>
+      <Label>{t('describingScopeLabel')}</Label>
       <input
         type="range"
         min="0"
         max={maxDepth}
         value={specificity}
-        aria-label="How widely should it apply"
+        aria-label={t('describingScopeAria')}
         oninput={(event) => onscope(maxDepth - Number(event.currentTarget.value))}
       />
       <p class="note">
         {#if scopeDepth === 0}
-          Just this element.
+          {t('describingScopeOne')}
         {:else if scopeContainer}
-          {scopeCount === 1 ? 'Only this one' : `All ${scopeCount} like it`} inside
-          <code>{scopeContainer}</code>, outlined on the page.
+          {scopeCount === 1
+            ? t('describingScopeInsideOne', scopeContainer)
+            : t('describingScopeInsideMany', scopeCount, scopeContainer)}
         {:else}
-          Every element like this one.
+          {t('describingScopeAll')}
         {/if}
       </p>
     </section>
   {/if}
 
   <section>
-    <Label>What should change?</Label>
+    <Label>{t('describingInstructionLabel')}</Label>
     <textarea
       use:autogrow={instruction}
       use:focusOnMount
       value={instruction}
-      placeholder="Give the comment tree a dark background"
+      placeholder={t('describingPlaceholder')}
       oninput={(event) => onchange(event.currentTarget.value)}
     ></textarea>
     <div class="actions">
-      <Button grow={1} small onclick={oncancel}>Cancel</Button>
+      <Button grow={1} small onclick={oncancel}>{t('cancel')}</Button>
       <Button
         variant="primary"
         grow={2}
@@ -384,7 +386,7 @@
         disabled={!instruction.trim()}
         onclick={ongenerate}
       >
-        Generate
+        {t('describingGenerate')}
       </Button>
     </div>
   </section>
@@ -403,10 +405,10 @@
         <div class="include">
           <Toggle
             checked={false}
-            label="Include screenshot of the area you drew"
+            label={t('describingIncludeShot')}
             onchange={(on) => on && onincluderegion()}
           />
-          <span class="include-text">Include screenshot of the area you drew</span>
+          <span class="include-text">{t('describingIncludeShot')}</span>
         </div>
       {/if}
 
@@ -418,10 +420,10 @@
           onclick={() => onscreenshot(true)}
         >
           {choosingRegion
-            ? 'Drag the area on the page…'
+            ? t('describingShotDrag')
             : regionAvailable
-              ? 'Add a different screenshot'
-              : 'Add a screenshot'}
+              ? t('describingShotDifferent')
+              : t('describingShotAdd')}
         </button>
       {/if}
 
@@ -431,24 +433,22 @@
         the picture rather than a description of one.
       -->
       {#if shotPreview}
-        <img class="shot" src={shotPreview} alt="The region that will be sent" />
+        <img class="shot" src={shotPreview} alt={t('describingShotAlt')} />
         <p class="warning">
-          This image is sent to your AI provider. Everything visible in it goes
-          too — names, messages, account details, anything personal that happens
-          to be on screen.
+          {t('describingShotWarning')}
         </p>
         {#if shotClipped}
           <p class="note">
-            Clipped at the viewport — only the visible part was captured.
+            {t('describingShotClipped')}
           </p>
         {/if}
         {#if shotMoved}
           <p class="note">
-            The area was moved because the page scrolled after it was drawn.
+            {t('describingShotMoved')}
           </p>
         {/if}
         <button type="button" class="shot-action" onclick={() => onscreenshot(false)}>
-          Remove screenshot
+          {t('describingShotRemove')}
         </button>
       {/if}
     </section>
@@ -644,11 +644,6 @@
     width: 100%;
     margin: 0;
     accent-color: var(--accent-fg);
-  }
-
-  .note code {
-    font: 11px var(--font-mono);
-    color: var(--text-dim);
   }
 
   /*

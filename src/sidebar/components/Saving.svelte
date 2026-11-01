@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from '@shared/i18n'
   import { radioGroup } from '@shared/radio-group'
   import type { MatchPreset } from '@shared/match'
   import type { GenerationResult } from '@shared/types'
@@ -37,8 +38,8 @@
 
 <div class="panel">
   <header>
-    <Label>Step 1 of 3 · Confirm</Label>
-    <h1 use:focusOnMount>Is this what you meant?</h1>
+    <Label>{t('savingStep1')}</Label>
+    <h1 use:focusOnMount>{t('savingTitle')}</h1>
   </header>
 
   <section>
@@ -48,14 +49,13 @@
       oninput={(event) => onintent(event.currentTarget.value)}
     ></textarea>
     <p class="note">
-      {#if consolidated}Written from your messages. {/if}Edit it — this is the text
-      used to rebuild the transform when the site changes.
+      {#if consolidated}{t('savingNoteConsolidated')}{:else}{t('savingNote')}{/if}
     </p>
   </section>
 
   <section>
-    <Label>Step 2 · Where it applies</Label>
-    <div class="options" role="radiogroup" aria-label="Where it applies" use:radioGroup>
+    <Label>{t('savingStep2')}</Label>
+    <div class="options" role="radiogroup" aria-label={t('savingWhereLabel')} use:radioGroup>
       {#each presets as preset (preset.pattern)}
         <button
           type="button"
@@ -75,11 +75,11 @@
   <details bind:open={codeOpen}>
     <summary>
       <span class="caret" aria-hidden="true">{codeOpen ? '▾' : '▸'}</span>
-      Code and rationale
-      <span class="meta">{lineCount} lines · {result.kind.toUpperCase()}</span>
+      {t('savingCodeAndRationale')}
+      <span class="meta">{t('savingMeta', lineCount, result.kind.toUpperCase())}</span>
     </summary>
     <div class="detail">
-      <Label>Approach</Label>
+      <Label>{t('savingApproach')}</Label>
       <p class="prose">{result.rationale.approach}</p>
       <CodeBlock code={result.code} kind={result.kind} />
     </div>
@@ -87,7 +87,7 @@
 
   <div class="submit">
     <Button variant="primary" full disabled={!match || !intent.trim()} onclick={oncontinue}>
-      Continue
+      {t('savingContinue')}
     </Button>
   </div>
 </div>

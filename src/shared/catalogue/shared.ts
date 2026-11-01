@@ -323,4 +323,41 @@ export const sharedMessages = defineMessages({
     message: 'Different',
     description: 'Says that a value differs between the two versions.',
   },
+  accentRed: {
+    message: 'red',
+    description: 'Name of an accent colour, read out by a screen reader for a colour swatch.',
+  },
+  accentOrange: {
+    message: 'orange',
+    description: 'Name of an accent colour, read out by a screen reader for a colour swatch.',
+  },
+  accentAmber: {
+    message: 'amber',
+    description: 'Name of an accent colour, read out by a screen reader for a colour swatch.',
+  },
+  accentGreen: {
+    message: 'green',
+    description: 'Name of an accent colour, read out by a screen reader for a colour swatch.',
+  },
+  accentBlue: {
+    message: 'blue',
+    description: 'Name of an accent colour, read out by a screen reader for a colour swatch.',
+  },
+  accentIndigo: {
+    message: 'indigo',
+    description: 'Name of an accent colour, read out by a screen reader for a colour swatch.',
+  },
+  accentViolet: {
+    message: 'violet',
+    description: 'Name of an accent colour, read out by a screen reader for a colour swatch.',
+  },
+  accentMono: {
+    message: 'mono',
+    description: 'Name of an accent colour, read out by a screen reader for a colour swatch.',
+  },
+  excludedAccessMessage: {
+    message: '$HOST$ is on your list of excluded sites, so Web Alchemist does not ask for access to it. Remove it from the list in the settings first.',
+    description: 'Shown when the extension refuses to ask for access to an excluded site. $HOST$ is a site name.',
+    placeholders: ['HOST'],
+  },
 })

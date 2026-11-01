@@ -11,14 +11,15 @@
 
 import type { ReviewResult, TransformKind } from '@shared/types'
 import type { ProgressStage } from './flow.svelte'
+import { t } from '@shared/i18n'
 
 const STAGE_TEXT: Record<ProgressStage, string> = {
-  context: 'Reading the element and its ancestors.',
-  sent: 'Request sent to the model.',
-  thinking: 'The model is thinking.',
-  streaming: 'The model is writing code.',
-  analysis: 'Running static analysis.',
-  preview: 'Applying a preview to the page.',
+  context: t('announceContext'),
+  sent: t('announceSent'),
+  thinking: t('announceThinking'),
+  streaming: t('announceStreaming'),
+  analysis: t('announceAnalysis'),
+  preview: t('announcePreview'),
 }
 
 /** One sentence per stage, so the text changes once per stage and not per token. */
@@ -31,31 +32,31 @@ export function generationAnnouncement(stage: ProgressStage): string {
  * which is announced as waiting so that the later result is a change.
  */
 export function reviewAnnouncement(review: ReviewResult | null, kind: TransformKind): string {
-  if (review === null) return 'Reviewing the code.'
+  if (review === null) return t('announceReviewing')
   const blocking = review.static.filter((finding) => finding.severity === 'block').length
   const warnings = review.static.filter((finding) => finding.severity === 'warn').length
   const parts: string[] = []
   if (blocking > 0) {
     parts.push(
       blocking === 1
-        ? 'One problem stops this from being saved.'
-        : `${blocking} problems stop this from being saved.`,
+        ? t('announceOneBlocking')
+        : t('announceBlocking', blocking),
     )
   }
   if (warnings > 0) {
-    parts.push(warnings === 1 ? 'One warning.' : `${warnings} warnings.`)
+    parts.push(warnings === 1 ? t('announceOneWarning') : t('announceWarnings', warnings))
   }
   if (kind === 'js' && review.model && review.model.verdict !== 'match') {
-    parts.push('The second model review disagrees with the description.')
+    parts.push(t('announceModelDisagrees'))
   }
   if (parts.length === 0) {
     parts.push(
       kind === 'css'
-        ? 'Review finished. No problems found. CSS is not sent for model review.'
-        : 'Review finished. No problems found.',
+        ? t('announceCleanCss')
+        : t('announceClean'),
     )
   } else {
-    parts.unshift('Review finished.')
+    parts.unshift(t('announceFinished'))
   }
   return parts.join(' ')
 }
@@ -63,5 +64,5 @@ export function reviewAnnouncement(review: ReviewResult | null, kind: TransformK
 /** Empty when nothing is broken, so a region that held a message is cleared. */
 export function brokenAnnouncement(count: number): string {
   if (count <= 0) return ''
-  return count === 1 ? '1 transform stopped working.' : `${count} transforms stopped working.`
+  return count === 1 ? t('announceOneBroken') : t('announceBroken', count)
 }

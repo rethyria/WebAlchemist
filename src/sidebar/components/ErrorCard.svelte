@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from '@shared/i18n'
   import { announcement } from '../lib/countdown'
   import type { FlowError } from '../lib/flow.svelte'
   import { SENSITIVE_PAGE_TITLE } from '@shared/excluded-sites'
@@ -31,33 +32,32 @@
   role={error.kind === 'rate-limited' ? undefined : 'alert'}
 >
   {#if error.kind === 'no-provider'}
-    <span class="title">No provider set up</span>
+    <span class="title">{t('errNoProviderTitle')}</span>
     <p>
-      Nothing can be generated until an API key is stored. Anthropic or any
-      OpenAI-compatible endpoint.
+      {t('errNoProviderBody')}
     </p>
     <div class="actions">
-      <Button variant="primary" small onclick={onsettings}>Add a provider</Button>
+      <Button variant="primary" small onclick={onsettings}>{t('errAddProvider')}</Button>
     </div>
   {:else if error.kind === 'request-failed'}
     <div class="head">
       <span class="dot block" aria-hidden="true"></span>
-      <span class="title">The request failed</span>
+      <span class="title">{t('errRequestFailedTitle')}</span>
     </div>
-    <p>{error.message}{error.descriptionKept ? ' Your description is kept.' : ''}</p>
+    <p>{error.descriptionKept ? t('errMessageKept', error.message) : error.message}</p>
     {#if detailOpen && error.detail}
       <pre>{error.detail}</pre>
     {/if}
     <div class="actions">
       {#if onretry}
-        <Button variant="primary" small onclick={onretry}>Try again</Button>
+        <Button variant="primary" small onclick={onretry}>{t('tryAgain')}</Button>
       {/if}
       {#if error.detail}
         <Button small onclick={() => (detailOpen = !detailOpen)}>
-          {detailOpen ? 'Hide response' : 'Show response'}
+          {detailOpen ? t('errHideResponse') : t('errShowResponse')}
         </Button>
       {/if}
-      <Button small onclick={ondismiss}>Dismiss</Button>
+      <Button small onclick={ondismiss}>{t('dismiss')}</Button>
     </div>
   {:else if error.kind === 'sensitive-page'}
     <div class="head">
@@ -67,44 +67,44 @@
     <p>{error.message}</p>
     <div class="actions">
       {#if onretry}
-        <Button variant="primary" small onclick={onretry}>Send page content</Button>
+        <Button variant="primary" small onclick={onretry}>{t('errSendPage')}</Button>
       {/if}
-      <Button small onclick={ondismiss}>Cancel</Button>
+      <Button small onclick={ondismiss}>{t('cancel')}</Button>
     </div>
   {:else if error.kind === 'model-unavailable'}
     <div class="head">
       <span class="dot block" aria-hidden="true"></span>
-      <span class="title">Model not available</span>
+      <span class="title">{t('errModelUnavailableTitle')}</span>
     </div>
-    <p>{error.message}{error.descriptionKept ? ' Your description is kept.' : ''}</p>
+    <p>{error.descriptionKept ? t('errMessageKept', error.message) : error.message}</p>
     <div class="actions">
-      <Button variant="primary" small onclick={onmodelsettings}>Open model settings</Button>
+      <Button variant="primary" small onclick={onmodelsettings}>{t('errOpenModelSettings')}</Button>
       {#if onretry}
-        <Button small onclick={onretry}>Try again</Button>
+        <Button small onclick={onretry}>{t('tryAgain')}</Button>
       {/if}
-      <Button small onclick={ondismiss}>Dismiss</Button>
+      <Button small onclick={ondismiss}>{t('dismiss')}</Button>
     </div>
   {:else if error.kind === 'model-not-permitted'}
     <div class="head">
       <span class="dot block" aria-hidden="true"></span>
-      <span class="title">Model not permitted</span>
+      <span class="title">{t('errModelNotPermittedTitle')}</span>
     </div>
-    <p>{error.message}{error.descriptionKept ? ' Your description is kept.' : ''}</p>
+    <p>{error.descriptionKept ? t('errMessageKept', error.message) : error.message}</p>
     <div class="actions">
-      <Button variant="primary" small onclick={onmodelsettings}>Open model settings</Button>
-      <Button small onclick={ondismiss}>Dismiss</Button>
+      <Button variant="primary" small onclick={onmodelsettings}>{t('errOpenModelSettings')}</Button>
+      <Button small onclick={ondismiss}>{t('dismiss')}</Button>
     </div>
   {:else if error.kind === 'billing'}
     <div class="head">
       <span class="dot block" aria-hidden="true"></span>
-      <span class="title">Billing problem</span>
+      <span class="title">{t('errBillingTitle')}</span>
     </div>
-    <p>{error.message}{error.descriptionKept ? ' Your description is kept.' : ''}</p>
+    <p>{error.descriptionKept ? t('errMessageKept', error.message) : error.message}</p>
     <div class="actions">
       {#if onretry}
-        <Button variant="primary" small onclick={onretry}>Try again</Button>
+        <Button variant="primary" small onclick={onretry}>{t('tryAgain')}</Button>
       {/if}
-      <Button small onclick={ondismiss}>Dismiss</Button>
+      <Button small onclick={ondismiss}>{t('dismiss')}</Button>
     </div>
   {:else if error.kind === 'rate-limited'}
     <!--
@@ -117,7 +117,7 @@
     <div class="alert" role="alert">
       <div class="head">
         <span class="dot attention" aria-hidden="true"></span>
-        <span class="title">Rate limited</span>
+        <span class="title">{t('errRateLimitedTitle')}</span>
       </div>
       <p>{error.message}</p>
     </div>
@@ -131,8 +131,7 @@
         clicked: an automatic request is only acceptable if it can be stopped.
       -->
       <p class="countdown" aria-hidden="true">
-        Trying again in {error.retryInSeconds}
-        {error.retryInSeconds === 1 ? 'second' : 'seconds'}
+        {t(error.retryInSeconds === 1 ? 'errCountdownOne' : 'errCountdown', error.retryInSeconds)}
       </p>
       <!-- What assistive technology gets instead: a polite region whose text changes at coarse steps. -->
       <p class="hidden" role="status">
@@ -140,26 +139,26 @@
       </p>
       <div class="actions">
         {#if onretry}
-          <Button small onclick={onretry}>Try now</Button>
+          <Button small onclick={onretry}>{t('errTryNow')}</Button>
         {/if}
-        <Button small onclick={ondismiss}>Cancel</Button>
+        <Button small onclick={ondismiss}>{t('cancel')}</Button>
       </div>
     {:else}
       <!-- No guidance from the provider, so nothing to count down from. -->
       <div class="actions">
         {#if onretry}
-          <Button variant="primary" small onclick={onretry}>Try again</Button>
+          <Button variant="primary" small onclick={onretry}>{t('tryAgain')}</Button>
         {/if}
-        <Button small onclick={ondismiss}>{onretry ? 'Cancel' : 'Dismiss'}</Button>
+        <Button small onclick={ondismiss}>{onretry ? t('cancel') : t('dismiss')}</Button>
       </div>
     {/if}
   {:else}
-    <span class="title">Credential expired</span>
+    <span class="title">{t('errCredentialExpiredTitle')}</span>
     <p>
-      {error.message} Saved transforms keep working; new ones cannot be generated.
+      {t('errCredentialExpiredBody', error.message)}
     </p>
     <div class="actions">
-      <Button variant="primary" small onclick={onsettings}>Reconnect</Button>
+      <Button variant="primary" small onclick={onsettings}>{t('errReconnect')}</Button>
     </div>
   {/if}
 </div>

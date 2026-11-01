@@ -1,4 +1,3 @@
-import { t } from './i18n'
 /**
  * Restricting a transform to the container of one tab (#127).
  *
@@ -22,6 +21,7 @@ import { t } from './i18n'
  */
 
 import type { Transform } from './types'
+import { t } from './i18n'
 
 /** The cookie store of a tab that is not in any container. */
 export const DEFAULT_COOKIE_STORE = 'firefox-default'

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from '@shared/i18n'
   import type { HoverTarget } from '@shared/types'
   import { forwardedAction, type PickerAction } from '@shared/picker-keys'
   import { focusOnMount } from '../lib/focus'
@@ -22,12 +23,12 @@
 
   let mode = $derived(
     hover?.drawing
-      ? 'Drawing a rectangle'
+      ? t('pickingModeDrawing')
       : hover?.crop
-        ? 'Resolved from your rectangle'
+        ? t('pickingModeCrop')
         : touch
-          ? 'Waiting for a tap on the page'
-          : 'Hovering the page',
+          ? t('pickingModeTouch')
+          : t('pickingModeHover'),
   )
 
   /*
@@ -53,25 +54,25 @@
   }
 
   const KEYS: [string, string][] = [
-    ['↑', 'Parent'],
-    ['↓', 'First child'],
-    ['← →', 'Previous / next sibling'],
-    ['↵', 'Confirm this element'],
-    ['esc', 'Cancel'],
+    ['↑', t('pickingKeyParent')],
+    ['↓', t('pickingKeyChild')],
+    ['← →', t('pickingKeySibling')],
+    ['↵', t('pickingKeyConfirm')],
+    [t('pickingKeyEscape'), t('cancel')],
   ]
 </script>
 
 <svelte:window onkeydown={onwindowkeydown} />
 
 <div class="panel">
-  <h1 class="title" tabindex="-1" use:focusOnMount>Pick an element</h1>
+  <h1 class="title" tabindex="-1" use:focusOnMount>{t('pickingTitle')}</h1>
   <div class="mode">
     <span class="live" aria-hidden="true"></span>
     <span class="mode-text">{mode}</span>
   </div>
 
   <section>
-    <Label>Current element</Label>
+    <Label>{t('pickingCurrent')}</Label>
     {#if hover}
       <div class="crumb">
         {#each trail as part}<span class="part">{part}</span><span
@@ -86,30 +87,27 @@
         {/if}
         {#if hover.crop}
           <span class="fact crop">
-            crop {Math.round(hover.crop.width)} × {Math.round(hover.crop.height)}
+            {t('pickingCrop', Math.round(hover.crop.width), Math.round(hover.crop.height))}
           </span>
         {/if}
       </div>
     {:else}
       <p class="waiting">
-        {touch ? 'Tap an element on the page.' : 'Move the pointer over the page, or use the arrow keys.'}
+        {touch ? t('pickingTapHint') : t('pickingMoveHint')}
       </p>
     {/if}
   </section>
 
   {#if touch}
     <div class="keys">
-      <Label>Picking by touch</Label>
+      <Label>{t('pickingTouchLabel')}</Label>
       <p class="waiting">
-        The page is shown while picking. Tap an element to select it. To draw an area instead,
-        touch and hold still for half a second, then drag. A drag that starts sooner scrolls the
-        page. After a tap, this panel comes back and lists the element's parent, children and
-        siblings, which can be chosen from the tree.
+        {t('pickingTouchHelp')}
       </p>
     </div>
   {:else}
     <div class="keys">
-      <Label>Walk the tree</Label>
+      <Label>{t('pickingKeysLabel')}</Label>
       <dl>
         {#each KEYS as [key, meaning]}
           <dt><kbd>{key}</kbd></dt>
@@ -119,7 +117,7 @@
     </div>
   {/if}
 
-  <Button full onclick={oncancel}>Cancel</Button>
+  <Button full onclick={oncancel}>{t('cancel')}</Button>
 </div>
 
 <style>

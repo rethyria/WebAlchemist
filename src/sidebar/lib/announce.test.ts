@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import type { ProgressStage } from './flow.svelte'
+import { EN_CATALOGUE } from '@shared/catalogue'
 import { brokenAnnouncement, generationAnnouncement, reviewAnnouncement } from './announce'
 import type { ModelReview, ReviewResult, StaticFinding } from '@shared/types'
 
@@ -26,8 +27,9 @@ describe('generationAnnouncement', () => {
     // it is the unsuitable thing to put in a live region.
     expect(generationAnnouncement('streaming')).not.toMatch(/\d/)
     const source = readFileSync(new URL('../components/Generating.svelte', import.meta.url), 'utf8')
-    expect(source).toMatch(/lines so far/)
-    expect(source.match(/role="status"[^>]*>[^<]*/)?.[0]).not.toMatch(/lines so far|thinkingChars|code/)
+    expect(EN_CATALOGUE.generatingStepWritingLines.message).toMatch(/lines so far/)
+    expect(source).toMatch(/generatingStepWritingLines/)
+    expect(source.match(/role="status"[^>]*>[^<]*/)?.[0]).not.toMatch(/generatingStep|thinkingChars|code/)
   })
 })
 

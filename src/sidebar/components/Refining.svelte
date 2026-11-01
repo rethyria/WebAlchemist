@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from '@shared/i18n'
   import { focusOnMount } from '../lib/focus'
   import type { RefinementTurn } from '@background/providers/types'
   import type { GenerationResult, ReviewResult } from '@shared/types'
@@ -111,52 +112,49 @@
   <header>
     <span class="live" class:idle={isJs && !jsRan} aria-hidden="true"></span>
     <span class="status" role="heading" aria-level="1" use:focusOnMount>
-      <span class="sr-only">Code ready. </span>
+      <span class="sr-only">{t('refCodeReady')} </span>
       {#if !isJs && blocked}
-        Not applied to the page
+        {t('refStatusBlocked')}
       {:else if !isJs}
-        Live on the page
+        {t('refStatusLive')}
       {:else if jsRan}
-        Ran once on this page
+        {t('refStatusRan')}
       {:else}
-        Not run yet
+        {t('refStatusNotRun')}
       {/if}
     </span>
     {#if isJs}
-      <span class="badge">JS</span>
+      <span class="badge">{t('refBadgeJs')}</span>
     {:else}
-      <span class="unsaved">not saved yet</span>
+      <span class="unsaved">{t('refUnsaved')}</span>
     {/if}
   </header>
 
   {#if blocked}
     <div class="notice block">
       <span class="notice-title">
-        {isJs ? 'This code was not run' : 'This CSS was not applied'}
+        {isJs ? t('refBlockedJsTitle') : t('refBlockedCssTitle')}
       </span>
       <p>
-        {isJs ? 'Static analysis' : 'The CSS check'} rejected it before anything reached the
-        page.
+        {isJs ? t('refRejectedByAnalysis') : t('refRejectedByCssCheck')}
       </p>
       <ul>
         {#each analysis?.static.filter((f) => f.severity === 'block') ?? [] as finding}
-          <li><code>{finding.api}</code> on line {finding.line} — {finding.explanation}</li>
+          <li>{t('refFinding', finding.api, finding.line, finding.explanation)}</li>
         {/each}
         {#each analysis?.pendingUrls ?? [] as url}
-          <li>Loads <code>{url}</code>, which needs approval before it can be applied.</li>
+          <li>{t('refPendingUrl', url)}</li>
         {/each}
       </ul>
-      <p class="quiet">Say what to change below, or discard it.</p>
+      <p class="quiet">{t('refSayWhat')}</p>
     </div>
   {:else if isJs && !jsRan}
     <div class="notice">
-      <span class="notice-title">JavaScript runs on the next page load</span>
+      <span class="notice-title">{t('refJsNextLoadTitle')}</span>
       <p>
-        Unlike CSS, a script cannot be applied to a page already on screen. To try
-        it, the page is reloaded with the script registered — exactly the way it
-        would run if you saved it.
+        {t('refJsNextLoadBody')}
       </p>
-      <p class="quiet">Nothing is stored. Discarding removes the registration.</p>
+      <p class="quiet">{t('refNothingStored')}</p>
       {#if !previewAllowed}
         <!--
           The script runs on the page with the user's session, so it is not
@@ -164,37 +162,34 @@
         -->
         <p>
           {#if previewReviewing}
-            A second model is reading the code. It cannot be run until that finishes.
+            {t('refReviewReading')}
           {:else if previewReview && previewReview.model && previewReview.model.verdict !== 'match'}
-            The second model did not agree that the code matches your description, so it
-            cannot be run here: {previewReview.model.explanation}
+            {t('refReviewDisagrees', previewReview.model.explanation)}
           {:else if previewReview && !previewReview.passed}
-            The code scan rejected this code, so it cannot be run.
+            {t('refReviewScanRejected')}
           {:else}
-            The code has to be read by a second model before it runs on the page.
+            {t('refReviewNeeded')}
           {/if}
         </p>
       {/if}
     </div>
   {:else if isJs && jsRan}
     <div class="notice attention">
-      <span class="notice-title">Changing this needs a page reload</span>
+      <span class="notice-title">{t('refReloadTitle')}</span>
       <p>
-        The script has already altered the page. A second attempt would run on top
-        of the first, so the page has to be reloaded to get back to the original.
+        {t('refReloadBody')}
       </p>
-      <p class="quiet">Your description and the current code are kept.</p>
+      <p class="quiet">{t('refReloadKept')}</p>
     </div>
   {:else}
     <p class="explainer">
-      Scroll the page to check it. Nothing is stored until you save, and closing
-      this panel discards it.
+      {t('refExplainer')}
     </p>
   {/if}
 
   <section class="transcript">
     {#if attempt > 1}
-      <Label>Attempt {attempt}</Label>
+      <Label>{t('refAttempt', attempt)}</Label>
     {/if}
     <div class="bubbles">
       {#each bubbles as bubble}
@@ -205,13 +200,13 @@
     <details bind:open={codeOpen}>
       <summary>
         <span class="caret" aria-hidden="true">{codeOpen ? '▾' : '▸'}</span>
-        Code and rationale
-        <span class="meta">{lineCount} lines · {result.kind.toUpperCase()}</span>
+        {t('savingCodeAndRationale')}
+        <span class="meta">{t('savingMeta', lineCount, result.kind.toUpperCase())}</span>
       </summary>
       <div class="detail">
-        <Label>Targets</Label>
+        <Label>{t('refTargets')}</Label>
         <p class="prose">{result.rationale.targets}</p>
-        <Label>Assumes</Label>
+        <Label>{t('refAssumes')}</Label>
         <ul class="assumptions">
           {#each result.rationale.assumptions as assumption}
             <li>{assumption}</li>
@@ -224,11 +219,11 @@
 
   <div class="foot">
     <section class="ask">
-      <Label>Not right yet? Say what to change</Label>
+      <Label>{t('refAskLabel')}</Label>
       <textarea
         use:autogrow={followUp}
         value={followUp}
-        placeholder="keep the header light though"
+        placeholder={t('refPlaceholder')}
         oninput={(event) => onfollowup(event.currentTarget.value)}
         onkeydown={onKeyDown}
       ></textarea>
@@ -245,13 +240,13 @@
             <button
               type="button"
               class="drop"
-              aria-label="Remove {reference.selector}"
+              aria-label={t('refRemoveRef', reference.selector)}
               onclick={() => onremovereference(reference.selector)}>×</button
             >
           </span>
         {/each}
         <button type="button" class="add" disabled={awaitingReference} onclick={onaddreference}>
-          {awaitingReference ? 'Pick one on the page…' : '+ Point at another element'}
+          {awaitingReference ? t('refPickOne') : t('refPointAt')}
         </button>
       </div>
 
@@ -265,29 +260,27 @@
             onclick={() => onscreenshot(true)}
           >
             {choosingRegion
-              ? 'Drag the area on the page…'
-              : 'Add a screenshot of the page as it is now'}
+              ? t('describingShotDrag')
+              : t('refShotAdd')}
           </button>
         {/if}
         {#if shotPreview}
-          <img class="shot-image" src={shotPreview} alt="The region that will be sent" />
+          <img class="shot-image" src={shotPreview} alt={t('describingShotAlt')} />
           <p class="shot-warning">
-            This image is sent to your AI provider. Everything visible in it goes
-            too — names, messages, account details, anything personal that
-            happens to be on screen.{shotClipped
-              ? ' Clipped at the viewport; only the visible part was captured.'
+            {t('describingShotWarning')}{shotClipped
+              ? ' ' + t('refShotClipped')
               : ''}{shotMoved
-              ? ' The area was moved because the page scrolled after it was drawn.'
+              ? ' ' + t('refShotMoved')
               : ''}
           </p>
           <button type="button" class="shot-action" onclick={() => onscreenshot(false)}>
-            Remove screenshot
+            {t('describingShotRemove')}
           </button>
         {/if}
       {/if}
       {#if isJs && jsRan}
         <Button variant="primary" full onclick={onreload}>
-          Reload page and try again
+          {t('refReloadAndTry')}
         </Button>
       {:else}
         <button
@@ -297,7 +290,7 @@
           disabled={!followUp.trim()}
           onclick={onregenerate}
         >
-          Regenerate
+          {t('refRegenerate')}
         </button>
       {/if}
     </section>
@@ -305,18 +298,18 @@
     <AddressNote address={sentAddress} />
 
     <div class="actions">
-      <Button grow={1} small onclick={ondiscard}>Discard</Button>
+      <Button grow={1} small onclick={ondiscard}>{t('discard')}</Button>
       {#if isJs && !jsRan && !blocked && previewAllowed}
         <Button variant="primary" grow={1.4} small onclick={onrun}>
-          Reload and run it
+          {t('refReloadAndRun')}
         </Button>
       {:else if isJs && !jsRan && !blocked}
         <Button variant="primary" grow={1.4} small disabled={previewReviewing} onclick={onreviewfirst}>
-          {previewReviewing ? 'Reading the code…' : 'Read the code first'}
+          {previewReviewing ? t('refReading') : t('refReadFirst')}
         </Button>
       {:else}
         <Button variant="primary" grow={1.4} small onclick={onkeep} disabled={blocked}>
-          Keep it
+          {t('refKeep')}
         </Button>
       {/if}
     </div>

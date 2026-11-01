@@ -1,7 +1,7 @@
-import { t } from './i18n'
 /** Wording for the versions of a transform that the editor lists. */
 
 import type { Capability, Transform, TransformSource, TransformVersion } from './types'
+import { t } from './i18n'
 
 /** What produced a version, in the words the editor shows. */
 export function sourceLabel(source: TransformSource | undefined): string {

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from '@shared/i18n'
   import type { Conflict, Transform, TransformRuntimeState } from '@shared/types'
   import {
     AWAITING_APPROVAL_NOTE,
@@ -128,11 +129,13 @@
   let overridden = $derived(conflicts.filter((c) => c.loser === transform.id))
   let overriding = $derived(conflicts.filter((c) => c.winner === transform.id))
 
-  const nameOf = (id: string): string => names[id] ?? 'another transform'
+  const nameOf = (id: string): string => names[id] ?? t('trAnotherTransform')
   const list = (properties: string[]): string =>
-    properties.length <= 2
-      ? properties.join(' and ')
-      : `${properties.slice(0, 2).join(', ')} and ${properties.length - 2} more`
+    properties.length === 1
+      ? properties[0]!
+      : properties.length === 2
+        ? t('trListTwo', properties[0]!, properties[1]!)
+        : t('trListMore', properties.slice(0, 2).join(', '), properties.length - 2)
 
   /*
    * Delete asks first and asks in place. A transform is minutes of work and a
@@ -186,7 +189,7 @@
       type="button"
       class="handle"
       draggable="true"
-      aria-label="Reorder {transform.name}. Arrow keys move it."
+      aria-label={t('trReorder', transform.name)}
       ondragstart={(event) => {
         // Firefox refuses to start a drag with no payload set.
         event.dataTransfer?.setData('text/plain', transform.id)
@@ -198,7 +201,7 @@
 
     <Toggle
       checked={transform.enabled}
-      label="Enable {transform.name}"
+      label={t('trEnable', transform.name)}
       onchange={onToggle}
     />
 
@@ -208,7 +211,7 @@
         class="rename"
         autofocus
         value={draftName}
-        aria-label="Name"
+        aria-label={t('trName')}
         oninput={(event) => (draftName = event.currentTarget.value)}
         onblur={commitRename}
         onkeydown={onRenameKey}
@@ -227,7 +230,7 @@
 
     <div class="meta">
       {#if regenerates}
-        <span class="overridden">needs regenerating</span>
+        <span class="overridden">{t('trNeedsRegen')}</span>
       {/if}
       {#if overridden.length > 0}
         <!--
@@ -236,15 +239,15 @@
         -->
         <span
           class="overridden"
-          title="Overridden by {overridden.map((c) => nameOf(c.winner)).join(', ')}"
+          title={t('trOverriddenBy', overridden.map((c) => nameOf(c.winner)).join(', '))}
         >
-          overridden
+          {t('trOverridden')}
         </span>
       {/if}
       <span
         class="dot"
         class:broken
-        title={broken ? 'Stopped working' : 'Working'}
+        title={broken ? t('trStopped') : t('trWorking')}
       ></span>
       <span class="badge" class:flagged={flagged && transform.kind === 'js'}>
         {transform.kind.toUpperCase()}
@@ -254,8 +257,8 @@
 
   {#if !hasAccess}
     <div class="no-access">
-      <span>No access to this site</span>
-      <button type="button" class="secondary" onclick={ongrant}>Grant access</button>
+      <span>{t('trNoAccess')}</span>
+      <button type="button" class="secondary" onclick={ongrant}>{t('trGrant')}</button>
     </div>
   {/if}
 
@@ -264,18 +267,18 @@
       <span>
         {explainOff
           ? NEEDS_REGENERATING_NOTE
-          : 'Needs regenerating. It has no code, so it cannot run.'}
+          : t('trNeedsRegenNote')}
       </span>
-      <button type="button" class="secondary" onclick={oneditintent}>Review description</button>
+      <button type="button" class="secondary" onclick={oneditintent}>{t('trReviewDescription')}</button>
     </div>
   {/if}
 
   {#if transform.awaitsApproval && !regenerates}
     <div class="no-access" role="status">
-      <span>{approving ? AWAITING_APPROVAL_NOTE : 'Restored from a backup. It stays off until its code is approved.'}</span>
+      <span>{approving ? AWAITING_APPROVAL_NOTE : t('trRestoredNote')}</span>
       {#if !approving}
         <button type="button" class="secondary" onclick={() => (approving = true)}>
-          Review code
+          {t('trReviewCode')}
         </button>
       {/if}
     </div>
@@ -294,17 +297,17 @@
   {#if expanded}
     <div class="body">
       <section>
-        <h3 class="label">{imported ? 'Description from an imported file' : 'You wanted'}</h3>
+        <h3 class="label">{imported ? t('trDescriptionImported') : t('trYouWanted')}</h3>
         <p>{transform.intent}</p>
       </section>
 
       {#if transform.worldResetFromModel}
         <section class="world-reset">
-          <h3 class="label attention">Environment changed</h3>
+          <h3 class="label attention">{t('trEnvChanged')}</h3>
           <p>{WORLD_RESET_NOTICE}</p>
           <div class="actions">
             <button type="button" class="secondary" onclick={onedit}>
-              Open the editor to turn on the page's environment
+              {t('trOpenEditorEnv')}
             </button>
           </div>
         </section>
@@ -313,42 +316,45 @@
       {#if overridden.length > 0 || overriding.length > 0}
         <section>
           <h3 class="label" class:attention={overridden.length > 0}>
-            {overridden.length > 0 ? 'Not applying' : 'Overrides'}
+            {overridden.length > 0 ? t('trNotApplying') : t('trOverrides')}
           </h3>
           {#each overridden as conflict}
             <p>
-              {list(conflict.properties)}
-              {conflict.properties.length === 1 ? 'is' : 'are'} set by
-              <b>{nameOf(conflict.winner)}</b> on
-              {conflict.elements === 1 ? 'the same element' : `${conflict.elements} of the same elements`},
-              and it wins{conflict.byImportant
-                ? ' — it marks them !important, so it wins despite being earlier in the list'
-                : ', being later in the list'}.
+              {t(
+                conflict.properties.length === 1 ? 'trLosesOne' : 'trLosesMany',
+                list(conflict.properties),
+                nameOf(conflict.winner),
+                conflict.elements === 1
+                  ? t('trSameElement')
+                  : t('trSameElements', conflict.elements),
+                conflict.byImportant ? t('trWinsImportant') : t('trWinsLater'),
+              )}
             </p>
           {/each}
           {#each overriding as conflict}
             <p class="quiet">
-              This one wins {list(conflict.properties)} over
-              <b>{nameOf(conflict.loser)}</b>{conflict.byImportant
-                ? ', because it marks them !important'
-                : ''}.
+              {t(
+                conflict.byImportant ? 'trWinsOverImportant' : 'trWinsOver',
+                list(conflict.properties),
+                nameOf(conflict.loser),
+              )}
             </p>
           {/each}
           {#if overridden.length > 0 && !overridden.some((c) => c.byImportant)}
-            <p class="quiet">Move this one later in the list to win instead.</p>
+            <p class="quiet">{t('trMoveLater')}</p>
           {/if}
         </section>
       {/if}
 
       {#if broken}
         <section>
-          <h3 class="label attention">What broke</h3>
+          <h3 class="label attention">{t('trWhatBroke')}</h3>
           <p>{runtime?.brokenReason}</p>
           {#if runtime?.pageReportedError}
-            <p class="assumption">Error text reported by the page: {runtime.pageReportedError}</p>
+            <p class="assumption">{t('trPageError', runtime.pageReportedError)}</p>
           {/if}
           {#if runtime?.failedAssumption}
-            <p class="assumption">This transform assumed {runtime.failedAssumption}.</p>
+            <p class="assumption">{t('trAssumed', runtime.failedAssumption)}</p>
           {/if}
         </section>
 
@@ -361,38 +367,38 @@
           <button
             type="button"
             class="primary"
-            onclick={() => onrepair(runtime?.brokenReason ?? 'It stopped working.')}
+            onclick={() => onrepair(runtime?.brokenReason ?? t('trStoppedDefault'))}
           >
-            Repair with AI
+            {t('trRepair')}
           </button>
           <button type="button" class="secondary" onclick={() => ontoggle(false)}>
-            Disable
+            {t('trDisable')}
           </button>
         </div>
       {/if}
 
       <div class="manage">
         {#if confirming}
-          <span class="ask">Delete this transform?</span>
-          <button type="button" class="danger" onclick={ondelete}>Delete</button>
+          <span class="ask">{t('trDeleteAsk')}</span>
+          <button type="button" class="danger" onclick={ondelete}>{t('trDelete')}</button>
           <button type="button" class="secondary" onclick={() => (confirming = false)}>
-            Cancel
+            {t('cancel')}
           </button>
         {:else}
-          <button type="button" class="secondary" onclick={startRename}>Rename</button>
+          <button type="button" class="secondary" onclick={startRename}>{t('trRename')}</button>
           <button type="button" class="secondary" onclick={() => (confirming = true)}>
-            Delete
+            {t('trDelete')}
           </button>
         {/if}
       </div>
 
       <details class="disclosure">
-        <summary>Code and rationale</summary>
+        <summary>{t('savingCodeAndRationale')}</summary>
         <div class="rationale">
-          <h4 class="label">Approach</h4>
+          <h4 class="label">{t('savingApproach')}</h4>
           <p>{transform.rationale.approach}</p>
           {#if transform.rationale.assumptions.length > 0}
-            <h4 class="label">Assumes</h4>
+            <h4 class="label">{t('refAssumes')}</h4>
             <ul>
               {#each transform.rationale.assumptions as assumption}
                 <li>{assumption}</li>
@@ -420,14 +426,14 @@
               running.
             -->
             <button type="button" class="secondary" onclick={oneditintent}>
-              Edit description
+              {t('trEditDescription')}
             </button>
             {#if !regenerates}
               <button type="button" class="secondary" onclick={oneditwithai}>
-                Change with AI
+                {t('trChangeWithAi')}
               </button>
             {/if}
-            <button type="button" class="secondary" onclick={onedit}>Edit code</button>
+            <button type="button" class="secondary" onclick={onedit}>{t('trEditCode')}</button>
           </div>
           <pre>{transform.code}</pre>
         </div>

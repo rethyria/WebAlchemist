@@ -15,6 +15,7 @@
  * derivations behind `fg` are documented there.
  */
 
+import { t, type MessageKey } from './i18n'
 import type { Accent } from './types'
 
 export interface AccentColours {
@@ -37,6 +38,22 @@ export const ACCENT_COLOURS: Record<Accent, AccentColours> = {
   indigo: { swatch: '#4338ca', fgDark: '#9a92f5', fgLight: '#4338ca', on: '#ffffff' },
   violet: { swatch: '#7c3aed', fgDark: '#aa7ff3', fgLight: '#7c3aed', on: '#ffffff' },
   mono: { swatch: '#f5f3f0', fgDark: '#fbfbfe', fgLight: '#15141a', on: '#15141a' },
+}
+
+const ACCENT_NAME_KEYS: Record<Accent, MessageKey> = {
+  red: 'accentRed',
+  orange: 'accentOrange',
+  amber: 'accentAmber',
+  green: 'accentGreen',
+  blue: 'accentBlue',
+  indigo: 'accentIndigo',
+  violet: 'accentViolet',
+  mono: 'accentMono',
+}
+
+/** The name of an accent colour in the browser's language, for a screen reader. */
+export function accentName(accent: Accent): string {
+  return t(ACCENT_NAME_KEYS[accent])
 }
 
 /**
