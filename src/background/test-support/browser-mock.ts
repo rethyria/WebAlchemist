@@ -35,14 +35,41 @@ function createArea() {
   }
 }
 
+/**
+ * Records the alarms the code under test schedules. Nothing fires by itself:
+ * a test calls the handler it is checking, which stands in for the browser
+ * delivering the alarm.
+ */
+export interface ScheduledAlarm {
+  delayInMinutes: number
+}
+export const alarmsMock = {
+  scheduled: new Map<string, ScheduledAlarm>(),
+  /** Every create call in order, including ones that replaced an earlier alarm. */
+  created: [] as { name: string; delayInMinutes: number }[],
+  async create(name: string, info: { delayInMinutes: number }) {
+    this.created.push({ name, delayInMinutes: info.delayInMinutes })
+    this.scheduled.set(name, { delayInMinutes: info.delayInMinutes })
+  },
+  async clear(name: string) {
+    return this.scheduled.delete(name)
+  },
+  reset() {
+    this.scheduled.clear()
+    this.created.length = 0
+  },
+}
+
 export const localArea = createArea()
 export const sessionArea = createArea()
 
 ;(globalThis as unknown as { browser: unknown }).browser = {
   storage: { local: localArea, session: sessionArea },
+  alarms: alarmsMock,
 }
 
 export function resetBrowserMock(): void {
   localArea.reset()
   sessionArea.reset()
+  alarmsMock.reset()
 }

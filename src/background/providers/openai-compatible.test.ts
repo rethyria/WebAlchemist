@@ -231,7 +231,7 @@ describe('concurrent OAuth refreshes', () => {
 
     expect(used).toEqual(['r0'])
     expect(results.map((r) => r.status)).toEqual(['fulfilled', 'fulfilled'])
-    expect(await storage.readCredentialForRequest('p1')).toMatchObject({ refreshToken: 'r1' })
+    expect(await storage.readStoredCredential('p1')).toMatchObject({ refreshToken: 'r1' })
   })
 
   it('shares one failed refresh between callers and then allows a new attempt', async () => {
@@ -273,5 +273,40 @@ describe('concurrent OAuth refreshes', () => {
     await Promise.all([adapter.review(REVIEW_ARGS), adapter.review(REVIEW_ARGS)])
 
     expect(used).toEqual([])
+  })
+})
+
+describe('a token response with no access token', () => {
+  const stale = {
+    kind: 'oauth' as const,
+    accessToken: 'a',
+    refreshToken: 'r',
+    expiresAt: 0,
+    tokenEndpoint: 'https://auth.example.com/token',
+    clientId: 'c',
+  }
+
+  it('is reported as an auth failure so the sidebar shows the reconnect state', async () => {
+    await storage.setCredential('p1', stale)
+    stubFetch(async () => new Response('{"token_type":"bearer"}', { status: 200 }))
+    const adapter = await createOpenAiCompatibleProvider(provider)
+
+    const error = await adapter.review(REVIEW_ARGS).catch((e: unknown) => e)
+
+    expect(error).toBeInstanceOf(ProviderError)
+    expect((error as ProviderError).kind).toBe('auth')
+    expect((error as ProviderError).retryable).toBe(false)
+  })
+
+  it('control: a token response with an access token still refreshes', async () => {
+    await storage.setCredential('p1', stale)
+    stubFetch(async (url) =>
+      url.includes('/token')
+        ? new Response(JSON.stringify({ access_token: 'a2', refresh_token: 'r2', expires_in: 3600 }))
+        : new Response(JSON.stringify({ choices: [{ message: { content: '{"verdict":"match","explanation":""}' } }] })),
+    )
+    const adapter = await createOpenAiCompatibleProvider(provider)
+
+    await expect(adapter.review(REVIEW_ARGS)).resolves.toEqual({ verdict: 'match', explanation: '' })
   })
 })

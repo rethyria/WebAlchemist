@@ -23,7 +23,8 @@
     "activeTab",
     "tabs",
     "webNavigation",
-    "identity"
+    "identity",
+    "alarms"
   ],
   "optional_permissions": [
     "userScripts"

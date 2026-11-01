@@ -22,7 +22,7 @@ import {
   scopeInstruction,
 } from '../prompts'
 import { retryAfterSeconds, type HeaderSource } from './retry-after'
-import { readCredentialForRequest } from '../storage'
+import { readCredentialOrProviderError } from './credential'
 import {
   GENERATION_SCHEMA,
   ProviderError,
@@ -104,7 +104,7 @@ async function withoutUnsupportedFields<T>(
 }
 
 export async function createAnthropicProvider(provider: Provider): Promise<AiProvider> {
-  const credential = await readCredentialForRequest(provider.id)
+  const credential = await readCredentialOrProviderError(provider)
   if (!credential) {
     throw new ProviderError(
       `No API key is configured for ${provider.label}.`,

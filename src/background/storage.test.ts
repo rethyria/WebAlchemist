@@ -61,15 +61,16 @@ describe('concurrent transform writes', () => {
     await s.saveTransform(mk('a', 1))
     await s.saveTransform(mk('b', 2))
     await Promise.all([
-      s.saveTransform(mk('a', 1, { enabled: false })),
-      s.saveTransform(mk('b', 2, { enabled: false })),
+      s.saveTransform(mk('a', 1, { name: 'renamed a' })),
+      s.saveTransform(mk('b', 2, { name: 'renamed b' })),
       s.saveTransform(mk('c', 3)),
     ])
+    // Names rather than `enabled`: a save keeps the stored enabled flag (#85).
     const all = await s.getAllTransforms()
-    expect(all.map((t) => [t.id, t.enabled])).toEqual([
-      ['a', false],
-      ['b', false],
-      ['c', true],
+    expect(all.map((t) => [t.id, t.name])).toEqual([
+      ['a', 'renamed a'],
+      ['b', 'renamed b'],
+      ['c', 'c'],
     ])
   })
 
@@ -256,5 +257,47 @@ describe('saving an incomplete transform (#90)', () => {
   it('stores a complete record, as the control for the refusals', async () => {
     await s.saveTransform(mk('ok', 0))
     expect((await s.getAllTransforms()).map((t) => t.id)).toEqual(['ok'])
+  })
+})
+
+describe('saving over an existing transform keeps fields it does not own (#85)', () => {
+  // The sidebar and the editor send the record as it was when they loaded it.
+  const stale = () => mk('a', 0, { name: 'edited', enabled: true, createdAt: 1 })
+
+  beforeEach(async () => {
+    await s.saveTransform(mk('a', 0, { createdAt: 1 }))
+    await s.saveTransform(mk('b', 1))
+  })
+
+  it('keeps the stored order after a reorder', async () => {
+    await s.reorderTransforms(['b', 'a'])
+    await s.saveTransform(stale())
+    const a = (await s.getAllTransforms()).find((t) => t.id === 'a')!
+    expect([a.name, a.order]).toEqual(['edited', 1])
+  })
+
+  it('keeps the stored enabled flag after a toggle', async () => {
+    await s.updateTransform('a', { enabled: false })
+    await s.saveTransform(stale())
+    const a = (await s.getAllTransforms()).find((t) => t.id === 'a')!
+    expect([a.name, a.enabled]).toEqual(['edited', false])
+  })
+
+  it('keeps the stored creation time', async () => {
+    await s.saveTransform(mk('a', 0, { createdAt: 999 }))
+    expect((await s.getAllTransforms()).find((t) => t.id === 'a')!.createdAt).toBe(1)
+  })
+
+  it('returns the record as stored', async () => {
+    await s.updateTransform('a', { enabled: false })
+    const saved = await s.saveTransform(stale())
+    expect([saved.name, saved.enabled]).toEqual(['edited', false])
+  })
+
+  it('stores the order, enabled flag and creation time of a new transform as given', async () => {
+    // Control: the fields are only held back for an id that already exists.
+    await s.saveTransform(mk('c', 7, { enabled: false, createdAt: 5 }))
+    const c = (await s.getAllTransforms()).find((t) => t.id === 'c')!
+    expect([c.order, c.enabled, c.createdAt]).toEqual([7, false, 5])
   })
 })

@@ -20,6 +20,7 @@
     type ProviderType,
     type Settings,
   } from '@shared/types'
+  import { endpointProblem } from '@shared/endpoint-policy'
   import ModelPicker from './ModelPicker.svelte'
   import Button from '@sidebar/components/Button.svelte'
 
@@ -144,12 +145,8 @@
   )
 
   function isValidUrl(value: string): boolean {
-    try {
-      const url = new URL(value)
-      return url.protocol === 'https:' || url.hostname === 'localhost'
-    } catch {
-      return false
-    }
+    // The same rule the background enforces; see endpoint-policy.ts.
+    return endpointProblem(value) === null
   }
 
   function statusFor(providerId: string): CredentialStatus | undefined {
@@ -192,14 +189,22 @@
         supportsVision: draftType === 'anthropic',
       }
 
-      // The credential is written first. A provider listed without one is a
-      // dead entry the user has to notice and fix; the reverse cannot happen.
-      await onsetkey(provider.id, draftKey.trim())
+      // The provider is saved first, because the background binds the key to
+      // the saved provider's address and refuses a key for a provider it does
+      // not know. If saving the key fails, the provider is removed again, so a
+      // dead entry without a key is not left behind.
+      const previous = settings
       await onsave({
         ...settings,
         providers: [...settings.providers, provider],
         activeProviderId: settings.activeProviderId ?? provider.id,
       })
+      try {
+        await onsetkey(provider.id, draftKey.trim())
+      } catch (error) {
+        await onsave(previous)
+        throw error
+      }
       resetDraft()
     } finally {
       busy = false
@@ -300,7 +305,13 @@
                     date is here so an expiry that cannot be refreshed does not
                     arrive as an unexplained failure mid-generation.
                   -->
-                  <span class="expiry">until {new Date(status.expiresAt).toLocaleString()}</span>
+                  <span class="expiry">
+                    until {new Date(status.expiresAt).toLocaleString()}{status.renewable === false
+                      ? ', then sign in again'
+                      : ''}
+                  </span>
+                {:else if status.renewable === false}
+                  <span class="expiry">no refresh token; sign in again when it ends</span>
                 {/if}
               {:else if status?.configured}
                 <span class="configured">Key configured</span>

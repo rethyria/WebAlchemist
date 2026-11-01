@@ -48,6 +48,7 @@ import {
 import {
   LockedError,
   deriveKey,
+  IDLE_ALARM,
   forgetKey,
   isSealed,
   randomSalt,
@@ -58,6 +59,9 @@ import {
   unseal,
 } from './vault'
 import { MIN_PASSPHRASE_LENGTH } from '@shared/vault-policy'
+import { assertEndpoint, endpointsOf } from '@shared/endpoint-policy'
+import { destinationOf, sameBinding } from '@shared/credential-binding'
+import type { Provider } from '@shared/types'
 
 const KEY_SETTINGS = 'settings'
 const KEY_TRANSFORMS = 'transforms'
@@ -77,7 +81,27 @@ export async function getSettings(): Promise<Settings> {
 }
 
 export async function saveSettings(settings: Settings): Promise<void> {
+  const idle = settings.vaultIdleLockMinutes
+  if (!Number.isInteger(idle) || idle < 0) {
+    throw new Error('The vault lock period must be a whole number of minutes, or 0 for never.')
+  }
+  const previous = (await browser.storage.local.get(KEY_SETTINGS))[KEY_SETTINGS] as
+    | Partial<Settings>
+    | undefined
+  // Checked here and not only in the settings page: this is reached by a
+  // message that any extension context can send.
+  for (const provider of settings.providers) {
+    for (const [what, url] of endpointsOf(provider)) {
+      assertEndpoint(url, `${what} of ${provider.label}`)
+    }
+  }
   await browser.storage.local.set({ [KEY_SETTINGS]: settings })
+
+  // A changed period applies to the vault that is open now, not only to the
+  // next unlock. Other settings changes leave the running timer alone, so
+  // that picking an accent colour does not count as using the vault.
+  const before = previous?.vaultIdleLockMinutes ?? DEFAULT_SETTINGS.vaultIdleLockMinutes
+  if (before !== idle && (await recallKey())) await armIdleLock()
 }
 
 function migrateSettings(raw: Partial<Settings>): Settings {
@@ -219,15 +243,36 @@ function mutateTransforms<T>(work: () => Promise<T>): Promise<T> {
   return result
 }
 
-export function saveTransform(transform: Transform): Promise<void> {
+/**
+ * Stores a transform, replacing the record with the same id when there is one.
+ *
+ * When it replaces a record, the stored `order`, `enabled` and `createdAt` are
+ * kept and the caller's values for them are ignored. The sidebar and the editor
+ * send a copy of the record from when they loaded it, and nothing refreshes
+ * that copy, so a save from either one carried the old order after a reorder
+ * and the old enabled flag after a toggle, and undid both (#85). Only
+ * `reorderTransforms` and `updateTransform` change those fields. Returns the
+ * record as stored, which is what callers should register or apply.
+ */
+export function saveTransform(transform: Transform): Promise<Transform> {
   return mutateTransforms(async () => {
     const { valid: all, invalid } = await readStored()
     const index = all.findIndex((t) => t.id === transform.id)
-    const next = { ...transform, updatedAt: Date.now() }
+    const existing = index === -1 ? undefined : all[index]
+    const next = {
+      ...transform,
+      ...(existing && {
+        order: existing.order,
+        enabled: existing.enabled,
+        createdAt: existing.createdAt,
+      }),
+      updatedAt: Date.now(),
+    }
     assertValidTransform(next)
     if (index === -1) all.push(next)
     else all[index] = next
     await writeTransforms(all, invalid)
+    return next
   })
 }
 
@@ -290,7 +335,7 @@ export function reorderTransforms(orderedIds: string[]): Promise<void> {
  * settings flag. A flag can disagree with the bytes; the bytes cannot disagree
  * with themselves.
  */
-async function readCredentialMap(): Promise<CredentialMap> {
+async function readCredentialMap(touch = false): Promise<CredentialMap> {
   const stored = await browser.storage.local.get(KEY_CREDENTIALS)
   const value = stored[KEY_CREDENTIALS]
   if (value === undefined) return {}
@@ -298,7 +343,33 @@ async function readCredentialMap(): Promise<CredentialMap> {
 
   const key = await recallKey()
   if (!key) throw new LockedError()
-  return JSON.parse(await unseal(key, value)) as CredentialMap
+  const map = JSON.parse(await unseal(key, value)) as CredentialMap
+  if (touch) await armIdleLock()
+  return map
+}
+
+/**
+ * Starts, or restarts, the countdown to the idle lock.
+ *
+ * An alarm rather than a timer in the page or a `setTimeout`: the background
+ * is an event page that the browser stops when it is idle, and a timer stops
+ * with it, so the vault would stay unlocked. A named alarm survives the page
+ * being stopped and wakes it, and creating one with the same name replaces
+ * the earlier one, which is what makes each use restart the countdown.
+ *
+ * Restarted only by provider calls, so that opening settings or the sidebar,
+ * which read credential statuses, does not keep an unattended vault open.
+ */
+async function armIdleLock(): Promise<void> {
+  const minutes = (await getSettings()).vaultIdleLockMinutes
+  if (minutes > 0) await browser.alarms.create(IDLE_ALARM, { delayInMinutes: minutes })
+  else await browser.alarms.clear(IDLE_ALARM)
+}
+
+/** Handles an alarm from the browser; the background registers this at start. */
+export async function handleVaultIdleAlarm(alarm: { name: string }): Promise<void> {
+  if (alarm.name !== IDLE_ALARM) return
+  await lockVault()
 }
 
 /** Writes the map back in whichever form it is currently kept. */
@@ -354,15 +425,15 @@ export async function vaultState(): Promise<{ sealed: boolean; unlocked: boolean
   return { sealed: true, unlocked: (await recallKey()) !== null }
 }
 
+const ALREADY_SEALED =
+  'The credentials are already protected by a passphrase. Remove that passphrase first to set a different one.'
+
 /**
  * Turns passphrase mode on, sealing whatever is already stored.
  *
  * The key is remembered for this session immediately, so enabling does not
  * lock the user out of the thing they just set up.
  */
-const ALREADY_SEALED =
-  'The credentials are already protected by a passphrase. Remove that passphrase first to set a different one.'
-
 export async function enableVault(passphrase: string): Promise<void> {
   // Checked here as well as in the settings page: this function is reached by
   // a message that any extension context can send, and the page's check is
@@ -398,6 +469,7 @@ export async function enableVault(passphrase: string): Promise<void> {
     // Still inside the lock: a write queued behind this one must find the key
     // in the session, or it would fail as locked.
     await rememberKey(key)
+    await armIdleLock()
   })
 }
 
@@ -439,10 +511,17 @@ export async function unlockVault(passphrase: string): Promise<void> {
   // rather than accepted and then failing on the next generation.
   await unseal(key, existing)
   await rememberKey(key)
+  await armIdleLock()
 }
 
+/**
+ * Through the credential lock, so a lock waits for a refresh that is in
+ * progress. A provider that rotates refresh tokens has already invalidated the
+ * old one when its response arrives; forgetting the key before the new one is
+ * stored makes that write fail as locked, and the sign-in is lost.
+ */
 export async function lockVault(): Promise<void> {
-  await forgetKey()
+  await withCredentialLock(() => forgetKey())
 }
 
 /**
@@ -469,22 +548,151 @@ export async function discardVault(): Promise<void> {
   })
 }
 
+/** A stored credential was entered for a different destination than the provider's current one. */
+export class CredentialOriginError extends Error {
+  constructor(label: string, entered: string, current: string | null) {
+    super(
+      current === null
+        ? `The key for ${label} cannot be used because the provider has no valid address. Fix the address in settings and enter the key again.`
+        : `The key for ${label} was entered for ${entered}, but the provider now sends requests to ${current}. The key was not sent. Enter it again in settings.`,
+    )
+    this.name = 'CredentialOriginError'
+  }
+}
+
 /**
- * Reads a credential for use in an outbound request. This must never be
+ * Reads a credential for use in an outbound request, and only if it was
+ * entered for the destination this provider currently has. This must never be
  * exposed over the message channel — callers outside the background script get
  * getCredentialStatus() instead.
+ *
+ * Credentials are keyed by provider id, and an id survives an edit of the base
+ * URL or the type. Without this comparison, such an edit sent the stored key to
+ * the new address. The refusal is an error rather than a null so that it cannot
+ * fall through to the unauthenticated path that loopback providers use.
+ *
+ * Migration: credentials written before binding existed carry no `boundTo`.
+ * The first read binds one to the provider's destination at that moment and
+ * saves it. That trusts the current settings, which is the only information
+ * available, and it is the same trust the old code placed in them on every
+ * request. A credential read for the first time after an unwanted edit is
+ * therefore bound to the unwanted address; the other choice was to discard
+ * every stored key on upgrade.
  */
-export async function readCredentialForRequest(
-  providerId: string,
-): Promise<Credential | null> {
-  const map = await readCredentialMap()
-  return map[providerId] ?? null
+export async function readCredentialForRequest(provider: Provider): Promise<Credential | null> {
+  const found = (await readCredentialMap(true))[provider.id]
+  if (!found) return null
+  if (found.boundTo) return checkedForProvider(provider, found)
+
+  return withCredentialLock(async () => {
+    const map = await readCredentialMap()
+    const current = map[provider.id]
+    if (!current) return null
+    const checked = checkedForProvider(provider, current)
+    if (!current.boundTo) {
+      map[provider.id] = checked
+      await writeCredentialMap(map)
+    }
+    return checked
+  })
+}
+
+/**
+ * Returns the credential bound to the provider's destination, binding a legacy
+ * one that has no binding, or throws when the binding names another destination.
+ * Does not write; the caller stores the bound copy when it has a reason to.
+ */
+function checkedForProvider(provider: Provider, credential: Credential): Credential {
+  const destination = destinationOf(provider)
+  const bound = credential.boundTo ?? destination ?? undefined
+  if (!destination || !bound || !sameBinding(bound, destination)) {
+    throw new CredentialOriginError(
+      provider.label,
+      credential.boundTo?.origin ?? '(unknown)',
+      destination?.origin ?? null,
+    )
+  }
+  return credential.boundTo ? credential : { ...credential, boundTo: destination }
+}
+
+/**
+ * Runs `step` with the provider's credential while holding the credential lock,
+ * and gives it a function that stores a replacement.
+ *
+ * For a refresh, which has to read the credential, wait for the token endpoint
+ * and store what comes back as one operation. Done in three separate steps, a
+ * credential removed or reconnected while the request was waiting was
+ * overwritten by the old grant's refreshed copy. Holding the lock means a
+ * removal or reconnection waits until the refresh has stored its token, and
+ * then applies on top of it. The cost is that those changes wait as long as
+ * the request does, which is why the request has a timeout.
+ *
+ * The store function writes only if the stored credential is still the same
+ * sign-in (same refresh token and token endpoint) as the one the step was
+ * given, and returns whether it did. The lock already prevents a change by any
+ * code that takes it; this covers a write that does not.
+ *
+ * Inside `step`, do not call a function that takes the lock itself, such as
+ * setCredential, because it would wait for this step to finish.
+ */
+export function withCredentialForRequest<T>(
+  provider: Provider,
+  step: (
+    credential: Credential | null,
+    store: (replacement: Credential) => Promise<boolean>,
+  ) => Promise<T>,
+): Promise<T> {
+  return withCredentialLock(async () => {
+    const found = (await readCredentialMap())[provider.id]
+    const credential = found ? checkedForProvider(provider, found) : null
+    const store = async (replacement: Credential): Promise<boolean> => {
+      const map = await readCredentialMap()
+      const current = map[provider.id]
+      if (!credential || !current || !sameSignIn(current, credential)) return false
+      map[provider.id] = replacement
+      await writeCredentialMap(map)
+      return true
+    }
+    return step(credential, store)
+  })
+}
+
+function sameSignIn(a: Credential, b: Credential): boolean {
+  return (
+    a.kind === 'oauth' &&
+    b.kind === 'oauth' &&
+    a.refreshToken === b.refreshToken &&
+    a.tokenEndpoint === b.tokenEndpoint
+  )
+}
+
+/**
+ * Reads a stored credential without checking where it would be sent. For code
+ * that needs to inspect or copy a credential, such as tests; never use the
+ * result to build a request.
+ */
+export async function readStoredCredential(providerId: string): Promise<Credential | null> {
+  return (await readCredentialMap())[providerId] ?? null
+}
+
+/**
+ * Saves a credential bound to the provider's current destination. A binding
+ * supplied by the caller is replaced, since the sender of a message is not the
+ * authority on where the key was entered.
+ */
+export async function saveCredentialFor(provider: Provider, credential: Credential): Promise<void> {
+  const boundTo = destinationOf(provider)
+  if (!boundTo) throw new Error(`${provider.label} has no valid address to bind the key to.`)
+  await setCredential(provider.id, { ...credential, boundTo })
 }
 
 export async function setCredential(
   providerId: string,
   credential: Credential,
 ): Promise<void> {
+  // The refresh token is sent to this address on every refresh, so it is
+  // checked where the credential is saved as well as where it is used.
+  if (credential.kind === 'oauth') assertEndpoint(credential.tokenEndpoint, 'token endpoint')
   await withCredentialLock(async () => {
     const map = await readCredentialMap()
     map[providerId] = credential
@@ -500,6 +708,19 @@ export async function clearCredential(providerId: string): Promise<void> {
   })
 }
 
+function oauthStatus(
+  providerId: string,
+  credential: Extract<Credential, { kind: 'oauth' }>,
+): CredentialStatus {
+  return {
+    providerId,
+    configured: true,
+    kind: 'oauth',
+    ...(credential.expiresAt !== undefined ? { expiresAt: credential.expiresAt } : {}),
+    renewable: Boolean(credential.refreshToken),
+  }
+}
+
 /** The only credential shape any other context is allowed to see. */
 export async function getCredentialStatus(
   providerId: string,
@@ -507,7 +728,7 @@ export async function getCredentialStatus(
   const credential = (await readCredentialMap())[providerId]
   if (!credential) return { providerId, configured: false }
   return credential.kind === 'oauth'
-    ? { providerId, configured: true, kind: 'oauth', expiresAt: credential.expiresAt }
+    ? oauthStatus(providerId, credential)
     : { providerId, configured: true, kind: 'api_key' }
 }
 
@@ -518,12 +739,7 @@ export async function getAllCredentialStatuses(): Promise<CredentialStatus[]> {
     const credential = map[provider.id]
     if (!credential) return { providerId: provider.id, configured: false }
     return credential.kind === 'oauth'
-      ? {
-          providerId: provider.id,
-          configured: true,
-          kind: 'oauth' as const,
-          expiresAt: credential.expiresAt,
-        }
+      ? oauthStatus(provider.id, credential)
       : { providerId: provider.id, configured: true, kind: 'api_key' as const }
   })
 }

@@ -28,7 +28,25 @@ function stub(path: string): any {
 
 const registered = new Map<string, any>()
 let stored: any[] = []
-const empty = { get: async () => ({}), set: async () => {}, remove: async () => {} }
+
+/**
+ * An in-memory storage.session. The background keeps the ids of previewed
+ * scripts there so they survive a suspension, and clears them from there, so a
+ * stub that forgets what it is given would leave nothing to clear.
+ */
+const session = new Map<string, unknown>()
+const sessionArea = {
+  get: async (keys?: string | string[] | null) => {
+    const names = keys == null ? [...session.keys()] : typeof keys === 'string' ? [keys] : keys
+    return Object.fromEntries(names.filter((k) => session.has(k)).map((k) => [k, session.get(k)]))
+  },
+  set: async (items: Record<string, unknown>) => {
+    for (const [k, v] of Object.entries(items)) session.set(k, v)
+  },
+  remove: async (keys: string | string[]) => {
+    for (const k of typeof keys === 'string' ? [keys] : keys) session.delete(k)
+  },
+}
 
 /** An object whose missing members are stubs, so start-up listeners still register. */
 const withFallback = (path: string, obj: object) =>
@@ -45,7 +63,7 @@ const realApis: Record<string, object> = {
       set: async () => {},
       remove: async () => {},
     },
-    session: empty,
+    session: sessionArea,
   },
   // The background refuses messages and ports that do not come from an
   // extension page (#68), which it decides by comparing the sender's url with
@@ -118,6 +136,7 @@ const previewJs = (code = 'draftCode()') =>
 beforeEach(async () => {
   // Leaves no preview from an earlier test in the background's own state.
   await onMessage({ type: 'clear-preview-js', id: 'SAVED' }, extensionPage)
+  session.clear()
   registered.clear()
   stored = [saved]
   registered.set('SAVED', { id: 'SAVED', js: [{ code: 'savedCode()' }] })

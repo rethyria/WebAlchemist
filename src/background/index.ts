@@ -16,17 +16,37 @@ import type {
 import { matchesUrl } from '@shared/match'
 import { regionAtScroll, type ScrollOffset, type Viewport } from '@shared/region'
 import type {
+  Accent,
   PageContext,
   Rect,
   ReviewResult,
   Transform,
+  TransformRuntimeState,
 } from '@shared/types'
 import type { RefinementTurn } from './providers/types'
 import { overlayPaletteFor } from '@shared/accents'
 import * as badge from './badge'
+import { isSidebarPortName, windowOfSidebarPort } from '@shared/sidebar-port'
+import { documentOf, forgetTab, inTabQueue, startDocument } from './tab-queue'
 import { reconcile as reconcileContentScripts } from './content-scripts'
 import { buildProbeTransform } from './csp-probe'
-import { forgetSession, runHealthCheck, shouldCheck } from './health'
+import {
+  addPreviewedScript,
+  forgetCss,
+  forgetSuspended,
+  previewedScriptIds,
+  previewedTabIds,
+  previewScriptWindow,
+  previewWindow,
+  suspendedTabIds,
+  readCss,
+  readSuspended,
+  removePreviewedScript,
+  writeCss,
+  writePreviewWindow,
+  writeSuspended,
+} from './css-state'
+import { forgetSession, markChecked, runHealthCheck, shouldCheck } from './health'
 import { withKeepalive } from './keepalive'
 import { isContentEvent as isContentEventType, isExtensionPage } from './sender'
 import { connect as connectOAuth } from './oauth'
@@ -51,16 +71,22 @@ import {
   getAllTransforms,
   getCredentialStatus,
   getSettings,
+  handleVaultIdleAlarm,
   importTransforms,
   lockVault,
   reorderTransforms,
   saveSettings,
   saveTransform,
-  setCredential,
+  saveCredentialFor,
   unlockVault,
   updateTransform,
   vaultState,
 } from './storage'
+
+/** Rebuilds registrations from storage, leaving preview scripts registered. */
+async function reregister(): Promise<void> {
+  await reregisterAll(await previewedScriptIds())
+}
 
 /* ------------------------------------------------------------------ */
 /* Lifecycle                                                           */
@@ -72,7 +98,7 @@ browser.runtime.onInstalled.addListener(async (details) => {
   // working after an extension update — with no error, which is the worst
   // possible failure mode.
   if (details.reason === 'update' || details.reason === 'install') {
-    await reregisterAll()
+    await reregister()
     await reconcileContentScripts()
   }
 })
@@ -84,14 +110,18 @@ browser.runtime.onInstalled.addListener(async (details) => {
  * changes in both directions from about:addons as well as from our own
  * request at save time.
  */
+// Registered at the top level so the browser can deliver an alarm that wakes a
+// stopped background page.
+browser.alarms.onAlarm.addListener((alarm) => void handleVaultIdleAlarm(alarm))
+
 browser.permissions.onAdded.addListener(async (permissions) => {
   const granted = permissions.permissions as string[] | undefined
   // A JavaScript transform whose origin was revoked is not registered, and
   // granting the origin again (from the sidebar's "Grant access") is not a
-  // userScripts grant, so it has to trigger registration too. reregisterAll
+  // userScripts grant, so it has to trigger registration too. reregister
   // is idempotent, so running it for an origin that changes nothing is safe.
   if (granted?.includes('userScripts') || (permissions.origins?.length ?? 0) > 0) {
-    await reregisterAll()
+    await reregister()
   }
   await reconcileContentScripts()
 })
@@ -117,14 +147,87 @@ browser.action.onClicked.addListener(() => {
 browser.webNavigation.onHistoryStateUpdated.addListener(async (details) => {
   if (details.frameId !== 0) return
   await sendToContent(details.tabId, { type: 'url-changed', url: details.url })
+
+  /*
+   * The same evaluation a full page load gets, without discarding what is
+   * applied. The document survives a route change, so the stylesheet stays in
+   * the page and `applyCssTransforms` compares against it: it does nothing when
+   * the same CSS still applies, and removes it when the new route no longer
+   * matches a transform's pattern. Before this, a single-page app that moved
+   * from a matching route to a non-matching one kept the CSS and the badge
+   * count, and a move the other way gained neither.
+   */
+  if (!(await urlChangedSinceLastEvaluation(details.tabId, details.url))) return
+  await evaluateTab(details.tabId, details.url, { navigated: false })
 })
+
+/**
+ * replaceState and pushState with the URL the tab already has fire the same
+ * event as a real route change. Evaluating each one costs a storage read, a
+ * badge update and, in every-load mode, a full health check, for a page that
+ * has not changed. The last evaluated URL is kept in storage.session so the
+ * comparison still works after the event page is suspended; a missing entry
+ * counts as a change.
+ */
+async function urlChangedSinceLastEvaluation(tabId: number, url: string): Promise<boolean> {
+  const key = `wa-last-url-${tabId}`
+  const previous = (await browser.storage.session.get(key))[key]
+  if (previous === url) return false
+  await browser.storage.session.set({ [key]: url })
+  return true
+}
 
 browser.webNavigation.onCommitted.addListener(async (details) => {
   if (details.frameId !== 0) return
   // The page reloaded, so nothing we injected survives — forget it rather
   // than trying to remove a stylesheet that is already gone.
-  appliedCss.delete(details.tabId)
-  const transforms = await transformsForUrl(details.url)
+  //
+  // The counter moves before anything is awaited, so a task still queued for
+  // the old document sees that it is out of date. The forget steps are queued
+  // behind it for the same reason every other CSS change is: one that finished
+  // late would store a string for a document that is gone.
+  const restored = details.transitionQualifiers?.includes('forward_back') ?? false
+  startDocument(details.tabId)
+  await inTabQueue(details.tabId, async () => {
+    await forgetCss('applied', details.tabId)
+    /*
+     * The same goes for a preview, except when the document came back from the
+     * back-forward cache: that document is restored as it was, with the
+     * preview's stylesheet still in it, and forgetting the string would leave
+     * nothing that can remove it. The applied string is forgotten either way.
+     * If it is still stored for a document that was loaded afresh, a later
+     * removal finds nothing to remove and the next preview replaces it, so
+     * keeping it is the harmless mistake. Forgetting it for a restored document
+     * is not harmless, and applied CSS cannot be kept the same way: its
+     * comparison with the stored string would skip inserting into a document
+     * that does not have it.
+     */
+    if (!restored) await forgetCss('preview', details.tabId)
+  })
+  await browser.storage.session.set({ [`wa-last-url-${details.tabId}`]: details.url })
+  await evaluateTab(details.tabId, details.url, { navigated: true })
+})
+
+/**
+ * Applies CSS, updates the badge and starts the health check for a top frame
+ * whose URL just changed, by page load or by history state.
+ *
+ * `navigated` is true for a new document. A new document starts with no known
+ * breakage, so the badge's broken state is reset. A route change keeps the
+ * document, and the broken state is kept until a health check replaces it,
+ * because clearing it would hide a problem that is still on the page when the
+ * configured mode runs no new check.
+ */
+async function evaluateTab(
+  tabId: number,
+  url: string,
+  { navigated }: { navigated: boolean },
+): Promise<void> {
+  // Taken before any await, so a check that is still running for an earlier
+  // evaluation of this tab is already out of date by the time this one reads
+  // storage.
+  const evaluation = beginEvaluation(tabId)
+  const transforms = await transformsForUrl(url)
 
   /*
    * Before the early return below, not after. A tab that navigates from a site
@@ -132,20 +235,47 @@ browser.webNavigation.onCommitted.addListener(async (details) => {
    * `transforms.length === 0` case — the one the early return skips.
    */
   const settings = await getSettings()
-  await badge.tabNavigated(details.tabId, transforms.length, settings.accent)
+  if (navigated) await badge.tabNavigated(tabId, transforms.length, settings.accent)
+  else await badge.transformCountChanged(
+    tabId,
+    transforms.map((t) => t.id),
+    settings.accent,
+  )
+
+  // A route change may leave nothing to apply, and the previous route's CSS
+  // has to come out. On a new document nothing was applied, so this is a no-op.
+  if (!navigated || transforms.length > 0) {
+    await applyCssTransforms(tabId, () => cssTransformsFor(tabId, url))
+  }
 
   if (transforms.length === 0) return
-
-  await applyCssTransforms(details.tabId, transforms)
-
-  if (!shouldCheck(settings, details.url)) return
+  if (!(await shouldCheck(settings, url, transforms))) return
 
   // Deliberately not awaited alongside the CSS application: the check waits up
   // to three seconds for a slow page to settle, and CSS must not queue behind
   // it. A visible delay before the page restyles would be a worse bug than a
   // late health result.
-  void checkAndPublish(details.tabId, transforms)
-})
+  void checkAndPublish(tabId, url, transforms, () => isLatestEvaluation(tabId, evaluation))
+}
+
+/*
+ * Which evaluation of each tab is the latest, so a health check can tell that
+ * the page it was started for has been replaced. A counter rather than the URL:
+ * a reload keeps the URL and still replaces the document. In memory because a
+ * check cannot outlive a suspension anyway, and after one the missing entry
+ * makes every old check count as out of date, which is the safe answer.
+ */
+const evaluations = new Map<number, number>()
+
+function beginEvaluation(tabId: number): number {
+  const next = (evaluations.get(tabId) ?? 0) + 1
+  evaluations.set(tabId, next)
+  return next
+}
+
+function isLatestEvaluation(tabId: number, evaluation: number): boolean {
+  return evaluations.get(tabId) === evaluation
+}
 
 /* ------------------------------------------------------------------ */
 /* Message routing                                                     */
@@ -241,10 +371,17 @@ async function handle(
         else await unregisterTransform(saved.id)
       }
 
+      /*
+       * Every open tab, not only those the new pattern matches. The editor can
+       * change the pattern, and a tab that matched the old one no longer does:
+       * filtering by the saved record left the stylesheet applied there and
+       * the badge count unchanged until the tab navigated. `reapply` already
+       * works out what each tab should show, so a tab it has nothing to do for
+       * costs one storage read.
+       */
       const tabs = await browser.tabs.query({})
       for (const tab of tabs) {
         if (tab.id === undefined || !tab.url) continue
-        if (!matchesUrl(saved.match, tab.url)) continue
         await reapply(tab.id)
       }
       return true
@@ -319,10 +456,13 @@ async function handle(
         }
       }
 
-      await saveTransform(message.transform)
-      if (message.transform.kind === 'js') {
-        await registerTransform(message.transform)
+      // Register what was stored, not what was sent: a save keeps the stored
+      // `enabled`, and the copy that arrived may hold an older value.
+      const saved = await saveTransform(message.transform)
+      if (saved.kind === 'js') {
+        await registerTransform(saved)
       }
+      await badge.transformEdited(saved.id, (await getSettings()).accent)
       // Apply it now rather than on the next navigation. The preview was just
       // taken down, so without this the page visibly reverts on save.
       await reapply(message.tabId)
@@ -332,6 +472,7 @@ async function handle(
     case 'delete-transform':
       await unregisterTransform(message.id)
       await deleteTransform(message.id)
+      await badge.transformEdited(message.id, (await getSettings()).accent)
       // Take it off the page now. Without this a deleted CSS transform stayed
       // applied until the next navigation — the row vanished from the list
       // while the change it made was still on screen, which reads as the
@@ -364,12 +505,17 @@ async function handle(
     case 'save-settings':
       await saveSettings(message.settings)
       // The kill switch changes which scripts may run.
-      await reregisterAll()
+      await reregister()
       return true
 
-    case 'set-credential':
-      await setCredential(message.providerId, message.credential)
+    case 'set-credential': {
+      // The destination the key is bound to comes from the saved provider, not
+      // from the message.
+      const provider = (await getSettings()).providers.find((p) => p.id === message.providerId)
+      if (!provider) throw new Error('That provider is no longer configured.')
+      await saveCredentialFor(provider, message.credential)
       return true
+    }
 
     case 'clear-credential':
       await clearCredential(message.providerId)
@@ -398,7 +544,7 @@ async function handle(
         )
       }
 
-      await setCredential(message.providerId, await connectOAuth(provider.oauth))
+      await saveCredentialFor(provider, await connectOAuth(provider.oauth))
       return getCredentialStatus(message.providerId)
     }
 
@@ -426,11 +572,11 @@ async function handle(
       return true
 
     case 'preview-css':
-      await setPreviewCss(message.tabId, message.css)
+      await setPreviewCss(message.tabId, message.css, await windowOfTab(message.tabId))
       return true
 
     case 'clear-preview-css':
-      await setPreviewCss(message.tabId, null)
+      await clearPreviewCss(message.tabId, message.css)
       return true
 
     case 'preview-js': {
@@ -446,12 +592,13 @@ async function handle(
       }
       // Recorded before registering: registerPreview pauses the saved script
       // first, so a close of the sidebar during or after a failed registration
-      // has to find the id here to restore it.
-      previewedScripts.add(message.transform.id)
+      // has to find the id in storage to restore it.
+      const windowId = await windowOfTab(message.tabId)
+      await addPreviewedScript(message.transform.id, windowId)
       try {
         await registerPreview(message.transform)
       } catch (cause) {
-        previewedScripts.delete(message.transform.id)
+        await removePreviewedScript(message.transform.id)
         throw cause
       }
       await browser.tabs.reload(message.tabId)
@@ -460,7 +607,7 @@ async function handle(
 
     case 'clear-preview-js':
       await unregisterPreview(message.id)
-      previewedScripts.delete(message.id)
+      await removePreviewedScript(message.id)
       return true
 
     case 'start-picking': {
@@ -501,12 +648,13 @@ async function handle(
 
     case 'suspend-transform': {
       const tab = await browser.tabs.get(message.tabId).catch(() => undefined)
-      if (!tab?.url) return false
-      const all = await transformsForUrl(tab.url)
-      await applyCssTransforms(
-        message.tabId,
-        message.id === null ? all : all.filter((t) => t.id !== message.id),
-      )
+      const url = tab?.url
+      if (!url) return false
+      // Recorded before applying: every later evaluation of this tab reads the
+      // record, so a route change cannot bring the paused version back.
+      if (message.id === null) await forgetSuspended(message.tabId)
+      else await writeSuspended(message.tabId, message.id)
+      await applyCssTransforms(message.tabId, () => cssTransformsFor(message.tabId, url))
       return true
     }
 
@@ -568,9 +716,17 @@ async function handle(
     case 'check-now': {
       // A manual check must actually run, even under once-per-session where
       // this host has already been seen.
-      forgetSession(message.url)
       const transforms = await transformsForUrl(message.url)
-      return (await runHealthCheck(message.tabId, transforms)) ?? []
+      await forgetSession(message.url, transforms)
+      const states = await runHealthCheck(message.tabId, transforms)
+      // Without this a manual check showed its result in the panel only: a
+      // broken transform it found left the badge unchanged, and a clean result
+      // did not clear an earlier "!". No result means no change.
+      if (states) {
+        const { accent } = await getSettings()
+        await badge.healthChecked(message.tabId, brokenIds(states), accent)
+      }
+      return states ?? []
     }
 
     case 'capture-region':
@@ -589,7 +745,7 @@ async function handle(
       const result = await importTransforms(
         message.bundle as Awaited<ReturnType<typeof exportTransforms>>,
       )
-      await reregisterAll()
+      await reregister()
       return result
     }
   }
@@ -602,19 +758,25 @@ async function handle(
  * now, not a property of the transform — storing it would mean showing a stale
  * warning about a site that has since been fixed.
  */
-async function checkAndPublish(tabId: number, transforms: Transform[]): Promise<void> {
-  const states = await runHealthCheck(tabId, transforms)
+function brokenIds(states: TransformRuntimeState[]): string[] {
+  return states.filter((state) => state.status === 'broken').map((state) => state.id)
+}
+
+async function checkAndPublish(
+  tabId: number,
+  url: string,
+  transforms: Transform[],
+  isCurrent: () => boolean,
+): Promise<void> {
+  const states = await runHealthCheck(tabId, transforms, isCurrent)
   if (!states) return
+  await markChecked(url, transforms)
 
   const settings = await getSettings()
-  await badge.healthChecked(
-    tabId,
-    states.filter((state) => state.status === 'broken').length,
-    settings.accent,
-  )
+  await badge.healthChecked(tabId, brokenIds(states), settings.accent)
 
   await browser.runtime
-    .sendMessage({ type: 'health-check-result', states })
+    .sendMessage({ type: 'health-check-result', tabId, states })
     .catch(() => {})
 }
 
@@ -628,35 +790,116 @@ async function checkAndPublish(tabId: number, transforms: Transform[]): Promise<
  * would be left carrying an unsaved change the user was told was discarded.
  *
  * Holding the exact injected string matters: removeCSS matches on content, so
- * the only way to take a preview back out is to have kept what went in.
+ * the only way to take a preview back out is to have kept what went in. It is
+ * kept in storage.session (see css-state.ts) because this page is suspended
+ * after 30 idle seconds and a module-level map would not survive that.
  */
-const previewedCss = new Map<number, string>()
-/** Saved transform ids whose preview is registered, under `previewIdFor(id)`. */
-const previewedScripts = new Set<string>()
 
-async function setPreviewCss(tabId: number, css: string | null): Promise<void> {
-  const existing = previewedCss.get(tabId)
-  if (existing) {
-    await browser.scripting
-      .removeCSS({ target: { tabId }, css: existing, origin: 'USER' })
-      .catch(() => {})
-    previewedCss.delete(tabId)
-  }
-  if (css === null) return
-
-  await browser.scripting.insertCSS({ target: { tabId }, css, origin: 'USER' })
-  previewedCss.set(tabId, css)
+async function removePreviewCss(tabId: number, css: string): Promise<void> {
+  await browser.scripting
+    .removeCSS({ target: { tabId }, css, origin: 'USER' })
+    .catch(() => {})
 }
 
-async function clearAllPreviews(): Promise<void> {
-  for (const tabId of [...previewedCss.keys()]) {
-    await setPreviewCss(tabId, null)
+async function windowOfTab(tabId: number): Promise<number | undefined> {
+  return (await browser.tabs.get(tabId).catch(() => undefined))?.windowId
+}
+
+function setPreviewCss(tabId: number, css: string, windowId: number | undefined): Promise<void> {
+  return inTabQueue(tabId, async () => {
+    const existing = await readCss('preview', tabId)
+    if (existing) {
+      await removePreviewCss(tabId, existing)
+      await forgetCss('preview', tabId)
+    }
+    await browser.scripting.insertCSS({ target: { tabId }, css, origin: 'USER' })
+    await writeCss('preview', tabId, css)
+    await writePreviewWindow(tabId, windowId)
+  })
+}
+
+/**
+ * Takes a preview out. `carried` is the string the sidebar says it inserted;
+ * the stored copy is removed as well when it differs, so a mismatch between
+ * the two cannot leave a stylesheet behind.
+ */
+function clearPreviewCss(tabId: number, carried?: string): Promise<void> {
+  return inTabQueue(tabId, async () => {
+    const stored = await readCss('preview', tabId)
+    const strings = new Set([carried, stored].filter((css): css is string => !!css))
+    for (const css of strings) await removePreviewCss(tabId, css)
+    await forgetCss('preview', tabId)
+  })
+}
+
+/**
+ * Takes out the previews, and lifts the pauses on transforms, that belong to
+ * windows for which `ownerIsGone` is true. A preview with no recorded window
+ * has no owner and is always taken out.
+ */
+async function clearPreviewsWhere(
+  ownerIsGone: (windowId: number | undefined) => boolean,
+): Promise<void> {
+  for (const tabId of await previewedTabIds()) {
+    if (ownerIsGone(await previewWindow(tabId))) await clearPreviewCss(tabId)
   }
-  for (const id of [...previewedScripts]) {
+  for (const id of await previewedScriptIds()) {
+    if (!ownerIsGone(await previewScriptWindow(id))) continue
     await unregisterPreview(id)
-    previewedScripts.delete(id)
+    await removePreviewedScript(id)
+  }
+  // A pause belongs to the window the tab is in: the sidebar that paused it is
+  // the one that resumes it, and a sidebar that closed cannot.
+  for (const tabId of await suspendedTabIds()) {
+    if (!ownerIsGone(await windowOfTab(tabId))) continue
+    await forgetSuspended(tabId)
+    await reapply(tabId)
   }
 }
+
+/**
+ * Sidebar ports connected to this run of the background page, with the window
+ * each one names. A port that names no window maps to undefined.
+ */
+const sidebarPorts = new Map<browser.runtime.Port, number | undefined>()
+
+/**
+ * Whether the sidebar that owns a preview is gone. A port that names no window
+ * could own anything, so while one is connected no preview is called
+ * abandoned; a preview with no recorded window is abandoned when no sidebar at
+ * all is connected.
+ */
+function ownerIsGone(windowId: number | undefined): boolean {
+  const connected = [...sidebarPorts.values()]
+  if (connected.includes(undefined)) return false
+  if (windowId === undefined) return connected.length === 0
+  return !connected.includes(windowId)
+}
+
+/**
+ * How long a freshly started background page waits for a sidebar to connect
+ * before it treats stored previews as abandoned. A sidebar that is still open
+ * reconnects within a fraction of a second of the page starting (see
+ * sidebar-port.ts in the sidebar); a panel closed during a suspension never
+ * does.
+ */
+export const SIDEBAR_RECONNECT_GRACE_MS = 3000
+
+/**
+ * A panel closed while this page was suspended sent no disconnect that anyone
+ * received, so its previews are still in the tabs and in storage.session when
+ * the page next starts. If no sidebar has connected shortly after start-up, no
+ * panel is open to own them, and they are removed.
+ */
+void (async () => {
+  const stored =
+    (await previewedTabIds()).length > 0 ||
+    (await previewedScriptIds()).length > 0 ||
+    (await suspendedTabIds()).length > 0
+  if (!stored) return
+  await new Promise((resolve) => setTimeout(resolve, SIDEBAR_RECONNECT_GRACE_MS))
+  await clearPreviewsWhere(ownerIsGone)
+})()
 
 /**
  * The sidebar holds a port open for exactly as long as it is on screen. Its
@@ -671,9 +914,23 @@ browser.runtime.onConnect.addListener((port) => {
     return
   }
 
-  if (port.name === 'wa-sidebar') {
+  if (isSidebarPortName(port.name)) {
+    const windowId = windowOfSidebarPort(port.name)
+    sidebarPorts.set(port, windowId)
     port.onDisconnect.addListener(() => {
-      void clearAllPreviews()
+      sidebarPorts.delete(port)
+      // Only what this window's sidebar made. Another window's panel may still
+      // be open, and its preview must stay: removing every preview whenever the
+      // last panel closed was right for one window and wrong for two. While
+      // another port for the same window is connected the panel is still open.
+      if (windowId === undefined) {
+        void clearPreviewsWhere(ownerIsGone)
+      } else if (![...sidebarPorts.values()].includes(windowId)) {
+        // Exactly this window, not every window whose sidebar is not connected
+        // at this moment: right after a start-up the other windows' sidebars
+        // have not reconnected yet, and they are still open.
+        void clearPreviewsWhere((owner) => owner === windowId)
+      }
     })
     return
   }
@@ -719,7 +976,10 @@ async function runGeneration(
 ): Promise<void> {
   const { tabId } = request
   const accent = (await getSettings()).accent
-  if (tabId !== undefined) await badge.generationStarted(tabId, accent)
+  if (tabId !== undefined) {
+    await restoreBadgeFacts(tabId, accent)
+    await badge.generationStarted(tabId, accent)
+  }
 
   try {
     const provider = await resolveActiveProvider()
@@ -758,14 +1018,49 @@ async function runGeneration(
   } finally {
     // In `finally` so a failed generation does not leave the tab showing `··`
     // for as long as the tab is open.
-    if (tabId !== undefined) await badge.generationEnded(tabId, accent)
+    if (tabId !== undefined) {
+      await restoreBadgeFacts(tabId, accent)
+      await badge.generationEnded(tabId, accent)
+    }
   }
 }
 
-browser.tabs.onRemoved.addListener((tabId) => {
-  previewedCss.delete(tabId)
-  appliedCss.delete(tabId)
+/**
+ * Rebuilds the matching count for a tab the badge knows nothing about.
+ *
+ * The badge's facts are in memory and a suspension erases them, while the badge
+ * Firefox draws survives. A generation that starts after a suspension would
+ * otherwise get a fresh entry with a count of zero, and when it ended the badge
+ * was repainted from that entry and cleared on a page that still has
+ * transforms. Recounting from the tab's URL is cheap and gives the right count;
+ * persisting every tab's facts in `storage.session` was the other option and
+ * was not taken because the broken set would still be unknown after a
+ * suspension, so the extra storage would not make the badge complete.
+ *
+ * Called at the end as well as the start, in case a suspension falls between
+ * them.
+ */
+async function restoreBadgeFacts(tabId: number, accent: Accent): Promise<void> {
+  if (badge.hasFacts(tabId)) return
+  const tab = await browser.tabs.get(tabId).catch(() => undefined)
+  const transforms = tab?.url ? await transformsForUrl(tab.url) : []
+  await badge.transformCountChanged(
+    tabId,
+    transforms.map((t) => t.id),
+    accent,
+  )
+}
+
+browser.tabs.onRemoved.addListener(async (tabId) => {
   badge.tabClosed(tabId)
+  await inTabQueue(tabId, async () => {
+    await forgetCss('preview', tabId)
+    await forgetCss('applied', tabId)
+    forgetTab(tabId)
+    await browser.storage.session.remove(`wa-last-url-${tabId}`)
+    await forgetSuspended(tabId)
+  })
+  evaluations.delete(tabId)
 })
 
 /* ------------------------------------------------------------------ */
@@ -840,40 +1135,55 @@ async function transformsForUrl(url: string): Promise<Transform[]> {
 }
 
 /**
- * What is currently injected in each tab.
- *
- * Held because removeCSS matches on content: taking a stylesheet back out
- * requires the exact string that went in. Without this, saving or toggling
- * could only add, never replace — so a change showed up on the next page load
- * and not before.
+ * The transforms whose CSS belongs in the tab right now: the enabled ones for
+ * the URL, without the one the sidebar has paused for an edit preview.
  */
-const appliedCss = new Map<number, string>()
+async function cssTransformsFor(tabId: number, url: string): Promise<Transform[]> {
+  const [all, suspended] = await Promise.all([transformsForUrl(url), readSuspended(tabId)])
+  return suspended === undefined ? all : all.filter((t) => t.id !== suspended)
+}
 
 /**
  * CSS is applied by the background script rather than the content script:
  * insertCSS at the USER origin needs no page-side code, survives re-renders
  * without observers, and cannot be tampered with from the page.
  */
-async function applyCssTransforms(tabId: number, transforms: Transform[]): Promise<void> {
+function applyCssTransforms(
+  tabId: number,
+  load: () => Promise<Transform[]>,
+): Promise<void> {
+  // Taken now, not when the task runs: a document that commits while this is
+  // queued makes it out of date.
+  const document = documentOf(tabId)
+  return inTabQueue(tabId, async () => {
+    if (documentOf(tabId) !== document) return
+    // Read inside the queue. A list read before waiting would be older than the
+    // task ahead of this one, and a save finishing in between would be undone.
+    await applyCss(tabId, await load())
+  })
+}
+
+async function applyCss(tabId: number, transforms: Transform[]): Promise<void> {
   const css = transforms
     .filter((t) => t.kind === 'css' && t.enabled)
     .sort((a, b) => a.order - b.order)
     .map((t) => `/* ${t.name} */\n${t.code}`)
     .join('\n\n')
 
-  const previous = appliedCss.get(tabId)
+  // Read from storage.session: see css-state.ts for why a module variable is not enough.
+  const previous = await readCss('applied', tabId)
   if (previous !== undefined && previous !== css) {
     await browser.scripting
       .removeCSS({ target: { tabId }, css: previous, origin: 'USER' })
       .catch(() => {})
-    appliedCss.delete(tabId)
+    await forgetCss('applied', tabId)
   }
 
   if (!css || previous === css) return
 
   try {
     await browser.scripting.insertCSS({ target: { tabId }, css, origin: 'USER' })
-    appliedCss.set(tabId, css)
+    await writeCss('applied', tabId, css)
   } catch {
     // No host permission for this origin yet, which is expected until the user
     // saves their first transform for the site.
@@ -885,14 +1195,19 @@ async function reapply(tabId: number | undefined): Promise<void> {
   if (tabId === undefined) return
   const tab = await browser.tabs.get(tabId).catch(() => undefined)
   if (!tab?.url) return
-  const transforms = await transformsForUrl(tab.url)
-  await applyCssTransforms(tabId, transforms)
+  const url = tab.url
+  await applyCssTransforms(tabId, () => cssTransformsFor(tabId, url))
+  const transforms = await transformsForUrl(url)
 
   // Every mutation that changes what runs — save, delete, reorder, toggle —
   // reaches here, which is why the count is refreshed here rather than at each
   // of the four call sites.
   const settings = await getSettings()
-  await badge.transformCountChanged(tabId, transforms.length, settings.accent)
+  await badge.transformCountChanged(
+    tabId,
+    transforms.map((t) => t.id),
+    settings.accent,
+  )
 }
 
 /* ------------------------------------------------------------------ */
@@ -1025,6 +1340,6 @@ export { transformsForUrl, runReview }
 // Registration state can drift if the browser restarted with stale scripts,
 // or if a permission changed while the background script was not alive.
 void (async () => {
-  if (await hasUserScriptsPermission()) await reregisterAll()
+  if (await hasUserScriptsPermission()) await reregister()
   await reconcileContentScripts()
 })()

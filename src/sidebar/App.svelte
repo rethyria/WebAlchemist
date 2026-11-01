@@ -16,7 +16,9 @@
   import { permissionRequestsFor, requestAll } from '@shared/permissions'
   import { hasAccess, requiredOrigin } from '@shared/site-access'
   import { activeTab, BackgroundError, send } from './lib/messaging.svelte'
+  import { isForTab, type HealthCheckResult } from './lib/health-result'
   import { Flow } from './lib/flow.svelte'
+  import { holdSidebarPortForWindow } from './lib/sidebar-port'
   import Describing from './components/Describing.svelte'
   import ErrorCard from './components/ErrorCard.svelte'
   import Generating from './components/Generating.svelte'
@@ -25,10 +27,12 @@
   import Reviewing from './components/Reviewing.svelte'
   import Saving from './components/Saving.svelte'
   import SettingsPanel from './components/Settings.svelte'
+  import type { VaultView } from '@shared/vault-disclosure'
   import TransformRow from './components/TransformRow.svelte'
 
   let settings = $state<Settings | null>(null)
   let statuses = $state<CredentialStatus[]>([])
+  let vault = $state<VaultView>({ sealed: false, unlocked: true })
   let transforms = $state<Transform[]>([])
   let runtimeStates = $state<TransformRuntimeState[]>([])
   let conflicts = $state<Conflict[]>([])
@@ -170,10 +174,20 @@
     await send({ type: 'save-settings', settings: next })
   }
 
+  /*
+   * Read when the panel loads and each time the settings panel opens, because
+   * the vault can be locked, by the idle timer or by hand, while the sidebar
+   * stays open, and the disclosure there must describe the current state.
+   */
+  async function refreshVault() {
+    vault = await send<VaultView>({ type: 'vault-state' })
+  }
+
   async function load() {
     loadError = null
     try {
       applySettings(await send<Settings>({ type: 'get-settings' }))
+      await refreshVault()
       statuses = await send<CredentialStatus[]>({ type: 'get-credential-statuses' })
 
       const tab = await activeTab()
@@ -408,13 +422,19 @@
     void browser.runtime.openOptionsPage()
   }
 
+  /** Ignores results for tabs the panel is not showing; see health-result.ts. */
+  async function showHealthResult(message: HealthCheckResult) {
+    const tab = await activeTab()
+    if (isForTab(message, tab?.id)) runtimeStates = message.states
+  }
+
   $effect(() => {
     void load()
 
     const onMessage = (message: ContentEvent, sender: browser.runtime.MessageSender) => {
       // Health results are the one content event the list owns rather than
       // the flow — they describe saved transforms, not the draft.
-      if (message.type === 'health-check-result') runtimeStates = message.states
+      if (message.type === 'health-check-result') void showHealthResult(message)
       else flow.receive(message, sender)
     }
     browser.runtime.onMessage.addListener(onMessage)
@@ -467,8 +487,13 @@
 
     // Held open for the lifetime of the panel. The background watches for it
     // to drop, which is how "closing this panel discards it" is kept true —
-    // a closed sidebar gets no chance to run cleanup of its own.
-    const port = browser.runtime.connect({ name: 'wa-sidebar' })
+    // a closed sidebar gets no chance to run cleanup of its own. It is opened
+    // again whenever the background drops it, because a suspension does that
+    // while the panel is still open.
+    const releasePort = holdSidebarPortForWindow(
+      (name) => browser.runtime.connect({ name }),
+      async () => (await browser.windows.getCurrent()).id,
+    )
 
     return () => {
       browser.runtime.onMessage.removeListener(onMessage)
@@ -478,7 +503,7 @@
       browser.tabs.onActivated.removeListener(onTabChange)
       browser.tabs.onUpdated.removeListener(onTabUpdated)
       browser.tabs.onRemoved.removeListener(onTabRemoved)
-      port.disconnect()
+      releasePort()
     }
   })
 </script>
@@ -489,7 +514,10 @@
     <button
       type="button"
       class="chrome-link"
-      onclick={() => (showSettings = !showSettings)}
+      onclick={() => {
+        showSettings = !showSettings
+        if (showSettings) refreshVault().catch(() => undefined)
+      }}
     >
       {showSettings ? 'Done' : 'Settings'}
     </button>
@@ -520,6 +548,7 @@
     <SettingsPanel
       {settings}
       {statuses}
+      {vault}
       onsave={(next: Settings) => void saveSettings(next)}
       onfullpage={openSettingsPage}
     />

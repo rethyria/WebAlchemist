@@ -56,3 +56,45 @@ describe('loading the settings page state', () => {
     expect(loaded.statuses).toHaveLength(1)
   })
 })
+
+describe('the vault locking between the two requests', () => {
+  /*
+   * Another tab locks the vault after `vault-state` answered that it was
+   * readable and before `get-credential-statuses` ran. The second request then
+   * fails, and `load()` in the page has no catch, so the failure left the page
+   * showing only its heading.
+   */
+  function lockedBetween() {
+    const requested: string[] = []
+    let stateReads = 0
+    const call = (async (message: { type: string }) => {
+      requested.push(message.type)
+      if (message.type === 'vault-state') {
+        stateReads += 1
+        return stateReads === 1 ? { sealed: true, unlocked: true } : { sealed: true, unlocked: false }
+      }
+      throw new Error('Web Alchemist is locked.')
+    }) as Parameters<typeof loadVaultAndStatuses>[0]
+    return { call, requested }
+  }
+
+  it('returns no statuses and the state read again, instead of failing', async () => {
+    const { call, requested } = lockedBetween()
+
+    const loaded = await loadVaultAndStatuses(call)
+
+    expect(loaded.statuses).toEqual([])
+    expect(loaded.vault).toEqual({ sealed: true, unlocked: false })
+    expect(requested).toEqual(['vault-state', 'get-credential-statuses', 'vault-state'])
+  })
+
+  // The control is the existing test that an unlocked vault returns its
+  // statuses and reads the state once: the second read happens only on failure.
+  it('control: a successful statuses request does not read the state a second time', async () => {
+    const { call, requested } = fakeCall({ sealed: true, unlocked: true })
+
+    await loadVaultAndStatuses(call)
+
+    expect(requested.filter((type) => type === 'vault-state')).toHaveLength(1)
+  })
+})

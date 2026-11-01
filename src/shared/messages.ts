@@ -304,7 +304,16 @@ export type ContentEvent =
       scrolledTo: ScrollOffset
     }
   | { type: 'picking-cancelled' }
-  | { type: 'health-check-result'; states: TransformRuntimeState[] }
+  | {
+      type: 'health-check-result'
+      /**
+       * The tab the check ran in. Several tabs finish loading while one sidebar
+       * is open, and without this the sidebar cannot tell whose states these
+       * are.
+       */
+      tabId: number
+      states: TransformRuntimeState[]
+    }
 
 /**
  * An element the page found for us, described the way a pick describes one.

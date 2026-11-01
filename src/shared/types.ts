@@ -13,6 +13,8 @@
  *   code       the implementation itself.
  */
 
+import { DEFAULT_VAULT_IDLE_MINUTES } from './vault-policy'
+
 export const SCHEMA_VERSION = 1
 
 export type TransformKind = 'css' | 'js'
@@ -176,6 +178,20 @@ export interface Conflict {
 export type ProviderType = 'anthropic' | 'openai-compatible'
 
 /**
+ * What a credential was entered for: the provider type and the origin its
+ * requests go to. The background compares it with the provider's current
+ * destination before every request and refuses to send on a mismatch.
+ *
+ * Optional only because credentials stored by earlier versions have none. The
+ * first read binds such a credential to the provider's destination at that
+ * moment; see `readCredentialForRequest` in storage.ts.
+ */
+export interface CredentialBinding {
+  type: ProviderType
+  origin: string
+}
+
+/**
  * Credentials are keyed by provider *id*, not provider type, so two
  * OpenAI-compatible endpoints hold independent keys. Removing a provider
  * clears its credential.
@@ -185,13 +201,23 @@ export type ProviderType = 'anthropic' | 'openai-compatible'
  * implemented only for providers that sanction it.
  */
 export type Credential =
-  | { kind: 'api_key'; value: string }
+  | { kind: 'api_key'; value: string; boundTo?: CredentialBinding }
   | {
       kind: 'oauth'
+      boundTo?: CredentialBinding
       accessToken: string
-      refreshToken: string
-      /** Epoch ms. Refresh is attempted ahead of this. */
-      expiresAt: number
+      /**
+       * Absent when the provider issued none, for example because no
+       * `offline_access` scope was requested. The sign-in then ends when the
+       * access token does.
+       */
+      refreshToken?: string
+      /**
+       * Epoch ms. Refresh is attempted ahead of this. Absent when the provider
+       * sent no `expires_in` and issued no refresh token, so that no lifetime
+       * has to be guessed for a token that cannot be renewed.
+       */
+      expiresAt?: number
       tokenEndpoint: string
       clientId: string
     }
@@ -277,6 +303,8 @@ export interface CredentialStatus {
   kind?: Credential['kind']
   /** Epoch ms, oauth only. Lets the UI warn before a hard expiry. */
   expiresAt?: number
+  /** Oauth only. False when there is no refresh token and sign-in must be repeated at expiry. */
+  renewable?: boolean
 }
 
 /* ------------------------------------------------------------------ */
@@ -326,6 +354,11 @@ export interface Settings {
   keepScreenshotPermission: boolean
   /** Disables execution of every AI-authored JS transform, everywhere. */
   aiJsKillSwitch: boolean
+  /**
+   * Minutes without a provider call after which an unlocked vault locks
+   * itself. Zero means never. Has no effect while credentials are not sealed.
+   */
+  vaultIdleLockMinutes: number
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -336,6 +369,7 @@ export const DEFAULT_SETTINGS: Settings = {
   accent: 'blue',
   keepScreenshotPermission: false,
   aiJsKillSwitch: false,
+  vaultIdleLockMinutes: DEFAULT_VAULT_IDLE_MINUTES,
 }
 
 /* ------------------------------------------------------------------ */

@@ -10,7 +10,7 @@
  * support cannot be queried and is set by hand on the Provider record.
  */
 
-import type { GenerationResult, ModelReview, Provider } from '@shared/types'
+import type { Credential, GenerationResult, ModelReview, Provider } from '@shared/types'
 import {
   GENERATE_SYSTEM_PROMPT,
   REVIEW_SYSTEM_PROMPT,
@@ -18,9 +18,10 @@ import {
   repairPrompt,
   scopeInstruction,
 } from '../prompts'
-import { credentialFrom, needsRefresh, type TokenPayload } from '../oauth'
+import { TOKEN_REQUEST_TIMEOUT_MS, credentialFrom, needsRefresh, type TokenPayload } from '../oauth'
+import { endpointProblem, isLoopbackHostname } from '@shared/endpoint-policy'
 import { retryAfterSeconds } from './retry-after'
-import { readCredentialForRequest, setCredential } from '../storage'
+import { readCredentialOrProviderError, withCredentialOrProviderError } from './credential'
 import {
   GENERATION_SCHEMA,
   ProviderError,
@@ -39,13 +40,25 @@ export async function createOpenAiCompatibleProvider(
       false,
     )
   }
+  const baseProblem = endpointProblem(provider.baseUrl)
+  if (baseProblem) {
+    throw new ProviderError(
+      `The base URL for ${provider.label} is not allowed. ${baseProblem} Change it in settings.`,
+      'no-credential',
+      false,
+    )
+  }
   const baseUrl = provider.baseUrl.replace(/\/+$/, '')
 
-  const authHeader = async (): Promise<Record<string, string>> => {
-    const credential = await readCredentialForRequest(provider.id)
+  /**
+   * `oauthToken` is set when the header carries an access token that could be
+   * refreshed, so that a 401 can name the token the server rejected.
+   */
+  const authHeader = async (): Promise<{ headers: Record<string, string>; oauthToken?: string }> => {
+    const credential = await readCredentialOrProviderError(provider)
     if (!credential) {
       // Local servers frequently accept unauthenticated requests.
-      if (isLoopback(baseUrl)) return {}
+      if (isLoopback(baseUrl)) return { headers: {} }
       throw new ProviderError(
         `No credential is configured for ${provider.label}.`,
         'no-credential',
@@ -54,12 +67,13 @@ export async function createOpenAiCompatibleProvider(
     }
 
     if (credential.kind === 'api_key') {
-      return { Authorization: `Bearer ${credential.value}` }
+      return { headers: { Authorization: `Bearer ${credential.value}` } }
     }
 
-    // OAuth: refresh ahead of expiry rather than after a 401.
-    const token = await ensureFreshToken(provider.id, credential)
-    return { Authorization: `Bearer ${token}` }
+    // OAuth: refresh ahead of expiry when the expiry is known. A 401 is also
+    // handled below, for tokens that end early or whose lifetime was assumed.
+    const token = await ensureFreshToken(provider, credential)
+    return { headers: { Authorization: `Bearer ${token}` }, oauthToken: token }
   }
 
   const complete = async <T>(args: {
@@ -70,44 +84,64 @@ export async function createOpenAiCompatibleProvider(
     schemaName: string
     maxTokens: number
   }): Promise<T> => {
+    const body = JSON.stringify({
+      model: args.model,
+      max_tokens: args.maxTokens,
+      messages: [
+        { role: 'system', content: args.system },
+        { role: 'user', content: args.userContent },
+      ],
+      response_format: {
+        type: 'json_schema',
+        json_schema: { name: args.schemaName, strict: true, schema: args.schema },
+      },
+    })
+
+    const send = async (auth: Record<string, string>): Promise<Response> => {
+      try {
+        return await fetch(`${baseUrl}/chat/completions`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...auth },
+          body,
+        })
+      } catch (error) {
+        throw new ProviderError(
+          `Could not reach ${provider.label}.`,
+          'network',
+          true,
+          { cause: error },
+        )
+      }
+    }
+
     /*
-     * Built before the `try` below, not inside it. The `catch` turns every
+     * Read outside `send`, not inside its `try`. The `catch` there turns every
      * error into "could not reach", which is right for `fetch` and wrong for
      * the credential: a locked vault, an expired sign-in and a missing key each
      * carry their own kind, and the sidebar picks its state from it. Wrapping
      * them as retryable network errors let a user retry forever without being
      * told to unlock or reconnect.
      */
-    const headers = {
-      'Content-Type': 'application/json',
-      ...(await authHeader()),
-    }
+    const first = await authHeader()
+    let response = await send(first.headers)
 
-    let response: Response
-    try {
-      response = await fetch(`${baseUrl}/chat/completions`, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({
-          model: args.model,
-          max_tokens: args.maxTokens,
-          messages: [
-            { role: 'system', content: args.system },
-            { role: 'user', content: args.userContent },
-          ],
-          response_format: {
-            type: 'json_schema',
-            json_schema: { name: args.schemaName, strict: true, schema: args.schema },
-          },
-        }),
-      })
-    } catch (error) {
-      throw new ProviderError(
-        `Could not reach ${provider.label}.`,
-        'network',
-        true,
-        { cause: error },
-      )
+    /*
+     * A 401 on a sign-in token is not yet a rejected credential. The lifetime
+     * is assumed when the server sends no `expires_in`, and a provider can
+     * revoke a token early, so the token may simply be dead while the refresh
+     * token is good. Refreshing once and sending the request once more tells
+     * the two apart: only a second 401 is reported as a rejection. Without
+     * this, every request failed until the assumed expiry arrived, up to an
+     * hour later, while settings showed the account as signed in.
+     *
+     * Once, not until it works: a provider that rejects a fresh token is
+     * refusing the account, and looping would hammer the token endpoint.
+     * The refresh is shared with overlapping calls, so several 401s from one
+     * dead token cause one token request.
+     */
+    if (response.status === 401 && first.oauthToken !== undefined) {
+      const token = await refreshAfterRejection(provider, first.oauthToken)
+      response = await send({ Authorization: `Bearer ${token}` })
     }
 
     if (!response.ok) throw httpToProviderError(response.status, provider.label, response.headers)
@@ -215,8 +249,7 @@ export async function createOpenAiCompatibleProvider(
 
 function isLoopback(baseUrl: string): boolean {
   try {
-    const { hostname } = new URL(baseUrl)
-    return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]'
+    return isLoopbackHostname(new URL(baseUrl).hostname)
   } catch {
     return false
   }
@@ -232,50 +265,109 @@ function isLoopback(baseUrl: string): boolean {
  */
 const refreshesInFlight = new Map<string, Promise<string>>()
 
-type OAuthCredential = Extract<
-  NonNullable<Awaited<ReturnType<typeof readCredentialForRequest>>>,
-  { kind: 'oauth' }
->
+type OAuthCredential = Extract<Credential, { kind: 'oauth' }>
 
-function ensureFreshToken(providerId: string, credential: OAuthCredential): Promise<string> {
-  if (!needsRefresh(credential.expiresAt, Date.now())) {
-    return Promise.resolve(credential.accessToken)
-  }
+function ensureFreshToken(
+  provider: Provider,
+  credential: OAuthCredential,
+  /** The access token a server just rejected, when called after a 401. */
+  rejected?: string,
+): Promise<string> {
+  const providerId = provider.id
+  // After a 401 the clock is not consulted: the server has said this token is
+  // no good, whatever its recorded expiry.
+  const stale = (c: OAuthCredential) =>
+    rejected !== undefined ? c.accessToken === rejected : needsRefresh(c.expiresAt, Date.now())
+  if (!stale(credential)) return Promise.resolve(credential.accessToken)
   const running = refreshesInFlight.get(providerId)
   if (running) return running
 
-  const started = (async () => {
-    /*
-     * The credential is read again, because the caller's copy may be older than
-     * a refresh that finished between its read and this point. Without this, a
-     * caller that missed the in-flight window would refresh with a token that
-     * has already been spent.
-     */
-    const latest = await readCredentialForRequest(providerId)
+  /*
+   * The credential is read inside the lock, not taken from the caller. The
+   * caller's copy may be older than a refresh that finished between its read
+   * and this point, and refreshing with it would send a token that has already
+   * been spent. Reading, requesting and storing all happen under the lock; see
+   * withCredentialForRequest.
+   */
+  const started = withCredentialOrProviderError(provider, async (latest, store) => {
     // Removed or replaced while this call was starting. Refreshing the old
     // copy would store it again and undo the removal.
-    if (latest?.kind !== 'oauth') {
+    if (!latest) {
       throw new ProviderError('The sign-in for this provider was removed. Reconnect it in settings.', 'no-credential', false)
     }
-    if (!needsRefresh(latest.expiresAt, Date.now())) return latest.accessToken
-    return refreshToken(providerId, latest)
-  })().finally(() => {
+    // Replaced by an API key. Both are sent as a bearer token, and a call made
+    // a moment later would use the key, so this one does too.
+    if (latest.kind === 'api_key') return latest.value
+    if (!stale(latest)) return latest.accessToken
+    if (!latest.refreshToken) {
+      // The provider issued no refresh token, so there is nothing to renew
+      // with. Saying so is the point: the generic expiry message tells the
+      // person to reconnect without saying that this is how it will always be.
+      throw new ProviderError(
+        'The sign-in has ended and this provider issued no way to renew it. Sign in again in settings.',
+        'auth',
+        false,
+      )
+    }
+    const refreshed = await requestRefresh({ ...latest, refreshToken: latest.refreshToken })
+    // Not stored when the sign-in was changed behind the lock's back. The token
+    // belongs to a grant that is no longer the one on record, so it is not used.
+    if (!(await store(refreshed))) {
+      throw new ProviderError('The sign-in for this provider changed while it was being renewed. Try again.', 'no-credential', false)
+    }
+    return refreshed.accessToken
+  }).finally(() => {
     refreshesInFlight.delete(providerId)
   })
   refreshesInFlight.set(providerId, started)
   return started
 }
 
-/** Refreshes an OAuth token a minute ahead of expiry and persists the result. */
-async function refreshToken(
-  providerId: string,
-  credential: OAuthCredential,
-): Promise<string> {
+/**
+ * Gets a token to retry with after the server answered 401 to `rejected`.
+ *
+ * If another call already replaced the token, that one is used and no second
+ * refresh is sent. A refresh already running is joined first, because it
+ * would produce the replacement.
+ */
+async function refreshAfterRejection(provider: Provider, rejected: string): Promise<string> {
+  const running = refreshesInFlight.get(provider.id)
+  if (running) {
+    const token = await running
+    if (token !== rejected) return token
+  }
+  const credential = await readCredentialOrProviderError(provider)
+  if (!credential) {
+    throw new ProviderError('The sign-in for this provider was removed. Reconnect it in settings.', 'no-credential', false)
+  }
+  // Replaced by an API key after the rejected request was sent; retry with it.
+  if (credential.kind === 'api_key') return credential.value
+  return ensureFreshToken(provider, credential, rejected)
+}
+
+/**
+ * Sends the refresh request and returns the credential to store. Does not
+ * store it; the caller holds the credential lock and decides.
+ */
+async function requestRefresh(
+  credential: OAuthCredential & { refreshToken: string },
+): Promise<OAuthCredential> {
   /*
    * The header call no longer sits inside the chat request's `try`, so a
    * transport failure here has to be classified on its own. It used to be
    * reported as a network failure by that outer `catch`, and still is.
    */
+  // The endpoint comes from the stored credential, which an older version or
+  // another context may have written without the check in setCredential.
+  const endpointIssue = endpointProblem(credential.tokenEndpoint)
+  if (endpointIssue) {
+    throw new ProviderError(
+      `The sign-in server address is not allowed. ${endpointIssue} Reconnect this provider in settings.`,
+      'auth',
+      false,
+    )
+  }
+
   let response: Response
   try {
     response = await fetch(credential.tokenEndpoint, {
@@ -286,6 +378,8 @@ async function refreshToken(
         refresh_token: credential.refreshToken,
         client_id: credential.clientId,
       }),
+      // The caller holds the credential lock while this waits.
+      signal: AbortSignal.timeout(TOKEN_REQUEST_TIMEOUT_MS),
     })
   } catch (error) {
     throw new ProviderError('Could not reach the sign-in server.', 'network', true, {
@@ -318,14 +412,33 @@ async function refreshToken(
       { cause: error },
     )
   }
-  const refreshed = credentialFrom(
-    tokens,
-    { authorizationEndpoint: '', tokenEndpoint: credential.tokenEndpoint, clientId: credential.clientId, scopes: [] },
-    Date.now(),
-    credential.refreshToken,
-  )
-  await setCredential(providerId, refreshed)
-  return refreshed.accessToken
+  /*
+   * `credentialFrom` raises a plain Error when the response has no access
+   * token. Left as it is, that reached the sidebar with no kind, which shows a
+   * generic failure instead of the reconnect state this one needs.
+   */
+  let refreshed: ReturnType<typeof credentialFrom>
+  try {
+    refreshed = credentialFrom(
+      tokens,
+      { authorizationEndpoint: '', tokenEndpoint: credential.tokenEndpoint, clientId: credential.clientId, scopes: [] },
+      Date.now(),
+      credential.refreshToken,
+    )
+  } catch (error) {
+    throw new ProviderError(
+      'The sign-in server returned no access token. Reconnect this provider in settings.',
+      'auth',
+      false,
+      { cause: error },
+    )
+  }
+  // Carried over: the refreshed token goes to the same destination as the one
+  // it replaces, and dropping the binding would send it back through migration.
+  return {
+    ...refreshed,
+    ...(credential.boundTo ? { boundTo: credential.boundTo } : {}),
+  }
 }
 
 function httpToProviderError(

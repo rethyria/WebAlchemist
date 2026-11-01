@@ -15,6 +15,21 @@ beforeEach(() => {
   ;(globalThis as unknown as { browser: unknown }).browser = {
     permissions: { getAll: async () => ({ origins: held }) },
     scripting: {
+      // reconcile() reads the current registration so that it can leave an
+      // identical one alone, and returns early when none exists and none is
+      // wanted. Without this answer the fake reported nothing registered.
+      getRegisteredContentScripts: async () =>
+        registered === null
+          ? []
+          : [
+              {
+                id: 'wa-content',
+                matches: registered,
+                js: ['src/content/index.js'],
+                runAt: 'document_idle',
+                persistAcrossSessions: true,
+              },
+            ],
       unregisterContentScripts: async () => {
         registered = null
       },
@@ -47,5 +62,19 @@ describe('reconcile after access is removed (#122)', () => {
     held = []
     expect((await reconcile()).registered).toBe(0)
     expect(registered).toBeNull()
+  })
+
+  it('leaves an identical registration in place without registering again', async () => {
+    held = ['*://other.com/*']
+    await reconcile()
+    let registerCalls = 0
+    const scripting = (globalThis as unknown as { browser: { scripting: { registerContentScripts: unknown } } })
+      .browser.scripting
+    scripting.registerContentScripts = async () => {
+      registerCalls++
+    }
+    await reconcile()
+    expect(registerCalls).toBe(0)
+    expect(registered).toEqual(['*://other.com/*'])
   })
 })

@@ -25,6 +25,7 @@
  */
 
 import type { Credential, OAuthConfig } from '@shared/types'
+import { assertEndpoint } from '@shared/endpoint-policy'
 
 /** RFC 7636 §4.1: 43–128 characters from the unreserved set. */
 const VERIFIER_BYTES = 32
@@ -151,10 +152,19 @@ export function expiryFrom(payload: TokenPayload, now: number): number {
   return now + (payload.expires_in ?? ASSUMED_LIFETIME_SECONDS) * 1000
 }
 
+/**
+ * How long a token request may take. A refresh holds the credential lock while
+ * it waits, so an endpoint that never answers would otherwise block every
+ * credential change.
+ */
+export const TOKEN_REQUEST_TIMEOUT_MS = 15_000
+
 /** Refresh this far ahead of expiry, so a request in flight does not expire. */
 export const REFRESH_MARGIN_MS = 60_000
 
-export function needsRefresh(expiresAt: number, now: number): boolean {
+export function needsRefresh(expiresAt: number | undefined, now: number): boolean {
+  // An unknown expiry is not treated as an expired one; a 401 settles it.
+  if (expiresAt === undefined) return false
   return expiresAt - REFRESH_MARGIN_MS <= now
 }
 
@@ -165,14 +175,28 @@ export function credentialFrom(
   previousRefreshToken?: string,
 ): Extract<Credential, { kind: 'oauth' }> {
   const refreshToken = payload.refresh_token ?? previousRefreshToken
-  if (!payload.access_token || !refreshToken) {
+  if (!payload.access_token) {
     throw new Error('The provider did not return a usable token.')
   }
+  /*
+   * A missing refresh token is accepted. Some providers issue one only when an
+   * `offline_access` scope is requested and others never do, and refusing the
+   * response discarded an access token that was valid. The sign-in then lasts
+   * until that token ends, and the adapter says so when it does.
+   *
+   * With no refresh token and no `expires_in` the lifetime is left unknown
+   * rather than assumed to be an hour: an assumed expiry that is too short
+   * would refuse a working token, and a 401 reports a dead one anyway.
+   */
+  const expiresAt =
+    payload.expires_in !== undefined || refreshToken
+      ? expiryFrom(payload, now)
+      : undefined
   return {
     kind: 'oauth',
     accessToken: payload.access_token,
-    refreshToken,
-    expiresAt: expiryFrom(payload, now),
+    ...(refreshToken ? { refreshToken } : {}),
+    ...(expiresAt !== undefined ? { expiresAt } : {}),
     tokenEndpoint: config.tokenEndpoint,
     clientId: config.clientId,
   }
@@ -187,6 +211,12 @@ export function credentialFrom(
  * as thin as it is — every decision worth testing has been moved above.
  */
 export async function connect(config: OAuthConfig): Promise<Extract<Credential, { kind: 'oauth' }>> {
+  // Before anything is opened or sent. Settings are checked when saved, but
+  // this is the last point before the authorization code and the verifier
+  // leave the extension, so it does not rely on that having happened.
+  assertEndpoint(config.authorizationEndpoint, 'authorization endpoint')
+  assertEndpoint(config.tokenEndpoint, 'token endpoint')
+
   const redirectUri = browser.identity.getRedirectURL()
   const { verifier, challenge } = await createPkce()
   const state = randomState()
