@@ -341,3 +341,35 @@ describe('the settings in a backup', () => {
     expect((await ask({ type: 'preview-import', bundle: { ...file(), mode: 'share' } })).settings).toBeNull()
   })
 })
+
+describe('invisible characters in restored code (#124)', () => {
+  const backup = (code: string) => ({
+    format: 'web-alchemist-export',
+    schemaVersion: 1,
+    exportedAt: 0,
+    mode: 'backup',
+    transforms: [jsRecord({ code })],
+  })
+
+  beforeEach(async () => {
+    await boot([], DEFAULT_SETTINGS)
+  })
+
+  it.each([
+    ['a right-to-left override', '‮'],
+    ['a left-to-right isolate', '⁦'],
+    ['a zero-width space', '​'],
+    ['a byte order mark', '﻿'],
+  ])('is refused with %s in a comment, and the record keeps no code', async (_label, ch) => {
+    const result = await ask({ type: 'import-transforms', bundle: backup(`// ${ch}\n${GOOD_JS}`) })
+    expect(stored()[0].code).toBe('')
+    expect(stored()[0]).not.toHaveProperty('awaitsApproval')
+    expect(result.items[0].reason).toContain('static analysis')
+    expect(result.items[0].needsApproval).toBe(false)
+  })
+
+  it('is restored without the character (control)', async () => {
+    await ask({ type: 'import-transforms', bundle: backup(`// plain\n${GOOD_JS}`) })
+    expect(stored()[0]).toMatchObject({ code: `// plain\n${GOOD_JS}`, awaitsApproval: true })
+  })
+})

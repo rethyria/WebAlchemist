@@ -1419,3 +1419,48 @@ describe('second audit (#48): a class with a constructor', () => {
     }
   })
 })
+
+describe('invisible and direction-changing characters (#124)', () => {
+  const chars: [string, string][] = [
+    ['U+202A', '‪'],
+    ['U+202B', '‫'],
+    ['U+202C', '‬'],
+    ['U+202D', '‭'],
+    ['U+202E', '‮'],
+    ['U+2066', '⁦'],
+    ['U+2067', '⁧'],
+    ['U+2068', '⁨'],
+    ['U+2069', '⁩'],
+    ['U+200B', '​'],
+    ['U+200C', '‌'],
+    ['U+200D', '‍'],
+    ['U+FEFF', '﻿'],
+  ]
+
+  it.each(chars)('blocks %s inside a string', (_name, ch) => {
+    expect(blocks(`document.body.dataset.x = "a${ch}b"`)).toBe(true)
+  })
+
+  it.each(chars)('blocks %s inside a comment', (_name, ch) => {
+    expect(blocks(`// harmless ${ch}\ndocument.body.remove()`)).toBe(true)
+  })
+
+  it('reports the character and its position, and says why', () => {
+    const [finding] = analyseJavaScript('const a = 1\nconst b = "x‮y"').findings
+    expect(finding).toMatchObject({ severity: 'block', line: 2, api: '(hidden character)' })
+    expect(finding!.explanation).toContain('U+202E')
+  })
+
+  it('still blocks when the transform declares every capability', () => {
+    expect(blocks('document.body.remove() // ​', ['network', 'storage', 'cookies'])).toBe(true)
+  })
+
+  it('passes the same code without the character (control)', () => {
+    expect(blocks('document.body.dataset.x = "ab"')).toBe(false)
+    expect(blocks('// harmless \ndocument.body.remove()')).toBe(false)
+  })
+
+  it('passes ordinary non-ASCII text, such as accented letters and CJK (control)', () => {
+    expect(blocks('document.body.dataset.x = "café 日本語"')).toBe(false)
+  })
+})

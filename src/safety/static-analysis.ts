@@ -653,7 +653,35 @@ export interface AnalysisOutcome {
   parseError?: string
 }
 
+/**
+ * Characters that change how text is displayed or that have no width: the
+ * bidirectional embedding, override and isolate controls (U+202A to U+202E,
+ * U+2066 to U+2069) and the zero-width space, non-joiner, joiner and byte order
+ * mark (U+200B to U+200D, U+FEFF). In code they can make a line read as
+ * something other than what runs, in an approval panel or a review, so code
+ * that contains any of them is refused wherever they appear.
+ */
+const HIDDEN_CHARACTERS = /[\u202A-\u202E\u2066-\u2069\u200B-\u200D\uFEFF]/
+
 export function analyseJavaScript(source: string): AnalysisOutcome {
+  const hidden = HIDDEN_CHARACTERS.exec(source)
+  if (hidden) {
+    const before = source.slice(0, hidden.index).split('\n')
+    const code = hidden[0].codePointAt(0)!.toString(16).toUpperCase().padStart(4, '0')
+    return {
+      findings: [
+        {
+          line: before.length,
+          column: before[before.length - 1]!.length,
+          api: '(hidden character)',
+          capability: null,
+          severity: 'block',
+          explanation: `This code contains the invisible or direction-changing character U+${code}, which can make the code display differently from what runs. Remove it.`,
+        },
+      ],
+      usedCapabilities: [],
+    }
+  }
   let ast: Node
   try {
     ast = parse(source, {
