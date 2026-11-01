@@ -302,6 +302,10 @@ deny(
   'Reaches a style sheet, where text such as an import rule makes the browser request an address.',
   'sheet', 'styleSheets', 'adoptedStyleSheets', 'insertRule', 'addRule', 'replaceSync',
 )
+deny(
+  'Sets styles through the Typed Object Model, whose values are not checked as the text of a style is.',
+  'attributeStyleMap', 'styleMap',
+)
 deny('Sets the page inside a frame from a text string, which can run content.', 'srcdoc')
 deny('Redirects the page from a meta element.', 'httpEquiv', 'http-equiv')
 

