@@ -298,3 +298,31 @@ describe('a stale active provider', () => {
     expect(stored().activeProviderId).toBe('gone')
   })
 })
+
+describe('saving the whole settings object', () => {
+  // A change is queued behind earlier ones; a save that skipped the queue wrote
+  // at once and was then overwritten by the change that was already running,
+  // so the later message lost to the earlier one.
+  it('runs after a change that was sent before it, in 20 of 20 runs', async () => {
+    for (let run = 0; run < 20; run += 1) {
+      h.local.set('settings', { ...DEFAULT_SETTINGS })
+      await Promise.all([
+        h.onMessage({ type: 'patch-settings', change: { kind: 'fields', fields: { accent: 'green' } } }),
+        h.onMessage({ type: 'save-settings', settings: { ...DEFAULT_SETTINGS, accent: 'blue' } }),
+      ])
+      expect(stored().accent).toBe('blue')
+    }
+  })
+
+  // Control: the same two messages sent in the opposite order end with the
+  // change, so the result above comes from the order and not from one of the
+  // two messages always winning.
+  it('control: the change wins when it is sent after the save', async () => {
+    h.local.set('settings', { ...DEFAULT_SETTINGS })
+    await Promise.all([
+      h.onMessage({ type: 'save-settings', settings: { ...DEFAULT_SETTINGS, accent: 'blue' } }),
+      h.onMessage({ type: 'patch-settings', change: { kind: 'fields', fields: { accent: 'green' } } }),
+    ])
+    expect(stored().accent).toBe('green')
+  })
+})
