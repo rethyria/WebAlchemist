@@ -15,6 +15,8 @@ const calls: any[] = []
 
 /** Every object passed to `storage.local.set`. */
 const localWrites: Record<string, unknown>[] = []
+/** What `storage.local.get` returns. */
+const localStored: Record<string, unknown> = {}
 ;(globalThis as any).browser = {
   runtime: {
     sendMessage: async (message: any) => {
@@ -26,10 +28,11 @@ const localWrites: Record<string, unknown>[] = []
     },
     getURL: (path: string) => path,
   },
-  permissions: { request: async () => true, remove: async () => true },
+  permissions: { request: async () => true, remove: async () => true, contains: async () => true },
   tabs: { update: async () => {}, reload: async () => {}, create: async () => {} },
   storage: {
     local: {
+      get: async (key: string) => (key in localStored ? { [key]: localStored[key] } : {}),
       set: async (items: Record<string, unknown>) => {
         localWrites.push(items)
       },
@@ -141,6 +144,10 @@ describe('leaving a run that started from a saved transform', () => {
     const flow = newFlow()
     handler = (m) => {
       if (m.type === 'context-for-anchor') return { ok: true, data: found }
+      // The CSS check runs before the preview, so it has to answer for the preview to be reached.
+      if (m.type === 'analyse-css') {
+        return { ok: true, data: { static: [], undeclaredCapabilities: [], pendingUrls: [], passed: true } }
+      }
       if (m.type === 'preview-css') return failure('network')
       return { ok: true, data: null }
     }
@@ -1137,6 +1144,10 @@ describe('cancelling while the preview is applied', () => {
     let release: () => void = () => {}
     const gate = new Promise<void>((resolve) => (release = resolve))
     handler = async (m) => {
+      // The CSS check runs before the preview, so it has to answer for the preview to be reached.
+      if (m.type === 'analyse-css') {
+        return { ok: true, data: { static: [], undeclaredCapabilities: [], pendingUrls: [], passed: true } }
+      }
       if (m.type === 'preview-css' && m.css === '/* A2 */') await gate
       return { ok: true, data: null }
     }
@@ -1210,6 +1221,10 @@ describe('a late preview cleanup after a new run started (#110)', () => {
     flow.step = 'describing'
     const gate = new Promise<void>((resolve) => (release.fn = resolve))
     handler = async (m) => {
+      // The CSS check runs before the preview, so it has to answer for the preview to be reached.
+      if (m.type === 'analyse-css') {
+        return { ok: true, data: { static: [], undeclaredCapabilities: [], pendingUrls: [], passed: true } }
+      }
       if (m.type === 'preview-css' && m.css === '/* A */') await gate
       return { ok: true, data: null }
     }
@@ -1620,5 +1635,432 @@ describe('the address that is shown is the address that is sent (#65)', () => {
     await flow.repair(saved, 'broken')
     const sent = calls.find((c) => c.type === 'repair')
     expect(sent.context.url).toBe('https://shop.example/repair')
+  })
+})
+
+/* -------------------------------------------------------------------- */
+/* Excluded sites and the sensitive-page warning (#131)                  */
+/* -------------------------------------------------------------------- */
+
+describe('picking on an excluded site', () => {
+  const requests: unknown[] = []
+  const realRequest = (globalThis as any).browser.permissions.request
+  beforeEach(() => {
+    requests.length = 0
+    ;(globalThis as any).browser.permissions.request = async (p: unknown) => {
+      requests.push(p)
+      return true
+    }
+  })
+  afterEach(() => {
+    ;(globalThis as any).browser.permissions.request = realRequest
+  })
+
+  it('shows a message and requests no permission and starts nothing', async () => {
+    const flow = newFlow()
+    flow.excludedSites = ['example.com']
+    await flow.startPicking()
+    expect(requests).toEqual([])
+    expect(calls.filter((c) => c.type === 'start-picking')).toEqual([])
+    expect(flow.step).toBe('list')
+    expect(flow.error).toMatchObject({ kind: 'request-failed' })
+    expect((flow.error as any).message).toContain('www.example.com')
+  })
+
+  it('refuses writing by hand as well', async () => {
+    const flow = newFlow()
+    flow.excludedSites = ['example.com']
+    await flow.startPicking('author')
+    expect(requests).toEqual([])
+  })
+
+  it('requests the permission and starts picking on a host that is not excluded (control)', async () => {
+    const flow = newFlow()
+    flow.excludedSites = ['other.test']
+    await flow.startPicking()
+    expect(requests).toHaveLength(1)
+    expect(calls.filter((c) => c.type === 'start-picking')).toHaveLength(1)
+  })
+
+  it('picks again once the host is removed from the list', async () => {
+    const flow = newFlow()
+    flow.excludedSites = ['example.com']
+    await flow.startPicking()
+    expect(requests).toEqual([])
+    flow.dismissError()
+    flow.excludedSites = []
+    await flow.startPicking()
+    expect(requests).toHaveLength(1)
+  })
+})
+
+describe('generating on a page with password or payment fields', () => {
+  beforeEach(() => {
+    ports.length = 0
+    ;(globalThis as any).browser.runtime.connect = fakeConnect
+  })
+  afterEach(() => {
+    ;(globalThis as any).browser.runtime.connect = realConnect
+  })
+
+  const withSensitiveFields = (present: boolean) => {
+    handler = (m) => (m.type === 'page-has-sensitive-fields' ? { ok: true, data: present } : { ok: true, data: null })
+  }
+  function flowAtDescribing() {
+    const flow = newFlow()
+    flow.picked = { ...found, cropDrawn: false } as any
+    flow.instruction = 'make it red'
+    flow.step = 'describing'
+    return flow
+  }
+
+  it('warns and sends nothing until the user confirms', async () => {
+    withSensitiveFields(true)
+    const flow = flowAtDescribing()
+    await flow.generate()
+    expect(ports).toHaveLength(0)
+    expect(flow.error).toMatchObject({ kind: 'sensitive-page' })
+    // The description is kept while the user decides.
+    expect(flow.step).toBe('describing')
+    expect(flow.instruction).toBe('make it red')
+  })
+
+  it('sends the request after the user confirms', async () => {
+    withSensitiveFields(true)
+    const flow = flowAtDescribing()
+    await flow.generate()
+    const confirm = flow.retry()
+    ;(await nextPort(1)).emit({ type: 'error', error: { message: 'stop here', kind: 'network' } })
+    await confirm
+    expect(ports).toHaveLength(1)
+  })
+
+  it('does not ask again for the same page once confirmed', async () => {
+    withSensitiveFields(true)
+    const flow = flowAtDescribing()
+    await flow.generate()
+    const confirm = flow.retry()
+    ;(await nextPort(1)).emit({ type: 'error', error: { message: 'stop here', kind: 'network' } })
+    await confirm
+    flow.dismissError()
+    const second = flow.generate()
+    ;(await nextPort(2)).emit({ type: 'error', error: { message: 'stop here', kind: 'network' } })
+    await second
+    expect(ports).toHaveLength(2)
+  })
+
+  it('sends nothing when the user cancels', async () => {
+    withSensitiveFields(true)
+    const flow = flowAtDescribing()
+    await flow.generate()
+    flow.dismissError()
+    expect(flow.error).toBeNull()
+    expect(ports).toHaveLength(0)
+  })
+
+  it('generates with no warning on a page without such fields (control)', async () => {
+    withSensitiveFields(false)
+    const flow = flowAtDescribing()
+    const run = flow.generate()
+    ;(await nextPort(1)).emit({ type: 'error', error: { message: 'stop here', kind: 'network' } })
+    await run
+    expect(ports).toHaveLength(1)
+    expect(flow.error).not.toMatchObject({ kind: 'sensitive-page' })
+  })
+
+  it('asks the page, not the extracted context', async () => {
+    withSensitiveFields(true)
+    const flow = flowAtDescribing()
+    await flow.generate()
+    const asked = calls.filter((c) => c.type === 'page-has-sensitive-fields')
+    expect(asked).toEqual([{ type: 'page-has-sensitive-fields', tabId: 1 }])
+  })
+
+  it('warns before a repair sends the page, and sends nothing', async () => {
+    handler = (m) => {
+      if (m.type === 'context-for-anchor') return { ok: true, data: found }
+      if (m.type === 'page-has-sensitive-fields') return { ok: true, data: true }
+      return { ok: true, data: null }
+    }
+    const flow = newFlow()
+    await flow.repair(saved, 'broken')
+    expect(calls.filter((c) => c.type === 'repair')).toEqual([])
+    expect(flow.error).toMatchObject({ kind: 'sensitive-page' })
+    expect(flow.step).toBe('list')
+  })
+})
+
+describe('ending a run that has a preview request in flight (#110, #98)', () => {
+  beforeEach(() => {
+    ports.length = 0
+    ;(globalThis as any).browser.runtime.connect = fakeConnect
+  })
+  afterEach(() => {
+    ;(globalThis as any).browser.runtime.connect = realConnect
+  })
+
+  const gateOf = () => {
+    let open: () => void = () => {}
+    const gate = new Promise<void>((resolve) => (open = resolve))
+    return { gate, open }
+  }
+  const previews = () => calls.filter((c) => c.type === 'preview-css' || c.type === 'clear-preview-css')
+
+  it('removes the late CSS when a refinement is cancelled and then discarded', async () => {
+    const flow = flowAtRefining()
+    flow.followUp = 'second'
+    const held = gateOf()
+    handler = async (m) => {
+      // The CSS check runs before the preview, so it has to answer for the preview to be reached.
+      if (m.type === 'analyse-css') {
+        return { ok: true, data: { static: [], undeclaredCapabilities: [], pendingUrls: [], passed: true } }
+      }
+      if (m.type === 'preview-css' && m.css === '/* A2 */') await held.gate
+      return { ok: true, data: null }
+    }
+    const run = flow.regenerate()
+    ;(await nextPort(1)).emit({ type: 'done', result: cssResult('A2') })
+    await vi.waitFor(() =>
+      expect(calls.some((c) => c.type === 'preview-css' && c.css === '/* A2 */')).toBe(true),
+    )
+
+    // Two steps of the generation counter and no new run in between. Before
+    // #110 was fixed this left the late CSS in the page.
+    flow.cancelGenerating()
+    await flow.discard()
+    held.open()
+    await run
+
+    expect(flow.step).toBe('list')
+    expect(previews().at(-1)?.type).toBe('clear-preview-css')
+    // The previous result's CSS was not put back after the discard.
+    expect(previews().filter((c) => c.type === 'preview-css' && c.css === '/* A1 */')).toEqual([])
+  })
+
+  it('removes CSS whose reply lands while a discard is still clearing the page', async () => {
+    const flow = newFlow()
+    flow.picked = { ...found, cropDrawn: false } as any
+    flow.instruction = 'first'
+    flow.step = 'describing'
+    const css = gateOf()
+    const lock = gateOf()
+    handler = async (m) => {
+      // The CSS check runs before the preview, so it has to answer for the preview to be reached.
+      if (m.type === 'analyse-css') {
+        return { ok: true, data: { static: [], undeclaredCapabilities: [], pendingUrls: [], passed: true } }
+      }
+      if (m.type === 'preview-css') await css.gate
+      if (m.type === 'clear-lock') await lock.gate
+      return { ok: true, data: null }
+    }
+    const run = flow.generate()
+    ;(await nextPort(1)).emit({ type: 'done', result: cssResult('A') })
+    await vi.waitFor(() => expect(calls.some((c) => c.type === 'preview-css')).toBe(true))
+
+    const discarding = flow.discard()
+    await vi.waitFor(() => expect(calls.some((c) => c.type === 'clear-lock')).toBe(true))
+    // The reply lands while discard() is waiting for the lock to clear.
+    css.open()
+    await run
+    lock.open()
+    await discarding
+
+    expect(flow.step).toBe('list')
+    expect(previews().at(-1)?.type).toBe('clear-preview-css')
+  })
+
+  it('clears a script whose preview reply lands while a discard is still clearing the page', async () => {
+    const flow = newFlow()
+    flow.draft = { ...saved, kind: 'js' }
+    flow.analysis = { static: [], undeclaredCapabilities: [], passed: true } as any
+    const reply = gateOf()
+    const lock = gateOf()
+    handler = async (m) => {
+      if (m.type === 'preview-js') await reply.gate
+      if (m.type === 'clear-lock') await lock.gate
+      return { ok: true, data: null }
+    }
+    const run = flow.runJs()
+    await vi.waitFor(() => expect(calls.some((c) => c.type === 'preview-js')).toBe(true))
+
+    const discarding = flow.discard()
+    await vi.waitFor(() => expect(calls.some((c) => c.type === 'clear-lock')).toBe(true))
+    reply.open()
+    await run
+    lock.open()
+    await discarding
+
+    expect(calls.filter((c) => c.type === 'clear-preview-js').map((c) => c.id)).toEqual(['OLD'])
+    expect(flow.jsRan).toBe(false)
+  })
+
+  it('leaves a script that ran alone while its run is current (control)', async () => {
+    const flow = newFlow()
+    flow.draft = { ...saved, kind: 'js' }
+    flow.analysis = { static: [], undeclaredCapabilities: [], passed: true } as any
+    handler = async () => ({ ok: true, data: null })
+    await flow.runJs()
+    expect(flow.jsRan).toBe(true)
+    expect(calls.filter((c) => c.type === 'clear-preview-js')).toEqual([])
+  })
+})
+
+describe('saving while the all-sites screenshot grant is held (#134)', () => {
+  const order: string[] = []
+  const api = (globalThis as any).browser.permissions
+  const real = { ...api }
+  let originRecorded = true
+  beforeEach(() => {
+    order.length = 0
+    originRecorded = true
+    api.request = async (p: any) => (order.push(`request:${(p.origins ?? p.permissions).join()}`), true)
+    api.remove = async (p: any) => (order.push(`remove:${p.origins.join()}`), true)
+    api.contains = async (p: any) => (order.push(`contains:${p.origins.join()}`), originRecorded)
+  })
+  afterEach(() => Object.assign(api, real))
+
+  function flowAtSave(keep: boolean, grantTaken = true) {
+    const flow = newFlow()
+    flow.captureGrantTaken = grantTaken
+    flow.draft = { ...saved, kind: 'css', id: 'NEW' }
+    flow.matchPattern = '*.example.com/*'
+    flow.keepScreenshotPermission = keep
+    return flow
+  }
+
+  it('removes <all_urls> and then requests the site, both before the first await', () => {
+    const flow = flowAtSave(false)
+    void flow.save()
+    // Read with no await since save() was called: the gesture is still live only
+    // if both calls were already made.
+    expect(order).toEqual(['remove:<all_urls>', 'request:*://*.example.com/*'])
+  })
+
+  it('removes nothing when the panel did not record taking the grant (#134)', () => {
+    // A grant the user gave outside the panel has no record, and a save must
+    // not take it away. The site request is still made.
+    const flow = flowAtSave(false, false)
+    void flow.save()
+    expect(order).toEqual(['request:*://*.example.com/*'])
+  })
+
+  it('reads the record from storage.local when the panel starts (#134)', async () => {
+    const flow = newFlow()
+    localStored['wa-capture-grant-held'] = true
+    await flow.loadCaptureGrantRecord()
+    expect(flow.captureGrantTaken).toBe(true)
+    delete localStored['wa-capture-grant-held']
+    await flow.loadCaptureGrantRecord()
+    expect(flow.captureGrantTaken).toBe(false)
+  })
+
+  it('clears the record after the save removed the grant (#134)', async () => {
+    const flow = flowAtSave(false)
+    await flow.save()
+    expect(flow.captureGrantTaken).toBe(false)
+    expect(localWrites.at(-1)).toEqual({ 'wa-capture-grant-held': false })
+  })
+
+  it('checks that the site was recorded and saves when it was', async () => {
+    const flow = flowAtSave(false)
+    await flow.save()
+    expect(order).toContain('contains:*://*.example.com/*')
+    expect(calls.some((c) => c.type === 'save-transform')).toBe(true)
+  })
+
+  it('reports the permission as missing and saves nothing when the site was not recorded', async () => {
+    originRecorded = false
+    const flow = flowAtSave(false)
+    await flow.save()
+    expect(flow.permissionDenied).toBe(true)
+    expect(calls.some((c) => c.type === 'save-transform')).toBe(false)
+  })
+
+  it('removes nothing and does not check when the grant is kept on purpose (control)', async () => {
+    const flow = flowAtSave(true)
+    await flow.save()
+    expect(order).toEqual(['request:*://*.example.com/*'])
+    expect(calls.some((c) => c.type === 'save-transform')).toBe(true)
+  })
+})
+
+describe('a model the account may not use (#125)', () => {
+  const repairWith = async (kind: string) => {
+    const flow = newFlow()
+    handler = (m) => {
+      if (m.type === 'context-for-anchor') return { ok: true, data: found }
+      if (m.type === 'repair') return failure(kind)
+      return { ok: true, data: null }
+    }
+    await flow.repair(saved, 'broken')
+    return flow
+  }
+
+  it('shows its own card kind with the provider message', async () => {
+    const flow = await repairWith('model-not-permitted')
+    expect(flow.error).toMatchObject({ kind: 'model-not-permitted', message: 'failed' })
+  })
+
+  it('offers no retry, so nothing repeats on its own', async () => {
+    const flow = await repairWith('model-not-permitted')
+    expect(flow.canRetry).toBe(false)
+  })
+
+  it('still offers a retry for an ordinary failure (control)', async () => {
+    const flow = await repairWith('network')
+    expect(flow.error).toMatchObject({ kind: 'request-failed' })
+    expect(flow.canRetry).toBe(true)
+  })
+
+  it('is not shown as a retired model', async () => {
+    const flow = await repairWith('model-not-permitted')
+    expect(flow.error?.kind).not.toBe('model-unavailable')
+  })
+})
+
+describe('saving for a site on the excluded list (#131)', () => {
+  const requested: string[] = []
+  const api = (globalThis as any).browser.permissions
+  const real = { ...api }
+  beforeEach(() => {
+    requested.length = 0
+    api.request = async (p: any) => (requested.push((p.origins ?? p.permissions).join()), true)
+  })
+  afterEach(() => Object.assign(api, real))
+
+  function flowFor(pattern: string, excluded: string[]) {
+    const flow = newFlow()
+    flow.draft = { ...saved, kind: 'css', id: 'NEW' }
+    flow.matchPattern = pattern
+    flow.excludedSites = excluded
+    return flow
+  }
+
+  it('does not ask for a parent-domain pattern that covers an excluded host', async () => {
+    const flow = flowFor('*.example.com/*', ['www.example.com'])
+    await flow.save()
+    expect(requested).toEqual([])
+    expect(calls.some((c) => c.type === 'save-transform')).toBe(false)
+    expect(flow.error).toMatchObject({ kind: 'request-failed' })
+    expect(flow.error?.message).toContain('www.example.com')
+  })
+
+  it('does not ask for the excluded host itself', async () => {
+    const flow = flowFor('www.example.com/*', ['example.com'])
+    await flow.save()
+    expect(requested).toEqual([])
+  })
+
+  it('asks as before when another site is excluded (control)', async () => {
+    const flow = flowFor('*.example.com/*', ['other.test'])
+    await flow.save()
+    expect(requested).toEqual(['*://*.example.com/*'])
+    expect(calls.some((c) => c.type === 'save-transform')).toBe(true)
+  })
+
+  it('refuses before anything is awaited, so no gesture is spent (control for the order)', () => {
+    const flow = flowFor('*.example.com/*', ['www.example.com'])
+    void flow.save()
+    expect(flow.error).toMatchObject({ kind: 'request-failed' })
   })
 })

@@ -12,6 +12,16 @@ One file, `public/icons/icon.svg`, declared at every size for both the toolbar
 and the sidebar. It is a dark rounded square holding a header bar, a light
 content block, and an accent block outlined with a dashed stroke.
 
+## Produced assets
+
+The three SVG sources in `public/icons` are `icon.svg` (the mark on a dark
+rounded square), `icon-mark-on-light.svg` (a dark mark for a light toolbar) and
+`icon-mark-on-dark.svg` (a light mark for a dark toolbar). The script
+`scripts/render-icons.sh` renders the PNG files from them with `rsvg-convert`.
+The mark is a page outline with a filled blue block in its upper-left corner,
+placed above the region the badge covers. `npm run check:icons` fails when an
+icon path in `dist/manifest.json` is missing from `dist/`.
+
 ## What has to be produced
 
 | Asset | Sizes | Declared at | Notes |

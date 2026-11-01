@@ -21,3 +21,8 @@ export const CAPTURE_GRANT_KEY = 'wa-capture-grant-held'
 export function recordCaptureGrant(held: boolean): Promise<void> {
   return browser.storage.local.set({ [CAPTURE_GRANT_KEY]: held })
 }
+
+/** Whether the record says the panel took the all-sites grant for a run. */
+export async function readCaptureGrant(): Promise<boolean> {
+  return (await browser.storage.local.get(CAPTURE_GRANT_KEY))[CAPTURE_GRANT_KEY] === true
+}

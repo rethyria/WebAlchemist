@@ -380,3 +380,38 @@ describe('a pause is assigned to the window it was set in (#83)', () => {
     expect(h.calls.insertCSS).toHaveLength(1)
   })
 })
+
+describe('the picker overlay when the sidebar closed during a suspension (#108)', () => {
+  const GRACE_MS = 3000
+  const overlayTo = (tabId: number) =>
+    h.calls.sendMessage.filter(
+      (c) => c.tabId === tabId && (c.message.type === 'cancel-picking' || c.message.type === 'clear-lock'),
+    )
+  beforeEach(() => {
+    vi.useFakeTimers()
+    h.session.set('wa-run-tabs-1', [TAB])
+  })
+  afterEach(() => vi.useRealTimers())
+
+  it('is cancelled and cleared when no sidebar for that window connects after start-up', async () => {
+    await h.boot()
+    await vi.advanceTimersByTimeAsync(GRACE_MS + 100)
+    expect(overlayTo(TAB).map((c) => c.message.type)).toEqual(['cancel-picking', 'clear-lock'])
+    expect(h.session.get('wa-run-tabs-1')).toBeUndefined()
+  })
+
+  it('is left alone when the window\'s sidebar reconnects within the grace period (control)', async () => {
+    await h.boot()
+    h.listeners.get('browser.runtime.onConnect')!(sidebarPort(1))
+    await vi.advanceTimersByTimeAsync(GRACE_MS + 100)
+    expect(overlayTo(TAB)).toEqual([])
+    expect(h.session.get('wa-run-tabs-1')).toEqual([TAB])
+  })
+
+  it('is cleared for a window whose sidebar did not reconnect when another did', async () => {
+    await h.boot()
+    h.listeners.get('browser.runtime.onConnect')!(sidebarPort(2))
+    await vi.advanceTimersByTimeAsync(GRACE_MS + 100)
+    expect(overlayTo(TAB)).toHaveLength(2)
+  })
+})

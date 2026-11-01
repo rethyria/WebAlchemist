@@ -66,10 +66,14 @@ import {
 import { MIN_PASSPHRASE_LENGTH } from '@shared/vault-policy'
 import { assertEndpoint, endpointsOf } from '@shared/endpoint-policy'
 import { destinationOf, sameBinding } from '@shared/credential-binding'
-import type { Provider } from '@shared/types'
+import type { Provider, TransformVersion } from '@shared/types'
 
 const KEY_SETTINGS = 'settings'
 const KEY_TRANSFORMS = 'transforms'
+/** Earlier versions of each transform, by transform id, newest first. */
+const KEY_HISTORY = 'wa-transform-history'
+/** How many earlier versions are kept for each transform. */
+export const MAX_VERSIONS = 5
 const KEY_CREDENTIALS = 'credentials'
 const KEY_USAGE = 'usage'
 /** Set to true once bindStoredCredentials has finished a pass. */
@@ -335,6 +339,54 @@ async function readStored(): Promise<{ valid: Transform[]; invalid: unknown[] }>
   }
 }
 
+type HistoryMap = Record<string, TransformVersion[]>
+
+async function readHistory(): Promise<HistoryMap> {
+  const value = (await browser.storage.local.get(KEY_HISTORY))[KEY_HISTORY]
+  return isObject(value) ? (value as HistoryMap) : {}
+}
+
+/** The earlier versions of a transform, newest first. */
+export async function getVersions(id: string): Promise<TransformVersion[]> {
+  const list = (await readHistory())[id]
+  return Array.isArray(list) ? list : []
+}
+
+/** True when a save changed something a version holds. */
+function versionedFieldsDiffer(a: Transform, b: Transform): boolean {
+  const view = (t: Transform) =>
+    JSON.stringify([t.code, t.rationale, t.match, t.capabilities, t.world ?? null])
+  return view(a) !== view(b)
+}
+
+/**
+ * Keeps `replaced` as the newest version of its transform and drops the oldest
+ * beyond MAX_VERSIONS. Called only from inside the transform queue, so two
+ * saves cannot read the same history and lose one of the two entries.
+ */
+async function recordVersion(replaced: Transform): Promise<void> {
+  const history = await readHistory()
+  const version: TransformVersion = {
+    id: crypto.randomUUID(),
+    code: replaced.code,
+    rationale: replaced.rationale,
+    match: replaced.match,
+    capabilities: replaced.capabilities,
+    ...(replaced.world === undefined ? {} : { world: replaced.world }),
+    savedAt: replaced.updatedAt,
+    ...(replaced.producedBy === undefined ? {} : { producedBy: replaced.producedBy }),
+  }
+  history[replaced.id] = [version, ...(history[replaced.id] ?? [])].slice(0, MAX_VERSIONS)
+  await browser.storage.local.set({ [KEY_HISTORY]: history })
+}
+
+async function forgetVersions(id: string): Promise<void> {
+  const history = await readHistory()
+  if (!(id in history)) return
+  delete history[id]
+  await browser.storage.local.set({ [KEY_HISTORY]: history })
+}
+
 async function writeTransforms(valid: Transform[], invalid: unknown[]): Promise<void> {
   await browser.storage.local.set({ [KEY_TRANSFORMS]: [...valid, ...invalid] })
 }
@@ -408,6 +460,9 @@ export function saveTransform(transform: Transform): Promise<Transform> {
       updatedAt: Date.now(),
     }
     assertValidTransform(next)
+    // Before the transform is replaced, so a failure leaves at worst one extra
+    // version and never a replaced transform with no version of what it was.
+    if (existing && versionedFieldsDiffer(existing, next)) await recordVersion(existing)
     if (index === -1) all.push(next)
     else all[index] = next
     await writeTransforms(all, invalid)
@@ -436,6 +491,7 @@ export function updateTransform(
     if (index === -1) return null
     const next = { ...all[index]!, ...patch, id, updatedAt: Date.now() }
     assertValidTransform(next)
+    if (versionedFieldsDiffer(all[index]!, next)) await recordVersion(all[index]!)
     all[index] = next
     await writeTransforms(all, invalid)
     return next
@@ -449,6 +505,7 @@ export async function deleteTransform(id: string): Promise<void> {
       all.filter((t) => t.id !== id),
       invalid,
     )
+    await forgetVersions(id)
   })
   // The transform is gone, so its usage would otherwise stay in the store
   // forever with no name to show. The provider totals by month keep the cost.
@@ -1150,13 +1207,22 @@ export interface ImportResult {
  * Imports a bundle. JS transforms arrive without code — a shared JS transform
  * carries only intent and anchor, and the importer's own model regenerates the
  * implementation locally under their own review and capability gates. CSS
- * arrives with code intact, since CSS cannot exfiltrate anything.
+ * arrives with code intact unless `rejectCss` refuses it: CSS can request
+ * outside resources, which is how it can send page data to another server, so
+ * the caller checks it for that.
  */
-export function importTransforms(bundle: ExportBundle): Promise<ImportResult> {
-  return mutateTransforms(() => importTransformsNow(bundle))
+export function importTransforms(
+  bundle: ExportBundle,
+  /** True for a CSS transform whose code must not be imported. */
+  rejectCss: (transform: Transform) => boolean = () => false,
+): Promise<ImportResult> {
+  return mutateTransforms(() => importTransformsNow(bundle, rejectCss))
 }
 
-async function importTransformsNow(bundle: ExportBundle): Promise<ImportResult> {
+async function importTransformsNow(
+  bundle: ExportBundle,
+  rejectCss: (transform: Transform) => boolean,
+): Promise<ImportResult> {
   // `undefined > SCHEMA_VERSION` is false, so a file with no version used to
   // pass the check below. A missing or non-numeric version means the file is
   // not one of ours, or was cut short.
@@ -1196,6 +1262,16 @@ async function importTransformsNow(bundle: ExportBundle): Promise<ImportResult> 
     if (transform.kind === 'js') {
       // Never import third-party JavaScript. Strip it and mark for local
       // regeneration from the intent.
+      transform.code = ''
+      transform.enabled = false
+      needsRegeneration.push(transform.id)
+    }
+
+    // An approval in a shared file was given by the sender, not by the person
+    // importing it, so it counts for nothing here.
+    delete transform.approvedCssUrls
+
+    if (transform.kind === 'css' && rejectCss(transform)) {
       transform.code = ''
       transform.enabled = false
       needsRegeneration.push(transform.id)

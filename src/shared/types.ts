@@ -110,6 +110,9 @@ export interface Rationale {
 
 export type TransformStatus = 'ok' | 'broken' | 'disabled'
 
+/** What produced the code a transform holds, recorded when it is saved. */
+export type TransformSource = 'generation' | 'repair' | 'ai-edit' | 'hand-edit'
+
 export interface Transform {
   id: string
   /** Short human-facing name, model-proposed, user-editable. */
@@ -131,8 +134,37 @@ export interface Transform {
   rationale: Rationale
   anchor: Anchor
   code: string
+  /**
+   * External URLs the user approved for this CSS, when its site is set to
+   * list external URLs. A stored URL not in this list does not load. Absent
+   * means none were approved.
+   */
+  approvedCssUrls?: string[]
+  /**
+   * What produced `code`. Absent on records saved before versions were kept,
+   * and on records whose saving caller did not say.
+   */
+  producedBy?: TransformSource
   createdAt: number
   updatedAt: number
+}
+
+/**
+ * An earlier state of a transform, kept when a save replaced it. The fields
+ * are the ones a save can change and a restore puts back; the name, intent,
+ * anchor and order are not versioned.
+ */
+export interface TransformVersion {
+  /** Names the version in a restore request; the save time alone can repeat. */
+  id: string
+  code: string
+  rationale: Rationale
+  match: string
+  capabilities: Capability[]
+  world?: ExecutionWorld
+  /** When this state was saved, as `updatedAt` of the record it came from. */
+  savedAt: number
+  producedBy?: TransformSource
 }
 
 /** Runtime state, derived per page load. Never persisted. */
@@ -381,6 +413,16 @@ export interface CredentialStatus {
 /* Settings                                                            */
 /* ------------------------------------------------------------------ */
 
+/**
+ * What generated CSS may load. `@import` is blocked in every mode.
+ *
+ *   block          only data: URLs (the default)
+ *   same-origin    also URLs on the page's own origin
+ *   list-external  also own-origin URLs, and external URLs the user approves
+ *                  one by one in the approval panel
+ */
+export type CssUrlMode = 'block' | 'same-origin' | 'list-external'
+
 export type HealthCheckMode = 'every-load' | 'once-per-session' | 'manual'
 
 /**
@@ -422,8 +464,19 @@ export interface Settings {
    * consent model for not being asked again.
    */
   keepScreenshotPermission: boolean
-  /** Disables execution of every AI-authored JS transform, everywhere. */
+  /**
+   * Stops every transform, CSS and JavaScript, hand-written and AI-written,
+   * on every site. The name predates the wider meaning and is kept so that
+   * saved settings do not need a migration.
+   */
   aiJsKillSwitch: boolean
+  /**
+   * Per-site CSS URL mode, keyed the way a match pattern names a host. A key
+   * `*.example.com` covers example.com and its subdomains; a key
+   * `shop.example.com` covers that host only. A site with no entry uses
+   * `block`. A wildcard key for a public suffix such as `*.com` is ignored.
+   */
+  cssUrlPolicy: Record<string, CssUrlMode>
   /**
    * Minutes without a provider call after which an unlocked vault locks
    * itself. Zero means never. Has no effect while credentials are not sealed.
@@ -484,6 +537,7 @@ export const DEFAULT_SETTINGS: Settings = {
   accent: 'blue',
   keepScreenshotPermission: false,
   aiJsKillSwitch: false,
+  cssUrlPolicy: {},
   vaultIdleLockMinutes: DEFAULT_VAULT_IDLE_MINUTES,
 }
 
@@ -517,6 +571,16 @@ export interface ReviewResult {
   undeclaredCapabilities: Capability[]
   /** Absent for CSS transforms, which are not sent for model review. */
   model?: ModelReview
+  /**
+   * External CSS URLs waiting for the user's approval. Present only for CSS on
+   * a site set to list external URLs; `passed` is false while any remain.
+   */
+  pendingUrls?: string[]
+  /**
+   * One-time token for saving the reviewed code, present on a model review
+   * that was recorded. It is sent back with `save-transform`.
+   */
+  approvalToken?: string
   /** False when anything blocking is outstanding. */
   passed: boolean
   /** Present when a model call was made for this result. */

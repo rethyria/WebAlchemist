@@ -11,9 +11,11 @@
     type UsageStore,
   } from '@shared/types'
   import { ACCENT_COLOURS } from '@shared/accents'
+  import { KILL_SWITCH_LABEL, KILL_SWITCH_NOTE, killSwitchNotice } from '@shared/kill-switch'
   import { NOT_SAVED_USAGE_ID } from '@shared/usage'
   import Toggle from '@sidebar/components/Toggle.svelte'
   import ProviderSettings from './ProviderSettings.svelte'
+  import ExcludedSites from './ExcludedSites.svelte'
   import SiteAccess from './SiteAccess.svelte'
   import UsageSettings from './UsageSettings.svelte'
   import VaultSettings from './VaultSettings.svelte'
@@ -21,6 +23,7 @@
   import { loadVaultAndStatuses } from './vault-load'
 
   let settings = $state<Settings | null>(null)
+  let killNotice = $state('')
   let statuses = $state<CredentialStatus[]>([])
   let vault = $state({ sealed: false, unlocked: true })
   /** Set when the credentials could not be read and the vault is not locked. */
@@ -95,9 +98,15 @@
    * pages have since changed.
    */
   async function change(next: SettingsChange) {
+    const before = settings?.aiJsKillSwitch
     const saved = await call<Settings>({ type: 'patch-settings', change: next })
     settings = saved
     document.documentElement.dataset['accent'] = saved.accent
+    // The stop-all setting leaves scripts running in tabs that are already
+    // open, so the page says how many need a reload.
+    if (before !== undefined && before !== saved.aiJsKillSwitch) {
+      killNotice = killSwitchNotice(saved.aiJsKillSwitch, await call<number>({ type: 'count-js-tabs' }))
+    }
   }
 
   async function setKey(providerId: string, key: string) {
@@ -187,6 +196,8 @@
 
     <SiteAccess loadTransforms={() => call<Transform[]>({ type: 'get-all-transforms' })} />
 
+    <ExcludedSites />
+
     <section>
       <h2>Accent</h2>
       <div class="swatches" role="radiogroup" aria-label="Accent colour">
@@ -229,14 +240,13 @@
     <section>
       <div class="kill">
         <div>
-          <h2 class="kill-title">Stop running AI-written JavaScript</h2>
-          <p class="subtitle">
-            Takes effect immediately on every site. CSS transforms keep working.
-          </p>
+          <h2 class="kill-title">{KILL_SWITCH_LABEL}</h2>
+          <p class="subtitle">{KILL_SWITCH_NOTE}</p>
+          {#if killNotice}<p class="subtitle" role="status"><strong>{killNotice}</strong></p>{/if}
         </div>
         <Toggle
           checked={settings.aiJsKillSwitch}
-          label="Stop running AI-written JavaScript"
+          label={KILL_SWITCH_LABEL}
           large
           onchange={(checked) => change({ kind: 'fields', fields: { aiJsKillSwitch: checked } })}
         />

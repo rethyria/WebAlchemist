@@ -35,10 +35,13 @@
  * the user that they are a boundary.
  */
 
+import { excludePatternsFor } from '@shared/site-off'
 import type { Capability, Transform } from '@shared/types'
 import { parsePattern } from '@shared/match'
+import { problemWithStoredCode } from './code-gate'
 import { wrapTransform } from './harness'
 import { userScripts, type ExecutionWorld, type Mv3RegisteredUserScript } from './userscripts-api'
+import { getOffHosts } from './site-off'
 import { getAllTransforms, getSettings } from './storage'
 
 /** Worlds are per-transform so transforms cannot collide with each other. */
@@ -153,27 +156,56 @@ export async function hasUserScriptsPermission(): Promise<boolean> {
  */
 
 /**
- * What should be registered for a transform, or null when nothing should be:
- * it is not JavaScript, is disabled, has no code, or is an AI-written script
- * while the kill switch is on.
+ * What should be registered for a transform. `registration` is null when
+ * nothing should be: the transform is not JavaScript, is disabled, has no
+ * code, is not wanted while the kill switch is on, or (unless
+ * `skipAnalysis` is set) has code that no longer passes static analysis.
+ * `blocked` is true only for the last case, so a caller can tell a script the
+ * safety check refuses from one that is simply not wanted.
+ *
+ * Static analysis runs here, at registration, and not only when code is saved.
+ * Registration happens on install, update, start-up, a settings change and an
+ * import, all from stored code, and an analyser that was tightened after the
+ * code was saved would otherwise never see it again.
+ *
+ * `skipAnalysis` is for the CSP probe alone, whose job is to attempt network
+ * access and so cannot pass. The code it registers is fixed in this extension.
  */
-async function registrationFor(transform: Transform): Promise<Mv3RegisteredUserScript | null> {
-  if (transform.kind !== 'js' || !transform.enabled || !transform.code) return null
+async function registrationFor(
+  transform: Transform,
+  options: { skipAnalysis?: boolean } = {},
+): Promise<{ registration: Mv3RegisteredUserScript | null; blocked: boolean }> {
+  const none = { registration: null, blocked: false }
+  if (transform.kind !== 'js' || !transform.enabled || !transform.code) return none
 
   const settings = await getSettings()
-  if (settings.aiJsKillSwitch && transform.origin === 'ai') return null
+  // The switch covers hand-written scripts too: the user's own code can break
+  // a page as much as the model's, and a switch that leaves some JavaScript
+  // running cannot be relied on as the way to stop all of it.
+  if (settings.aiJsKillSwitch) return none
 
+  if (!options.skipAnalysis && problemWithStoredCode(transform, settings) !== null) {
+    return { registration: null, blocked: true }
+  }
+
+  const offHosts = await getOffHosts()
   const worldId = worldIdFor(transform)
   const world = transform.world ?? 'USER_SCRIPT'
 
   return {
-    id: transform.id,
-    matches: matchPatternsFor(transform),
-    // Wrapped so the transform re-applies after framework re-renders.
-    js: [{ code: wrapTransform(transform) }],
-    world: world satisfies ExecutionWorld,
-    ...(world === 'USER_SCRIPT' ? { worldId } : {}),
-    runAt: 'document_idle',
+    registration: {
+      id: transform.id,
+      matches: matchPatternsFor(transform),
+      // The per-site off switch. The registration stays, so that turning the site
+      // back on needs no re-registration of anything else.
+      ...(offHosts.length > 0 ? { excludeMatches: excludePatternsFor(offHosts) } : {}),
+      // Wrapped so the transform re-applies after framework re-renders.
+      js: [{ code: wrapTransform(transform) }],
+      world: world satisfies ExecutionWorld,
+      ...(world === 'USER_SCRIPT' ? { worldId } : {}),
+      runAt: 'document_idle',
+    },
+    blocked: false,
   }
 }
 
@@ -188,9 +220,21 @@ async function configureWorldFor(transform: Transform): Promise<void> {
   })
 }
 
-export async function registerTransform(transform: Transform): Promise<void> {
-  const registration = await registrationFor(transform)
-  if (!registration) return
+/**
+ * Registers a script so it runs on matching pages. Returns false when the
+ * script was left unregistered on purpose (see registrationFor). A script that
+ * fails static analysis is unregistered rather than skipped, because a
+ * registration made earlier would still be running.
+ */
+async function registerTransformNow(
+  transform: Transform,
+  options: { skipAnalysis?: boolean } = {},
+): Promise<boolean> {
+  const { registration, blocked } = await registrationFor(transform, options)
+  if (!registration) {
+    if (blocked) await unregisterTransformNow(transform.id)
+    return false
+  }
 
   if (!(await hasUserScriptsPermission())) {
     throw new Error(
@@ -206,6 +250,7 @@ export async function registerTransform(transform: Transform): Promise<void> {
   } else {
     await userScripts.register([registration])
   }
+  return true
 }
 
 /**
@@ -236,22 +281,21 @@ export function previewIdFor(id: string): string {
  * edits, so only one of the two runs. Pausing an id that is not registered
  * (a new transform) does nothing.
  */
-export async function registerPreview(transform: Transform): Promise<void> {
-  // The kill switch wins over a preview. A preview of model-written code is
-  // still model-written code running on a real page, and the switch exists to
-  // stop that. The alternative, running it because the user asked, was
+async function registerPreviewNow(transform: Transform): Promise<void> {
+  // The kill switch wins over a preview. A preview is still code running on a
+  // real page, and the switch exists to stop that. The alternative, running it because the user asked, was
   // rejected: a setting that a button next to the code can bypass is not a
   // kill switch. The refusal is thrown, and not returned silently, because
-  // registerTransform returns without registering in this case and the caller
+  // registerTransformNow returns without registering in this case and the caller
   // would then report a run that never happened. It is checked before the saved
   // registration is paused, so a refused preview changes nothing.
   const settings = await getSettings()
-  if (settings.aiJsKillSwitch && transform.origin === 'ai') {
+  if (settings.aiJsKillSwitch) {
     throw new Error(
-      'JavaScript written by the model is switched off in the settings, so it was not run. Turn that setting off to run it.',
+      'Running transforms is switched off in the settings, so the JavaScript was not run. Turn that setting off to run it.',
     )
   }
-  await unregisterTransform(transform.id)
+  await unregisterTransformNow(transform.id)
   try {
     await registerPreviewScript(transform)
   } catch (cause) {
@@ -259,7 +303,7 @@ export async function registerPreview(transform: Transform): Promise<void> {
     // would otherwise leave it paused with nothing running in its place, and
     // the caller, which only records the preview after this returns, would
     // not know to restore it.
-    await unregisterPreview(transform.id).catch(() => {})
+    await unregisterPreviewNow(transform.id).catch(() => {})
     throw cause
   }
 }
@@ -267,10 +311,22 @@ export async function registerPreview(transform: Transform): Promise<void> {
 async function registerPreviewScript(transform: Transform): Promise<void> {
   // `enabled` is forced on because the saved record's flag describes the saved
   // script, not the question being asked, which is whether to run this draft
-  // now. The draft copies the saved flag, and registerTransform returns
+  // now. The draft copies the saved flag, and registerTransformNow returns
   // without registering a disabled transform, so a preview of a disabled
   // script reloaded the page and ran nothing. The saved record is not changed.
-  await registerTransform({ ...transform, enabled: true, id: previewIdFor(transform.id) })
+  //
+  // registerTransformNow returns false, and registers nothing, when static
+  // analysis refuses the code. A preview that was refused has to fail here:
+  // returning normally would let the caller reload the page and report a run
+  // that never happened.
+  const registered = await registerTransformNow({
+    ...transform,
+    enabled: true,
+    id: previewIdFor(transform.id),
+  })
+  if (!registered) {
+    throw new Error('This code did not pass the safety check, so it was not run.')
+  }
 }
 
 /**
@@ -279,13 +335,13 @@ async function registerPreviewScript(transform: Transform): Promise<void> {
  * is read here, not kept from when the preview started, so a save made while
  * the preview was running is the version that comes back.
  */
-export async function unregisterPreview(id: string): Promise<void> {
-  await unregisterTransform(previewIdFor(id))
+async function unregisterPreviewNow(id: string): Promise<void> {
+  await unregisterTransformNow(previewIdFor(id))
   const saved = (await getAllTransforms()).find((t) => t.id === id)
-  if (saved) await registerTransform(saved)
+  if (saved) await registerTransformNow(saved)
 }
 
-export async function unregisterTransform(id: string): Promise<void> {
+async function unregisterTransformNow(id: string): Promise<void> {
   if (!(await hasUserScriptsPermission())) return
   try {
     await userScripts.unregister({ ids: [id] })
@@ -299,6 +355,7 @@ function sameRegistration(held: Mv3RegisteredUserScript, wanted: Mv3RegisteredUs
   const code = (r: Mv3RegisteredUserScript) => (r.js ?? []).map((source) => source.code ?? source.file)
   return (
     JSON.stringify(held.matches ?? []) === JSON.stringify(wanted.matches ?? []) &&
+    JSON.stringify(held.excludeMatches ?? []) === JSON.stringify(wanted.excludeMatches ?? []) &&
     JSON.stringify(code(held)) === JSON.stringify(code(wanted)) &&
     (held.world ?? 'USER_SCRIPT') === (wanted.world ?? 'USER_SCRIPT') &&
     held.worldId === wanted.worldId &&
@@ -322,12 +379,20 @@ function sameRegistration(held: Mv3RegisteredUserScript, wanted: Mv3RegisteredUs
  * blocked is removed. `previewed` lists the saved ids that have a preview
  * running: the preview registration (`previewIdFor(id)`) stays registered, and
  * the saved registration stays paused, as registerPreview left them.
+ *
+ * A preview is still code that runs on real pages, so the kill switch and the
+ * per-site off switch apply to it (#121). With the kill switch on, every
+ * preview registration is removed and its id is returned in `endedPreviews`,
+ * for the caller to take off the previewed list; nothing is registered in its
+ * place, because the saved script is not allowed to run either. With sites
+ * off, the preview registration is updated with the new `excludeMatches`, and
+ * the unsaved code is kept for the sites that remain on.
  */
-export async function reregisterAll(
+async function reregisterAllNow(
   previewed: string[] = [],
-): Promise<{ registered: number; skipped: number }> {
+): Promise<{ registered: number; skipped: number; endedPreviews: string[] }> {
   if (!(await hasUserScriptsPermission())) {
-    return { registered: 0, skipped: 0 }
+    return { registered: 0, skipped: 0, endedPreviews: [] }
   }
 
   const held = new Map<string, Mv3RegisteredUserScript>()
@@ -338,17 +403,39 @@ export async function reregisterAll(
   }
 
   const transforms = await getAllTransforms()
-  const keep = previewed.map(previewIdFor)
+  const killed = (await getSettings()).aiJsKillSwitch
+  const endedPreviews = killed ? [...previewed] : []
+  const keep = killed ? [] : previewed.map(previewIdFor)
+  if (!killed) {
+    const offHosts = await getOffHosts()
+    for (const id of keep) {
+      const preview = held.get(id)
+      if (!preview) continue
+      const excludeMatches = offHosts.length > 0 ? excludePatternsFor(offHosts) : undefined
+      if (JSON.stringify(preview.excludeMatches ?? []) === JSON.stringify(excludeMatches ?? [])) continue
+      const { excludeMatches: _old, ...rest } = preview
+      try {
+        await userScripts.update([{ ...rest, ...(excludeMatches ? { excludeMatches } : {}) }])
+      } catch {
+        // A preview that cannot be updated is removed rather than left running
+        // on a site that is now off.
+        await userScripts.unregister({ ids: [id] }).catch(() => {})
+      }
+    }
+  }
   const wanted = new Set<string>()
   let registered = 0
   let skipped = 0
 
   for (const transform of transforms) {
     if (transform.kind !== 'js') continue
-    if (previewed.includes(transform.id)) continue
+    if (!killed && previewed.includes(transform.id)) continue
     try {
-      const registration = await registrationFor(transform)
-      if (!registration) continue
+      const { registration, blocked } = await registrationFor(transform)
+      if (!registration) {
+        if (blocked) skipped += 1
+        continue
+      }
       wanted.add(transform.id)
       const current = held.get(transform.id)
       if (current && sameRegistration(current, registration)) {
@@ -356,7 +443,7 @@ export async function reregisterAll(
         // changed capability list has to reach it.
         await configureWorldFor(transform)
       } else {
-        await registerTransform(transform)
+        await registerTransformNow(transform)
       }
       registered += 1
     } catch {
@@ -373,5 +460,38 @@ export async function reregisterAll(
     }
   }
 
-  return { registered, skipped }
+  return { registered, skipped, endedPreviews }
 }
+
+/*
+ * Every change to the registered user scripts goes through one queue (#122).
+ *
+ * The permission listener, the save handlers, the preview handlers and the
+ * start-up pass all register scripts, and registerTransform reads what is
+ * registered and then registers or updates, which is not one step. Two of them
+ * running at once could both see the script as absent and both register it, and
+ * the second call fails. The functions that call each other (a preview pauses
+ * the saved script and registers its own) use the unqueued versions, so a call
+ * made while holding the queue never waits for the queue.
+ */
+let registrationQueue: Promise<unknown> = Promise.resolve()
+
+function queued<T>(work: () => Promise<T>): Promise<T> {
+  // A failed change must not stop the ones behind it.
+  const result = registrationQueue.then(work, work)
+  registrationQueue = result.catch(() => undefined)
+  return result
+}
+
+export const registerTransform = (
+  transform: Transform,
+  options: { skipAnalysis?: boolean } = {},
+): Promise<boolean> => queued(() => registerTransformNow(transform, options))
+export const unregisterTransform = (id: string): Promise<void> => queued(() => unregisterTransformNow(id))
+export const registerPreview = (transform: Transform): Promise<void> =>
+  queued(() => registerPreviewNow(transform))
+export const unregisterPreview = (id: string): Promise<void> => queued(() => unregisterPreviewNow(id))
+export const reregisterAll = (
+  previewed: string[] = [],
+): Promise<{ registered: number; skipped: number; endedPreviews: string[] }> =>
+  queued(() => reregisterAllNow(previewed))

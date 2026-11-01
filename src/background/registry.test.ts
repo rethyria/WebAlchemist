@@ -15,12 +15,13 @@ const store = new Map<string, unknown>()
 const failing = new Set<string>()
 let stored: unknown[] = []
 let killSwitch = false
+let offHosts: string[] = []
 ;(globalThis as unknown as { browser: unknown }).browser = {
   permissions: { contains: async () => true },
   // `stored` is what getAllTransforms reads, so a test can say what is saved.
   storage: {
     local: {
-      get: async () => ({ transforms: stored, settings: { aiJsKillSwitch: killSwitch } }),
+      get: async () => ({ transforms: stored, settings: { aiJsKillSwitch: killSwitch }, 'wa-sites-off': offHosts }),
       set: async () => {},
     },
   },
@@ -44,6 +45,10 @@ let killSwitch = false
 
 const { registerTransform, registerPreview, unregisterPreview, matchPatternsFor } = await import('./registry')
 
+// Code that passes static analysis, since registering and previewing run it.
+const SAVED_CODE = "document.querySelector('aside').style.display = 'none'"
+const DRAFT_CODE = "document.querySelector('nav').style.display = 'none'"
+
 const saved = {
   id: 'SAVED',
   name: 'Saved',
@@ -57,7 +62,7 @@ const saved = {
   intent: 'x',
   rationale: { targets: '', approach: '', assumptions: [] },
   anchor: { tag: 'div', classes: [], path: 'html>body>div', landmarks: [], selector: 'div.x' },
-  code: 'savedCode()',
+  code: SAVED_CODE,
   createdAt: 1,
   updatedAt: 1,
 } as unknown as Transform
@@ -69,70 +74,109 @@ describe('previewing a saved JavaScript transform', () => {
     store.clear()
     stored = [saved]
     killSwitch = false
+    offHosts = []
     failing.clear()
   })
 
   it('registers the saved script again when the preview cannot be registered', async () => {
     await registerTransform(saved)
     failing.add('preview-SAVED')
-    await expect(registerPreview({ ...saved, code: 'draftCode()' })).rejects.toThrow(
+    await expect(registerPreview({ ...saved, code: DRAFT_CODE })).rejects.toThrow(
       'register failed',
     )
     // Control: the saved script was paused by registerPreview before the
     // failure, so without the restore this is false.
-    expect(code('SAVED')).toContain('savedCode()')
+    expect(code('SAVED')).toContain(SAVED_CODE)
     expect(store.has('preview-SAVED')).toBe(false)
   })
 
+  it('refuses a preview whose code fails static analysis, and registers nothing', async () => {
+    await registerTransform(saved)
+    await expect(
+      registerPreview({ ...saved, code: "eval('1')" }),
+    ).rejects.toThrow(/safety check/)
+    expect(store.has('preview-SAVED')).toBe(false)
+    // Control: the same preview with code that passes registers.
+    await registerPreview({ ...saved, code: DRAFT_CODE })
+    expect(store.has('preview-SAVED')).toBe(true)
+  })
+
   it('runs a preview of a script that is disabled in storage', async () => {
-    await registerPreview({ ...saved, enabled: false, code: 'draftCode()' })
-    expect(code('preview-SAVED')).toContain('draftCode()')
+    await registerPreview({ ...saved, enabled: false, code: DRAFT_CODE })
+    expect(code('preview-SAVED')).toContain(DRAFT_CODE)
   })
 
   it('refuses a preview of model-written code while the kill switch is on', async () => {
-    killSwitch = true
     await registerTransform(saved)
+    killSwitch = true
     await expect(
-      registerPreview({ ...saved, origin: 'ai', code: 'draftCode()' }),
+      registerPreview({ ...saved, origin: 'ai', code: DRAFT_CODE }),
     ).rejects.toThrow(/switched off/)
     expect(store.has('preview-SAVED')).toBe(false)
     // The refused preview did not pause the saved registration.
     expect(store.has('SAVED')).toBe(true)
   })
 
-  it('still previews user-written code while the kill switch is on', async () => {
+  it('refuses a preview of hand-written code while the kill switch is on (#121)', async () => {
+    // Before #121 the switch covered only model-written code, and this
+    // preview ran.
     killSwitch = true
-    await registerPreview({ ...saved, code: 'draftCode()' })
-    expect(code('preview-SAVED')).toContain('draftCode()')
+    await expect(registerPreview({ ...saved, code: DRAFT_CODE })).rejects.toThrow(/switched off/)
+    expect(store.has('preview-SAVED')).toBe(false)
+  })
+
+  it('previews hand-written code while the kill switch is off (control)', async () => {
+    await registerPreview({ ...saved, code: DRAFT_CODE })
+    expect(code('preview-SAVED')).toContain(DRAFT_CODE)
+  })
+
+  it('does not register hand-written code while the kill switch is on (#121)', async () => {
+    killSwitch = true
+    await registerTransform(saved)
+    expect(store.has('SAVED')).toBe(false)
+  })
+
+  it('excludes the hosts that are turned off from a registration (#121)', async () => {
+    offHosts = ['www.example.com', 'bank.example.org']
+    await registerTransform(saved)
+    expect((store.get('SAVED') as any).excludeMatches).toEqual([
+      '*://bank.example.org/*',
+      '*://www.example.com/*',
+    ])
+  })
+
+  it('registers with no exclusions when no host is turned off (control)', async () => {
+    await registerTransform(saved)
+    expect((store.get('SAVED') as any).excludeMatches).toBeUndefined()
   })
 
   it('pauses the saved registration while the preview runs', async () => {
     await registerTransform(saved)
-    await registerPreview({ ...saved, code: 'draftCode()' })
+    await registerPreview({ ...saved, code: DRAFT_CODE })
     expect(store.has('SAVED')).toBe(false)
-    expect(code('preview-SAVED')).toContain('draftCode()')
+    expect(code('preview-SAVED')).toContain(DRAFT_CODE)
   })
 
   it('registers the saved transform again when the preview is cleared', async () => {
     await registerTransform(saved)
-    await registerPreview({ ...saved, code: 'draftCode()' })
+    await registerPreview({ ...saved, code: DRAFT_CODE })
     await unregisterPreview('SAVED')
     expect(store.has('preview-SAVED')).toBe(false)
-    expect(code('SAVED')).toContain('savedCode()')
-    expect(code('SAVED')).not.toContain('draftCode()')
+    expect(code('SAVED')).toContain(SAVED_CODE)
+    expect(code('SAVED')).not.toContain(DRAFT_CODE)
   })
 
   it('does not register a transform that is disabled in storage', async () => {
     stored = [{ ...saved, enabled: false }]
-    await registerPreview({ ...saved, code: 'draftCode()' })
+    await registerPreview({ ...saved, code: DRAFT_CODE })
     await unregisterPreview('SAVED')
     expect(store.size).toBe(0)
   })
 
   it('registers nothing for a preview of a transform that was never saved', async () => {
     stored = []
-    await registerPreview({ ...saved, id: 'NEW', code: 'draftCode()' })
-    expect(code('preview-NEW')).toContain('draftCode()')
+    await registerPreview({ ...saved, id: 'NEW', code: DRAFT_CODE })
+    expect(code('preview-NEW')).toContain(DRAFT_CODE)
     await unregisterPreview('NEW')
     expect(store.size).toBe(0)
   })

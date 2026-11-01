@@ -13,6 +13,7 @@
  */
 
 import { vi } from 'vitest'
+import { originCovers } from '@shared/site-access'
 
 /** Captured before a test installs fake timers, so `boot()` can still wait. */
 const realSetTimeout = globalThis.setTimeout
@@ -69,6 +70,8 @@ export interface Harness {
     registry: string[]
     setBadgeText: { tabId?: number | undefined; text: string | null }[]
     sendMessage: { tabId: number; message: any }[]
+    /** Ids of tabs passed to `tabs.reload`. */
+    reload: number[]
     /** Messages the background broadcast with `runtime.sendMessage`. */
     runtimeMessages: any[]
   }
@@ -106,7 +109,7 @@ export function createHarness(): Harness {
     rejectContentScript: () => false,
     origins: [],
     tabWindows: new Map(),
-    calls: { insertCSS: [], removeCSS: [], unregister: [], registry: [], setBadgeText: [], sendMessage: [], runtimeMessages: [] },
+    calls: { insertCSS: [], removeCSS: [], unregister: [], registry: [], setBadgeText: [], sendMessage: [], reload: [], runtimeMessages: [] },
     listeners: new Map(),
     hasUserScripts: false,
     allUrlsGranted: false,
@@ -131,8 +134,12 @@ export function createHarness(): Harness {
     'browser.runtime.getURL': (path: string) => ORIGIN + path,
     'browser.runtime.id': 'wa@test',
     'browser.permissions.getAll': async () => ({ origins: h.origins, permissions: [] }),
-    'browser.permissions.contains': async (p?: { origins?: string[] }) =>
-      p?.origins?.includes('<all_urls>') ? h.allUrlsGranted : h.hasUserScripts,
+    'browser.permissions.contains': async (p?: { origins?: string[] }) => {
+      if (p?.origins?.includes('<all_urls>')) return h.allUrlsGranted
+      return p?.origins
+        ? p.origins.every((o) => h.origins.some((held) => originCovers(held, o)))
+        : h.hasUserScripts
+    },
     'browser.permissions.remove': async (p: { origins?: string[] }) => {
       h.permissionsRemoved.push(structuredClone(p))
       if (p.origins?.includes('<all_urls>')) h.allUrlsGranted = false
@@ -185,6 +192,9 @@ export function createHarness(): Harness {
       windowId: h.tabWindows.get(id) ?? 1,
     }),
     'browser.tabs.query': async () => [...h.tabUrls].map(([id, url]) => ({ id, url })),
+    'browser.tabs.reload': async (tabId: number) => {
+      h.calls.reload.push(tabId)
+    },
     'browser.tabs.sendMessage': async (tabId: number, message: unknown) => {
       h.calls.sendMessage.push({ tabId, message })
       return h.contentReply(message)

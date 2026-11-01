@@ -54,7 +54,11 @@ describe('a preview when the page is shown again from the back-forward cache (#8
     await commitUrl(PAGE, ['forward_back'])
     expect(stored()).toBe('a { color: red }')
     await h.onMessage({ type: 'clear-preview-css', tabId: TAB })
-    expect(h.calls.removeCSS).toEqual([{ tabId: TAB, css: 'a { color: red }' }])
+    // The restored page also has the stylesheet applied from the stored
+    // transform, which is removed as well (#50); this test is about the preview's.
+    expect(h.calls.removeCSS.filter((c) => c.css === 'a { color: red }')).toEqual([
+      { tabId: TAB, css: 'a { color: red }' },
+    ])
   })
 
   it('does not give a preview made on one document to a different one that is restored', async () => {
@@ -100,7 +104,11 @@ describe('a preview when the page is shown again from the back-forward cache (#8
     h.calls.removeCSS.length = 0
     await commitUrl(PAGE, ['forward_back'])
     expect(stored()).toBeUndefined()
-    expect(h.calls.removeCSS).toEqual([{ tabId: TAB, css: 'a { color: red }' }])
+    // The restored page also has the stylesheet applied from the stored
+    // transform, which is removed as well (#50); this test is about the preview's.
+    expect(h.calls.removeCSS.filter((c) => c.css === 'a { color: red }')).toEqual([
+      { tabId: TAB, css: 'a { color: red }' },
+    ])
   })
 
   it('discards the filed strings when the tab closes', async () => {
