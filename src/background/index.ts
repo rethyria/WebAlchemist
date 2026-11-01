@@ -117,16 +117,45 @@ browser.action.onClicked.addListener(() => {
 browser.webNavigation.onHistoryStateUpdated.addListener(async (details) => {
   if (details.frameId !== 0) return
   await sendToContent(details.tabId, { type: 'url-changed', url: details.url })
+
+  /*
+   * The same evaluation a full page load gets, without discarding what is
+   * applied. The document survives a route change, so the stylesheet stays in
+   * the page and `applyCssTransforms` compares against it: it does nothing when
+   * the same CSS still applies, and removes it when the new route no longer
+   * matches a transform's pattern. Before this, a single-page app that moved
+   * from a matching route to a non-matching one kept the CSS and the badge
+   * count, and a move the other way gained neither.
+   */
+  await evaluateTab(details.tabId, details.url, { navigated: false })
 })
 
 browser.webNavigation.onCommitted.addListener(async (details) => {
   if (details.frameId !== 0) return
   // The page reloaded, so nothing we injected survives — forget it rather
   // than trying to remove a stylesheet that is already gone.
-  // The same goes for a preview: the document it was injected into is gone.
   await forgetCss('applied', details.tabId)
+  // The same goes for a preview: the document it was injected into is gone.
   await forgetCss('preview', details.tabId)
-  const transforms = await transformsForUrl(details.url)
+  await evaluateTab(details.tabId, details.url, { navigated: true })
+})
+
+/**
+ * Applies CSS, updates the badge and starts the health check for a top frame
+ * whose URL just changed, by page load or by history state.
+ *
+ * `navigated` is true for a new document. A new document starts with no known
+ * breakage, so the badge's broken state is reset. A route change keeps the
+ * document, and the broken state is kept until a health check replaces it,
+ * because clearing it would hide a problem that is still on the page when the
+ * configured mode runs no new check.
+ */
+async function evaluateTab(
+  tabId: number,
+  url: string,
+  { navigated }: { navigated: boolean },
+): Promise<void> {
+  const transforms = await transformsForUrl(url)
 
   /*
    * Before the early return below, not after. A tab that navigates from a site
@@ -134,20 +163,22 @@ browser.webNavigation.onCommitted.addListener(async (details) => {
    * `transforms.length === 0` case — the one the early return skips.
    */
   const settings = await getSettings()
-  await badge.tabNavigated(details.tabId, transforms.length, settings.accent)
+  if (navigated) await badge.tabNavigated(tabId, transforms.length, settings.accent)
+  else await badge.transformCountChanged(tabId, transforms.length, settings.accent)
+
+  // A route change may leave nothing to apply, and the previous route's CSS
+  // has to come out. On a new document nothing was applied, so this is a no-op.
+  if (!navigated || transforms.length > 0) await applyCssTransforms(tabId, transforms)
 
   if (transforms.length === 0) return
-
-  await applyCssTransforms(details.tabId, transforms)
-
-  if (!shouldCheck(settings, details.url)) return
+  if (!shouldCheck(settings, url)) return
 
   // Deliberately not awaited alongside the CSS application: the check waits up
   // to three seconds for a slow page to settle, and CSS must not queue behind
   // it. A visible delay before the page restyles would be a worse bug than a
   // late health result.
-  void checkAndPublish(details.tabId, transforms)
-})
+  void checkAndPublish(tabId, transforms)
+}
 
 /* ------------------------------------------------------------------ */
 /* Message routing                                                     */
