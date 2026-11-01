@@ -505,6 +505,10 @@ export class Flow {
 
       case 'picking-cancelled':
         this.awaitingReference = false
+        // Without this, Esc during a region pick left the screenshot button
+        // disabled: both panels disable it while this is true and offer no
+        // other way out of region mode.
+        this.choosingRegion = false
         // Same reason as cancelPicking: the list must not keep the old run.
         if (this.step === 'picking') void this.discard()
         return

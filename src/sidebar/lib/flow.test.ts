@@ -652,3 +652,14 @@ describe('a reference or region pick still running in the page', () => {
     expect(stops()).toHaveLength(0)
   })
 })
+
+describe('Esc in the page during a screenshot region pick', () => {
+  it('lets the screenshot button be used again', async () => {
+    const flow = flowAtRefining()
+    await flow.chooseScreenshotRegion()
+    expect(flow.choosingRegion).toBe(true)
+    flow.receive({ type: 'picking-cancelled' } as any)
+    expect(flow.choosingRegion).toBe(false)
+    expect(flow.step).toBe('refining')
+  })
+})
