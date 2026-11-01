@@ -438,6 +438,16 @@ const SELECTOR_METHODS = new Map([
   ['getElementsByTagNameNS', 1], ['closest', 0], ['matches', 0],
 ])
 
+/**
+ * Properties that move from an element to the nodes around it. On `document.head`
+ * or `document.documentElement` they lead to the style elements of the page,
+ * whose text can then be rewritten to load an address.
+ */
+const TREE_TRAVERSAL_NAMES = new Set([
+  'children', 'childNodes', 'firstChild', 'lastChild', 'firstElementChild', 'lastElementChild',
+  'nextSibling', 'previousSibling', 'nextElementSibling', 'previousElementSibling',
+])
+
 /** Functions that resolve to another value later, so a literal using one proves nothing. */
 const CSS_INDIRECT = /\b(var|env|attr)\s*\(/i
 const CSS_LOADING_TEXT = /@import|\burl\s*\(|\bimage-set\s*\(|\bsrc\s*\(/i
@@ -764,6 +774,85 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
       !definedMembers.has('createElement') &&
       !dynamicDefinitions
     )
+  }
+
+  /**
+   * True when the expression is `document.head` or `document.documentElement`,
+   * is reached from one by member accesses and calls, or is a name that holds
+   * such a value. `document.body.previousElementSibling` (which is the head)
+   * and a selector for `head` or `html` count as well. One source that is
+   * rooted there is enough, because the name may hold it when the use runs.
+   */
+  function isHeadRooted(expr: N | null, scope: Scope, visiting = new Set<Binding>()): boolean {
+    if (!expr) return false
+    switch (expr.type) {
+      case 'ChainExpression':
+        return isHeadRooted(expr['expression'], scope, visiting)
+      case 'ConditionalExpression':
+        return isHeadRooted(expr['consequent'], scope, visiting) || isHeadRooted(expr['alternate'], scope, visiting)
+      case 'LogicalExpression':
+        return isHeadRooted(expr['left'], scope, visiting) || isHeadRooted(expr['right'], scope, visiting)
+      case 'MemberExpression': {
+        const name = staticName(expr)
+        const object = expr['object'] as N
+        if (object.type === 'Identifier' && object['name'] === 'document' && !scope.lookup('document')) {
+          return name === 'head' || name === 'documentElement'
+        }
+        if (
+          ['previousElementSibling', 'previousSibling'].includes(name ?? '') &&
+          object.type === 'MemberExpression' &&
+          staticName(object) === 'body' &&
+          object['object'].type === 'Identifier' &&
+          object['object'].name === 'document'
+        ) {
+          return true
+        }
+        return isHeadRooted(object, scope, visiting)
+      }
+      case 'CallExpression': {
+        const callee = expr['callee'] as N
+        if (callee.type !== 'MemberExpression') return false
+        const name = staticName(callee)
+        if (name !== null && SELECTOR_METHODS.has(name)) {
+          const texts = possibleTexts((expr['arguments'] as N[])[SELECTOR_METHODS.get(name)!] ?? null, scope)
+          if (texts?.some((t) => ['head', 'html'].includes(t.trim().toLowerCase()))) return true
+        }
+        return isHeadRooted(callee['object'], scope, visiting)
+      }
+      case 'Identifier': {
+        const binding = scope.lookup(expr['name'])
+        if (!binding || visiting.has(binding)) return false
+        visiting.add(binding)
+        const found = binding.sources.some((src) => src.value !== null && isHeadRooted(src.value, src.scope, visiting))
+        visiting.delete(binding)
+        return found
+      }
+    }
+    return false
+  }
+
+  /** Refuses a read of the nodes around, or a destructuring of the parts of, the head or the root element. */
+  function refuseHeadTraversal(node: N, object: N, scope: Scope): void {
+    deferred.push(() => {
+      if (!isHeadRooted(object, scope)) return
+      block(
+        node,
+        'head traversal',
+        'Moves from the head or the root element to the nodes inside it, which include style elements whose text can be rewritten to load an address, and this check cannot see what is written.',
+      )
+    })
+  }
+
+  /** `const { lastElementChild } = document.head` reads a traversal property without a member access. */
+  function checkHeadDestructure(pattern: N, init: N, scope: Scope): void {
+    if (pattern.type !== 'ObjectPattern') return
+    for (const prop of pattern['properties'] as N[]) {
+      const key =
+        prop.type === 'RestElement' || prop['computed'] === true
+          ? null
+          : prop['key'].type === 'Identifier' ? prop['key'].name : String(prop['key'].value)
+      if (key === null || TREE_TRAVERSAL_NAMES.has(key)) refuseHeadTraversal(prop, init, scope)
+    }
   }
 
   /**
@@ -1490,6 +1579,7 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
     }
     if (name !== null) {
       checkEventName(name, node, ctx)
+      if (TREE_TRAVERSAL_NAMES.has(name)) refuseHeadTraversal(node, object, ctx.scope)
       // Two names are refused wherever they are read but are ordinary when
       // used in the one way that cannot hand out the window or the document.
       // `open` is also a property of `details` and `dialog`, and writing it
@@ -1746,17 +1836,46 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
     }
 
     if (SELECTOR_METHODS.has(name)) {
-      const selector = literalText(args[SELECTOR_METHODS.get(name)!] ?? null)
-      // The tag name is matched in the position where a type selector can
-      // stand, so `[style*="width"]` and `.script` do not match.
-      const tag = selector === null ? null : /(?:^|[\s,>+~(])(script|style)(?![\w-])(?!\s*[*^$~|]?=)/i.exec(selector)
-      if (tag) {
-        block(
-          node,
-          `${name}(${tag[1]!.toLowerCase()})`,
-          'Selects a script or style element. Their text can be rewritten to run code or to load an address, and this check cannot see what is written, so they are not available to a page transform.',
-        )
-      }
+      const arg = args[SELECTOR_METHODS.get(name)!] ?? null
+      // Every text the argument can take is checked, after CSS escapes are
+      // decoded as the browser decodes them. An argument that is not written
+      // out cannot be checked and could be `'style'`, so it is refused.
+      deferred.push(() => {
+        if (arg === null) return
+        const texts = possibleTexts(arg, ctx.scope)
+        if (texts === null) {
+          block(
+            node,
+            `${name}(not written out)`,
+            'Selects elements with a selector or tag name that is not written out in this code, so this check cannot tell whether it selects a script or style element.',
+          )
+          return
+        }
+        for (const text of texts) {
+          for (const form of [text, decodeCssEscapes(text)]) {
+            // The tag name is matched in the position where a type selector can
+            // stand, so `[style*="width"]` and `.script` do not match. The bar
+            // is the namespace separator of `*|style`.
+            const tag = /(?:^|[\s,>+~(|])(script|style)(?![\w-])(?!\s*[*^$~|]?=)/i.exec(form)
+            if (tag) {
+              block(
+                node,
+                `${name}(${tag[1]!.toLowerCase()})`,
+                'Selects a script or style element. Their text can be rewritten to run code or to load an address, and this check cannot see what is written, so they are not available to a page transform.',
+              )
+            }
+            // Every element of the page includes the style elements. The
+            // `*` of an attribute operator (`[href*="x"]`) is not a selector.
+            if (/(?:^|[\s,>+~(|])\*(?!=)/.test(form)) {
+              block(
+                node,
+                `${name}(*)`,
+                'Selects every element, which includes script and style elements whose text can be rewritten, and this check cannot see what is written.',
+              )
+            }
+          }
+        }
+      })
     }
   }
 
@@ -1973,6 +2092,7 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
             if (binding && d['init']) binding.sources.push({ value: d['init'], op: '=', scope: ctx.scope })
           } else {
             visitPattern(d['id'], ctx, 'binding')
+            if (d['init']) checkHeadDestructure(d['id'], d['init'], ctx.scope)
           }
           if (d['init']) visit(d['init'], ctx, d)
         }
@@ -2006,6 +2126,7 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
           }
         } else {
           visitPattern(left, ctx, 'assign')
+          checkHeadDestructure(left, node['right'], ctx.scope)
         }
         return visit(node['right'], ctx, node)
       }
