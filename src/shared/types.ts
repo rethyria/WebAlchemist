@@ -431,6 +431,18 @@ export interface Settings {
   vaultIdleLockMinutes: number
 }
 
+/**
+ * One change to the stored settings, applied by the background as a single
+ * read, change and write. The settings page sends these instead of the whole
+ * settings object, because the object it holds is the one it loaded and any
+ * change saved elsewhere since then would be written over (#74).
+ */
+export type SettingsChange =
+  /** Adds a provider and makes it active when none is. Fails when the id exists. */
+  | { kind: 'add-provider'; provider: Provider }
+  /** Removes a provider and repairs the active choice. A missing id is not an error. */
+  | { kind: 'remove-provider'; providerId: string }
+
 export const DEFAULT_SETTINGS: Settings = {
   schemaVersion: SCHEMA_VERSION,
   providers: [],

@@ -81,6 +81,7 @@ import {
   lockVault,
   reorderTransforms,
   saveSettings,
+  changeSettings,
   saveTransform,
   saveCredentialFor,
   unlockVault,
@@ -537,6 +538,9 @@ async function handle(
       // The kill switch changes which scripts may run.
       await reregister()
       return true
+
+    case 'patch-settings':
+      return changeSettings(message.change)
 
     case 'set-credential': {
       // The destination the key is bound to comes from the saved provider, not

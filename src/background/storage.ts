@@ -43,6 +43,7 @@ import {
   type Credential,
   type CredentialStatus,
   type Settings,
+  type SettingsChange,
   type TokenUsage,
   type Transform,
   type UsageStore,
@@ -84,7 +85,7 @@ export async function getSettings(): Promise<Settings> {
   return migrateSettings(raw)
 }
 
-export async function saveSettings(settings: Settings): Promise<void> {
+async function writeSettings(settings: Settings): Promise<void> {
   const idle = settings.vaultIdleLockMinutes
   if (!Number.isInteger(idle) || idle < 0) {
     throw new Error('The vault lock period must be a whole number of minutes, or 0 for never.')
@@ -128,6 +129,66 @@ export async function saveSettings(settings: Settings): Promise<void> {
   // that picking an accent colour does not count as using the vault.
   const before = previous?.vaultIdleLockMinutes ?? DEFAULT_SETTINGS.vaultIdleLockMinutes
   if (before !== idle && (await recallKey())) await armIdleLock()
+}
+
+/**
+ * Settings writes run one after another. A change is a read, a change and a
+ * write, and two that overlapped would each start from the same stored value
+ * so that one of them was lost. Same reasoning as the transform queue.
+ */
+let settingsQueue: Promise<unknown> = Promise.resolve()
+
+function mutateSettings<T>(work: () => Promise<T>): Promise<T> {
+  const result = settingsQueue.then(work, work)
+  settingsQueue = result.catch(() => undefined)
+  return result
+}
+
+/**
+ * Replaces the stored settings with the ones given. A caller that holds a copy
+ * from when it loaded should use changeSettings, which does not write back
+ * fields it did not mean to change.
+ */
+export function saveSettings(settings: Settings): Promise<void> {
+  return mutateSettings(() => writeSettings(settings))
+}
+
+/**
+ * Applies one change to the settings as they are stored now, inside the
+ * settings queue, and returns what was saved. Throws when the change is
+ * refused, and then writes nothing.
+ */
+export function changeSettings(change: SettingsChange): Promise<Settings> {
+  return mutateSettings(async () => {
+    const current = await getSettings()
+    let next: Settings
+    switch (change.kind) {
+      case 'add-provider':
+        if (current.providers.some((p) => p.id === change.provider.id)) {
+          throw new Error('A provider with that id already exists.')
+        }
+        next = {
+          ...current,
+          providers: [...current.providers, change.provider],
+          activeProviderId: current.activeProviderId ?? change.provider.id,
+        }
+        break
+      case 'remove-provider': {
+        const remaining = current.providers.filter((p) => p.id !== change.providerId)
+        next = {
+          ...current,
+          providers: remaining,
+          activeProviderId:
+            current.activeProviderId === change.providerId
+              ? (remaining[0]?.id ?? null)
+              : current.activeProviderId,
+        }
+        break
+      }
+    }
+    await writeSettings(next)
+    return next
+  })
 }
 
 function migrateSettings(raw: Partial<Settings>): Settings {

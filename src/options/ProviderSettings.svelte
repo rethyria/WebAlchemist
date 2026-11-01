@@ -19,6 +19,7 @@
     type Provider,
     type ProviderType,
     type Settings,
+    type SettingsChange,
   } from '@shared/types'
   import { endpointProblem } from '@shared/endpoint-policy'
   import ModelPicker from './ModelPicker.svelte'
@@ -29,14 +30,13 @@
     settings: Settings
     statuses: CredentialStatus[]
     onsave: (settings: Settings) => Promise<void>
+    onchange: (change: SettingsChange) => Promise<void>
     onsetkey: (providerId: string, key: string) => Promise<void>
-    /** The settings as stored now, for the rollback of a failed add. */
-    onreadsettings: () => Promise<Settings>
     onclearkey: (providerId: string) => Promise<void>
     onconnectoauth: (providerId: string) => Promise<void>
   }
 
-  let { settings, statuses, onsave, onsetkey, onreadsettings, onclearkey, onconnectoauth }: Props = $props()
+  let { settings, statuses, onsave, onchange, onsetkey, onclearkey, onconnectoauth }: Props = $props()
 
   /*
    * The sidebar links here with #models after a model error. A browser scrolls
@@ -206,9 +206,7 @@
       // does to the provider.
       await addProviderWithKey(
         {
-          current: () => settings,
-          readSettings: onreadsettings,
-          save: onsave,
+          change: onchange,
           setKey: onsetkey,
         },
         provider,

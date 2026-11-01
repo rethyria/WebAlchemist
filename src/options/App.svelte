@@ -6,6 +6,7 @@
     type CredentialStatus,
     type HealthCheckMode,
     type Settings,
+    type SettingsChange,
     type Transform,
     type UsageStore,
   } from '@shared/types'
@@ -90,6 +91,17 @@
     await call({ type: 'save-settings', settings: next })
   }
 
+  /**
+   * Sends one change for the background to apply to the stored settings. The
+   * page then shows what was stored, so it does not keep a copy that other
+   * pages have since changed.
+   */
+  async function change(next: SettingsChange) {
+    const saved = await call<Settings>({ type: 'patch-settings', change: next })
+    settings = saved
+    document.documentElement.dataset['accent'] = saved.accent
+  }
+
   async function setKey(providerId: string, key: string) {
     const next = await storeKey(call, providerId, key)
     if (next) statuses = next
@@ -130,8 +142,8 @@
       {settings}
       {statuses}
       onsave={save}
+      onchange={change}
       onsetkey={setKey}
-      onreadsettings={() => call<Settings>({ type: 'get-settings' })}
       onclearkey={clearKey}
       onconnectoauth={connectOAuth}
     />

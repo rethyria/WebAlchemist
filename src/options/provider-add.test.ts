@@ -1,9 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { DEFAULT_SETTINGS, type Provider, type Settings } from '@shared/types'
-import { addProviderWithKey, storeKey, withoutProvider } from './provider-add'
+import type { Provider, SettingsChange } from '@shared/types'
+import { addProviderWithKey, storeKey } from './provider-add'
 
 const provider = { id: 'new', label: 'New', type: 'anthropic' } as unknown as Provider
-const existing = { id: 'old', label: 'Old', type: 'anthropic' } as unknown as Provider
 
 describe('storing a key', () => {
   it('does not fail when the key is stored and the status read fails afterwards', async () => {
@@ -40,55 +39,53 @@ describe('storing a key', () => {
 })
 
 describe('adding a provider with its key', () => {
-  function deps(overrides: { setKey?: () => Promise<void>; stored: () => Settings }) {
-    const saved: Settings[] = []
+  function deps(setKey: () => Promise<void> = async () => undefined) {
+    const changes: SettingsChange[] = []
     return {
-      saved,
+      changes,
       deps: {
-        current: () => ({ ...DEFAULT_SETTINGS, providers: [existing], activeProviderId: 'old' }),
-        readSettings: async () => overrides.stored(),
-        save: async (s: Settings) => {
-          saved.push(s)
+        change: async (c: SettingsChange) => {
+          changes.push(c)
         },
-        setKey: overrides.setKey ?? (async () => undefined),
+        setKey,
       },
     }
   }
 
-  it('removes only the new provider when the key cannot be stored, keeping a change saved elsewhere meanwhile', async () => {
-    const elsewhere: Settings = {
-      ...DEFAULT_SETTINGS,
-      providers: [existing, provider],
-      activeProviderId: 'old',
-      aiJsKillSwitch: true, // saved from the sidebar after the page loaded
-    }
-    const { saved, deps: d } = deps({
-      stored: () => elsewhere,
-      setKey: async () => {
-        throw new Error('refused')
-      },
+  // The page sends changes and never a whole settings object, so there is no
+  // copy of the loaded settings that it could write back over a change made
+  // elsewhere (the review finding for #74).
+  it('sends one add and then removes only the new provider when the key cannot be stored', async () => {
+    const { changes, deps: d } = deps(async () => {
+      throw new Error('refused')
     })
 
     await expect(addProviderWithKey(d, provider, 'sk')).rejects.toThrow('refused')
 
-    expect(saved).toHaveLength(2)
-    // The rollback keeps the kill switch set elsewhere. Writing back the
-    // snapshot taken before the add would have turned it off again.
-    expect(saved[1]?.aiJsKillSwitch).toBe(true)
-    expect(saved[1]?.providers.map((p) => p.id)).toEqual(['old'])
+    expect(changes).toEqual([
+      { kind: 'add-provider', provider },
+      { kind: 'remove-provider', providerId: 'new' },
+    ])
   })
 
   // Control: when the key is stored nothing is rolled back.
-  it('saves once and keeps the provider when the key is stored', async () => {
-    const { saved, deps: d } = deps({ stored: () => DEFAULT_SETTINGS })
+  it('sends only the add when the key is stored', async () => {
+    const { changes, deps: d } = deps()
     await addProviderWithKey(d, provider, 'sk')
-    expect(saved).toHaveLength(1)
-    expect(saved[0]?.providers.map((p) => p.id)).toEqual(['old', 'new'])
+    expect(changes).toEqual([{ kind: 'add-provider', provider }])
   })
 
-  it('repairs the active provider when the removed one was active', () => {
-    const settings = { ...DEFAULT_SETTINGS, providers: [existing, provider], activeProviderId: 'new' }
-    expect(withoutProvider(settings, 'new').activeProviderId).toBe('old')
-    expect(withoutProvider({ ...settings, providers: [provider] }, 'new').activeProviderId).toBeNull()
+  it('does not store a key when the add is refused', async () => {
+    let keyStored = false
+    const d = {
+      change: async () => {
+        throw new Error('duplicate')
+      },
+      setKey: async () => {
+        keyStored = true
+      },
+    }
+    await expect(addProviderWithKey(d, provider, 'sk')).rejects.toThrow('duplicate')
+    expect(keyStored).toBe(false)
   })
 })
