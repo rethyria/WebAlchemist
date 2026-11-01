@@ -199,3 +199,36 @@ describe('once-per-session checks (#94)', () => {
     expect(checks()).toHaveLength(1)
   })
 })
+
+describe('changing a match pattern in the editor (#89)', () => {
+  const OTHER_TAB = 9
+
+  it('takes the CSS off a tab the new pattern no longer matches', async () => {
+    h.tabUrls.set(TAB, OLD_PAGE)
+    h.tabUrls.set(OTHER_TAB, 'https://other.example/')
+    h.contentReply = (message) => (message.type === 'ping' ? true : { type: 'health-check-result', states: [] })
+    await commit(OLD_PAGE)
+    expect(h.calls.insertCSS).toHaveLength(1)
+
+    // The editor saves the record with a new pattern, then asks for a reapply.
+    await h.onMessage({ type: 'save-transform', transform: { ...app, match: 'other.example/*' } })
+    await h.onMessage({ type: 'reapply-everywhere', id: app.id })
+
+    expect(h.calls.removeCSS.map((c) => c.tabId)).toEqual([TAB])
+    expect(h.calls.insertCSS.map((c) => c.tabId)).toEqual([TAB, OTHER_TAB])
+    expect(h.calls.setBadgeText.filter((c) => c.tabId === TAB).at(-1)?.text).toBe('')
+    expect(h.calls.setBadgeText.filter((c) => c.tabId === OTHER_TAB).at(-1)?.text).toBe('1')
+  })
+
+  it('control: an unchanged pattern leaves the matching tab applied', async () => {
+    // Shows the removal above comes from the pattern change: the same
+    // sequence with the pattern unchanged removes nothing.
+    h.tabUrls.set(TAB, OLD_PAGE)
+    h.contentReply = (message) => (message.type === 'ping' ? true : { type: 'health-check-result', states: [] })
+    await commit(OLD_PAGE)
+    await h.onMessage({ type: 'save-transform', transform: app })
+    await h.onMessage({ type: 'reapply-everywhere', id: app.id })
+    expect(h.calls.removeCSS).toEqual([])
+    expect(h.calls.setBadgeText.filter((c) => c.tabId === TAB).at(-1)?.text).toBe('1')
+  })
+})

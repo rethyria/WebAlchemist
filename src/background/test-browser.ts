@@ -44,7 +44,7 @@ export interface Harness {
   /** Contents of storage.session and storage.local; they survive `boot()`. */
   session: Map<string, unknown>
   local: Map<string, unknown>
-  /** The URL `tabs.get` reports for each tab id. */
+  /** The URL `tabs.get` reports for each tab id; `tabs.query` lists these tabs. */
   tabUrls: Map<number, string>
   calls: {
     insertCSS: { tabId: number; css: string }[]
@@ -93,7 +93,7 @@ export function createHarness(): Harness {
       h.calls.runtimeMessages.push(message)
     },
     'browser.tabs.get': async (id: number) => ({ id, url: h.tabUrls.get(id) }),
-    'browser.tabs.query': async () => [],
+    'browser.tabs.query': async () => [...h.tabUrls].map(([id, url]) => ({ id, url })),
     'browser.tabs.sendMessage': async (tabId: number, message: unknown) => {
       h.calls.sendMessage.push({ tabId, message })
       return h.contentReply(message)

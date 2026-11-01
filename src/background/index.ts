@@ -300,10 +300,17 @@ async function handle(
         else await unregisterTransform(saved.id)
       }
 
+      /*
+       * Every open tab, not only those the new pattern matches. The editor can
+       * change the pattern, and a tab that matched the old one no longer does:
+       * filtering by the saved record left the stylesheet applied there and
+       * the badge count unchanged until the tab navigated. `reapply` already
+       * works out what each tab should show, so a tab it has nothing to do for
+       * costs one storage read.
+       */
       const tabs = await browser.tabs.query({})
       for (const tab of tabs) {
         if (tab.id === undefined || !tab.url) continue
-        if (!matchesUrl(saved.match, tab.url)) continue
         await reapply(tab.id)
       }
       return true
