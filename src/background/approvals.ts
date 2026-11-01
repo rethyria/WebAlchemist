@@ -140,10 +140,11 @@ function sameSet(a: Capability[], b: Capability[]): boolean {
  * Whether a JavaScript transform may be saved: its code is what is already
  * stored, or it is code that was approved.
  *
- * Unchanged code is let through so that renaming a transform does not need a
- * new review. Capabilities count as unchanged when they are a subset of the
- * stored ones, because dropping a capability (refusing it in the panel) allows
- * less than before.
+ * Unchanged code, with the same match pattern and world and no new capability,
+ * is let through so that renaming a transform does not need a new review.
+ * Capabilities count as unchanged when they are a subset of the stored ones,
+ * because dropping a capability (refusing it in the panel) allows less than
+ * before.
  */
 export async function mayBeSaved(
   stored: Transform | undefined,
@@ -155,6 +156,9 @@ export async function mayBeSaved(
     stored !== undefined &&
     stored.kind === 'js' &&
     stored.code === incoming.code &&
+    // Where the code runs is part of what was reviewed, so widening the match
+    // pattern is not a rename.
+    stored.match === incoming.match &&
     (stored.world ?? 'USER_SCRIPT') === world &&
     incoming.capabilities.every((c) => stored.capabilities.includes(c))
   return (

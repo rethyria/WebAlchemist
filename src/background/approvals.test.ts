@@ -122,6 +122,21 @@ describe('mayBeSaved', () => {
     expect(await mayBeSaved(stored, transform({ name: 'New' }), undefined)).toBe(true)
   })
 
+  it('does not accept stored code saved with a wider match pattern and no token (#62)', async () => {
+    const stored = transform({ match: 'example.com/*' })
+    expect(await mayBeSaved(stored, transform({ match: '*/*' }), undefined)).toBe(false)
+    expect(await mayBeSaved(stored, transform({ match: 'evil.example/*' }), undefined)).toBe(false)
+    // Control: the same match pattern with another name is still a rename.
+    expect(await mayBeSaved(stored, transform({ name: 'New', match: 'example.com/*' }), undefined)).toBe(true)
+  })
+
+  it('accepts a changed match pattern when a token approves the code for that pattern (#62)', async () => {
+    const stored = transform({ match: 'example.com/*' })
+    const wide = { transformId: 't', match: '*/*' }
+    const token = await recordApproval('document.title = "a"', undefined, [], 'match', wide)
+    expect(await mayBeSaved(stored, transform({ match: '*/*' }), token)).toBe(true)
+  })
+
   it('does not accept stored code with a new capability or a new world', async () => {
     const stored = transform({})
     expect(await mayBeSaved(stored, transform({ capabilities: ['network'] }), undefined)).toBe(false)
