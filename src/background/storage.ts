@@ -173,6 +173,8 @@ const PROVIDER_FIELDS = [
   'oauth',
 ] as const satisfies readonly ProviderEditableField[]
 
+const UNSETTABLE_PROVIDER_FIELDS: readonly string[] = ['price', 'oauth']
+
 /**
  * Applies one change to the settings as they are stored now, inside the
  * settings queue, and returns what was saved. Throws when the change is
@@ -230,7 +232,15 @@ export function changeSettings(change: SettingsChange): Promise<Settings> {
             ;(updated as unknown as Record<string, unknown>)[key] = (change.set as Record<string, unknown>)[key]
           }
         }
-        for (const key of change.unset ?? []) delete updated[key]
+        // Only the optional fields may be removed. The list comes from a
+        // message, and deleting the id, the type, the address or the label
+        // would leave a provider that cannot be used or found.
+        for (const key of change.unset ?? []) {
+          if (!UNSETTABLE_PROVIDER_FIELDS.includes(key)) {
+            throw new Error(`The provider field "${String(key)}" cannot be removed.`)
+          }
+          delete updated[key]
+        }
         next = {
           ...current,
           providers: current.providers.map((p) => (p.id === found.id ? updated : p)),
