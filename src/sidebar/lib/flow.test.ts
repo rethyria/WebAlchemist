@@ -1152,6 +1152,67 @@ describe('cancelling while the preview is applied', () => {
   })
 })
 
+describe('a late preview cleanup after a new run started (#110)', () => {
+  beforeEach(() => {
+    ports.length = 0
+    ;(globalThis as any).browser.runtime.connect = fakeConnect
+  })
+  afterEach(() => {
+    ;(globalThis as any).browser.runtime.connect = realConnect
+  })
+
+  async function cancelledFirstRun(release: { fn: () => void }) {
+    const flow = newFlow()
+    flow.picked = { ...found, cropDrawn: false } as any
+    flow.instruction = 'first'
+    flow.step = 'describing'
+    const gate = new Promise<void>((resolve) => (release.fn = resolve))
+    handler = async (m) => {
+      if (m.type === 'preview-css' && m.css === '/* A */') await gate
+      return { ok: true, data: null }
+    }
+    const run = flow.generate()
+    ;(await nextPort(1)).emit({ type: 'done', result: cssResult('A') })
+    await vi.waitFor(() =>
+      expect(calls.some((c) => c.type === 'preview-css' && c.css === '/* A */')).toBe(true),
+    )
+    flow.cancelGenerating()
+    await vi.waitFor(() => expect(flow.step).toBe('list'))
+    return { flow, run }
+  }
+
+  it('leaves the newer run its preview', async () => {
+    const release = { fn: () => {} }
+    const { flow, run } = await cancelledFirstRun(release)
+
+    // A quick second run on the same tab, which previews before the first
+    // run's held request returns.
+    flow.picked = { ...found, cropDrawn: false } as any
+    flow.instruction = 'second'
+    flow.step = 'describing'
+    const second = flow.generate()
+    ;(await nextPort(2)).emit({ type: 'done', result: cssResult('B') })
+    await second
+    expect(calls.some((c) => c.type === 'preview-css' && c.css === '/* B */')).toBe(true)
+    const before = calls.length
+
+    release.fn()
+    await run
+    // Nothing is sent for the cancelled run after the second run's preview.
+    expect(calls.slice(before).filter((c) => c.type === 'clear-preview-css')).toEqual([])
+    expect(flow.step).toBe('refining')
+  })
+
+  it('still removes the late CSS when no new run started (control)', async () => {
+    const release = { fn: () => {} }
+    const { run } = await cancelledFirstRun(release)
+    const before = calls.length
+    release.fn()
+    await run
+    expect(calls.slice(before).filter((c) => c.type === 'clear-preview-css')).toHaveLength(1)
+  })
+})
+
 describe('a re-pick from Edit description', () => {
   const describing = async () => {
     const flow = newFlow()

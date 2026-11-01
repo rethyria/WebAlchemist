@@ -1255,7 +1255,10 @@ export class Flow {
         // The request to add the new CSS may have been processed after that
         // happened, and nothing else knows about it: discard and reset read
         // previewedCss, which was still empty while the request was in flight.
-        await this.removeLatePreview()
+        // A cancel, discard or reset bumps the generation once, so token + 1
+        // is the value it left. A larger value means a new run has started on
+        // this flow and tab since, and its preview is not ours to remove.
+        await this.removeLatePreview(token + 1)
         return
       }
       this.refinement = null
@@ -1269,7 +1272,7 @@ export class Flow {
       // previous result's CSS, so it is put back along with the result.
       const replacedResult = this.refinement?.previous !== undefined
       this.undoRefinement()
-      if (replacedResult) await this.removeLatePreview()
+      if (replacedResult) await this.removeLatePreview(this.generation)
       this.fail(cause, again)
     } finally {
       this.stopClock()
@@ -1493,10 +1496,17 @@ export class Flow {
    * Takes out CSS that a cancelled attempt applied after it was cancelled, and
    * for a refinement that went back to its previous result, puts that result's
    * CSS on the page again, since applyPreview had already removed it.
+   *
+   * `generation` is the value the cleanup is for. It does nothing once the
+   * flow has moved past it, because the tab and the flow's preview state then
+   * belong to a newer run.
    */
-  private async removeLatePreview(): Promise<void> {
-    if (this.tabId === null) return
-    await send({ type: 'clear-preview-css', tabId: this.tabId, css: '' }).catch(() => {})
+  private async removeLatePreview(generation: number): Promise<void> {
+    if (this.tabId === null || this.generation !== generation) return
+    const tabId = this.tabId
+    await send({ type: 'clear-preview-css', tabId, css: '' }).catch(() => {})
+    // The request takes time, and a new run may have started while it did.
+    if (this.generation !== generation || this.tabId !== tabId) return
     this.previewedCss = null
     const back = this.step === 'refining' ? this.result : null
     if (back?.kind === 'css') {
