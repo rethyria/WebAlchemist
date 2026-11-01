@@ -20,7 +20,7 @@ import type { ReviewInstruction } from './providers/types'
 import type { ReviewResult, Settings, Transform } from '@shared/types'
 import { isApproved, mayBeSaved, recordApproval, spendApproval, type ApprovalVerdict } from './approvals'
 import { blockedStates, problemWithStoredCode, runStaticAnalysis } from './code-gate'
-import { assertPreviewable, checkCssTransform } from './css-gate'
+import { assertPreviewable, checkCssForPage, checkCssTransform } from './css-gate'
 
 type Of<T extends Message['type']> = Extract<Message, { type: T }>
 
@@ -387,13 +387,23 @@ export async function applyCssTransforms(
   // restricted transform is left out when the container is unknown.
   const restricted = transforms.some((t) => t.kind === 'css' && t.cookieStoreId !== undefined)
   const tabStore = restricted ? await deps.tabCookieStore(tabId) : undefined
-  const css = transforms
+  const included = transforms
     .filter((t) => t.kind === 'css' && t.enabled)
     .filter((t) => appliesInContainer(t, tabStore))
     .filter((t) => problemWithStoredCode(t, settings, tabUrl) === null)
     .sort((a, b) => a.order - b.order)
-    .map((t) => `/* ${t.name} */\n${t.code}`)
-    .join('\n\n')
+  // The separator carries the position only. A transform's name is not put in
+  // the CSS, because a name containing a comment terminator would end the
+  // comment and let the rest of the name be read as CSS (#145).
+  let css = included.map((t, i) => `/* transform ${i + 1} */\n${t.code}`).join('\n\n')
+
+  // Second barrier: the joined string is what the page receives, so it is
+  // checked as a whole, for this page and its site mode. A failure refuses the
+  // whole insert.
+  if (css) {
+    const approved = included.flatMap((t) => t.approvedCssUrls ?? [])
+    if (!checkCssForPage(css, settings, tabUrl, approved).passed) css = ''
+  }
 
   const previous = await deps.applied.read(tabId)
   if (previous !== undefined && previous !== css) {

@@ -122,9 +122,9 @@ describe('a preview when the page is shown again from the back-forward cache (#8
 
   it('still forgets the applied string, so the CSS is inserted again', async () => {
     await commit()
-    expect(h.calls.insertCSS.filter((c) => c.css.includes('Dark'))).toHaveLength(1)
+    expect(h.calls.insertCSS.filter((c) => c.css.includes('color: red'))).toHaveLength(1)
     await commit(['forward_back'])
-    expect(h.calls.insertCSS.filter((c) => c.css.includes('Dark'))).toHaveLength(2)
+    expect(h.calls.insertCSS.filter((c) => c.css.includes('color: red'))).toHaveLength(2)
   })
 })
 
@@ -166,7 +166,7 @@ describe('a history event that leaves the URL unchanged (#83)', () => {
 describe('a transform paused for an edit preview (#83)', () => {
   const route = (url: string) =>
     h.listeners.get('browser.webNavigation.onHistoryStateUpdated')!({ frameId: 0, tabId: TAB, url })
-  const stamped = `/* ${app.name} */\n${app.code}`
+  const stamped = `/* transform 1 */\n${app.code}`
 
   beforeEach(async () => {
     await commit()
