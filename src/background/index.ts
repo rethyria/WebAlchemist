@@ -686,6 +686,7 @@ async function handle(
       await setHostOff(host, message.off)
       await reregister()
       const onHost = (url: string) => hostOfUrl(url) === host
+      if (message.off) await clearCssPreviewsOn(onHost)
       await reapplyOpenTabs(onHost)
       // Only when turning off. The user chose this site, and a page that was
       // broken by a transform needs the reload to get rid of its scripts. When
@@ -765,6 +766,7 @@ async function handle(
       return true
 
     case 'preview-css':
+      await refuseWhenOff(message.tabId)
       await setPreviewCss(message.tabId, message.css, await windowOfTab(message.tabId))
       return true
 
@@ -1089,6 +1091,36 @@ async function clearPreviewsWhere(
     if (!ownerIsGone(owner)) continue
     await forgetSuspended(tabId)
     await reapply(tabId)
+  }
+}
+
+/**
+ * Takes out the CSS previews in the tabs whose address passes `include`. Used
+ * when a switch that stops transforms changes: a preview is a stylesheet on a
+ * real page, so it is covered by the switch as much as a saved one (#121).
+ */
+async function clearCssPreviewsOn(include: (url: string) => boolean): Promise<void> {
+  for (const tabId of await previewedTabIds()) {
+    const url = (await browser.tabs.get(tabId).catch(() => undefined))?.url
+    if (url && include(url)) await clearPreviewCss(tabId)
+  }
+}
+
+/**
+ * Throws when the switches say nothing may run on the tab's page, so that a
+ * preview is refused instead of being shown on a site the user turned off.
+ */
+async function refuseWhenOff(tabId: number): Promise<void> {
+  if ((await getSettings()).aiJsKillSwitch) {
+    throw new Error(
+      'Running transforms is switched off in the settings, so the preview was not shown. Turn that setting off to preview.',
+    )
+  }
+  const url = (await browser.tabs.get(tabId).catch(() => undefined))?.url
+  if (url && (await isUrlOff(url))) {
+    throw new Error(
+      'Web Alchemist is turned off on this site, so the preview was not shown. Turn it on for this site to preview.',
+    )
   }
 }
 
@@ -1535,7 +1567,9 @@ async function transformsForUrl(url: string): Promise<Transform[]> {
  */
 async function afterSettingsWritten(switchBefore: boolean): Promise<void> {
   await reregister()
-  if ((await getSettings()).aiJsKillSwitch !== switchBefore) await reapplyOpenTabs(() => true)
+  const switchNow = (await getSettings()).aiJsKillSwitch
+  if (switchNow && !switchBefore) await clearCssPreviewsOn(() => true)
+  if (switchNow !== switchBefore) await reapplyOpenTabs(() => true)
 }
 
 /** Reapplies CSS and the badge in every open tab whose address passes `include`. */

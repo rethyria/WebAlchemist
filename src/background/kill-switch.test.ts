@@ -169,3 +169,54 @@ describe('a JavaScript preview and the switches (#121)', () => {
     expect(h.userScriptsHeld.has('preview-js-a')).toBe(true)
   })
 })
+
+describe('a CSS preview and the switches (#121)', () => {
+  const previewCss = (tabId: number, css = '.x { color: red }') => ask({ type: 'preview-css', tabId, css })
+  const removedPreview = (tabId: number) =>
+    h.calls.removeCSS.filter((c) => c.tabId === tabId && c.css === '.x { color: red }')
+
+  it('is shown while no switch is on (control)', async () => {
+    await previewCss(A)
+    expect(h.calls.insertCSS.some((c) => c.tabId === A && c.css === '.x { color: red }')).toBe(true)
+  })
+
+  it('is refused while the kill switch is on', async () => {
+    await setSwitch(true)
+    const before = h.calls.insertCSS.length
+    await expect(previewCss(A)).rejects.toThrow(/switched off in the settings/)
+    expect(h.calls.insertCSS.length).toBe(before)
+  })
+
+  it('is refused on a site that is off, and still shown on another site (control)', async () => {
+    await ask({ type: 'set-site-off', url: 'https://a.example/page', off: true })
+    const before = h.calls.insertCSS.length
+    await expect(previewCss(A)).rejects.toThrow(/turned off on this site/)
+    expect(h.calls.insertCSS.length).toBe(before)
+    await previewCss(B)
+    expect(h.calls.insertCSS.length).toBe(before + 1)
+  })
+
+  it('is removed from every tab when the kill switch turns on', async () => {
+    await previewCss(A)
+    await previewCss(B)
+    await setSwitch(true)
+    expect(removedPreview(A)).toHaveLength(1)
+    expect(removedPreview(B)).toHaveLength(1)
+  })
+
+  it('is removed only from the site that is turned off', async () => {
+    await previewCss(A)
+    await previewCss(B)
+    await ask({ type: 'set-site-off', url: 'https://a.example/page', off: true })
+    expect(removedPreview(A)).toHaveLength(1)
+    expect(removedPreview(B)).toHaveLength(0)
+  })
+
+  it('stays when the site is turned back on (control)', async () => {
+    await ask({ type: 'set-site-off', url: 'https://a.example/page', off: true })
+    await ask({ type: 'set-site-off', url: 'https://a.example/page', off: false })
+    await previewCss(A)
+    await ask({ type: 'set-site-off', url: 'https://a.example/page', off: false })
+    expect(removedPreview(A)).toHaveLength(0)
+  })
+})
