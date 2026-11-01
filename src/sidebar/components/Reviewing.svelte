@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { MARK } from '@shared/i18n'
+  import Marked from '@shared/Marked.svelte'
   import { t } from '@shared/i18n'
   import { CAPABILITY_ENFORCEMENT } from '@shared/types'
   import type { GenerationResult, ReviewResult } from '@shared/types'
@@ -151,7 +153,7 @@
         </div>
         {#each blocking as finding}
           <p class="finding">
-            {t('revBlockedFinding', finding.line, finding.api, finding.explanation)}
+            <Marked text={t('revBlockedFinding', finding.line, MARK, finding.explanation)} value={finding.api} />
           </p>
         {/each}
         <p class="quiet">
@@ -190,7 +192,7 @@
           <div class="card-body">
             <span class="card-title">{finding.explanation}</span>
             <p class="finding">
-              {t('revWarnLine', finding.line, finding.api)}
+              <Marked text={t('revWarnLine', finding.line, MARK)} value={finding.api} />
               {#if finding.capability && capabilities.includes(finding.capability)}
                 {t('revWarnDeclared', finding.capability)}
               {:else if finding.capability}
@@ -311,7 +313,7 @@
   </details>
 
   <p class="grant">
-    {t(result.kind === 'js' ? 'revGrantJs' : 'revGrant', origin)}
+    <Marked text={t(result.kind === 'js' ? 'revGrantJs' : 'revGrant', MARK)} value={origin} />
   </p>
 
   {#if permissionDenied}

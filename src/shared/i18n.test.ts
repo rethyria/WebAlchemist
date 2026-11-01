@@ -73,6 +73,20 @@ describe('fillEnglish', () => {
   })
 })
 
+describe('fillEnglish as Firefox fills a message', () => {
+  it('turns a named placeholder that is not declared into nothing', () => {
+    expect(fillEnglish({ message: 'a $OTHER$ b' }, ['x'])).toBe('a  b')
+  })
+
+  it('fills $1 to $9 by position and uses nothing when the substitution is missing', () => {
+    expect(fillEnglish({ message: '$2 and $1 and $3' }, ['x', 'y'])).toBe('y and x and ')
+  })
+
+  it('keeps a dollar sign that is written $$ and does not read a digit after it as a substitution', () => {
+    expect(fillEnglish({ message: 'costs $$1' }, ['x'])).toBe('costs $1')
+  })
+})
+
 describe('the English catalogue', () => {
   const entries = Object.entries(EN_CATALOGUE) as Array<[string, CatalogueEntry]>
 
@@ -82,6 +96,20 @@ describe('the English catalogue', () => {
       const declared = (entry.placeholders ?? []).map((name) => name.toLowerCase())
       expect({ key, used: [...new Set(used)].sort() }).toEqual({ key, used: [...declared].sort() })
     }
+  })
+
+  it('has no dollar sign except in a declared $NAME$ placeholder or $$', () => {
+    for (const [key, entry] of entries) {
+      const stray = entry.message
+        .replace(/\$\$/g, '')
+        .replace(/\$([A-Za-z0-9_@]+)\$/g, '')
+      expect({ key, stray: stray.includes('$') }).toEqual({ key, stray: false })
+    }
+  })
+
+  it('reports a stray dollar sign (control)', () => {
+    const stray = 'costs $5 or $1'.replace(/\$\$/g, '').replace(/\$([A-Za-z0-9_@]+)\$/g, '')
+    expect(stray.includes('$')).toBe(true)
   })
 
   it('has a non-empty message for every key', () => {

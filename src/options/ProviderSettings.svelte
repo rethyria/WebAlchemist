@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { MARK } from '@shared/i18n'
+  import Marked from '@shared/Marked.svelte'
   import { t } from '@shared/i18n'
   import { radioGroup } from '@shared/radio-group'
   import { focusOnMount } from '@sidebar/lib/focus'
@@ -499,7 +501,7 @@
                 />
               </label>
               <p class="explain">
-                {t('optRedirect', redirectUrl)}
+                <Marked text={t('optRedirect', MARK)} value={redirectUrl} />
               </p>
               {#if oauthError}
                 <p class="oauth-error">{oauthError}</p>

@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { MARK } from '@shared/i18n'
+  import Marked from '@shared/Marked.svelte'
   import { t } from '@shared/i18n'
   import type { HoverTarget, Rect, TreePath, TreeRow } from '@shared/types'
   import { autogrow } from '../lib/autogrow'
@@ -358,9 +360,12 @@
         {#if scopeDepth === 0}
           {t('describingScopeOne')}
         {:else if scopeContainer}
-          {scopeCount === 1
-            ? t('describingScopeInsideOne', scopeContainer)
-            : t('describingScopeInsideMany', scopeCount, scopeContainer)}
+          <Marked
+            text={scopeCount === 1
+              ? t('describingScopeInsideOne', MARK)
+              : t('describingScopeInsideMany', scopeCount, MARK)}
+            value={scopeContainer}
+          />
         {:else}
           {t('describingScopeAll')}
         {/if}

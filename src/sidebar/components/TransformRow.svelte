@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { MARK } from '@shared/i18n'
+  import Marked from '@shared/Marked.svelte'
   import { t } from '@shared/i18n'
   import type { Conflict, Transform, TransformRuntimeState } from '@shared/types'
   import {
@@ -320,24 +322,32 @@
           </h3>
           {#each overridden as conflict}
             <p>
-              {t(
-                conflict.properties.length === 1 ? 'trLosesOne' : 'trLosesMany',
-                list(conflict.properties),
-                nameOf(conflict.winner),
-                conflict.elements === 1
-                  ? t('trSameElement')
-                  : t('trSameElements', conflict.elements),
-                conflict.byImportant ? t('trWinsImportant') : t('trWinsLater'),
-              )}
+              <Marked
+                tag="b"
+                text={t(
+                  conflict.properties.length === 1 ? 'trLosesOne' : 'trLosesMany',
+                  list(conflict.properties),
+                  MARK,
+                  conflict.elements === 1
+                    ? t('trSameElement')
+                    : t('trSameElements', conflict.elements),
+                  conflict.byImportant ? t('trWinsImportant') : t('trWinsLater'),
+                )}
+                value={nameOf(conflict.winner)}
+              />
             </p>
           {/each}
           {#each overriding as conflict}
             <p class="quiet">
-              {t(
-                conflict.byImportant ? 'trWinsOverImportant' : 'trWinsOver',
-                list(conflict.properties),
-                nameOf(conflict.loser),
-              )}
+              <Marked
+                tag="b"
+                text={t(
+                  conflict.byImportant ? 'trWinsOverImportant' : 'trWinsOver',
+                  list(conflict.properties),
+                  MARK,
+                )}
+                value={nameOf(conflict.loser)}
+              />
             </p>
           {/each}
           {#if overridden.length > 0 && !overridden.some((c) => c.byImportant)}

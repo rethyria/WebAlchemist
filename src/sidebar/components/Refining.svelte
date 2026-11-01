@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { MARK } from '@shared/i18n'
+  import Marked from '@shared/Marked.svelte'
   import { t } from '@shared/i18n'
   import { focusOnMount } from '../lib/focus'
   import type { RefinementTurn } from '@background/providers/types'
@@ -140,10 +142,10 @@
       </p>
       <ul>
         {#each analysis?.static.filter((f) => f.severity === 'block') ?? [] as finding}
-          <li>{t('refFinding', finding.api, finding.line, finding.explanation)}</li>
+          <li><Marked text={t('refFinding', MARK, finding.line, finding.explanation)} value={finding.api} /></li>
         {/each}
         {#each analysis?.pendingUrls ?? [] as url}
-          <li>{t('refPendingUrl', url)}</li>
+          <li><Marked text={t('refPendingUrl', MARK)} value={url} /></li>
         {/each}
       </ul>
       <p class="quiet">{t('refSayWhat')}</p>

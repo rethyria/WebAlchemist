@@ -42,13 +42,20 @@ function browserMessage(key: string, values: string[]): string {
   }
 }
 
-/** Fills the placeholders of an English entry the way the browser fills a translated one. */
+/**
+ * Fills the placeholders of an English entry the way Firefox fills a message:
+ * a declared named placeholder takes the substitution at its position, a named
+ * placeholder that is not declared becomes empty, $1 to $9 take the
+ * substitution at that position and become empty when there is none, and $$
+ * is a dollar sign.
+ */
 export function fillEnglish(entry: CatalogueEntry, values: string[]): string {
-  const names = entry.placeholders ?? []
-  return entry.message.replace(/\$\$|\$([A-Za-z0-9_@]+)\$/g, (match, name: string | undefined) => {
+  const names = (entry.placeholders ?? []).map((name) => name.toLowerCase())
+  return entry.message.replace(/\$\$|\$([A-Za-z0-9_@]+)\$|\$([1-9])/g, (match, name?: string, digit?: string) => {
     if (match === '$$') return '$'
-    const index = names.findIndex((candidate) => candidate.toLowerCase() === name!.toLowerCase())
-    return index === -1 ? match : (values[index] ?? '')
+    if (digit !== undefined) return values[Number(digit) - 1] ?? ''
+    const index = names.indexOf(name!.toLowerCase())
+    return index === -1 ? '' : (values[index] ?? '')
   })
 }
 
@@ -63,3 +70,11 @@ export function applyPageLanguage(): void {
   const language = typeof i18n?.getUILanguage === 'function' ? i18n.getUILanguage() : ''
   if (typeof language === 'string' && language !== '') document.documentElement.lang = language
 }
+
+/**
+ * Stands in for a value that a component draws with its own markup, such as a
+ * code element or bold text, which a message cannot hold. A message receives
+ * this character where the value belongs, and the Marked component swaps it for
+ * the marked value, so a translator can still move the value in the sentence.
+ */
+export const MARK = '\u0001'
