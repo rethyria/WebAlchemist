@@ -31,6 +31,7 @@ import type { RefinementTurn, ReviewInstruction } from './providers/types'
 import { overlayPaletteFor } from '@shared/accents'
 import * as badge from './badge'
 import { openPanel } from './open-panel'
+import { SCREENSHOTS_UNAVAILABLE } from '@shared/android-limits'
 import { recordRunTab, takeRunTabs, windowsWithRunTabs } from './run-tabs'
 import { isUrlOff, setHostOff } from './site-off'
 import { excludedHostOf, getExcludedSites, setExcludedSites } from './excluded-sites'
@@ -1082,6 +1083,7 @@ async function handle(
     }
 
     case 'capture-region':
+      if (platformOs === 'android') throw new Error(SCREENSHOTS_UNAVAILABLE)
       await refuseInPrivateWindow(message.tabId)
       return captureWithLockDown(
         message.tabId,

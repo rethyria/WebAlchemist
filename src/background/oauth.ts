@@ -26,6 +26,7 @@
 
 import type { Credential, OAuthConfig } from '@shared/types'
 import { assertEndpoint } from '@shared/endpoint-policy'
+import { ACCOUNT_SIGN_IN_UNAVAILABLE, hasAccountSignIn } from '@shared/android-limits'
 
 /** RFC 7636 §4.1: 43–128 characters from the unreserved set. */
 const VERIFIER_BYTES = 32
@@ -224,6 +225,10 @@ export async function connect(config: OAuthConfig): Promise<Extract<Credential, 
   // leave the extension, so it does not rely on that having happened.
   assertEndpoint(config.authorizationEndpoint, 'authorization endpoint')
   assertEndpoint(config.tokenEndpoint, 'token endpoint')
+
+  // Checked first so that nothing is generated or opened where the flow
+  // cannot run.
+  if (!hasAccountSignIn(browser)) throw new Error(ACCOUNT_SIGN_IN_UNAVAILABLE)
 
   const redirectUri = browser.identity.getRedirectURL()
   const { verifier, challenge } = await createPkce()

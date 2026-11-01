@@ -55,6 +55,7 @@ import {
 } from '@shared/excluded-sites'
 import { readCaptureGrant, recordCaptureGrant } from '@shared/capture-grant'
 import { BackgroundError, generateOverPort, send } from './messaging.svelte'
+import { screenshotsAvailable } from '@shared/panel-binding'
 
 /** An address without its fragment, so that scrolling to an anchor is not a new page. */
 const pageKey = (url: string): string => url.split('#')[0] ?? url
@@ -816,7 +817,8 @@ export class Flow {
 
   private async checkVisionSupport(): Promise<void> {
     try {
-      this.visionSupported = await send<boolean>({ type: 'get-vision-support' })
+      this.visionSupported =
+        (await send<boolean>({ type: 'get-vision-support' })) && screenshotsAvailable()
     } catch {
       // A model whose capabilities cannot be established does not get offered
       // an image. Degrading to no-screenshot is the safe direction.

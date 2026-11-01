@@ -79,3 +79,14 @@ export function setBoundTab(id: number | null): void {
 export function boundTab(): number | null {
   return bound
 }
+
+/**
+ * Whether the panel offers screenshots. Screenshots are taken with
+ * `tabs.captureVisibleTab`, which is believed to be missing on Firefox for
+ * Android, and which photographs the tab in front, which would be the panel
+ * itself while it is open in a tab. A panel bound to a page tab is the Android
+ * layout, so it offers none.
+ */
+export function screenshotsAvailable(): boolean {
+  return bound === null
+}
