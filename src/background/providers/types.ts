@@ -26,6 +26,12 @@ export interface GenerateRequest {
    * consolidated intent is persisted.
    */
   history: RefinementTurn[]
+  /**
+   * Aborted when nobody can receive the result any more, which is when the
+   * panel that asked has closed. Adapters pass it to the request so the call
+   * stops being paid for.
+   */
+  signal?: AbortSignal
   /** Present on repair, absent on first generation. */
   repair?: {
     intent: string

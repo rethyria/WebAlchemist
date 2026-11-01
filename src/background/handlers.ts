@@ -38,6 +38,12 @@ export interface SaveDeps {
   registerTransform: (transform: Transform) => Promise<unknown>
   /** Refreshes the badge for a transform that was saved. */
   transformEdited: (id: string) => Promise<void>
+  /**
+   * Work that follows a save: repainting the other tabs that match the old or
+   * the new pattern, and checking the site again. `before` is the record as it
+   * was stored before the save, or undefined for a new transform.
+   */
+  afterSave?: (saved: Transform, before: Transform | undefined) => Promise<void>
   /** Brings a tab up to date after a change. */
   reapply: (tabId: number | undefined) => Promise<void>
 }
@@ -56,6 +62,7 @@ export async function handleSaveTransform(message: Of<'save-transform'>, deps: S
   // analysis reads fields it may not have. saveTransform checks again; this is
   // only the earlier point.
   deps.assertValidTransform(message.transform)
+  const before = (await deps.getAllTransforms()).find((t) => t.id === message.transform.id)
 
   if (message.transform.kind === 'js') {
     const analysis = runStaticAnalysis(message.transform.code, message.transform.capabilities)
@@ -123,6 +130,7 @@ export async function handleSaveTransform(message: Of<'save-transform'>, deps: S
     await spendApproval(message.approvalToken)
   }
   await deps.transformEdited(saved.id)
+  await deps.afterSave?.(saved, before)
   // Apply it now rather than on the next navigation. The preview was just taken
   // down, so without this the page visibly reverts on save.
   await deps.reapply(message.tabId)
@@ -319,6 +327,12 @@ export async function applyCssTransforms(
   tabId: number,
   transforms: Transform[],
   tabUrl: string,
+  /**
+   * Asked just before the insert. The caller uses it to refuse an insert for a
+   * page the tab has since left; the check is the caller's because the tab and
+   * document counters live in the background script (#57).
+   */
+  stillCurrent: () => Promise<boolean> = async () => true,
 ): Promise<void> {
   const settings = await deps.getSettings()
   const css = transforms
@@ -335,6 +349,7 @@ export async function applyCssTransforms(
   }
 
   if (!css || previous === css) return
+  if (!(await stillCurrent())) return
 
   try {
     await deps.insertCss(tabId, css)

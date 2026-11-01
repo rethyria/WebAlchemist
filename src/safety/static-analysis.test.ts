@@ -445,6 +445,7 @@ describe('allowlist (#48): legitimate transforms still pass', () => {
     it(`passes inside the harness: ${name}`, () => {
       const wrapped = wrapTransform({
         name: 'test',
+        match: 'https://example.com/*',
         anchor: { landmarks: ['main', '[role="main"]'] },
         code,
       } as unknown as Parameters<typeof wrapTransform>[0])
@@ -942,6 +943,7 @@ describe('allowlist (#48): ordinary patterns that pass', () => {
     it(`passes inside the harness: ${name}`, () => {
       const wrapped = wrapTransform({
         name: 'test',
+        match: 'https://example.com/*',
         anchor: { landmarks: ['main'] },
         code,
       } as unknown as Parameters<typeof wrapTransform>[0])

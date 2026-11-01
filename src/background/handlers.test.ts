@@ -371,6 +371,15 @@ describe('applyCssTransforms', () => {
     expect(log).toEqual([`insert:1:/* good */\n${GOOD_CSS}`])
   })
 
+  it('inserts nothing when the tab no longer shows the page, and inserts when it does', async () => {
+    const { deps, log } = cssDeps()
+    const css = [transform({ id: 'a', kind: 'css', code: GOOD_CSS, name: 'good' })]
+    await applyCssTransforms(deps, 1, css, URL_ON_PAGE, async () => false)
+    expect(log).toEqual([])
+    await applyCssTransforms(deps, 1, css, URL_ON_PAGE, async () => true)
+    expect(log).toEqual([`insert:1:/* good */\n${GOOD_CSS}`])
+  })
+
   it('injects nothing when every stored rule fails', async () => {
     const { deps, log } = cssDeps()
     await applyCssTransforms(deps, 1, [transform({ kind: 'css', code: BAD_CSS })], URL_ON_PAGE)

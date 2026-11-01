@@ -22,8 +22,27 @@
  * permission change.
  */
 
-const SCRIPT_ID = 'wa-content'
+/*
+ * One registration per granted origin, with an id made from the origin. A single
+ * registration for all origins was rejected as a whole when one pattern was
+ * malformed or no longer held, which left the content script registered for no
+ * site at all: the health check, conflict detection and the persistent outline
+ * stopped everywhere and nothing reported it (#96). With one registration each,
+ * a rejected origin affects only itself.
+ */
+const SCRIPT_ID_PREFIX = 'wa-content'
 const CONTENT_FILE = 'src/content/index.js'
+
+/**
+ * Where the origins that could not be registered are recorded, as a list in
+ * storage.session. Nothing in the interface reads it yet.
+ */
+export const FAILED_ORIGINS_KEY = 'wa-content-failed-origins'
+
+const idFor = (origin: string) => `${SCRIPT_ID_PREFIX}:${origin}`
+
+/** The id the single registration used before there was one per origin. */
+const isOurs = (id: string) => id === SCRIPT_ID_PREFIX || id.startsWith(`${SCRIPT_ID_PREFIX}:`)
 
 /**
  * `scripting.registerContentScripts` is typed but the registration shape here
@@ -66,12 +85,10 @@ async function grantedOrigins(): Promise<string[]> {
   return origins.filter((origin) => origin.includes('://') && !ALL_SITES.has(origin))
 }
 
-export async function reconcile(): Promise<{ registered: number }> {
-  const origins = await grantedOrigins()
-
-  const registration: Registration = {
-    id: SCRIPT_ID,
-    matches: origins,
+function registrationFor(origin: string): Registration {
+  return {
+    id: idFor(origin),
+    matches: [origin],
     js: [CONTENT_FILE],
     // The picker needs a laid-out page to measure, and the health check needs
     // the DOM the site actually rendered rather than its first paint.
@@ -80,50 +97,74 @@ export async function reconcile(): Promise<{ registered: number }> {
     // updates — hence reconcile() on install as well.
     persistAcrossSessions: true,
   }
+}
+
+/*
+ * Reconciliations run one at a time. They are started by install, update,
+ * start-up and both permission events, which can overlap, and two that both
+ * find an origin unregistered would both register it; the second call is
+ * rejected for a duplicate id and would be recorded as a failure of the origin.
+ */
+let reconcileTail: Promise<unknown> = Promise.resolve()
+
+export function reconcile(): Promise<{ registered: number; failed: string[] }> {
+  const run = reconcileTail.then(reconcileNow)
+  reconcileTail = run.catch(() => undefined)
+  return run
+}
+
+async function reconcileNow(): Promise<{ registered: number; failed: string[] }> {
+  const wanted = new Map((await grantedOrigins()).map((origin) => [idFor(origin), registrationFor(origin)]))
+  const held = await registeredContentScripts()
 
   /*
-   * Left alone when it already matches. This ran on every start of the event
-   * page, which is every 30-second idle period, and it removed the
+   * Only what differs is changed. This runs on every start of the event page,
+   * which is every 30-second idle period, and it used to remove the
    * registration before adding it again: a page that began loading in between
    * was given no content script, so the picker and the health check had
    * nothing to talk to on that load.
    */
-  const held = await registeredContentScript()
-  if (held && origins.length > 0 && sameRegistration(held, registration)) {
-    return { registered: origins.length }
+  const stale = held.filter((script) => {
+    const want = wanted.get(script.id)
+    return !want || !sameRegistration(script, want)
+  })
+  if (stale.length > 0) {
+    // Unregistered when a registration differs or is no longer wanted.
+    // Registering over an existing id throws, and after an update the
+    // platform's view and ours disagree.
+    try {
+      await browser.scripting.unregisterContentScripts({ ids: stale.map((script) => script.id) })
+    } catch {
+      // Already gone.
+    }
   }
 
-  if (!held && origins.length === 0) return { registered: 0 }
-
-  // Unregistered whenever one is held and differs. Registering over an existing
-  // id throws, and after an update the platform's view and ours disagree.
-  try {
-    await browser.scripting.unregisterContentScripts({ ids: [SCRIPT_ID] })
-  } catch {
-    // Nothing was registered, which is the normal case on a fresh profile.
+  const kept = new Set(held.filter((script) => !stale.includes(script)).map((script) => script.id))
+  const failed: string[] = []
+  for (const [id, registration] of wanted) {
+    if (kept.has(id)) continue
+    try {
+      await browser.scripting.registerContentScripts([
+        registration as unknown as browser.scripting.RegisteredContentScript,
+      ])
+    } catch {
+      // A malformed or unheld origin pattern is rejected here. The picker still
+      // works under activeTab, so the user keeps a functioning extension, and
+      // the other origins are registered regardless.
+      failed.push(registration.matches[0]!)
+    }
   }
 
-  if (origins.length === 0) return { registered: 0 }
-
-  try {
-    await browser.scripting.registerContentScripts([
-      registration as unknown as browser.scripting.RegisteredContentScript,
-    ])
-    return { registered: origins.length }
-  } catch {
-    // A malformed or unheld origin pattern rejects the whole call. Falling
-    // back to no registration is right: the picker still works under
-    // activeTab, so the user keeps a functioning extension rather than none.
-    return { registered: 0 }
-  }
+  await browser.storage.session.set({ [FAILED_ORIGINS_KEY]: failed })
+  return { registered: wanted.size - failed.length, failed }
 }
 
-async function registeredContentScript(): Promise<Registration | undefined> {
+async function registeredContentScripts(): Promise<Registration[]> {
   try {
-    const found = await browser.scripting.getRegisteredContentScripts({ ids: [SCRIPT_ID] })
-    return (found?.[0] as unknown as Registration | undefined) ?? undefined
+    const found = await browser.scripting.getRegisteredContentScripts()
+    return ((found ?? []) as unknown as Registration[]).filter((script) => isOurs(script.id))
   } catch {
-    return undefined
+    return []
   }
 }
 

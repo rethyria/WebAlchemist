@@ -42,7 +42,7 @@ let killSwitch = false
   },
 }
 
-const { registerTransform, registerPreview, unregisterPreview } = await import('./registry')
+const { registerTransform, registerPreview, unregisterPreview, matchPatternsFor } = await import('./registry')
 
 // Code that passes static analysis, since registering and previewing run it.
 const SAVED_CODE = "document.querySelector('aside').style.display = 'none'"
@@ -86,6 +86,17 @@ describe('previewing a saved JavaScript transform', () => {
     // failure, so without the restore this is false.
     expect(code('SAVED')).toContain(SAVED_CODE)
     expect(store.has('preview-SAVED')).toBe(false)
+  })
+
+  it('refuses a preview whose code fails static analysis, and registers nothing', async () => {
+    await registerTransform(saved)
+    await expect(
+      registerPreview({ ...saved, code: "eval('1')" }),
+    ).rejects.toThrow(/safety check/)
+    expect(store.has('preview-SAVED')).toBe(false)
+    // Control: the same preview with code that passes registers.
+    await registerPreview({ ...saved, code: DRAFT_CODE })
+    expect(store.has('preview-SAVED')).toBe(true)
   })
 
   it('runs a preview of a script that is disabled in storage', async () => {
@@ -139,5 +150,75 @@ describe('previewing a saved JavaScript transform', () => {
     expect(code('preview-NEW')).toContain(DRAFT_CODE)
     await unregisterPreview('NEW')
     expect(store.size).toBe(0)
+  })
+})
+
+describe('the schemes a script is registered for (#59)', () => {
+  const patternsFor = async (match: string) => {
+    store.clear()
+    await registerTransform({ ...saved, match })
+    return (store.get('SAVED') as { matches: string[] }).matches
+  }
+
+  it('is https only for a transform saved on an https page', async () => {
+    expect(await patternsFor('https://example.com/*')).toEqual(['https://example.com/*'])
+  })
+
+  it('is http only for a transform saved on an http page', async () => {
+    expect(await patternsFor('http://localhost/*')).toEqual(['http://localhost/*'])
+  })
+
+  it('is both only when the stored pattern says *:// explicitly', async () => {
+    expect(await patternsFor('*://example.com/*')).toEqual([
+      'https://example.com/*',
+      'http://example.com/*',
+    ])
+  })
+
+  it('is both for a stored pattern with no scheme, so a transform saved before schemes were recorded keeps running on http', async () => {
+    expect(await patternsFor('example.com/docs*')).toEqual([
+      'https://example.com/docs*',
+      'http://example.com/docs*',
+    ])
+  })
+
+  it('control: a pattern saved with a scheme is not widened to both', async () => {
+    expect(await patternsFor('https://example.com/docs*')).toEqual(['https://example.com/docs*'])
+    expect(await patternsFor('http://example.com/docs*')).toEqual(['http://example.com/docs*'])
+  })
+
+  it('never registers a scheme other than http or https', () => {
+    for (const match of ['https://a.test/*', 'http://a.test/*', '*://a.test/*', 'a.test/*']) {
+      const all = matchPatternsFor({ ...saved, match })
+      expect(all.every((m) => /^https?:\/\//.test(m)), match).toBe(true)
+    }
+    expect(matchPatternsFor({ ...saved, match: 'https://a.test/*' })).not.toContain('http://a.test/*')
+  })
+})
+
+describe('the paths a script is registered for (#95)', () => {
+  const paths = (match: string) =>
+    matchPatternsFor({ ...saved, match }).map((m) => m.replace(/^https:\/\/example\.com/, ''))
+
+  it('covers the page with and without a trailing slash, and with any query, when the pattern has no query', () => {
+    expect(paths('https://example.com/watch')).toEqual(['/watch', '/watch?*', '/watch/', '/watch/?*'])
+    expect(paths('https://example.com/watch/')).toEqual(['/watch', '/watch?*', '/watch/', '/watch/?*'])
+  })
+
+  it('keeps the query of a pattern that has one, with and without the trailing slash', () => {
+    expect(paths('https://example.com/watch?v=abc')).toEqual(['/watch?v=abc', '/watch/?v=abc'])
+  })
+
+  it('leaves a pattern that ends in a wildcard as it is', () => {
+    expect(paths('https://example.com/*')).toEqual(['/*'])
+    expect(paths('https://example.com/docs*')).toEqual(['/docs*'])
+  })
+
+  it('also registers the trailing-slash form of a pattern that has a query and ends in a wildcard', () => {
+    expect(paths('https://example.com/search?q=*')).toEqual(['/search?q=*', '/search/?q=*'])
+  })
+
+  it('registers the root page without duplicating the slash', () => {
+    expect(paths('https://example.com/')).toEqual(['/', '/?*'])
   })
 })

@@ -301,3 +301,67 @@ describe('saving over an existing transform keeps fields it does not own (#85)',
     expect([c.order, c.enabled, c.createdAt]).toEqual([7, false, 5])
   })
 })
+
+describe('order values after reordering on different pages (#93)', () => {
+  // G applies on both pages, P only on /foo and Q only on /bar.
+  const orders = async () =>
+    Object.fromEntries((await s.getAllTransforms()).map((t) => [t.id, t.order]))
+  const ids = async () => (await s.getAllTransforms()).map((t) => t.id)
+
+  beforeEach(async () => {
+    await s.saveTransform(mk('G', 100))
+    await s.saveTransform(mk('P', 101))
+    await s.saveTransform(mk('Q', 102))
+  })
+
+  it('gives every transform its own value after a reorder on each page', async () => {
+    await s.reorderTransforms(['Q', 'G'])
+    await s.reorderTransforms(['G', 'P'])
+    const values = Object.values(await orders())
+    expect(new Set(values).size).toBe(3)
+  })
+
+  it('keeps the order chosen on each page', async () => {
+    await s.reorderTransforms(['Q', 'G'])
+    expect((await ids()).indexOf('Q')).toBeLessThan((await ids()).indexOf('G'))
+    await s.reorderTransforms(['G', 'P'])
+    const after = await ids()
+    expect(after.indexOf('G')).toBeLessThan(after.indexOf('P'))
+    expect(after.indexOf('Q')).toBeLessThan(after.indexOf('G'))
+  })
+
+  it('control: giving the listed transforms 0 to n − 1 and leaving the rest, as before, makes two values equal', async () => {
+    // The previous rule, replayed on plain numbers, to show the scenario above
+    // is one that produced equal values.
+    const stored = { G: 100, P: 101, Q: 102 } as Record<string, number>
+    for (const listed of [['Q', 'G'], ['G', 'P']]) {
+      listed.forEach((id, index) => (stored[id] = index))
+    }
+    expect(new Set(Object.values(stored)).size).toBeLessThan(3)
+  })
+
+  it('resolves ties that already exist, in their stored order', async () => {
+    await s.saveTransform(mk('X', 5))
+    await s.saveTransform(mk('Y', 5))
+    await s.reorderTransforms(['Y', 'X'])
+    const values = await orders()
+    expect(values.Y).toBeLessThan(values.X!)
+    expect(new Set(Object.values(values)).size).toBe(5)
+  })
+
+  it('ignores ids that are not stored and ids listed twice', async () => {
+    await s.reorderTransforms(['Q', 'gone', 'Q', 'G'])
+    const after = await ids()
+    expect(after.indexOf('Q')).toBeLessThan(after.indexOf('G'))
+    expect(new Set(Object.values(await orders())).size).toBe(3)
+  })
+
+  it('gives an imported transform a value no stored transform has', async () => {
+    // Four stored transforms, one of which has the value 4: the count.
+    await s.saveTransform(mk('Z', 4))
+    await s.importTransforms({ schemaVersion: 1, exportedAt: 0, transforms: [mk('x', 0)] })
+    const values = Object.values(await orders())
+    expect(values).toHaveLength(5)
+    expect(new Set(values).size).toBe(5)
+  })
+})

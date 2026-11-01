@@ -13,6 +13,8 @@ type Handler = (message: any) => any
 let handler: Handler = () => ({ ok: true, data: null })
 const calls: any[] = []
 
+/** Every object passed to `storage.local.set`. */
+const localWrites: Record<string, unknown>[] = []
 ;(globalThis as any).browser = {
   runtime: {
     sendMessage: async (message: any) => {
@@ -26,7 +28,13 @@ const calls: any[] = []
   },
   permissions: { request: async () => true, remove: async () => true },
   tabs: { update: async () => {}, reload: async () => {}, create: async () => {} },
-  storage: { session: { set: async () => {} } },
+  storage: {
+    local: {
+      set: async (items: Record<string, unknown>) => {
+        localWrites.push(items)
+      },
+    },
+  },
 }
 
 const { Flow } = await import('./flow.svelte')
@@ -725,6 +733,40 @@ describe('a reference or region pick still running in the page', () => {
     const flow = flowAtRefining()
     await flow.discard()
     expect(stops()).toHaveLength(0)
+  })
+})
+
+describe('the record that the all-sites grant is held for a run (#134)', () => {
+  const grantWrites = () => localWrites.filter((w) => 'wa-capture-grant-held' in w).map((w) => w['wa-capture-grant-held'])
+  beforeEach(() => {
+    localWrites.length = 0
+  })
+
+  it('is written when the grant is requested', async () => {
+    const flow = flowAtRefining()
+    await flow.chooseScreenshotRegion()
+    expect(grantWrites()).toEqual([true])
+  })
+
+  it('is cleared when the grant is refused', async () => {
+    const flow = flowAtRefining()
+    ;(globalThis as any).browser.permissions.request = async () => false
+    await flow.chooseScreenshotRegion()
+    ;(globalThis as any).browser.permissions.request = async () => true
+    expect(grantWrites()).toEqual([true, false])
+  })
+
+  it('is cleared when the run hands the grant back', async () => {
+    const flow = flowAtRefining()
+    await flow.chooseScreenshotRegion()
+    flow.cancelScreenshot()
+    expect(grantWrites()).toEqual([true, false])
+  })
+
+  it('control: a flow that never asked for the grant writes nothing', () => {
+    // Shows the writes above come from the request, not from creating a flow.
+    flowAtRefining()
+    expect(grantWrites()).toEqual([])
   })
 })
 
