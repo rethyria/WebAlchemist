@@ -1018,10 +1018,12 @@ export class Flow {
         rationale: transform.rationale,
         intent: transform.intent,
       }
-      this.history = [
-        { role: 'user', content: transform.intent },
-        { role: 'assistant', content: transform.rationale.approach },
-      ]
+      // Empty on purpose. The intent and the approach are already the current
+      // instruction and the current result, and regenerate() moves that pair
+      // into history when the first follow-up is sent. Seeding them here as
+      // well showed the first exchange twice in the transcript and sent it to
+      // the model twice.
+      this.history = []
 
       /*
        * The saved copy comes off the page for the duration. Both it and any

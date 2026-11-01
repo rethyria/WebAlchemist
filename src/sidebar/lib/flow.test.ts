@@ -963,3 +963,17 @@ describe('regenerating after a script has run', () => {
     await nextPort(1)
   })
 })
+
+describe('opening Change with AI', () => {
+  it('starts with an empty history, so the first exchange is not repeated', async () => {
+    const flow = newFlow()
+    handler = (m) =>
+      m.type === 'context-for-anchor' ? { ok: true, data: found } : { ok: true, data: null }
+    await flow.editWithAi(saved)
+    expect(flow.step).toBe('refining')
+    // The stored pair is already the instruction and the result on screen.
+    expect(flow.history).toEqual([])
+    expect(flow.instruction).toBe('old intent')
+    expect(flow.result?.rationale.approach).toBe('a')
+  })
+})

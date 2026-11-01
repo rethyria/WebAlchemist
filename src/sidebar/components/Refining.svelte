@@ -2,6 +2,7 @@
   import type { RefinementTurn } from '@background/providers/types'
   import type { GenerationResult, ReviewResult } from '@shared/types'
   import type { ElementContext } from '@shared/types'
+  import { attemptNumber } from '../lib/attempt'
   import { autogrow } from '../lib/autogrow'
   import Button from './Button.svelte'
   import CodeBlock from './CodeBlock.svelte'
@@ -60,7 +61,7 @@
 
   let isJs = $derived(result.kind === 'js')
   let blocked = $derived(analysis !== null && !analysis.passed)
-  let attempt = $derived(Math.floor(history.length / 3) + 1)
+  let attempt = $derived(attemptNumber(history.length))
 
   /*
    * The transcript is the conversation as the user experienced it: their
