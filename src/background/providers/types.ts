@@ -13,17 +13,36 @@ export interface RefinementTurn {
   content: string
 }
 
+/**
+ * Where an instruction sent to the reviewer came from.
+ *
+ *  - `typed`: the user wrote it in this session.
+ *  - `saved-description`: pre-filled from a stored transform's intent (Repair,
+ *    Edit with AI, Edit description) and sent unchanged. A model or an imported
+ *    bundle wrote it, so it is not evidence of what the user wants.
+ *  - `saved-description-edited`: pre-filled the same way, then changed by the
+ *    user before sending. The user read and wrote the final text, so it counts
+ *    as theirs, and the reviewer is told how it started.
+ */
+export type InstructionSource = 'typed' | 'saved-description' | 'saved-description-edited'
+
+export interface ReviewInstruction {
+  text: string
+  source: InstructionSource
+}
+
 /** What a review call is given. Page content is never part of it. */
 export interface ReviewArgs {
   code: string
   /** The generator's summary of the intent. The model wrote it. */
   intent: string
   /**
-   * Everything the user typed for this transform, verbatim, in order. The
-   * message and the background entry point require it; it is optional here
-   * only so that adapter tests that exercise transport do not all need one.
+   * Every instruction behind this transform, verbatim, in order, each with its
+   * source. The message and the background entry point require it; it is
+   * optional here only so that adapter tests that exercise transport do not
+   * all need one.
    */
-  instructions?: string[]
+  instructions?: ReviewInstruction[]
 }
 
 export interface GenerateRequest {

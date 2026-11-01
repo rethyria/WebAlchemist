@@ -34,7 +34,7 @@ import type {
 import type { Rule } from './css'
 import type { ScrollOffset } from './region'
 import type { OverlayPalette } from './accents'
-import type { RefinementTurn } from '@background/providers/types'
+import type { RefinementTurn, ReviewInstruction } from '@background/providers/types'
 
 /**
  * What a confirmed pick means.
@@ -74,8 +74,11 @@ export type Message =
       code: string
       /** The generator's summary of the intent. */
       intent: string
-      /** What the user typed, verbatim and in order. The reviewer's yardstick. */
-      instructions: string[]
+      /**
+       * Every instruction, verbatim and in order, with where it came from. Only
+       * the typed ones are the reviewer's yardstick.
+       */
+      instructions: ReviewInstruction[]
       declaredCapabilities: Transform['capabilities']
       /** The transform the call is for, so its cost is added to that transform. */
       transformId?: string

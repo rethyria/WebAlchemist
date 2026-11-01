@@ -22,7 +22,7 @@
  */
 
 import type { AnchoredElement, ContentEvent } from '@shared/messages'
-import type { RefinementTurn } from '@background/providers/types'
+import type { RefinementTurn, ReviewInstruction } from '@background/providers/types'
 import type { ScrollOffset } from '@shared/region'
 import {
   matchPresetsFor,
@@ -438,6 +438,15 @@ export class Flow {
    * from the describing step.
    */
   private keptInstruction: string | null = null
+  /**
+   * The stored intent that `instruction` was pre-filled from, or null when the
+   * user wrote the first instruction themselves. Repair, Edit with AI and Edit
+   * description pre-fill from `transform.intent`, which a model or an imported
+   * bundle wrote, so the review has to be told that text did not come from the
+   * user (#52). Kept next to `keptInstruction` and restored with it.
+   */
+  private savedInstruction: string | null = null
+  private keptSavedInstruction: string | null = null
 
   /**
    * The element that was selected when "Change" started a new pick, held so
@@ -460,6 +469,7 @@ export class Flow {
     const held = this.rePickFrom
     this.rePickFrom = null
     this.keptInstruction = null
+    this.keptSavedInstruction = null
     if (!held) return false
     this.picked = held.picked
     this.tree = held.tree
@@ -471,6 +481,7 @@ export class Flow {
   async startPicking(purpose: 'describe' | 'author' = 'describe'): Promise<void> {
     this.pickPurpose = purpose
     this.keptInstruction = this.step === 'describing' ? this.instruction : null
+    this.keptSavedInstruction = this.step === 'describing' ? this.savedInstruction : null
     if (this.tabId === null) return
 
     const origin = originPermissionForUrl(this.url)
@@ -613,12 +624,17 @@ export class Flow {
         if (this.pickPurpose === 'author') void this.openAuthoring()
         else {
           const kept = this.keptInstruction
+          const keptSaved = this.keptSavedInstruction
           this.keptInstruction = null
+          this.keptSavedInstruction = null
           this.enterDescribing()
           // Changing the element is not starting a new description, so what
           // was typed stays. The screenshot, scope and references describe the
           // old element and are reset as before.
-          if (kept !== null) this.instruction = kept
+          if (kept !== null) {
+            this.instruction = kept
+            this.savedInstruction = keptSaved
+          }
         }
         return
       }
@@ -704,6 +720,7 @@ export class Flow {
     this.scopeCount = 1
     this.scopeContainer = null
     this.instruction = ''
+    this.savedInstruction = null
     this.history = []
     this.followUp = ''
     this.references = []
@@ -867,7 +884,7 @@ export class Flow {
       // What a regeneration from the refining panel will build on.
       this.matchPattern = transform.match
       this.intent = transform.intent
-      this.instruction = transform.intent
+      this.prefillInstruction(transform.intent)
       this.history = []
       this.references = []
       this.draft = transform
@@ -994,7 +1011,7 @@ export class Flow {
        * start of a new description and not a continuation of the old one.
        */
       this.enterDescribing()
-      this.instruction = transform.intent
+      this.prefillInstruction(transform.intent)
       this.intent = transform.intent
       await this.restoreScopeDepth(transform)
       if (!current()) return
@@ -1052,7 +1069,7 @@ export class Flow {
       this.picked = { ...found, cropDrawn: false }
       this.matchPattern = transform.match
       this.intent = transform.intent
-      this.instruction = transform.intent
+      this.prefillInstruction(transform.intent)
       this.references = []
       this.followUp = ''
       this.draft = transform
@@ -1138,6 +1155,35 @@ export class Flow {
       intent: string
     }
   } | null = null
+
+  /**
+   * Puts a stored intent in the instruction field and records that it came
+   * from storage. Every pre-fill goes through here so none can skip the record.
+   */
+  private prefillInstruction(storedIntent: string): void {
+    this.instruction = storedIntent
+    this.savedInstruction = storedIntent
+  }
+
+  /**
+   * Every instruction behind the current result, each with where it came from.
+   * The first one is the pre-filled text when there is a saved instruction, so
+   * it is compared with what was pre-filled to tell whether the user changed
+   * it. Later ones are follow-ups, which the user always wrote.
+   */
+  private reviewInstructions(): ReviewInstruction[] {
+    const texts = [
+      ...this.history.filter((turn) => turn.role === 'user').map((turn) => turn.content),
+      this.instruction,
+    ]
+    return texts.map((text, index): ReviewInstruction => {
+      if (index > 0 || this.savedInstruction === null) return { text, source: 'typed' }
+      return {
+        text,
+        source: text === this.savedInstruction ? 'saved-description' : 'saved-description-edited',
+      }
+    })
+  }
 
   private undoRefinement(): void {
     const held = this.refinement
@@ -1761,12 +1807,11 @@ export class Flow {
         code: result.code,
         // The edited intent is sent as the generator's summary only. The
         // reviewer judges against what the user typed, which is every user
-        // turn in the history followed by the current instruction.
+        // turn in the history followed by the current instruction, except a
+        // pre-filled stored intent the user has not changed (see
+        // reviewInstructions).
         intent: this.intent,
-        instructions: [
-          ...this.history.filter((turn) => turn.role === 'user').map((turn) => turn.content),
-          this.instruction,
-        ],
+        instructions: this.reviewInstructions(),
         declaredCapabilities: result.capabilities,
         transformId: this.transformKey(),
       })
@@ -2100,6 +2145,8 @@ export class Flow {
     this.scopeCount = 1
     this.scopeContainer = null
     this.instruction = ''
+    this.savedInstruction = null
+    this.keptSavedInstruction = null
     this.sendScreenshot = false
     this.history = []
     this.followUp = ''

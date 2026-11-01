@@ -26,7 +26,7 @@ import type {
   Transform,
   TransformRuntimeState,
 } from '@shared/types'
-import type { RefinementTurn } from './providers/types'
+import type { RefinementTurn, ReviewInstruction } from './providers/types'
 import { overlayPaletteFor } from '@shared/accents'
 import * as badge from './badge'
 import { isSidebarPortName, windowOfSidebarPort } from '@shared/sidebar-port'
@@ -1397,7 +1397,7 @@ function runStaticAnalysis(
 async function runReview(
   code: string,
   intent: string,
-  instructions: string[],
+  instructions: ReviewInstruction[],
   declared: Transform['capabilities'],
   transformId?: string,
 ): Promise<ReviewResult> {

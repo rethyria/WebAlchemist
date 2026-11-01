@@ -1414,7 +1414,100 @@ describe('the review is given what the user typed (#52)', () => {
     await flow.toReview()
 
     const sent = calls.filter((c) => c.type === 'review').at(-1)
-    expect(sent.instructions).toEqual(['first description', 'the follow-up as typed'])
+    expect(sent.instructions).toEqual([
+      { text: 'first description', source: 'typed' },
+      { text: 'the follow-up as typed', source: 'typed' },
+    ])
     expect(sent.intent).toBe('edited intent')
+  })
+})
+
+describe('the review is told where a pre-filled instruction came from (#52)', () => {
+  const repaired = {
+    ...jsResult,
+    code: 'document.body.remove()',
+    intent: 'new model intent',
+  }
+  const reviewHandler = (m: any) => {
+    if (m.type === 'context-for-anchor') return { ok: true, data: found }
+    if (m.type === 'repair') return { ok: true, data: { result: repaired } }
+    if (m.type === 'analyse' || m.type === 'review') {
+      return { ok: true, data: { static: [], undeclaredCapabilities: [], passed: true } }
+    }
+    return { ok: true, data: null }
+  }
+  const lastReview = () => calls.filter((c) => c.type === 'review').at(-1)
+
+  it('marks the stored intent as a saved description after Repair', async () => {
+    const flow = newFlow()
+    handler = reviewHandler
+    await flow.repair({ ...saved, kind: 'js', intent: 'STORED INTENT' }, 'broken')
+    expect(flow.step).toBe('refining')
+    await flow.toReview()
+    expect(lastReview().instructions).toEqual([
+      { text: 'STORED INTENT', source: 'saved-description' },
+    ])
+  })
+
+  it('keeps it marked after a follow-up moves it into the history', async () => {
+    const flow = newFlow()
+    handler = reviewHandler
+    await flow.repair({ ...saved, kind: 'js', intent: 'STORED INTENT' }, 'broken')
+    flow.history = [{ role: 'user', content: 'STORED INTENT' }]
+    flow.instruction = 'make it smaller'
+    await flow.toReview()
+    expect(lastReview().instructions).toEqual([
+      { text: 'STORED INTENT', source: 'saved-description' },
+      { text: 'make it smaller', source: 'typed' },
+    ])
+  })
+
+  it('marks Edit description text the user changed as edited, and unchanged text as saved', async () => {
+    const flow = newFlow()
+    handler = reviewHandler
+    await flow.editIntent({ ...saved, kind: 'js', intent: 'STORED INTENT' })
+    flow.result = jsResult
+    flow.instruction = 'STORED INTENT, but smaller'
+    await flow.toReview()
+    expect(lastReview().instructions).toEqual([
+      { text: 'STORED INTENT, but smaller', source: 'saved-description-edited' },
+    ])
+    flow.instruction = 'STORED INTENT'
+    await flow.toReview()
+    expect(lastReview().instructions).toEqual([{ text: 'STORED INTENT', source: 'saved-description' }])
+  })
+
+  it('keeps the mark through a re-pick inside Edit description', async () => {
+    const flow = newFlow()
+    handler = reviewHandler
+    await flow.editIntent({ ...saved, kind: 'js', intent: 'STORED INTENT' })
+    await flow.startPicking()
+    pick(flow)
+    flow.result = jsResult
+    await flow.toReview()
+    expect(lastReview().instructions).toEqual([{ text: 'STORED INTENT', source: 'saved-description' }])
+  })
+
+  it('control: a first description typed on a new pick is typed', async () => {
+    const flow = newFlow()
+    handler = reviewHandler
+    flow.picked = { ...found, cropDrawn: false } as any
+    flow.result = jsResult
+    flow.instruction = 'hide the banner'
+    await flow.toReview()
+    expect(lastReview().instructions).toEqual([{ text: 'hide the banner', source: 'typed' }])
+  })
+
+  it('control: a new pick after a repair does not inherit the mark', async () => {
+    const flow = newFlow()
+    handler = reviewHandler
+    await flow.repair({ ...saved, kind: 'js', intent: 'STORED INTENT' }, 'broken')
+    await flow.discard()
+    await flow.startPicking()
+    pick(flow)
+    flow.instruction = 'STORED INTENT'
+    flow.result = jsResult
+    await flow.toReview()
+    expect(lastReview().instructions).toEqual([{ text: 'STORED INTENT', source: 'typed' }])
   })
 })
