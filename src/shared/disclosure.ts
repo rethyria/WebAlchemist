@@ -58,7 +58,7 @@ export const SENT_RETENTION =
 export const ENFORCEMENT_NOTICE =
   'Firefox does not enforce a network restriction on the transform scripts this extension runs on a page, as measured in testing. A script that you approve can therefore use the network and read pages that you are logged in to. Approving the code is the main protection.'
 export const CHECKS_NOTICE =
-  'JavaScript written by the model is checked by a static analysis and by a review from a second model. Neither check is complete. CSS is checked for addresses that it would load.'
+  "JavaScript written by the model is checked by a static analysis and by a review from a second model. Neither check is complete. CSS, whether the model or you wrote it, is checked for addresses that it would load. By default only data: addresses are allowed. Two settings, which are chosen for each site, allow addresses on the page's own site or addresses that you approve. An @import rule is refused in every setting."
 
 export const TRANSFORMS_STORAGE_NOTICE =
   'Saved transforms are stored unencrypted in the Firefox profile, also when a passphrase is set.'
