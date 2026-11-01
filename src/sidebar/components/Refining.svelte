@@ -5,6 +5,7 @@
   import { attemptNumber } from '../lib/attempt'
   import { autogrow } from '../lib/autogrow'
   import Button from './Button.svelte'
+  import AddressNote from './AddressNote.svelte'
   import CodeBlock from './CodeBlock.svelte'
   import Label from './Label.svelte'
 
@@ -25,6 +26,8 @@
     shotClipped: boolean
     shotMoved: boolean
     visionSupported: boolean
+    /** The page address the next request will carry, as it is sent. */
+    sentAddress: string
     onfollowup: (text: string) => void
     onaddreference: () => void
     onremovereference: (selector: string) => void
@@ -50,6 +53,7 @@
     shotClipped,
     shotMoved,
     visionSupported,
+    sentAddress,
     onfollowup,
     onaddreference,
     onremovereference,
@@ -96,7 +100,9 @@
   <header>
     <span class="live" class:idle={isJs && !jsRan} aria-hidden="true"></span>
     <span class="status">
-      {#if !isJs}
+      {#if !isJs && blocked}
+        Not applied to the page
+      {:else if !isJs}
         Live on the page
       {:else if jsRan}
         Ran once on this page
@@ -113,11 +119,19 @@
 
   {#if blocked}
     <div class="notice block">
-      <span class="notice-title">This code was not run</span>
-      <p>Static analysis rejected it before anything reached the page.</p>
+      <span class="notice-title">
+        {isJs ? 'This code was not run' : 'This CSS was not applied'}
+      </span>
+      <p>
+        {isJs ? 'Static analysis' : 'The CSS check'} rejected it before anything reached the
+        page.
+      </p>
       <ul>
         {#each analysis?.static.filter((f) => f.severity === 'block') ?? [] as finding}
           <li><code>{finding.api}</code> on line {finding.line} — {finding.explanation}</li>
+        {/each}
+        {#each analysis?.pendingUrls ?? [] as url}
+          <li>Loads <code>{url}</code>, which needs approval before it can be applied.</li>
         {/each}
       </ul>
       <p class="quiet">Say what to change below, or discard it.</p>
@@ -257,6 +271,8 @@
         </button>
       {/if}
     </section>
+
+    <AddressNote address={sentAddress} />
 
     <div class="actions">
       <Button grow={1} small onclick={ondiscard}>Discard</Button>

@@ -10,6 +10,7 @@
  */
 
 import { readScriptErrors } from '@shared/script-errors'
+import { pageHasSensitiveFields } from './sensitive'
 import type { ConflictSpec, ContentEvent, ContentMessage, PickMode } from '@shared/messages'
 import type { OverlayPalette } from '@shared/accents'
 import type {
@@ -1675,6 +1676,8 @@ async function handleMessage(message: ContentMessage) {
       return { type: 'health-check-result', states: await runHealthCheck(message.transforms, message.errorTokens) }
     case 'ping':
       return true
+    case 'sensitive-fields':
+      return pageHasSensitiveFields()
     case 'get-viewport':
       return {
         x: window.scrollX,

@@ -33,8 +33,11 @@ let queue: Promise<unknown> = Promise.resolve()
 function update<T>(change: (map: TokenMap) => T): Promise<T> {
   const next = queue.then(async () => {
     const map = ((await browser.storage.session.get(KEY))[KEY] as TokenMap | undefined) ?? {}
+    const before = JSON.stringify(map)
     const result = change(map)
-    await browser.storage.session.set({ [KEY]: map })
+    // Written only when the map changed, so that registering a script that
+    // already has a token adds no storage write.
+    if (JSON.stringify(map) !== before) await browser.storage.session.set({ [KEY]: map })
     return result
   })
   queue = next.catch(() => undefined)

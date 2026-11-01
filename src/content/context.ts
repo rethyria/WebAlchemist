@@ -8,6 +8,7 @@
  */
 
 import type { ElementContext, PageContext } from '@shared/types'
+import { ADDRESS_PLACEHOLDER, mustRemovePart } from '@shared/address-policy'
 
 /** Properties that matter for layout and appearance decisions. */
 const RELEVANT_PROPERTIES = [
@@ -72,9 +73,75 @@ export function extractElementContext(element: Element, selector: string): Eleme
   }
 }
 
+/** Stands in for every query value, so the model sees the keys and no values. */
+export const QUERY_VALUE_PLACEHOLDER = ADDRESS_PLACEHOLDER
+
+/** Decodes a query key; a malformed escape leaves the text as it was. */
+function decodeKey(raw: string): string {
+  try {
+    return decodeURIComponent(raw.replace(/\+/g, ' '))
+  } catch {
+    return raw
+  }
+}
+
+/**
+ * The address that is sent to the model provider.
+ *
+ * For http and https it keeps the origin, the path and the query keys, and
+ * removes everything else the page address can carry a secret in:
+ *
+ *  - the fragment, user name and password;
+ *  - every query value;
+ *  - a query part with no "=", because a bare string such as `?eyJ...` is
+ *    itself the token, and sending it as a key would send the token;
+ *  - a query key, or a path segment, longer than 32 characters or that looks
+ *    like a token (see `looksLikeToken`);
+ *  - path parameters (`;jsessionid=...`), which are session identifiers that
+ *    some servers put in the path.
+ *
+ * Every other scheme (file, blob, data, about, ftp, extension pages) sends the
+ * scheme alone. Their paths are local file names or random identifiers, and a
+ * blob address embeds another origin that would print as a garbled string.
+ *
+ * Keys are kept because they show how the page is structured (`?tab=` or
+ * `?page=`). The panel shows this exact string, with a note built from the same
+ * limits (`ADDRESS_REMOVAL_NOTE`), so what the user reads is what leaves the
+ * browser.
+ */
+export function addressForModel(href: string): string {
+  let url: URL
+  try {
+    url = new URL(href)
+  } catch {
+    return ''
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') return url.protocol
+
+  const path = url.pathname
+    .split('/')
+    .map((segment) => {
+      const withoutParameters = segment.split(';')[0] ?? ''
+      return mustRemovePart(withoutParameters) ? ADDRESS_PLACEHOLDER : withoutParameters
+    })
+    .join('/')
+
+  const keys = new Set<string>()
+  for (const part of url.search.replace(/^\?/, '').split('&')) {
+    const equals = part.indexOf('=')
+    if (equals < 0) continue
+    const key = decodeKey(part.slice(0, equals))
+    if (key && !mustRemovePart(key)) keys.add(key)
+  }
+  const query = keys.size
+    ? `?${[...keys].map((key) => `${encodeURIComponent(key)}=${QUERY_VALUE_PLACEHOLDER}`).join('&')}`
+    : ''
+  return `${url.origin}${path}${query}`
+}
+
 export function extractContext(element: Element, selector: string): PageContext {
   return {
-    url: location.href,
+    url: addressForModel(location.href),
     target: extractElementContext(element, selector),
     ancestors: ancestorChain(element),
     customProperties: customPropertiesInScope(element),

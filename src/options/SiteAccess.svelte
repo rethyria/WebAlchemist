@@ -7,7 +7,7 @@
    * about:addons. Removing one calls permissions.remove, and the background
    * reconciles the content script registration from permissions.onRemoved.
    */
-  import { siteGrants, type SiteGrant } from '@shared/site-access'
+  import { removeAccessQuestion, siteGrants, type SiteGrant } from '@shared/site-access'
   import type { Transform } from '@shared/types'
   import Button from '@sidebar/components/Button.svelte'
 
@@ -35,7 +35,10 @@
     }
   }
 
-  async function remove(origin: string) {
+  async function remove(grant: SiteGrant) {
+    const question = removeAccessQuestion(grant)
+    if (question !== null && !confirm(question)) return
+    const origin = grant.origin
     removing = origin
     try {
       const removed = await browser.permissions.remove({ origins: [origin] })
@@ -87,7 +90,7 @@
             <span class="origin">{grant.origin}</span>
             <span class="count">{describeCount(grant.transforms)}</span>
           </div>
-          <Button small disabled={removing === grant.origin} onclick={() => void remove(grant.origin)}>
+          <Button small disabled={removing === grant.origin} onclick={() => void remove(grant)}>
             Remove access
           </Button>
         </li>

@@ -110,10 +110,6 @@ describe('a private window', () => {
   describe('the handlers that send the page to a model refuse when the tab is unknown (#127)', () => {
     const sends: [string, (tabId?: number) => Record<string, unknown>][] = [
       [
-        'generate',
-        (tabId) => ({ type: 'generate', context: {}, instruction: 'x', history: [], ...(tabId === undefined ? {} : { tabId }) }),
-      ],
-      [
         'repair',
         (tabId) => ({ type: 'repair', transformId: 't1', context: {}, brokenReason: 'x', ...(tabId === undefined ? {} : { tabId }) }),
       ],

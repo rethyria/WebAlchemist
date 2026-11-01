@@ -69,3 +69,14 @@ export function siteGrants(held: string[], transforms: Pick<Transform, 'match'>[
     transforms: transforms.filter((t) => originCovers(origin, requiredOrigin(t))).length,
   }))
 }
+
+/**
+ * The question to ask before removing a grant, or null when no transform
+ * depends on it and the grant can be removed without asking.
+ */
+export function removeAccessQuestion(grant: SiteGrant): string | null {
+  if (grant.transforms === 0) return null
+  const which =
+    grant.transforms === 1 ? '1 saved transform uses' : `${grant.transforms} saved transforms use`
+  return `${which} ${grant.origin}. After the access is removed they stop running there, and CSS they applied is taken out of open tabs. Remove access?`
+}

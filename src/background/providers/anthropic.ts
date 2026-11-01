@@ -24,7 +24,11 @@ import {
   GENERATE_SYSTEM_PROMPT,
   REVIEW_SYSTEM_PROMPT,
   fencePageContent,
+  fenceSavedTransform,
+  pageDataSections,
+  randomNonce,
   repairPrompt,
+  reviewContent,
   scopeInstruction,
 } from '../prompts'
 import { retryAfterSeconds, type HeaderSource } from './retry-after'
@@ -37,6 +41,7 @@ import {
   modelNotPermittedError,
   type AiProvider,
   type GenerateRequest,
+  type ReviewArgs,
   type StreamListener,
   type ThinkingListener,
   type UsageListener,
@@ -205,6 +210,7 @@ export async function createAnthropicProvider(
           (body) =>
             client.messages.create(
               body as unknown as Parameters<typeof client.messages.create>[0],
+              request.signal ? { signal: request.signal } : undefined,
             ),
         )
 
@@ -267,6 +273,7 @@ export async function createAnthropicProvider(
           async (payload) => {
             const stream = client.messages.stream(
               payload as unknown as Parameters<typeof client.messages.stream>[0],
+              request.signal ? { signal: request.signal } : undefined,
             )
 
             let accumulated = ''
@@ -289,7 +296,20 @@ export async function createAnthropicProvider(
               onThinking?.(thought)
             })
 
-            return await stream.finalMessage()
+            try {
+              return await stream.finalMessage()
+            } catch (error) {
+              /*
+               * An aborted generation makes finalMessage() throw, so the
+               * report after this call never runs. The tokens counted in the
+               * message events received before the abort are still billed, so
+               * they are reported here (#71). The message is absent when the
+               * abort came before the first event.
+               */
+              const partial = stream.currentMessage
+              if (partial?.usage) reportUsage(generateModel, partial)
+              throw error
+            }
           },
         )
 
@@ -300,10 +320,10 @@ export async function createAnthropicProvider(
       }
     },
 
-    async review(args: { code: string; intent: string }): Promise<ModelReview> {
+    async review(args: ReviewArgs): Promise<ModelReview> {
       // Note what is absent: no PageContext, no URL, no DOM, no screenshot.
       // See REVIEW_SYSTEM_PROMPT for why this matters.
-      const body = `INTENT (stated by the user):\n${args.intent}\n\nCODE:\n\`\`\`js\n${args.code}\n\`\`\``
+      const body = reviewContent(args)
 
       try {
         const response = await withoutUnsupportedFields(
@@ -333,23 +353,26 @@ export async function createAnthropicProvider(
   }
 }
 
-function buildGenerationContent(
+export function buildGenerationContent(
   request: GenerateRequest,
 ): Anthropic.MessageParam['content'] {
-  const instruction = request.repair
-    ? repairPrompt(request.repair)
-    : request.instruction
+  // One value for every fence and section name in this request, so the
+  // instruction can name sections the page's own text cannot imitate.
+  const nonce = randomNonce()
+  const instruction = request.repair ? repairPrompt(nonce) : request.instruction
 
   /*
-   * Instruction first, then the page, fenced. The order matters as much as the
+   * Instruction first, then the data, fenced. The order matters as much as the
    * fence: what the user asked for is stated before any page-controlled text
    * has been read, so the request cannot be reframed by content arriving after
-   * it. See `fencePageContent`.
+   * it. On repair the saved transform is data too, in its own block. See
+   * `fencePageContent` and `fenceSavedTransform`.
    */
   const text = [
     instruction,
-    scopeInstruction(request.scopeDepth, request.scopeContainer ?? null),
-    fencePageContent(describeContext(request.context)),
+    scopeInstruction(request.scopeDepth, request.scopeContainer ?? null, nonce),
+    ...(request.repair ? [fenceSavedTransform(request.repair, nonce)] : []),
+    fencePageContent(describeContext(request.context) + pageDataSections(request, nonce), nonce),
   ].join('\n\n')
 
   const shot = request.context.screenshot

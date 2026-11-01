@@ -1,9 +1,11 @@
 /**
- * The harness records the last error of a JavaScript transform (#123). The
- * wrapped code is run here against a small fake document.
+ * The harness records the last error of a JavaScript transform (#123), and
+ * its path check agrees with the CSS side (#95). The wrapped code is run here
+ * against a small fake document and a stub location.
  */
 
 import { describe, expect, it, vi } from 'vitest'
+import { matchesUrl } from '@shared/match'
 import { errorAttributeName } from '@shared/script-errors'
 import { cssTransform } from './test-browser'
 import { wrapTransform } from './harness'
@@ -32,7 +34,8 @@ function run(code: string, attributes = new Map<string, string>(), again = 0) {
   let frame: () => void = () => {}
   const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
   try {
-    new Function('document', 'requestAnimationFrame', 'MutationObserver', 'console', wrapTransform(transform, TOKEN))(
+    new Function('location', 'document', 'requestAnimationFrame', 'MutationObserver', 'console', wrapTransform(transform, TOKEN))(
+      { pathname: '/', search: '' },
       fakeDocument,
       (callback: () => void) => {
         frame = callback
@@ -116,5 +119,61 @@ describe('the error marker', () => {
       'document.runs = (document.runs || 0) + 1; const ERROR_ATTRIBUTE = "other"; let SCOPES = 1; const NAME = 2; if (document.runs === 1) throw new Error("boom")'
     expect(run(code, new Map(), 1).has(NAME)).toBe(false)
     expect(run('const ERROR_ATTRIBUTE = "other"; throw new Error("boom")').get(NAME)).toBe('boom')
+  })
+})
+
+/** Runs the wrapper for `match` on `url` and returns how many times the code ran. */
+function runsOn(match: string, url: string): number {
+  const transform = {
+    ...cssTransform({ id: 'j', kind: 'js', match, code: 'ran()' }),
+    anchor: { tag: 'body', classes: [], path: 'body', landmarks: [], selector: 'body' },
+  }
+  const { pathname, search } = new URL(url)
+  let count = 0
+  new Function(
+    'location',
+    'document',
+    'requestAnimationFrame',
+    'MutationObserver',
+    'ran',
+    wrapTransform(transform as never, 'a1b2c3'),
+  )(
+    { pathname, search },
+    { querySelector: () => null, body: null },
+    () => {},
+    class {
+      observe() {}
+    },
+    () => count++,
+  )
+  return count
+}
+
+describe('the wrapper agrees with the CSS side on which pages it runs on', () => {
+  const cases: [string, string][] = [
+    // A wildcard in the pattern matches across the start of the query in a
+    // browser pattern, so the script is registered on a page where the CSS
+    // does not apply.
+    ['example.com/a*b', 'https://example.com/a?x=b'],
+    ['example.com/a*b', 'https://example.com/axb'],
+    ['example.com/a*b', 'https://example.com/axb?x=1'],
+    ['example.com/docs*', 'https://example.com/docs/intro?x=1'],
+    ['example.com/search?q=*', 'https://example.com/search/?q=abc'],
+    ['example.com/search?q=*', 'https://example.com/search?q=abc'],
+    ['example.com/search?q=*', 'https://example.com/search?p=abc'],
+    ['example.com/watch', 'https://example.com/watch/'],
+    ['example.com/watch', 'https://example.com/other'],
+  ]
+  for (const [match, url] of cases) {
+    it(`${match} on ${url}`, () => {
+      expect(runsOn(match, url) > 0).toBe(matchesUrl(match, url))
+    })
+  }
+
+  it('control: the first case is one on which the CSS side does not match', () => {
+    // Shows the table includes a page where the script must not run, so the
+    // agreement above is not satisfied by both sides always saying yes.
+    expect(matchesUrl('example.com/a*b', 'https://example.com/a?x=b')).toBe(false)
+    expect(runsOn('example.com/axb', 'https://example.com/axb')).toBe(1)
   })
 })

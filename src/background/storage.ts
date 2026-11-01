@@ -66,10 +66,14 @@ import {
 import { MIN_PASSPHRASE_LENGTH } from '@shared/vault-policy'
 import { assertEndpoint, endpointsOf } from '@shared/endpoint-policy'
 import { destinationOf, sameBinding } from '@shared/credential-binding'
-import type { Provider } from '@shared/types'
+import type { Provider, TransformVersion } from '@shared/types'
 
 const KEY_SETTINGS = 'settings'
 const KEY_TRANSFORMS = 'transforms'
+/** Earlier versions of each transform, by transform id, newest first. */
+const KEY_HISTORY = 'wa-transform-history'
+/** How many earlier versions are kept for each transform. */
+export const MAX_VERSIONS = 5
 const KEY_CREDENTIALS = 'credentials'
 const KEY_USAGE = 'usage'
 /** Set to true once bindStoredCredentials has finished a pass. */
@@ -150,10 +154,15 @@ function mutateSettings<T>(work: () => Promise<T>): Promise<T> {
 /**
  * Replaces the stored settings with the ones given. A caller that holds a copy
  * from when it loaded should use changeSettings, which does not write back
- * fields it did not mean to change.
+ * fields it did not mean to change. Returns the settings that were stored
+ * before, read in the same queued step as the write.
  */
-export function saveSettings(settings: Settings): Promise<void> {
-  return mutateSettings(() => writeSettings(settings))
+export function saveSettings(settings: Settings): Promise<Settings> {
+  return mutateSettings(async () => {
+    const previous = await getSettings()
+    await writeSettings(settings)
+    return previous
+  })
 }
 
 const SETTINGS_FIELDS = [
@@ -178,11 +187,17 @@ const UNSETTABLE_PROVIDER_FIELDS: readonly string[] = ['price', 'oauth']
 /**
  * Applies one change to the settings as they are stored now, inside the
  * settings queue, and returns what was saved. Throws when the change is
- * refused, and then writes nothing.
+ * refused, and then writes nothing. `seen` is called with the settings as they
+ * were stored before the change, inside the same queued step, so a caller does
+ * not need a read of its own before the queue (#85).
  */
-export function changeSettings(change: SettingsChange): Promise<Settings> {
+export function changeSettings(
+  change: SettingsChange,
+  seen?: (before: Settings) => void,
+): Promise<Settings> {
   return mutateSettings(async () => {
     const current = await getSettings()
+    seen?.(current)
     let next: Settings
     switch (change.kind) {
       case 'add-provider':
@@ -353,6 +368,54 @@ async function readStored(): Promise<{ valid: Transform[]; invalid: unknown[] }>
   }
 }
 
+type HistoryMap = Record<string, TransformVersion[]>
+
+async function readHistory(): Promise<HistoryMap> {
+  const value = (await browser.storage.local.get(KEY_HISTORY))[KEY_HISTORY]
+  return isObject(value) ? (value as HistoryMap) : {}
+}
+
+/** The earlier versions of a transform, newest first. */
+export async function getVersions(id: string): Promise<TransformVersion[]> {
+  const list = (await readHistory())[id]
+  return Array.isArray(list) ? list : []
+}
+
+/** True when a save changed something a version holds. */
+function versionedFieldsDiffer(a: Transform, b: Transform): boolean {
+  const view = (t: Transform) =>
+    JSON.stringify([t.code, t.rationale, t.match, t.capabilities, t.world ?? null])
+  return view(a) !== view(b)
+}
+
+/**
+ * Keeps `replaced` as the newest version of its transform and drops the oldest
+ * beyond MAX_VERSIONS. Called only from inside the transform queue, so two
+ * saves cannot read the same history and lose one of the two entries.
+ */
+async function recordVersion(replaced: Transform): Promise<void> {
+  const history = await readHistory()
+  const version: TransformVersion = {
+    id: crypto.randomUUID(),
+    code: replaced.code,
+    rationale: replaced.rationale,
+    match: replaced.match,
+    capabilities: replaced.capabilities,
+    ...(replaced.world === undefined ? {} : { world: replaced.world }),
+    savedAt: replaced.updatedAt,
+    ...(replaced.producedBy === undefined ? {} : { producedBy: replaced.producedBy }),
+  }
+  history[replaced.id] = [version, ...(history[replaced.id] ?? [])].slice(0, MAX_VERSIONS)
+  await browser.storage.local.set({ [KEY_HISTORY]: history })
+}
+
+async function forgetVersions(id: string): Promise<void> {
+  const history = await readHistory()
+  if (!(id in history)) return
+  delete history[id]
+  await browser.storage.local.set({ [KEY_HISTORY]: history })
+}
+
 async function writeTransforms(valid: Transform[], invalid: unknown[]): Promise<void> {
   await browser.storage.local.set({ [KEY_TRANSFORMS]: [...valid, ...invalid] })
 }
@@ -436,6 +499,9 @@ export function saveTransform(
       updatedAt: Date.now(),
     }
     assertValidTransform(next)
+    // Before the transform is replaced, so a failure leaves at worst one extra
+    // version and never a replaced transform with no version of what it was.
+    if (existing && versionedFieldsDiffer(existing, next)) await recordVersion(existing)
     if (index === -1) all.push(next)
     else all[index] = next
     await writeTransforms(all, invalid)
@@ -464,6 +530,7 @@ export function updateTransform(
     if (index === -1) return null
     const next = { ...all[index]!, ...patch, id, updatedAt: Date.now() }
     assertValidTransform(next)
+    if (versionedFieldsDiffer(all[index]!, next)) await recordVersion(all[index]!)
     all[index] = next
     await writeTransforms(all, invalid)
     return next
@@ -477,6 +544,7 @@ export async function deleteTransform(id: string): Promise<void> {
       all.filter((t) => t.id !== id),
       invalid,
     )
+    await forgetVersions(id)
   })
   // The transform is gone, so its usage would otherwise stay in the store
   // forever with no name to show. The provider totals by month keep the cost.
@@ -485,13 +553,43 @@ export async function deleteTransform(id: string): Promise<void> {
   await pruneTransformUsage(id).catch(() => undefined)
 }
 
-/** Persists a new ordering. Order decides which transform wins a conflict. */
+/**
+ * Persists a new ordering of the transforms listed for one page. Order decides
+ * which transform wins a conflict.
+ *
+ * `orderedIds` holds only the transforms that match the page the user is on.
+ * It used to give them the values 0 to n − 1 and leave the others alone, so a
+ * transform that matches two pages could end up with the same value as one that
+ * matches only the other page, and which of two equal values wins then depended
+ * on where the records sit in storage. Now the listed transforms take the
+ * places in the overall ranking that they already held, in the new order, and
+ * every record is numbered 0 to n − 1 by its place. Each value is unique, a
+ * transform that was not listed keeps its rank relative to the other
+ * transforms it was not listed with, and ties that already exist are resolved
+ * in their stored order.
+ */
 export function reorderTransforms(orderedIds: string[]): Promise<void> {
   return mutateTransforms(async () => {
     const { valid: all, invalid } = await readStored()
-    const position = new Map(orderedIds.map((id, index) => [id, index]))
-    const next = all.map((t) => ({ ...t, order: position.get(t.id) ?? t.order }))
-    await writeTransforms(next, invalid)
+    const byId = new Map(all.map((t) => [t.id, t]))
+    const wanted = [...new Set(orderedIds)].filter((id) => byId.has(id))
+    const listed = new Set(wanted)
+
+    // Array position breaks a tie, which is what getAllTransforms does: the sort
+    // is stable, so equal values keep their stored order.
+    const ranking = all
+      .map((transform, index) => ({ transform, index }))
+      .sort((a, b) => a.transform.order - b.transform.order || a.index - b.index)
+      .map(({ transform }) => transform)
+
+    let nextListed = 0
+    const placed = ranking.map((t) => (listed.has(t.id) ? byId.get(wanted[nextListed++]!)! : t))
+
+    const rankOf = new Map(placed.map((t, rank) => [t.id, rank]))
+    await writeTransforms(
+      all.map((t) => ({ ...t, order: rankOf.get(t.id)! })),
+      invalid,
+    )
   })
 }
 
@@ -1158,13 +1256,22 @@ export interface ImportResult {
  * Imports a bundle. JS transforms arrive without code — a shared JS transform
  * carries only intent and anchor, and the importer's own model regenerates the
  * implementation locally under their own review and capability gates. CSS
- * arrives with code intact, since CSS cannot exfiltrate anything.
+ * arrives with code intact unless `rejectCss` refuses it: CSS can request
+ * outside resources, which is how it can send page data to another server, so
+ * the caller checks it for that.
  */
-export function importTransforms(bundle: ExportBundle): Promise<ImportResult> {
-  return mutateTransforms(() => importTransformsNow(bundle))
+export function importTransforms(
+  bundle: ExportBundle,
+  /** True for a CSS transform whose code must not be imported. */
+  rejectCss: (transform: Transform) => boolean = () => false,
+): Promise<ImportResult> {
+  return mutateTransforms(() => importTransformsNow(bundle, rejectCss))
 }
 
-async function importTransformsNow(bundle: ExportBundle): Promise<ImportResult> {
+async function importTransformsNow(
+  bundle: ExportBundle,
+  rejectCss: (transform: Transform) => boolean,
+): Promise<ImportResult> {
   // `undefined > SCHEMA_VERSION` is false, so a file with no version used to
   // pass the check below. A missing or non-numeric version means the file is
   // not one of ours, or was cut short.
@@ -1183,7 +1290,9 @@ async function importTransformsNow(bundle: ExportBundle): Promise<ImportResult> 
 
   const { valid: existing, invalid } = await readStored()
   const needsRegeneration: string[] = []
-  let nextOrder = existing.length
+  // After the highest value in use, not after the count: values are not
+  // consecutive (new transforms are numbered by time), and a count can equal one.
+  let nextOrder = existing.reduce((highest, t) => Math.max(highest, t.order), -1) + 1
 
   let skipped = 0
 
@@ -1202,6 +1311,16 @@ async function importTransformsNow(bundle: ExportBundle): Promise<ImportResult> 
     if (transform.kind === 'js') {
       // Never import third-party JavaScript. Strip it and mark for local
       // regeneration from the intent.
+      transform.code = ''
+      transform.enabled = false
+      needsRegeneration.push(transform.id)
+    }
+
+    // An approval in a shared file was given by the sender, not by the person
+    // importing it, so it counts for nothing here.
+    delete transform.approvedCssUrls
+
+    if (transform.kind === 'css' && rejectCss(transform)) {
       transform.code = ''
       transform.enabled = false
       needsRegeneration.push(transform.id)

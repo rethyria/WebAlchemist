@@ -28,13 +28,14 @@ import type {
   Conflict,
   Transform,
   TransformRuntimeState,
+  TransformSource,
   TreePath,
   TreeRow,
 } from './types'
 import type { Rule } from './css'
 import type { ScrollOffset } from './region'
 import type { OverlayPalette } from './accents'
-import type { RefinementTurn } from '@background/providers/types'
+import type { RefinementTurn, ReviewInstruction } from '@background/providers/types'
 
 /**
  * What a confirmed pick means.
@@ -60,17 +61,6 @@ export type Message =
 
   /* --- generation --------------------------------------------------- */
   | {
-      type: 'generate'
-      context: PageContext
-      instruction: string
-      history: RefinementTurn[]
-      scopeDepth?: number
-      scopeContainer?: string | null
-      transformId?: string
-      /** The tab the page came from, so a private window can be refused. */
-      tabId?: number
-    }
-  | {
       type: 'repair'
       transformId: string
       context: PageContext
@@ -81,28 +71,92 @@ export type Message =
   | {
       type: 'review'
       code: string
+      /** The generator's summary of the intent. */
       intent: string
+      /** True when the user changed the intent after the model returned it. */
+      intentEditedByUser?: boolean
+      /**
+       * Every instruction, verbatim and in order, with where it came from. Only
+       * the typed ones are the reviewer's yardstick.
+       */
+      instructions: ReviewInstruction[]
       declaredCapabilities: Transform['capabilities']
-      /** The transform the call is for, so its cost is added to that transform. */
-      transformId?: string
+      /** Part of what the approval is tied to. Absent means USER_SCRIPT. */
+      world?: Transform['world']
+      /**
+       * The transform the approval token is tied to. It is also the transform
+       * the call is for, so its cost is added to that transform.
+       */
+      transformId: string
+      /** The match pattern the approval token is tied to. */
+      match: string
+    }
+  /**
+   * Records that the user wrote this code and is saving it, for JavaScript that
+   * did not go through the model review (the editor, and hand edits in the
+   * panel). Static analysis must pass. `save-transform` refuses JavaScript with
+   * no recorded approval.
+   */
+  | {
+      type: 'approve-code'
+      code: string
+      declaredCapabilities: Transform['capabilities']
+      world?: Transform['world']
+      /** The transform and match pattern the approval token is tied to. */
+      transformId: string
+      match: string
     }
   /** Recorded token usage, for the settings page. */
   | { type: 'get-usage' }
   /** Static analysis alone — no model call, so it is free to run before preview. */
   | { type: 'analyse'; code: string; declaredCapabilities: Transform['capabilities'] }
+  /**
+   * The CSS check, which loads nothing and costs nothing. `tabId` names the
+   * page the CSS would apply to; without it the page is taken from `match`
+   * (the editor has no page). `approvedUrls` are the external URLs the user
+   * approved, which only matter on a site set to list external URLs.
+   */
+  | { type: 'analyse-css'; css: string; match: string; tabId?: number; approvedUrls?: string[] }
 
   /* --- persistence -------------------------------------------------- */
   /** `tabId` lets the change take effect now instead of on the next load. */
+  /**
+   * Stored transforms matching `url` whose code no longer passes the checks, as
+   * runtime states with status `broken`. Computed on request, never stored.
+   */
+  | { type: 'get-blocked-states'; url: string }
+  /**
+   * How many enabled transforms, on any site, are stored but not running
+   * because their code no longer passes the checks. Lets the list view say so
+   * without the user visiting each page the transform matches.
+   */
+  | { type: 'get-blocked-count' }
+  /**
+   * `approvalToken` is the one returned by `review` or `approve-code` for this
+   * code, transform and match pattern. JavaScript whose code differs from what
+   * is stored is refused without it, and the token is deleted by a successful
+   * save. CSS and unchanged code need none.
+   */
   | {
       type: 'save-transform'
       transform: Transform
       tabId?: number
+      approvalToken?: string
+      /** What produced the code, kept with the version it replaces. */
+      source?: TransformSource
       /**
        * Removes a stored container restriction. Without it, a record that has
        * no cookieStoreId keeps the stored one.
        */
       clearContainer?: boolean
     }
+  | { type: 'get-transform-versions'; id: string }
+  /**
+   * `approvalToken` is the one `approve-code` returned for the version's code,
+   * world, capabilities and match, with this transform's id. A restore goes
+   * through the same save as any other, so JavaScript is refused without it.
+   */
+  | { type: 'restore-transform-version'; id: string; versionId: string; tabId?: number; approvalToken?: string }
   /** `tabId` lets the change come off the page now rather than on reload. */
   | { type: 'delete-transform'; id: string; tabId?: number }
   /**
@@ -122,6 +176,16 @@ export type Message =
   | { type: 'save-settings'; settings: Settings }
   /** Applies one change to the stored settings and returns the settings as saved. */
   | { type: 'patch-settings'; change: SettingsChange }
+  /* The per-site off switch, by the host of `url`. */
+  | { type: 'get-site-off'; url: string }
+  | { type: 'set-site-off'; url: string; off: boolean }
+  /** How many open tabs may be running JavaScript that a changed setting does not stop. */
+  | { type: 'count-js-tabs' }
+  /* The sites on which picking and generation are refused (#131). */
+  | { type: 'get-excluded-sites' }
+  | { type: 'set-excluded-sites'; sites: string[] }
+  /** Asks the page in the tab whether it has a password or payment field. */
+  | { type: 'page-has-sensitive-fields'; tabId: number }
   | { type: 'set-credential'; providerId: string; credential: Credential }
   | { type: 'clear-credential'; providerId: string }
   /*
@@ -159,7 +223,7 @@ export type Message =
    */
 
   /* --- page-side operations ----------------------------------------- */
-  | { type: 'preview-css'; tabId: number; css: string }
+  | { type: 'preview-css'; tabId: number; css: string; approvedUrls?: string[] }
   | { type: 'clear-preview-css'; tabId: number; css: string }
   /**
    * Registers an unsaved transform and reloads the tab, so the preview runs in
@@ -306,6 +370,8 @@ export type ContentMessage =
   | { type: 'url-changed'; url: string }
   /** Answered only by a live instance; the background uses it to avoid reinjecting. */
   | { type: 'ping' }
+  /** Answers whether the page has a password or payment field. Never reads a value. */
+  | { type: 'sensitive-fields' }
   /** Answers the current scroll offset and viewport size. */
   | { type: 'get-viewport' }
 
@@ -436,6 +502,7 @@ export interface Responses {
   'find-conflicts': Conflict[]
   'suspend-transform': boolean
   review: ReviewResult
+  'approve-code': { approvalToken: string }
   analyse: ReviewResult
   'preview-js': boolean
   'clear-preview-js': boolean
@@ -456,6 +523,8 @@ export interface Responses {
   'set-lock-scope': { count: number; container: string | null }
   'clear-lock': boolean
   'check-now': TransformRuntimeState[]
+  'get-blocked-states': TransformRuntimeState[]
+  'get-blocked-count': number
   'run-csp-probe': boolean
   'clear-csp-probe': boolean
 }

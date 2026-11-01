@@ -2,39 +2,37 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { reconcile } from './content-scripts'
 
 /**
- * A fake of the three browser calls reconcile() makes. `held` stands for the
- * permissions Firefox reports; `registered` stands for the content script
- * registration, which unregister and register change.
+ * A fake of the browser calls reconcile() makes. `held` stands for the
+ * permissions Firefox reports. Since #96 the content script is registered once
+ * per origin, so the fake keeps registrations by id, and `registered` reads
+ * back the origins they cover, or null when there are none.
  */
 let held: string[]
+let scripts: Map<string, { id: string; matches: string[] }>
 let registered: string[] | null
+
+function readBack(): void {
+  const origins = [...scripts.values()].flatMap((script) => script.matches)
+  registered = origins.length === 0 ? null : origins.sort()
+}
 
 beforeEach(() => {
   held = []
+  scripts = new Map()
   registered = null
   ;(globalThis as unknown as { browser: unknown }).browser = {
     permissions: { getAll: async () => ({ origins: held }) },
+    // reconcile() records origins Firefox refused in session storage (#96).
+    storage: { session: { set: async () => {}, get: async () => ({}) } },
     scripting: {
-      // reconcile() reads the current registration so that it can leave an
-      // identical one alone, and returns early when none exists and none is
-      // wanted. Without this answer the fake reported nothing registered.
-      getRegisteredContentScripts: async () =>
-        registered === null
-          ? []
-          : [
-              {
-                id: 'wa-content',
-                matches: registered,
-                js: ['src/content/index.js'],
-                runAt: 'document_idle',
-                persistAcrossSessions: true,
-              },
-            ],
-      unregisterContentScripts: async () => {
-        registered = null
+      getRegisteredContentScripts: async () => [...scripts.values()],
+      unregisterContentScripts: async ({ ids }: { ids: string[] }) => {
+        for (const id of ids) scripts.delete(id)
+        readBack()
       },
-      registerContentScripts: async (list: { matches: string[] }[]) => {
-        registered = list[0]?.matches ?? []
+      registerContentScripts: async (list: { id: string; matches: string[] }[]) => {
+        for (const script of list) scripts.set(script.id, script)
+        readBack()
       },
     },
   }
@@ -44,7 +42,7 @@ describe('reconcile after access is removed (#122)', () => {
   it('registers the content script on a held origin', async () => {
     held = ['*://*.example.com/*', '*://other.com/*']
     await reconcile()
-    expect(registered).toEqual(['*://*.example.com/*', '*://other.com/*'])
+    expect(registered).toEqual(['*://*.example.com/*', '*://other.com/*'].sort())
   })
 
   it('drops the registration for an origin that is no longer held', async () => {

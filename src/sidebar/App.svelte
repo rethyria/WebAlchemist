@@ -15,6 +15,8 @@
   import { parseRules } from '@shared/css'
   import { permissionRequestsFor, requestAll } from '@shared/permissions'
   import { hasAccess, requiredOrigin } from '@shared/site-access'
+  import { killSwitchNotice } from '@shared/kill-switch'
+  import { changedFields } from '@shared/settings-fields'
   import { activeTab, BackgroundError, send } from './lib/messaging.svelte'
   import { isForTab, type HealthCheckResult } from './lib/health-result'
   import { Flow } from './lib/flow.svelte'
@@ -32,10 +34,21 @@
   import TransformRow from './components/TransformRow.svelte'
 
   let settings = $state<Settings | null>(null)
+  /** What to reload after the stop-all setting changed, shown under that setting. */
+  let killNotice = $state('')
+  /** Whether every transform is turned off for the host of the page in view. */
+  let siteOff = $state(false)
   let statuses = $state<CredentialStatus[]>([])
   let vault = $state<VaultView>({ sealed: false, unlocked: true })
   let transforms = $state<Transform[]>([])
-  let runtimeStates = $state<TransformRuntimeState[]>([])
+  let healthStates = $state<TransformRuntimeState[]>([])
+  /* Stored code that no longer passes the safety checks, so is not running. */
+  let blockedStates = $state<TransformRuntimeState[]>([])
+  /* Blocked wins: the page check can find the element and still miss that the code is refused. */
+  let runtimeStates = $derived([
+    ...healthStates.filter((s) => !blockedStates.some((b) => b.id === s.id)),
+    ...blockedStates,
+  ])
   let conflicts = $state<Conflict[]>([])
   let url = $state('')
   /* Origins currently held, for the rows' "No access to this site" state. */
@@ -44,6 +57,8 @@
   let loadError = $state<{ message: string; retryable: boolean } | null>(null)
   let checking = $state(false)
   let showSettings = $state(false)
+  /* Enabled transforms on any site that the safety check keeps from running. */
+  let blockedCount = $state(0)
 
   const flow = new Flow(() => void afterSave())
 
@@ -125,14 +140,39 @@
   }
 
   async function refresh() {
+    await refreshBlockedCount()
     if (!transformable) {
       transforms = []
       conflicts = []
+      blockedStates = []
       return
     }
     await readGrants()
     transforms = await send<Transform[]>({ type: 'get-transforms-for-url', url })
+    blockedStates = await send<TransformRuntimeState[]>({ type: 'get-blocked-states', url })
+    siteOff = (await send<boolean>({ type: 'get-site-off', url })) === true
     await findConflicts()
+  }
+
+  /*
+   * The tabs of this site that ran JavaScript are reloaded by the background
+   * when the site is turned off, because a script that is already running is
+   * not stopped by unregistering it. Turning the site back on reloads nothing.
+   */
+  let siteNotice = $state('')
+  async function setSiteOff(off: boolean) {
+    siteNotice = ''
+    try {
+      const answer = (await send({ type: 'set-site-off', url, off })) as { reloadTabs?: number }
+      siteOff = off
+      const waiting = answer?.reloadTabs ?? 0
+      if (!off && waiting > 0) {
+        siteNotice = `Reload ${waiting === 1 ? '1 open tab' : `${waiting} open tabs`} of this site to run JavaScript transforms there again.`
+      }
+      await refresh()
+    } catch (cause) {
+      siteNotice = cause instanceof Error ? cause.message : String(cause)
+    }
   }
 
   async function readGrants() {
@@ -146,6 +186,9 @@
    * already held resolves without a prompt.
    */
   async function grantAccess(transform: Transform) {
+    // Before the permission request, and with no await since the click: an
+    // excluded site is never asked for access (#131).
+    if (flow.refuseExcludedAccess(transform.match)) return
     try {
       const granted = await requestAll(
         (permissions) => browser.permissions.request(permissions),
@@ -170,9 +213,36 @@
     document.documentElement.dataset['accent'] = next.accent
   }
 
+  async function refreshBlockedCount() {
+    try {
+      blockedCount = await send<number>({ type: 'get-blocked-count' })
+    } catch {
+      // The count is a notice; failing to read it must not stop the list loading.
+      blockedCount = 0
+    }
+  }
+
+  /*
+   * Sends only the fields the user changed, as one patch the background applies
+   * to what is stored. A whole settings object would carry back every value this
+   * panel loaded earlier, and overwrite a change made on the settings page since
+   * (#85). The settings component still hands over a whole object, so the
+   * changed fields are found here by comparing with what is shown.
+   */
   async function saveSettings(next: Settings) {
+    const current = settings
+    if (!current) return
+    const fields = changedFields(current, next)
+    if (Object.keys(fields).length === 0) return
+
     applySettings(next)
-    await send({ type: 'save-settings', settings: next })
+    const saved = await send<Settings>({ type: 'patch-settings', change: { kind: 'fields', fields } })
+    applySettings(saved)
+    // A site setting can change which stored CSS passes the check.
+    await refreshBlockedCount()
+    if ('aiJsKillSwitch' in fields) {
+      killNotice = killSwitchNotice(saved.aiJsKillSwitch, await send<number>({ type: 'count-js-tabs' }))
+    }
   }
 
   /*
@@ -188,6 +258,8 @@
     loadError = null
     try {
       applySettings(await send<Settings>({ type: 'get-settings' }))
+      flow.excludedSites = await send<string[]>({ type: 'get-excluded-sites' })
+      await flow.loadCaptureGrantRecord()
       await refreshVault()
       statuses = await send<CredentialStatus[]>({ type: 'get-credential-statuses' })
 
@@ -227,7 +299,7 @@
     if (tab?.id === undefined || !url) return
     checking = true
     try {
-      runtimeStates = await send<TransformRuntimeState[]>({
+      healthStates = await send<TransformRuntimeState[]>({
         type: 'check-now',
         tabId: tab.id,
         url,
@@ -356,6 +428,7 @@
   }
 
   async function editCode(transform: Transform, code: string): Promise<string | null> {
+    let approvalToken: string | undefined
     if (transform.kind === 'js') {
       const analysis = await send<ReviewResult>({
         type: 'analyse',
@@ -368,6 +441,17 @@
           .map((f) => `Line ${f.line}: ${f.explanation}`)
           .join('\n')
       }
+      // Code the user typed was seen by the user, which is the approval here.
+      approvalToken = (
+        await send<{ approvalToken: string }>({
+          type: 'approve-code',
+          code,
+          declaredCapabilities: transform.capabilities,
+          ...(transform.world ? { world: transform.world } : {}),
+          transformId: transform.id,
+          match: transform.match,
+        })
+      ).approvalToken
     }
 
     const next: Transform = {
@@ -385,7 +469,9 @@
       await send({
         type: 'save-transform',
         transform: next,
+        source: 'hand-edit',
         ...(tab?.id === undefined ? {} : { tabId: tab.id }),
+        ...(approvalToken ? { approvalToken } : {}),
       })
     } catch (cause) {
       return cause instanceof BackgroundError ? cause.message : String(cause)
@@ -420,7 +506,7 @@
     }
     if (expandedId === transform.id) expandedId = null
     transforms = transforms.filter((t) => t.id !== transform.id)
-    runtimeStates = runtimeStates.filter((s) => s.id !== transform.id)
+    healthStates = healthStates.filter((s) => s.id !== transform.id)
   }
 
   function openSettingsPage() {
@@ -430,7 +516,7 @@
   /** Ignores results for tabs the panel is not showing; see health-result.ts. */
   async function showHealthResult(message: HealthCheckResult) {
     const tab = await activeTab()
-    if (isForTab(message, tab?.id)) runtimeStates = message.states
+    if (isForTab(message, tab?.id)) healthStates = message.states
   }
 
   /*
@@ -461,8 +547,12 @@
       changes: Record<string, browser.storage.StorageChange>,
       area: string,
     ) => {
-      if (area !== 'local' || !changes['settings']) return
-      applySettings(changes['settings'].newValue as Settings)
+      if (area !== 'local') return
+      // The list is edited on the settings page while this panel is open.
+      if (changes['wa-excluded-sites']) {
+        flow.excludedSites = (changes['wa-excluded-sites'].newValue as string[] | undefined) ?? []
+      }
+      if (changes['settings']) applySettings(changes['settings'].newValue as Settings)
     }
     browser.storage.onChanged.addListener(onStored)
 
@@ -558,6 +648,14 @@
     />
   {/if}
 
+  {#if blockedCount > 0 && !showSettings && transformable && flow.step === 'list' && !flow.awayFromOwner}
+    <p class="broken-banner" role="status">
+      {blockedCount}
+      {blockedCount === 1 ? 'transform is' : 'transforms are'} blocked by the current safety check and
+      {blockedCount === 1 ? 'is' : 'are'} not running. This count covers every site.
+    </p>
+  {/if}
+
   {#if showSettings && settings}
     <SettingsPanel
       {settings}
@@ -565,6 +663,7 @@
       {vault}
       onsave={(next: Settings) => void saveSettings(next)}
       onfullpage={openSettingsPage}
+      {killNotice}
     />
   {:else if flow.awayFromOwner}
     <div class="paused">
@@ -604,6 +703,7 @@
       shotClipped={flow.shotClipped}
       shotMoved={flow.shotMoved}
       visionSupported={flow.visionSupported}
+      sentAddress={flow.sentAddress}
       onchange={(value) => (flow.instruction = value)}
       onscreenshot={(value) =>
         value ? void flow.chooseScreenshotRegion() : flow.cancelScreenshot()}
@@ -630,6 +730,7 @@
       withScreenshot={flow.sendScreenshot}
       {contextSize}
       thinkingChars={flow.thinkingChars}
+      sentAddress={flow.sentAddress}
       oncancel={() => flow.cancelGenerating()}
     />
   {:else if flow.step === 'refining' && flow.result}
@@ -647,6 +748,7 @@
       shotClipped={flow.shotClipped}
       shotMoved={flow.shotMoved}
       visionSupported={flow.visionSupported}
+      sentAddress={flow.sentAddress}
       onfollowup={(value) => (flow.followUp = value)}
       onaddreference={() => void flow.addReference()}
       onremovereference={(selector) => flow.removeReference(selector)}
@@ -678,6 +780,7 @@
       origin={originPermissionFor(flow.matchPattern)}
       permissionDenied={flow.permissionDenied}
       onrefuse={() => void flow.refuseCapabilities()}
+      onapproveurls={() => void flow.approveCssUrls()}
       onsave={() => void flow.save()}
       onback={() => flow.toSaving()}
     />
@@ -738,6 +841,10 @@
       <span class="count">{activeCount} active</span>
     </header>
 
+    {#if siteOff}
+      <p class="hint off-note" role="status">Everything is turned off on this site.</p>
+    {/if}
+
     {#if brokenCount > 0}
       <p class="broken-banner">
         {brokenCount}
@@ -783,6 +890,18 @@
       </button>
       <p class="hint">Order decides conflicts — later wins</p>
     </footer>
+    <div class="site-off">
+      <button type="button" class="link" onclick={() => void setSiteOff(!siteOff)}>
+        {siteOff ? 'Turn everything back on for this site' : 'Turn off everything on this site'}
+      </button>
+      <p class="hint">
+        {siteOff
+          ? 'No transform runs on this site while this is off. They stay saved.'
+          : 'Stops every CSS and JavaScript transform on this site. Open tabs of this site that ran JavaScript are reloaded.'}
+      </p>
+      {#if siteNotice}<p class="hint" role="status">{siteNotice}</p>{/if}
+    </div>
+
   {/if}
 </div>
 
@@ -896,6 +1015,16 @@
     margin-top: auto;
     padding: 11px var(--gutter-sidebar);
     border-top: 1px solid var(--border-subtle);
+  }
+
+  .site-off {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 8px 12px 12px;
+  }
+  .off-note {
+    padding: 0 12px;
   }
 
   .idle-foot {

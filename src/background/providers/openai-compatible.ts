@@ -21,7 +21,11 @@ import {
   GENERATE_SYSTEM_PROMPT,
   REVIEW_SYSTEM_PROMPT,
   fencePageContent,
+  fenceSavedTransform,
+  pageDataSections,
+  randomNonce,
   repairPrompt,
+  reviewContent,
   scopeInstruction,
 } from '../prompts'
 import { TOKEN_REQUEST_TIMEOUT_MS, credentialFrom, needsRefresh, type TokenPayload } from '../oauth'
@@ -37,6 +41,7 @@ import {
   modelNotPermittedError,
   type AiProvider,
   type GenerateRequest,
+  type ReviewArgs,
   type UsageListener,
 } from './types'
 import { readUsage } from '@shared/usage'
@@ -95,6 +100,8 @@ export async function createOpenAiCompatibleProvider(
     schema: unknown
     schemaName: string
     maxTokens: number
+    /** Aborts the HTTP request when the caller no longer wants the answer. */
+    signal?: AbortSignal | undefined
   }): Promise<T> => {
     const body = JSON.stringify({
       model: args.model,
@@ -109,6 +116,8 @@ export async function createOpenAiCompatibleProvider(
       },
     })
 
+    const reportUnknownUsage = () => onUsage?.({ model: args.model, usage: null })
+
     const send = async (auth: Record<string, string>): Promise<Response> => {
       try {
         return await fetch(`${baseUrl}/chat/completions`, {
@@ -118,8 +127,12 @@ export async function createOpenAiCompatibleProvider(
           // location the base URL check never saw.
           redirect: 'error',
           body,
+          ...(args.signal ? { signal: args.signal } : {}),
         })
       } catch (error) {
+        // The request was sent, and the server may bill it although the answer
+        // is no longer wanted. The count is unknown, so null is reported (#71).
+        if (args.signal?.aborted) reportUnknownUsage()
         throw new ProviderError(
           `Could not reach ${provider.label}.`,
           'network',
@@ -176,6 +189,9 @@ export async function createOpenAiCompatibleProvider(
     try {
       payload = (await response.json()) as typeof payload
     } catch (error) {
+      // An abort while the body is being read leaves a complete, billed
+      // response unread, so the usage is recorded as unknown (#71).
+      if (args.signal?.aborted) reportUnknownUsage()
       throw new ProviderError(
         `${provider.label} returned a response that is not JSON. Check the base URL in settings.`,
         'bad-response',
@@ -222,9 +238,10 @@ export async function createOpenAiCompatibleProvider(
     },
 
     async generate(request: GenerateRequest): Promise<GenerationResult> {
-      const instruction = request.repair
-        ? repairPrompt(request.repair)
-        : request.instruction
+      // One value for every fence and section name in this request, so the
+      // instruction can name sections the page's own text cannot imitate.
+      const nonce = randomNonce()
+      const instruction = request.repair ? repairPrompt(nonce) : request.instruction
 
       /*
        * Two fixes in one line. The page content is fenced, for the reason in
@@ -240,8 +257,12 @@ export async function createOpenAiCompatibleProvider(
        */
       const text = [
         instruction,
-        scopeInstruction(request.scopeDepth, request.scopeContainer ?? null),
-        fencePageContent(JSON.stringify(request.context, null, 2)),
+        scopeInstruction(request.scopeDepth, request.scopeContainer ?? null, nonce),
+        ...(request.repair ? [fenceSavedTransform(request.repair, nonce)] : []),
+        fencePageContent(
+          JSON.stringify(request.context, null, 2) + pageDataSections(request, nonce),
+          nonce,
+        ),
       ].join('\n\n')
 
       const shot = request.context.screenshot
@@ -259,15 +280,16 @@ export async function createOpenAiCompatibleProvider(
         schema: GENERATION_SCHEMA,
         schemaName: 'transform',
         maxTokens: 16000,
+        signal: request.signal,
       })
     },
 
-    async review(args: { code: string; intent: string }): Promise<ModelReview> {
+    async review(args: ReviewArgs): Promise<ModelReview> {
       // No page content, deliberately. See REVIEW_SYSTEM_PROMPT.
       return complete<ModelReview>({
         model: provider.reviewModel,
         system: REVIEW_SYSTEM_PROMPT,
-        userContent: `INTENT (stated by the user):\n${args.intent}\n\nCODE:\n\`\`\`js\n${args.code}\n\`\`\``,
+        userContent: reviewContent(args),
         schema: REVIEW_SCHEMA,
         schemaName: 'review',
         maxTokens: 4000,

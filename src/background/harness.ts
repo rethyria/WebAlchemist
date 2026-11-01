@@ -12,6 +12,7 @@
  * performance problem on precisely the heavy sites that need transforms most.
  */
 
+import { pathMatcherFor } from '@shared/match'
 import type { Transform } from '@shared/types'
 import { errorAttributeName } from '@shared/script-errors'
 
@@ -30,18 +31,49 @@ export function wrapTransform(transform: Transform, errorToken: string): string 
     'body',
   ].map(jsString)
 
+  const scopeAttempts = scopeCandidates
+    .map(
+      (selector) => `    try {
+      const found = document.querySelector(${selector});
+      if (found) return found;
+    } catch (_) { /* selector no longer parses against this document */ }`,
+    )
+    .join('\n')
+
+  const matcher = pathMatcherFor(transform.match)
+  const errorName = jsString(errorAttributeName(errorToken))
+
   return `(() => {
   'use strict';
   const NAME = ${jsString(transform.name)};
-  const SCOPES = [${scopeCandidates.join(', ')}];
-  // Where the last error is recorded for the content script to read. The page
-  // can read and forge it, so it is for diagnostics only (see script-errors.ts).
-  const ERROR_ATTRIBUTE = ${jsString(errorAttributeName(errorToken))};
+  // The last error is recorded in an attribute for the content script to read.
+  // The page can read and forge it, so it is for diagnostics only (see
+  // script-errors.ts). The attribute name is written out at each use and is
+  // not held in a variable: the static analysis refuses a name that is decided
+  // while running, and this code is checked as well.
 
   // True only after this script wrote the marker. A successful run touches the
   // attribute only then: removing it on every run would let a page that
   // watches removeAttribute see the name on every run.
   let wroteMarker = false;
+
+  /*
+   * The path check that matchesUrl makes for the CSS side. A browser match
+   * pattern compares the path together with the query, so a wildcard in the
+   * pattern can match across the start of the query and register the script
+   * on a page the CSS does not apply to. Running the same check here makes
+   * the two agree. The host and scheme are already limited by the
+   * registration.
+   */
+  const PATH_FORMS = ${JSON.stringify(matcher.forms)};
+  const PATTERN_HAS_QUERY = ${matcher.hasQuery};
+  const pathAgrees = () => {
+    const path = location.pathname;
+    const trimmed = path.replace(/\\/+$/, '') || '/';
+    return PATH_FORMS.some((source) => [path, trimmed].some((form) =>
+      new RegExp(source).test(PATTERN_HAS_QUERY ? form + location.search : form)));
+  };
+  if (!pathAgrees()) return;
 
   const apply = () => {
     try {
@@ -55,13 +87,13 @@ ${transform.code}
       // run fixes is not reported.
       if (wroteMarker) {
         wroteMarker = false;
-        try { document.documentElement.removeAttribute(ERROR_ATTRIBUTE); } catch (_) {}
+        try { document.documentElement.removeAttribute(${errorName}); } catch (_) {}
       }
     } catch (error) {
       console.error('[Web Alchemist] transform failed:', NAME, error);
       try {
         const text = String((error && error.message) || error);
-        document.documentElement.setAttribute(ERROR_ATTRIBUTE, text.slice(0, 500));
+        document.documentElement.setAttribute(${errorName}, text.slice(0, 500));
         wroteMarker = true;
       } catch (_) { /* the document cannot be written; the console line remains */ }
     }
@@ -76,13 +108,10 @@ ${transform.code}
     requestAnimationFrame(() => { queued = false; apply(); });
   };
 
+  // One written-out selector per attempt: the static analysis refuses a
+  // selector that is not written out, and this code is checked as well.
   const findScope = () => {
-    for (const selector of SCOPES) {
-      try {
-        const found = document.querySelector(selector);
-        if (found) return found;
-      } catch (_) { /* selector no longer parses against this document */ }
-    }
+${scopeAttempts}
     return document.body;
   };
 

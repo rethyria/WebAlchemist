@@ -39,6 +39,7 @@ export default defineConfig({
   ],
   build: {
     // Extension review requires readable sources; keep output unminified.
+    outDir: process.env['WA_OUT_DIR'] ?? 'dist',
     minify: false,
     sourcemap: true,
     target: 'firefox115',
