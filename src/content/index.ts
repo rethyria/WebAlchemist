@@ -13,7 +13,7 @@ import { pageHasSensitiveFields } from './sensitive'
 import type { ConflictSpec, ContentEvent, ContentMessage, PickMode } from '@shared/messages'
 import type { OverlayPalette } from '@shared/accents'
 import { moveFrom, pickerActionFor, type PickerAction } from '@shared/picker-keys'
-import { decideKey, isUserEvent, relayPickerKey } from './picker-input'
+import { decideKey, isUserEvent, relayPickerKey, seedsBody } from './picker-input'
 import type {
   Conflict,
   HoverTarget,
@@ -1437,9 +1437,10 @@ function startPicking(palette: OverlayPalette): void {
   overlay.setHint(false, pickMode === 'region')
   // The arrow keys move from the current element, and a pointer has not set
   // one yet. Starting from the body lets a keyboard user pick without ever
-  // moving the pointer. Region mode has no current element.
+  // moving the pointer. Region mode has no current element, and a reference
+  // pick does not show the panel that forwards keys, so neither starts there.
   atSeed = false
-  if (pickMode !== 'region' && document.body) {
+  if (seedsBody(pickMode) && document.body) {
     setCurrent(document.body)
     atSeed = current === document.body
   }

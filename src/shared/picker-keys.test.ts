@@ -127,6 +127,6 @@ describe('wiring', () => {
   })
 
   it('the content script seeds the current element from the body when picking starts', () => {
-    expect(read('../content/index.ts')).toMatch(/pickMode !== 'region' && document\.body\) \{\s*setCurrent\(document\.body\)/)
+    expect(read('../content/index.ts')).toMatch(/seedsBody\(pickMode\) && document\.body\) \{\s*setCurrent\(document\.body\)/)
   })
 })

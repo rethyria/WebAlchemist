@@ -4,7 +4,8 @@
  *
  * The picker's handlers in index.ts act on the page's DOM and cannot be loaded
  * in a test. What they decide is kept here: whether a forwarded key does
- * anything and whether Enter may confirm.
+ * anything, whether Enter may confirm, and whether the picker starts on the
+ * body.
  */
 
 import type { PickerAction } from '@shared/picker-keys'
@@ -62,4 +63,14 @@ export function relayPickerKey(
   const decision = decideKey(state, action, false)
   if (decision === 'apply') apply(action)
   return decision
+}
+
+/**
+ * Whether the picker starts with the body selected. Only a pick of the target
+ * does: the sidebar forwards keys only while its Picking panel is mounted, and
+ * a reference pick or a region pick does not mount it, so a selection that
+ * nothing can move from would be confirmed by the first click.
+ */
+export function seedsBody(mode: 'target' | 'reference' | 'region'): boolean {
+  return mode === 'target'
 }

@@ -7,9 +7,8 @@
  * not verified by any test in this project.
  */
 
-import { readFileSync } from 'node:fs'
 import { describe, expect, it, vi } from 'vitest'
-import { decideKey, isUserEvent, relayPickerKey } from './picker-input'
+import { decideKey, isUserEvent, relayPickerKey, seedsBody } from './picker-input'
 
 describe('a key forwarded by the sidebar', () => {
   it('does nothing when no pick is running', () => {
@@ -52,6 +51,17 @@ describe('Enter', () => {
   })
 })
 
+describe('which picks start on the body', () => {
+  it('starts a target pick there, where the sidebar forwards keys', () => {
+    expect(seedsBody('target')).toBe(true)
+  })
+
+  it('does not start a reference pick or a region pick there', () => {
+    expect(seedsBody('reference')).toBe(false)
+    expect(seedsBody('region')).toBe(false)
+  })
+})
+
 describe('events from a page script', () => {
   it('accepts an event the browser made', () => {
     expect(isUserEvent({ isTrusted: true })).toBe(true)
@@ -64,16 +74,24 @@ describe('events from a page script', () => {
 
 describe('the handlers in index.ts use these decisions', () => {
   // The handlers cannot be run here, so this reads their source. It fails if a
-  // handler stops asking for the decision, which the tests above cannot see.
-  const source = readFileSync(new URL('./index.ts', import.meta.url), 'utf8')
+  // handler stops checking the event or the decision, which the tests above
+  // cannot see.
+  const source = (async () => (await import('node:fs')).readFileSync(new URL('./index.ts', import.meta.url), 'utf8'))()
 
-  it('decides a forwarded key with relayPickerKey and a page key with decideKey, both told where the selection started', () => {
-    expect(source).toContain('relayPickerKey({ picking, atSeed }, message.action, applyPickerAction)')
-    expect(source).toContain('decideKey({ picking, atSeed }, action, event.repeat)')
+  it.each(['onMouseMove', 'onMouseDown', 'onMouseUp', 'onKeyDown'])('%s returns early on an untrusted event', async (name) => {
+    const text = await source
+    const body = new RegExp(`function ${name}\\(event: [A-Za-z]+\\): void \\{([\\s\\S]*?)\\n\\}\\n`).exec(text)?.[1] ?? ''
+    expect(body).toContain('isUserEvent(event)')
   })
 
-  it.each(['onMouseMove', 'onMouseDown', 'onMouseUp', 'onKeyDown'])('%s returns early on an untrusted event', (name) => {
-    const body = new RegExp(`function ${name}\\(event: [A-Za-z]+\\): void \\{([\\s\\S]*?)\\n\\}\\n`).exec(source)?.[1] ?? ''
-    expect(body).toContain('if (!isUserEvent(event)) return')
+  it('applies a forwarded key through relayPickerKey and a page key through decideKey', async () => {
+    const text = await source
+    expect(text).toContain('relayPickerKey({ picking, atSeed }, message.action, applyPickerAction)')
+    expect(text).toContain('decideKey({ picking, atSeed }, action, event.repeat)')
+  })
+
+  it('does not select the body for a mode that seedsBody refuses', async () => {
+    const text = await source
+    expect(text).toContain('if (seedsBody(pickMode) && document.body)')
   })
 })
