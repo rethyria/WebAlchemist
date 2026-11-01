@@ -6,9 +6,15 @@ Status: **scaffold**. The architecture, data model, safety pipeline, and platfor
 
 ## Requirements
 
-- Firefox 140+ (Android 142+)
+- Firefox 140+ on desktop, or Firefox for Android 142+ (see "Firefox for Android")
 - Node 22+
 - An API key for Anthropic or any OpenAI-compatible endpoint
+
+## Firefox for Android
+
+Firefox for Android has no sidebars, so the toolbar (menu) action opens the same panel in a browser tab that is tied to the page tab it was opened from. Picking works by touch: the panel opens the page tab, a tap selects an element, and the panel returns with the tree for moving to the parent, a child or a sibling. A finger drag scrolls the page as usual; touching and holding still for half a second before dragging draws a rectangle.
+
+The following are not available on Android: screenshots, because the screenshot API is believed to be missing there, and, where Firefox for Android does not provide the identity API, signing in with a provider account (an API key works). These limits come from Mozilla's compatibility data as remembered, and none of the Android behaviour has been run on a device or emulator, so it is untested. Desktop behaviour is unchanged.
 
 ## Development
 
