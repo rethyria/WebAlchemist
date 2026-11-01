@@ -35,7 +35,6 @@
  * the user that they are a boundary.
  */
 
-import { excludePatternsFor } from '@shared/site-off'
 import type { Capability, Transform } from '@shared/types'
 import { errorTokenFor, forgetErrorTokens } from './error-tokens'
 import { parsePattern } from '@shared/match'
@@ -43,6 +42,8 @@ import { problemWithStoredCode } from './code-gate'
 import { wrapTransform } from './harness'
 import { userScripts, type ExecutionWorld, type Mv3RegisteredUserScript } from './userscripts-api'
 import { getOffHosts } from './site-off'
+import { getExcludedSites } from './excluded-sites'
+import { excludeMatchesFor } from '@shared/excluded-sites'
 import { getAllTransforms, getSettings } from './storage'
 
 /** Worlds are per-transform so transforms cannot collide with each other. */
@@ -189,7 +190,7 @@ async function registrationFor(
     return { registration: null, blocked: true }
   }
 
-  const offHosts = await getOffHosts()
+  const excludeMatches = excludeMatchesFor(await getOffHosts(), await getExcludedSites())
   const worldId = worldIdFor(transform)
   const world = transform.world ?? 'USER_SCRIPT'
 
@@ -197,9 +198,10 @@ async function registrationFor(
     registration: {
       id: transform.id,
       matches: matchPatternsFor(transform),
-      // The per-site off switch. The registration stays, so that turning the site
-      // back on needs no re-registration of anything else.
-      ...(offHosts.length > 0 ? { excludeMatches: excludePatternsFor(offHosts) } : {}),
+      // The per-site off switch and the excluded sites (#131). The registration
+      // stays, so that turning a site back on needs no re-registration of
+      // anything else.
+      ...(excludeMatches ? { excludeMatches } : {}),
       // Wrapped so the transform re-applies after framework re-renders.
       js: [{ code: wrapTransform(transform, await errorTokenFor(transform.id)) }],
       world: world satisfies ExecutionWorld,
@@ -409,11 +411,11 @@ async function reregisterAllNow(
   const endedPreviews = killed ? [...previewed] : []
   const keep = killed ? [] : previewed.map(previewIdFor)
   if (!killed) {
-    const offHosts = await getOffHosts()
+    const wantedExclusions = excludeMatchesFor(await getOffHosts(), await getExcludedSites())
     for (const id of keep) {
       const preview = held.get(id)
       if (!preview) continue
-      const excludeMatches = offHosts.length > 0 ? excludePatternsFor(offHosts) : undefined
+      const excludeMatches = wantedExclusions
       if (JSON.stringify(preview.excludeMatches ?? []) === JSON.stringify(excludeMatches ?? [])) continue
       const { excludeMatches: _old, ...rest } = preview
       try {

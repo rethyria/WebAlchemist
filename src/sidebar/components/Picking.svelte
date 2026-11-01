@@ -1,5 +1,7 @@
 <script lang="ts">
   import type { HoverTarget } from '@shared/types'
+  import { forwardedAction, type PickerAction } from '@shared/picker-keys'
+  import { focusOnMount } from '../lib/focus'
   import Button from './Button.svelte'
   import Label from './Label.svelte'
   import { boundTab } from '@shared/panel-binding'
@@ -7,9 +9,10 @@
   interface Props {
     hover: HoverTarget | null
     oncancel: () => void
+    onkey: (action: PickerAction) => void
   }
 
-  let { hover, oncancel }: Props = $props()
+  let { hover, oncancel, onkey }: Props = $props()
 
   /** The panel is open in a tab (Firefox for Android), so the page is picked by touch. */
   const touch = boundTab() !== null
@@ -27,6 +30,28 @@
           : 'Hovering the page',
   )
 
+  /*
+   * The page's own listener only sees keys while the page has the focus, and
+   * clicking "Select an element" leaves the focus here. Keys are therefore
+   * handled on the window of the sidebar and forwarded. The listener exists
+   * only while this panel is mounted, so every way out of picking removes it.
+   */
+  function onwindowkeydown(event: KeyboardEvent): void {
+    const target = event.target instanceof Element ? event.target : null
+    const action = forwardedAction({
+      key: event.key,
+      ctrlKey: event.ctrlKey,
+      altKey: event.altKey,
+      metaKey: event.metaKey,
+      shiftKey: event.shiftKey,
+      repeat: event.repeat,
+      fromButtonLike: target?.closest('button, a, input, textarea, select, summary') != null,
+    })
+    if (!action) return
+    event.preventDefault()
+    onkey(action)
+  }
+
   const KEYS: [string, string][] = [
     ['↑', 'Parent'],
     ['↓', 'First child'],
@@ -36,7 +61,10 @@
   ]
 </script>
 
+<svelte:window onkeydown={onwindowkeydown} />
+
 <div class="panel">
+  <h1 class="title" tabindex="-1" use:focusOnMount>Pick an element</h1>
   <div class="mode">
     <span class="live" aria-hidden="true"></span>
     <span class="mode-text">{mode}</span>
@@ -64,7 +92,7 @@
       </div>
     {:else}
       <p class="waiting">
-        {touch ? 'Tap an element on the page.' : 'Move the pointer over the page.'}
+        {touch ? 'Tap an element on the page.' : 'Move the pointer over the page, or use the arrow keys.'}
       </p>
     {/if}
   </section>
@@ -103,6 +131,16 @@
     padding: var(--gutter-sidebar);
     min-height: 0;
     overflow-y: auto;
+  }
+
+  .title {
+    margin: 0;
+    font: 600 13px var(--font-ui);
+  }
+
+  .title:focus-visible {
+    outline: 2px solid var(--accent-fg);
+    outline-offset: 2px;
   }
 
   .mode {

@@ -7,7 +7,7 @@
  * depend on the country and go out of date.
  */
 
-import { hostOfUrl } from './site-off'
+import { excludePatternsFor, hostOfUrl } from './site-off'
 
 /**
  * Turns what the user typed into a host name, or null when it is not one. An
@@ -72,4 +72,25 @@ export function excludedHostForPattern(entries: readonly string[], pattern: stri
 /** What the panel says when it refuses to ask for access to an excluded site. */
 export function excludedAccessMessage(host: string): string {
   return `${host} is on your list of excluded sites, so Web Alchemist does not ask for access to it. Remove it from the list in the settings first.`
+}
+
+/**
+ * Match patterns for `excludeMatches` that cover every excluded host and its
+ * subdomains. A pattern with a leading "*." matches the bare host as well as
+ * its subdomains, so one pattern per entry is enough.
+ */
+export function excludedPatternsFor(entries: readonly string[]): string[] {
+  return [...new Set(entries)].sort().map((host) => `*://*.${host}/*`)
+}
+
+/**
+ * The `excludeMatches` of a registration: the sites turned off one by one and
+ * the excluded sites, or undefined when there are none.
+ */
+export function excludeMatchesFor(
+  offHosts: readonly string[],
+  excluded: readonly string[],
+): string[] | undefined {
+  const all = [...new Set([...excludePatternsFor(offHosts), ...excludedPatternsFor(excluded)])].sort()
+  return all.length > 0 ? all : undefined
 }

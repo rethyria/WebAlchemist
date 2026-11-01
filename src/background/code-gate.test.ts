@@ -16,6 +16,8 @@ vi.mock('./storage', () => ({
 }))
 // The per-site off list is read at registration; none is turned off here.
 vi.mock('./site-off', () => ({ getOffHosts: async () => [] }))
+// The excluded-sites list is read at registration too (#131); none is set here.
+vi.mock('./excluded-sites', () => ({ getExcludedSites: async () => [] }))
 vi.mock('./userscripts-api', () => ({
   userScripts: {
     unregister: async () => {},

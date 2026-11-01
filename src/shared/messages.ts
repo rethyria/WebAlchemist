@@ -11,6 +11,7 @@
  * is and is not guaranteed.
  */
 
+import type { PickerAction } from './picker-keys'
 import type {
   Anchor,
   Credential,
@@ -274,6 +275,11 @@ export type Message =
   | { type: 'start-picking'; tabId: number; mode?: PickMode }
   | { type: 'stop-picking'; tabId: number }
   /**
+   * A picker key pressed while the keyboard focus is in the sidebar, where the
+   * page's own key listener cannot see it.
+   */
+  | { type: 'picker-key'; tabId: number; action: PickerAction }
+  /**
    * Re-reads the element currently being described, from the live page.
    *
    * Refinement used to resend the context captured when the element was first
@@ -337,6 +343,7 @@ export type ContentMessage =
   /** `touch` is set on Firefox for Android: tap to select, long press to draw. */
   | { type: 'start-picking'; palette: OverlayPalette; mode: PickMode; touch?: boolean }
   | { type: 'cancel-picking' }
+  | { type: 'picker-key'; action: PickerAction }
   | { type: 'recapture' }
   /**
    * The palette travels with this request as it does with start-picking. A
@@ -518,6 +525,7 @@ export interface Responses {
   }
   'start-picking': boolean
   'stop-picking': boolean
+  'picker-key': boolean
   retarget: boolean
   'highlight-node': boolean
   'expand-node': TreeRow[]

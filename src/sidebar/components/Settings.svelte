@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { radioGroup } from '@shared/radio-group'
+  import { focusOnMount } from '../lib/focus'
   /**
    * Settings inside the panel, as the design has it.
    *
@@ -42,10 +44,10 @@
   let activeStatus = $derived(statuses.find((s) => s.providerId === active?.id))
 </script>
 
-<div class="panel">
+<div class="panel" role="region" aria-label="Settings" use:focusOnMount>
   <section>
     <Label>Accent colour</Label>
-    <div class="swatches" role="radiogroup" aria-label="Accent colour">
+    <div class="swatches" role="radiogroup" aria-label="Accent colour" use:radioGroup>
       {#each ACCENTS as accent}
         <button
           type="button"
@@ -103,7 +105,7 @@
 
   <section>
     <Label>Check for broken transforms</Label>
-    <div class="modes" role="radiogroup" aria-label="Check for broken transforms">
+    <div class="modes" role="radiogroup" aria-label="Check for broken transforms" use:radioGroup>
       {#each HEALTH_MODES as mode}
         <button
           type="button"

@@ -35,7 +35,7 @@ import { SCREENSHOTS_UNAVAILABLE } from '@shared/android-limits'
 import { recordRunTab, takeRunTabs, windowsWithRunTabs } from './run-tabs'
 import { isUrlOff, setHostOff } from './site-off'
 import { excludedHostOf, getExcludedSites, setExcludedSites } from './excluded-sites'
-import { excludedSiteMessage } from '@shared/excluded-sites'
+import { excludedHostFor, excludedSiteMessage } from '@shared/excluded-sites'
 import { hostOfUrl } from '@shared/site-off'
 import { isSidebarPortName, windowOfSidebarPort } from '@shared/sidebar-port'
 import { blockedStates, runStaticAnalysis } from './code-gate'
@@ -702,9 +702,6 @@ async function handle(
       )
     }
 
-    case 'save-transform':
-      return handleSaveTransform(message, saveDeps)
-
     case 'delete-transform': {
       const doomed = (await getAllTransforms()).find((t) => t.id === message.id)
       // Both steps in one queued task: a rebuild that ran between them would
@@ -762,8 +759,21 @@ async function handle(
     case 'get-excluded-sites':
       return getExcludedSites()
 
-    case 'set-excluded-sites':
-      return setExcludedSites(message.sites)
+    case 'set-excluded-sites': {
+      const before = await getExcludedSites()
+      const after = await setExcludedSites(message.sites)
+      // Registrations carry the list in `excludeMatches`, so they are rebuilt,
+      // and the content script registrations with them. Open tabs that the
+      // change covers lose or regain their CSS and badge count (#131).
+      await reregister()
+      await reconcileContentScripts()
+      const changed = (url: string) =>
+        excludedHostFor(before, url) !== excludedHostFor(after, url)
+      const nowExcluded = (url: string) => excludedHostFor(after, url) !== null
+      await clearCssPreviewsOn(nowExcluded)
+      await reapplyOpenTabs(changed)
+      return after
+    }
 
     case 'page-has-sensitive-fields':
       // Only an answer of false means the page has no such fields. No answer
@@ -998,6 +1008,10 @@ async function handle(
 
     case 'stop-picking':
       await sendToContent(message.tabId, { type: 'cancel-picking' })
+      return true
+
+    case 'picker-key':
+      await sendToContent(message.tabId, { type: 'picker-key', action: message.action })
       return true
 
     case 'retarget':
@@ -1281,6 +1295,7 @@ async function refuseWhenOff(tabId: number): Promise<void> {
     )
   }
   const url = (await browser.tabs.get(tabId).catch(() => undefined))?.url
+  if (url) await refuseExcludedUrl(url)
   if (url && (await isUrlOff(url))) {
     throw new Error(
       'Web Alchemist is turned off on this site, so the preview was not shown. Turn it on for this site to preview.',
@@ -1711,9 +1726,16 @@ async function matchingTransforms(url: string): Promise<Transform[]> {
 
 /** The subset that should actually run. */
 async function transformsForUrl(url: string): Promise<Transform[]> {
-  // Nothing runs while the kill switch is on or the site is turned off, so
-  // nothing is applied, counted on the badge or health-checked.
-  if ((await getSettings()).aiJsKillSwitch || (await isUrlOff(url))) return []
+  // Nothing runs while the kill switch is on, the site is turned off or the
+  // site is on the excluded list (#131), so nothing is applied, counted on the
+  // badge or health-checked.
+  if (
+    (await getSettings()).aiJsKillSwitch ||
+    (await isUrlOff(url)) ||
+    (await excludedHostOf(url)) !== null
+  ) {
+    return []
+  }
   return (await matchingTransforms(url)).filter((t) => t.enabled)
 }
 

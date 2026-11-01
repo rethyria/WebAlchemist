@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { radioGroup } from '@shared/radio-group'
   import '@shared/tokens.css'
   import {
     ACCENTS,
@@ -15,6 +16,8 @@
   import { NOT_SAVED_USAGE_ID } from '@shared/usage'
   import Toggle from '@sidebar/components/Toggle.svelte'
   import ProviderSettings from './ProviderSettings.svelte'
+  import FirstRunDisclosure from '@sidebar/components/FirstRunDisclosure.svelte'
+  import { readDisclosureNeeded, recordDisclosureAck, watchDisclosureNeeded } from '@shared/disclosure-ack'
   import ExcludedSites from './ExcludedSites.svelte'
   import SiteAccess from './SiteAccess.svelte'
   import UsageSettings from './UsageSettings.svelte'
@@ -30,6 +33,13 @@
   let loadError = $state<string | null>(null)
   /** Set when the vault unlocked but the stored keys could not be checked against their providers. */
   let bindingError = $state<string | null>(null)
+  /*
+   * True until the stored acknowledgement is read and found current. While it
+   * is true the provider section, which holds the API key fields and the
+   * sign-in button, is not rendered at all, so neither pointer nor keyboard
+   * can reach them.
+   */
+  let disclosureNeeded = $state(true)
   let usage = $state<UsageStore>({ months: {}, transforms: {} })
   let transformNames = $state<Record<string, string>>({})
 
@@ -54,6 +64,7 @@
 
   async function load() {
     const loadedSettings = await call<Settings>({ type: 'get-settings' })
+    disclosureNeeded = await readDisclosureNeeded()
     document.documentElement.dataset['accent'] = loadedSettings.accent
     // Vault state first: the statuses request fails while the vault is locked.
     const loaded = await loadVaultAndStatuses(call)
@@ -131,6 +142,8 @@
 
   $effect(() => {
     void load()
+    // Acknowledging in the sidebar opens this section without a reload.
+    return watchDisclosureNeeded((needed) => (disclosureNeeded = needed))
   })
 </script>
 
@@ -152,14 +165,25 @@
   {/if}
 
   {#if settings}
-    <ProviderSettings
-      {settings}
-      {statuses}
-      onchange={change}
-      onsetkey={setKey}
-      onclearkey={clearKey}
-      onconnectoauth={connectOAuth}
-    />
+    {#if disclosureNeeded}
+      <FirstRunDisclosure
+        {vault}
+        level={2}
+        onacknowledge={async () => {
+          await recordDisclosureAck()
+          disclosureNeeded = false
+        }}
+      />
+    {:else}
+      <ProviderSettings
+        {settings}
+        {statuses}
+        onchange={change}
+        onsetkey={setKey}
+        onclearkey={clearKey}
+        onconnectoauth={connectOAuth}
+      />
+    {/if}
 
     <UsageSettings {usage} providers={settings.providers} {transformNames} />
 
@@ -203,7 +227,7 @@
 
     <section>
       <h2>Accent</h2>
-      <div class="swatches" role="radiogroup" aria-label="Accent colour">
+      <div class="swatches" role="radiogroup" aria-label="Accent colour" use:radioGroup>
         {#each ACCENTS as accent}
           <button
             type="button"
@@ -221,7 +245,7 @@
 
     <section>
       <h2>Health check</h2>
-      <div class="radios">
+      <div class="radios" role="radiogroup" aria-label="Health check" use:radioGroup>
         {#each HEALTH_MODES as mode}
           <button
             type="button"
