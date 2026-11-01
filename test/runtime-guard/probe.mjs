@@ -110,6 +110,11 @@ async function runConfig(config) {
         t('open', () => typeof window.open)
         t('frames', () => typeof window.frames + ' ' + window.length)
         t('serviceWorker', () => typeof navigator.serviceWorker)
+        t('functionConstructorOfFunction', () => (function () {}).constructor === Function)
+        t('functionConstructorRuns', () => (function () {}).constructor('return 3')())
+        t('asyncFunctionConstructorName', () => Object.getPrototypeOf(async function () {}).constructor.name)
+        t('elementConstructorChainRuns', () => document.body.constructor.constructor('return 4')())
+        t('eventTargetConstructor', () => typeof Object.getPrototypeOf(EventTarget).constructor)
         t('worker', () => typeof Worker)
         t('stringTimer', () => { setTimeout('document.documentElement.setAttribute("data-wa-page-str", "ran")', 0); return 'scheduled' })
         t('contentWindowOfNewFrame', () => { const f = document.createElement('iframe'); document.body.appendChild(f); const ok = typeof f.contentWindow.fetch; f.remove(); return ok })
@@ -290,6 +295,8 @@ try {
     rows.push([
       `page (${key}): its own fetch is native, and storage, cookie, eval, Function, string timers, frames and new iframes all work`,
       Boolean(p) && p.fetchIsNative === true && p.localStorage === '1' && p.sessionStorage === '1' && p.cookie === true && p.eval === 2 && p.Function === 2 &&
+        p.functionConstructorOfFunction === true && p.functionConstructorRuns === 3 && p.asyncFunctionConstructorName === 'AsyncFunction' &&
+        p.elementConstructorChainRuns === 4 && p.eventTargetConstructor === 'function' &&
         p.stringTimerRan === 'ran' && p.contentWindowOfNewFrame === 'function' && p.open === 'function' && p.worker === 'function' && p.serviceWorker === 'object',
     ])
   }

@@ -72,6 +72,9 @@ const WINDOW_FEATURES: Feature[] = [
   { name: 'sessionStorage', capability: 'storage' },
   { name: 'caches', capability: 'storage' },
   { name: 'cookieStore', capability: 'cookies' },
+  // A font loaded from an address. The world's CSP does not govern it
+  // (test/runtime-guard/README.md), and the request arrived.
+  { name: 'FontFace', capability: 'network' },
   // The page's real window. Nothing declares a capability for it.
   { name: 'wrappedJSObject', capability: null },
   // The windows of frames, which have none of the definitions made here.
@@ -95,6 +98,7 @@ export function runtimeGuardSource(capabilities: Capability[], errorName: string
   const windowNames = guardedWindowNames(capabilities)
   const network = capabilities.includes('network')
   const cookies = capabilities.includes('cookies')
+  const storage = capabilities.includes('storage')
   return `(() => {
   'use strict';
   const failed = [];
@@ -107,6 +111,19 @@ export function runtimeGuardSource(capabilities: Capability[], errorName: string
   for (const name of ${JSON.stringify(windowNames)}) hide(window, name);
   ${network ? '' : "hide(navigator, 'sendBeacon'); hide(Navigator.prototype, 'sendBeacon');"}
   hide(navigator, 'serviceWorker'); hide(Navigator.prototype, 'serviceWorker');
+  ${storage ? '' : "hide(navigator, 'storage'); hide(Navigator.prototype, 'storage');"}
+  // The page's own objects, reached through the waiver of an Xray wrapper. A
+  // definition on an instance hides it for that object only, and one on a
+  // prototype is read only when the prototype itself is the object, so these
+  // are the objects that exist once. Every other node, event or collection
+  // keeps its waiver (test/runtime-guard/README.md).
+  for (const object of [document, navigator, location, history, Node.prototype, EventTarget.prototype, Document.prototype, Element.prototype, HTMLElement.prototype, Navigator.prototype, Location.prototype, History.prototype]) hide(object, 'wrappedJSObject');
+  // Helpers of the sandbox that hand out or take page objects. XPCNativeWrapper
+  // is not here: it and its unwrap method cannot be configured, so they cannot be hidden.
+  for (const name of ['exportFunction', 'cloneInto', 'createObjectIn', 'importFunction', 'Components']) hide(globalThis, name);
+  // Loads a module of code from an address, which the world's CSP does not stop.
+  hide(BaseAudioContext.prototype, 'audioWorklet');
+  ${network ? '' : "hide(HTMLFormElement.prototype, 'submit'); hide(HTMLFormElement.prototype, 'requestSubmit');"}
   ${cookies ? '' : "hide(document, 'cookie'); hide(Document.prototype, 'cookie');"}
   // The Function of the page, reached as element.constructor.constructor: the
   // first step is an interface object, and its prototype is the page's

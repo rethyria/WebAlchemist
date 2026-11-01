@@ -262,6 +262,11 @@ deny(
   'scripts', 'currentScript',
 )
 deny(
+  t('saReachesAPageObjectThroughAWaiver'),
+  'wrappedJSObject', 'XPCNativeWrapper', 'exportFunction', 'cloneInto', 'createObjectIn', 'importFunction',
+  'Components',
+)
+deny(
   t('saNavigatesThePageOrOpensA'),
   'location', 'history', 'postMessage', 'navigation', 'open',
 )

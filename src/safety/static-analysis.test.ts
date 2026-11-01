@@ -1464,3 +1464,27 @@ describe('invisible and direction-changing characters (#124)', () => {
     expect(blocks('document.body.dataset.x = "café 日本語"')).toBe(false)
   })
 })
+
+describe('the Xray waiver and the sandbox helpers (#139)', () => {
+  // Control: the snippets below differ from this one only in the denied name.
+  it('control: reading a property of an element passes', () => {
+    expect(blocks(`const e = document.querySelector('p'); e.dataset.checked = 'yes'`)).toBe(false)
+  })
+
+  const SNIPPETS = [
+    `document.body.wrappedJSObject.ownerDocument`,
+    `const w = document.querySelector('p'); w['wrappedJSObject']`,
+    `XPCNativeWrapper.unwrap(document.body)`,
+    `exportFunction(() => 1, document.body, { defineAs: 'x' })`,
+    `cloneInto({ a: 1 }, document.body)`,
+    `createObjectIn(document.body)`,
+    `importFunction(() => 1)`,
+    `Components.classes`,
+  ]
+  for (const snippet of SNIPPETS) {
+    it(`blocks: ${snippet}`, () => {
+      expect(blocks(snippet)).toBe(true)
+      expect(blocks(snippet, ['network', 'storage', 'cookies'])).toBe(true)
+    })
+  }
+})

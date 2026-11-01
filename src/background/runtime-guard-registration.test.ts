@@ -79,8 +79,14 @@ describe('the guard in the registered script', () => {
   })
 
   it('is left out of the CSP probe, which measures the CSP alone', async () => {
-    await registerTransform(transform(), { skipAnalysis: true })
+    await registerTransform(transform(), { skipAnalysis: true, unguarded: true })
     expect(sources('T1')[0]).not.toContain('Object.defineProperty(target, name')
+  })
+
+  // Skipping the analysis is not skipping the guard: only `unguarded` does that.
+  it('control: a registration that skips the analysis but is not marked unguarded still has the guard', async () => {
+    await registerTransform(transform(), { skipAnalysis: true })
+    expect(sources('T1')[0]).toContain('Object.defineProperty(target, name')
   })
 })
 

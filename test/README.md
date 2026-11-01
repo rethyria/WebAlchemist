@@ -52,6 +52,7 @@ node test/contrast/probe.mjs
 | `runtime-guard/probe.mjs` | Does the runtime guard hide undeclared features from every route to a window, and leave the page alone? (#139) |
 | `runtime-guard/techniques.mjs` | Which way of removing a feature from a world works? (#139) |
 | `runtime-guard/integration.mjs` | Is the guard in the registration the extension makes? (#139) |
+| `runtime-guard/resources.mjs` | Which page objects and resource loads does the guard close, and which stay open? (#139) |
 
 The CSP one is separate — `npm run verify:csp` — because it needs a probe-only
 build.

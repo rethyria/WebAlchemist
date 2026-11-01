@@ -27,12 +27,13 @@ function world(options: { frozenWindow?: boolean } = {}) {
     'fetch', 'XMLHttpRequest', 'WebSocket', 'EventSource', 'WebTransport', 'RTCPeerConnection',
     'webkitRTCPeerConnection', 'open', 'Worker', 'SharedWorker', 'importScripts', 'eval', 'Function',
     'indexedDB', 'localStorage', 'sessionStorage', 'caches', 'cookieStore', 'wrappedJSObject', 'frames',
+    'FontFace',
   ]) {
     win[name] = `real ${name}`
   }
   if (options.frozenWindow) Object.freeze(win)
 
-  const navigatorPrototype = { sendBeacon: () => true, serviceWorker: 'real serviceWorker' }
+  const navigatorPrototype = { sendBeacon: () => true, serviceWorker: 'real serviceWorker', storage: 'real storage' }
   const navigator = Object.create(navigatorPrototype)
   const documentPrototype = {}
   Object.defineProperty(documentPrototype, 'cookie', { value: 'a=1', configurable: true, writable: true })
@@ -55,18 +56,58 @@ function world(options: { frozenWindow?: boolean } = {}) {
   const eventTarget = function () {} as unknown as object
   Object.setPrototypeOf(eventTarget, pageFunctionPrototype)
 
+  // Objects that the page owns and that carry the Xray waiver, and the helpers
+  // of the sandbox, as plain stand-ins with a readable `wrappedJSObject`.
+  const waivable = (name: string) => ({ name, wrappedJSObject: `page ${name}` })
+  Object.defineProperty(navigatorPrototype, 'wrappedJSObject', { value: 'page Navigator.prototype', configurable: true })
+  Object.defineProperty(documentPrototype, 'wrappedJSObject', { value: 'page Document.prototype', configurable: true })
+  Object.defineProperty(doc, 'wrappedJSObject', { value: 'page document', configurable: true })
+  Object.defineProperty(navigator, 'wrappedJSObject', { value: 'page navigator', configurable: true })
+  const location = waivable('location')
+  const history = waivable('history')
+  const makePrototype = (name: string) => {
+    const prototype: Record<string, unknown> = { wrappedJSObject: `page ${name}.prototype` }
+    if (name === 'BaseAudioContext') prototype.audioWorklet = 'real audioWorklet'
+    if (name === 'HTMLFormElement') {
+      prototype.submit = () => 'submitted'
+      prototype.requestSubmit = () => 'submitted'
+    }
+    return { prototype }
+  }
+  const prototypes = {
+    Node: makePrototype('Node'),
+    Element: makePrototype('Element'),
+    HTMLElement: makePrototype('HTMLElement'),
+    Location: makePrototype('Location'),
+    History: makePrototype('History'),
+    BaseAudioContext: makePrototype('BaseAudioContext'),
+    HTMLFormElement: makePrototype('HTMLFormElement'),
+  }
+  Object.defineProperty(eventTarget, 'prototype', { value: { wrappedJSObject: 'page EventTarget.prototype' } })
+  const sandbox: Record<string, unknown> = {}
+  for (const name of ['exportFunction', 'cloneInto', 'createObjectIn', 'importFunction', 'Components']) {
+    sandbox[name] = `real ${name}`
+  }
+
   const run = (capabilities: Capability[]) => {
     const source = runtimeGuardSource(capabilities, MARKER)
     new Function(
       'window', 'navigator', 'Navigator', 'document', 'Document', 'EventTarget',
       'HTMLIFrameElement', 'HTMLFrameElement', 'HTMLObjectElement', 'HTMLEmbedElement',
+      'location', 'history', 'globalThis', 'Node', 'Element', 'HTMLElement', 'Location', 'History',
+      'BaseAudioContext', 'HTMLFormElement',
       source,
     )(
       win, navigator, { prototype: navigatorPrototype }, doc, { prototype: documentPrototype }, eventTarget,
       ...frames.map(([, ctor]) => ctor),
+      location, history, sandbox, prototypes.Node, prototypes.Element, prototypes.HTMLElement,
+      prototypes.Location, prototypes.History, prototypes.BaseAudioContext, prototypes.HTMLFormElement,
     )
   }
-  return { win, navigator, doc, attributes, timerCalls, pageFunctionPrototype, frames, run, navigatorPrototype, documentPrototype }
+  return {
+    win, navigator, doc, attributes, timerCalls, pageFunctionPrototype, frames, run, navigatorPrototype,
+    documentPrototype, location, history, prototypes, sandbox, eventTarget,
+  }
 }
 
 describe('which names are hidden for which capabilities', () => {
@@ -152,6 +193,59 @@ describe('the guard run against stand-in objects', () => {
     expect(w.doc.cookie).toBe('a=1')
     expect(() => w.win.fetch).toThrow()
     expect(() => w.navigator.sendBeacon).toThrow()
+  })
+
+  it('control: the waiver, the sandbox helpers, the audio worklet, the form methods and navigator.storage read before the guard runs', () => {
+    const w = world()
+    expect(w.doc.wrappedJSObject).toBe('page document')
+    expect(w.location.wrappedJSObject).toBe('page location')
+    expect(w.prototypes.Node.prototype.wrappedJSObject).toBe('page Node.prototype')
+    expect(w.sandbox.exportFunction).toBe('real exportFunction')
+    expect(w.prototypes.BaseAudioContext.prototype.audioWorklet).toBe('real audioWorklet')
+    expect(typeof w.prototypes.HTMLFormElement.prototype.submit).toBe('function')
+    expect(w.navigator.storage).toBe('real storage')
+  })
+
+  it('hides wrappedJSObject on the document, the navigator, the location, the history and the prototypes, whatever is declared', () => {
+    const w = world()
+    w.run(['network', 'storage', 'cookies'])
+    for (const object of [
+      w.doc, w.navigator, w.location, w.history, w.navigatorPrototype, w.documentPrototype,
+      w.prototypes.Node.prototype, w.prototypes.Element.prototype, w.prototypes.HTMLElement.prototype,
+      w.prototypes.Location.prototype, w.prototypes.History.prototype,
+    ]) {
+      expect(() => (object as { wrappedJSObject: unknown }).wrappedJSObject).toThrow()
+    }
+  })
+
+  it('hides the sandbox helpers and the audio worklet whatever is declared', () => {
+    const w = world()
+    w.run(['network', 'storage', 'cookies'])
+    for (const name of ['exportFunction', 'cloneInto', 'createObjectIn', 'importFunction', 'Components']) {
+      expect(() => w.sandbox[name], name).toThrow()
+    }
+    expect(() => w.prototypes.BaseAudioContext.prototype.audioWorklet).toThrow()
+  })
+
+  it('hides navigator.storage and the form submit methods unless storage or network is declared', () => {
+    const none = world()
+    none.run([])
+    expect(() => none.navigator.storage).toThrow()
+    expect(() => none.prototypes.HTMLFormElement.prototype.submit).toThrow()
+    expect(() => none.prototypes.HTMLFormElement.prototype.requestSubmit).toThrow()
+    expect(() => none.win.FontFace).toThrow()
+    const declared = world()
+    declared.run(['network', 'storage'])
+    expect(declared.navigator.storage).toBe('real storage')
+    expect(typeof declared.prototypes.HTMLFormElement.prototype.submit).toBe('function')
+    expect(declared.win.FontFace).toBe('real FontFace')
+    const networkOnly = world()
+    networkOnly.run(['network'])
+    expect(() => networkOnly.navigator.storage).toThrow()
+    const storageOnly = world()
+    storageOnly.run(['storage'])
+    expect(storageOnly.navigator.storage).toBe('real storage')
+    expect(() => storageOnly.prototypes.HTMLFormElement.prototype.submit).toThrow()
   })
 
   it('cannot be undone by the code that runs after it', () => {

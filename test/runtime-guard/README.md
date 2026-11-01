@@ -83,6 +83,47 @@ The guard was not applied to a world other than USER_SCRIPT. In the MAIN world t
 
 For the rows marked Page: with an open world CSP and a page that sends `default-src 'none'; style-src 'unsafe-inline'; img-src 'none'; font-src 'none'; frame-src 'none'`, the three style loads do not arrive. For the rows marked World: with an open world CSP and the page policy above, those elements still arrive, so the page policy does not govern them. For the iframe: the request arrives under a strict world policy and under that page policy, which has `frame-src 'none'`, so neither policy stopped it. The image route that #21 found closed for `new Image()` is closed for inserted `img` elements as well. The four routes marked Page or Neither are open to a transform, and the guard does not change them. The static analysis refuses an address written to an element or to a style that can load a resource, so these routes depend on that check.
 
+### Page objects reached through the Xray waiver
+
+A review of the first version of the guard (commit 76d9244) pointed out that `wrappedJSObject` is not specific to the window: Firefox offers the same waiver on every Xray-wrapped page object, and a waived page object leads back to the page's unmodified window. `resources.mjs` measures this on 2026-11-01 in Firefox 159.0, on the page `/page-frames`, in three configurations: no guard (the control), the guard with nothing declared, and the guard with `network` and `storage` declared.
+
+Control: with no guard every route below works, and the server sees the requests that the routes make.
+
+| Route | No guard | Guard, nothing declared |
+|---|---|---|
+| `document.wrappedJSObject.defaultView.fetch` | works, request arrives | refused |
+| `navigator.wrappedJSObject.sendBeacon` | works, request arrives | refused |
+| `location.wrappedJSObject`, `history.wrappedJSObject` | works | refused |
+| `Node.prototype.wrappedJSObject.constructor.constructor('...')()` (the page's `Function`) | runs code | refused |
+| `document.body.wrappedJSObject.ownerDocument.defaultView.fetch` | works, request arrives | works, request arrives |
+| `document.createElement('div').wrappedJSObject` leading to the window | works, request arrives | works, request arrives |
+| `e.target.wrappedJSObject` for an event on an element | works, request arrives | works, request arrives |
+| `document.body.wrappedJSObject.constructor.constructor('return 10')()` | runs code in the page | runs code in the page |
+| `XPCNativeWrapper.unwrap(document).defaultView.fetch` | works, request arrives | works, request arrives |
+
+What was tried to close the open rows, and why it did not work:
+
+- A property defined on `Node.prototype`, `EventTarget.prototype`, `Document.prototype`, `Navigator.prototype` or `Location.prototype` hides the waiver only when that prototype object is itself waived. It does not shadow `wrappedJSObject` on an instance: after the definition, `document.body.wrappedJSObject`, a new `div`, a text node, a `NodeList` and an `Event` still returned the page object. Firefox resolves `wrappedJSObject` on each Xray wrapper before it looks at the prototype chain. A definition on the instance works, so the guard defines it on `document`, `navigator`, `location` and `history`, which exist once each, and on the prototype objects. Every element, text node, event and collection is a new wrapper and cannot be covered this way.
+- `XPCNativeWrapper` is a non-configurable, non-writable property of the sandbox's global object, and its `unwrap` method is non-configurable and non-writable. Defining a replacement throws a TypeError, so neither can be hidden, and `XPCNativeWrapper.unwrap(document)` gives the page's document.
+
+The guard does hide the sandbox helpers `exportFunction`, `cloneInto`, `createObjectIn`, `importFunction` and `Components`, which are configurable. The static analysis now refuses the names `wrappedJSObject`, `XPCNativeWrapper`, `exportFunction`, `cloneInto`, `createObjectIn`, `importFunction` and `Components` (they are in `DENIED_NAMES`). The analysis is itself not complete, and these routes are not measured against its other limits here. With these open routes the guard is a second protection against code that passes the analysis without the denied names, and it is not a boundary that a transform written to evade the analysis cannot cross.
+
+### Loads that the world's CSP does not stop
+
+The same run measures routes that the review named, and others of the same kind. With no guard and the strict world CSP of a transform that declared nothing, these requests arrived at the server: `FontFace` loading a font, `AudioContext.audioWorklet.addModule` loading a script, `form.submit()` and `form.requestSubmit()` and a click on a submit button (each a POST), a `video` poster, and a `link` with `rel="modulepreload"`. `navigator.storage.getDirectory()` wrote and removed a file in the origin private file system. A `link` with `rel="prefetch"` was inserted and its request arrived in one of two runs, so it is not counted.
+
+| Route | Guard, nothing declared | Guard, `network` and `storage` declared |
+|---|---|---|
+| `new FontFace('f', 'url(...)').load()` | refused (`FontFace` is hidden unless `network` is declared) | works, request arrives |
+| `audioWorklet.addModule(url)` | refused (the property is hidden on `BaseAudioContext.prototype`; no capability allows it) | refused |
+| `navigator.storage.getDirectory()` | refused (hidden unless `storage` is declared) | works |
+| `form.submit()`, `form.requestSubmit()` | refused (hidden unless `network` is declared) | works, request arrives |
+| Click on a submit button | request arrives | request arrives |
+| `video` poster | request arrives | request arrives |
+| `link rel="modulepreload"` | request arrives | request arrives |
+
+The last three routes are attributes of inserted elements, in the same family as the `style` and `iframe` routes below, and are not closed. The page's own use of `FontFace`, `audioWorklet`, `form.submit()`, `navigator.storage` and the origin private file system is unaffected in both guarded configurations, and its form submission reaches the server; the page also still sees `wrappedJSObject` as undefined, as without the extension.
+
 ### The registration the extension makes
 
 `integration.mjs` stores two transforms that pass the static analysis, switches them on with the `set-enabled` message from the options page, and reads the registration back with `userScripts.getScripts`. Controls and results: both transforms are registered; the one that declared nothing has the guard hiding `fetch` and `localStorage`; the one that declared `network` has the guard without `fetch` and with `localStorage` hidden; both transforms ran (one set an attribute on the page and the other changed its text, so the guard did not stop the wrapper); the one that declared `network` reached the server with `fetch`; and no error marker was written. A transform that declares nothing and passes the analysis cannot call `fetch`, so the refusal itself is shown by `probe.mjs` and by the unit tests.
@@ -90,6 +131,8 @@ For the rows marked Page: with an open world CSP and a page that sends `default-
 ## What remains reachable
 
 - Windows reached by index. `window[0]`, `window[1]` and so on, for iframes that the transform creates, reach every feature. A property cannot be defined on an index of the window wrapper (the call succeeds and the read is unchanged), so the guard cannot hide them. They could be closed only by refusing the creation of frames at run time through every API that creates elements, which was not attempted.
+- The Xray waiver on elements, text nodes, events and collections, and `XPCNativeWrapper.unwrap`. They reach the page's window and its `Function` (see the section on the waiver). Only the static analysis refuses them.
+- A `video` poster, `link rel="modulepreload"` and a click on a submit button, which load or send without a feature of the window.
 - Requests made by inserted elements: `style` elements containing `url()`, `@import` or `@font-face`, and `iframe` with `src`, as in the table above.
 - Navigation. Setting `location` was not measured. The static analysis refuses it.
 - Code run by the page through DOM sinks: inline event handler attributes, `javascript:` addresses, `script` elements, `document.write` and `innerHTML`. They were not measured. The static analysis refuses them, and the guard does not affect them. A `script` element with a `src` was refused by the world CSP in this run.
@@ -97,6 +140,8 @@ For the rows marked Page: with an open world CSP and a page that sends `default-
 
 ## What was not verified
 
+- Resource-loading and sending APIs beyond those listed: only `FontFace`, `audioWorklet`, the origin private file system, form submission, `video` poster and the `link` relations above were measured.
+- A transform in the MAIN world, which the guard cannot be applied to.
 - Other Firefox versions. The extension requires 140 or later; only 159.0 was measured.
 - Pages that have their own content security policy, other than the one test page described above.
 - A transform running on a page that already contains iframes, and frames of other origins.
@@ -112,6 +157,9 @@ For the rows marked Page: with an open world CSP and a page that sends `default-
 | `techniques.mjs` | Which way of removing a feature works, per route |
 | `probe.mjs` | Reachability by route with and without the guard, the page controls and the inserted elements |
 | `integration.mjs` | The guard in the registration that the extension makes |
+| `resources.mjs`, `resources-code.mjs` | Page objects reached through the waiver, and loads that the world's CSP does not stop |
+| `world.mjs` | Registers code in a world, opens a page and reads the report; shared by the probes that measure one part of the guard |
+| `grant.mjs` | Grants or removes the `http://localhost/*` permission from the parent process, and compares the stored data with a saved hash |
 | `measure-code.mjs` | The code that runs in the world for `probe.mjs` |
 | `server.mjs` | The loopback server that records which requests arrive and serves the test pages |
 
@@ -123,6 +171,7 @@ The probes need Firefox with the extension, remote debugging, the `userScripts` 
 WA_RDP_PORT=<port> node test/runtime-guard/techniques.mjs
 WA_RDP_PORT=<port> node test/runtime-guard/probe.mjs
 WA_RDP_PORT=<port> node test/runtime-guard/integration.mjs
+WA_RDP_PORT=<port> node test/runtime-guard/resources.mjs
 ```
 
 `probe.mjs` imports `src/background/runtime-guard.ts` directly, which needs a Node version that strips TypeScript types (22.18 or later). Each probe prints its controls with its results and exits with 1 when a row of its verdict fails.

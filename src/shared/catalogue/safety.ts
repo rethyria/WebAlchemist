@@ -134,6 +134,10 @@ export const safetyMessages = defineMessages({
     message: 'Reaches the page global object or another document, which can reach any browser feature.',
     description: 'A finding of the code check, shown to the user before code is saved.',
   },
+  saReachesAPageObjectThroughAWaiver: {
+    message: 'Reaches the page\'s own objects through an Xray waiver, which leads back to the page window and its Function constructor.',
+    description: 'A finding of the code check, shown to the user before code is saved.',
+  },
   saNavigatesThePageOrOpensA: {
     message: 'Navigates the page or opens a window, which can send page data to another site.',
     description: 'A finding of the code check, shown to the user before code is saved.',

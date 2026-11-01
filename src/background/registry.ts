@@ -165,6 +165,17 @@ export async function hasUserScriptsPermission(): Promise<boolean> {
  */
 
 /**
+ * `skipAnalysis` leaves out the static analysis and `unguarded` leaves out the
+ * runtime guard. They are separate so that skipping one does not skip the other
+ * by accident. Only the CSP probe sets either, and it sets both.
+ */
+interface RegistrationOptions {
+  skipAnalysis?: boolean
+  unguarded?: boolean
+  exactPath?: boolean
+}
+
+/**
  * What should be registered for a transform. `registration` is null when
  * nothing should be: the transform is not JavaScript, is disabled, has no
  * code, is not wanted while the kill switch is on, or (unless
@@ -182,7 +193,7 @@ export async function hasUserScriptsPermission(): Promise<boolean> {
  */
 async function registrationFor(
   transform: Transform,
-  options: { skipAnalysis?: boolean; exactPath?: boolean } = {},
+  options: RegistrationOptions = {},
 ): Promise<{ registration: Mv3RegisteredUserScript | null; blocked: boolean }> {
   const none = { registration: null, blocked: false }
   if (transform.kind !== 'js' || !transform.enabled || !transform.code) return none
@@ -214,12 +225,12 @@ async function registrationFor(
       ...(excludeMatches ? { excludeMatches } : {}),
       // Wrapped so the transform re-applies after framework re-renders, and
       // preceded by the guard that removes the features it did not declare a
-      // capability for (#139). The CSP probe is left unguarded: it measures
-      // what the CSP alone stops.
+      // capability for (#139). Only the CSP probe asks for no guard: it
+      // measures what the CSP alone stops.
       js: [
         {
           code: scriptSourceFor(transform, await errorTokenFor(transform.id), {
-            guard: world === 'USER_SCRIPT' && !options.skipAnalysis,
+            guard: world === 'USER_SCRIPT' && options.unguarded !== true,
           }),
         },
       ],
@@ -250,7 +261,7 @@ async function configureWorldFor(transform: Transform): Promise<void> {
  */
 async function registerTransformNow(
   transform: Transform,
-  options: { skipAnalysis?: boolean; exactPath?: boolean } = {},
+  options: RegistrationOptions = {},
 ): Promise<boolean> {
   const { registration, blocked } = await registrationFor(transform, options)
   if (!registration) {
@@ -522,7 +533,7 @@ function queued<T>(work: () => Promise<T>): Promise<T> {
 
 export const registerTransform = (
   transform: Transform,
-  options: { skipAnalysis?: boolean } = {},
+  options: RegistrationOptions = {},
 ): Promise<boolean> => queued(() => registerTransformNow(transform, options))
 export const unregisterTransform = (id: string): Promise<void> => queued(() => unregisterTransformNow(id))
 export const registerPreview = (transform: Transform): Promise<void> =>

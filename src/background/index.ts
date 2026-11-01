@@ -591,7 +591,7 @@ async function handle(
       // Registered, never saved. It must not appear in the user's transform
       // list, and it must come back out when the run is over.
       const { buildProbeTransform } = await import('./csp-probe')
-      await registerTransform(buildProbeTransform(), { skipAnalysis: true })
+      await registerTransform(buildProbeTransform(), { skipAnalysis: true, unguarded: true })
       await browser.tabs.update(message.tabId, { url: 'http://localhost:8787/' })
       return true
     }
