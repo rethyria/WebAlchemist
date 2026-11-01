@@ -31,11 +31,14 @@ import { buildProbeTransform } from './csp-probe'
 import {
   addPreviewedScript,
   forgetCss,
+  forgetSuspended,
   previewedScriptIds,
   previewedTabIds,
   readCss,
+  readSuspended,
   removePreviewedScript,
   writeCss,
+  writeSuspended,
 } from './css-state'
 import { forgetSession, markChecked, runHealthCheck, shouldCheck } from './health'
 import { withKeepalive } from './keepalive'
@@ -218,7 +221,7 @@ async function evaluateTab(
   // A route change may leave nothing to apply, and the previous route's CSS
   // has to come out. On a new document nothing was applied, so this is a no-op.
   if (!navigated || transforms.length > 0) {
-    await applyCssTransforms(tabId, () => transformsForUrl(url))
+    await applyCssTransforms(tabId, () => cssTransformsFor(tabId, url))
   }
 
   if (transforms.length === 0) return
@@ -606,10 +609,11 @@ async function handle(
       const tab = await browser.tabs.get(message.tabId).catch(() => undefined)
       const url = tab?.url
       if (!url) return false
-      await applyCssTransforms(message.tabId, async () => {
-        const all = await transformsForUrl(url)
-        return message.id === null ? all : all.filter((t) => t.id !== message.id)
-      })
+      // Recorded before applying: every later evaluation of this tab reads the
+      // record, so a route change cannot bring the paused version back.
+      if (message.id === null) await forgetSuspended(message.tabId)
+      else await writeSuspended(message.tabId, message.id)
+      await applyCssTransforms(message.tabId, () => cssTransformsFor(message.tabId, url))
       return true
     }
 
@@ -960,6 +964,7 @@ browser.tabs.onRemoved.addListener(async (tabId) => {
     await forgetCss('applied', tabId)
     forgetTab(tabId)
     await browser.storage.session.remove(`wa-last-url-${tabId}`)
+    await forgetSuspended(tabId)
   })
   evaluations.delete(tabId)
 })
@@ -1036,6 +1041,15 @@ async function transformsForUrl(url: string): Promise<Transform[]> {
 }
 
 /**
+ * The transforms whose CSS belongs in the tab right now: the enabled ones for
+ * the URL, without the one the sidebar has paused for an edit preview.
+ */
+async function cssTransformsFor(tabId: number, url: string): Promise<Transform[]> {
+  const [all, suspended] = await Promise.all([transformsForUrl(url), readSuspended(tabId)])
+  return suspended === undefined ? all : all.filter((t) => t.id !== suspended)
+}
+
+/**
  * CSS is applied by the background script rather than the content script:
  * insertCSS at the USER origin needs no page-side code, survives re-renders
  * without observers, and cannot be tampered with from the page.
@@ -1088,7 +1102,7 @@ async function reapply(tabId: number | undefined): Promise<void> {
   const tab = await browser.tabs.get(tabId).catch(() => undefined)
   if (!tab?.url) return
   const url = tab.url
-  await applyCssTransforms(tabId, () => transformsForUrl(url))
+  await applyCssTransforms(tabId, () => cssTransformsFor(tabId, url))
   const transforms = await transformsForUrl(url)
 
   // Every mutation that changes what runs — save, delete, reorder, toggle —

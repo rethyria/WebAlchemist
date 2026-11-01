@@ -86,3 +86,36 @@ describe('a history event that leaves the URL unchanged (#83)', () => {
     expect(checks()).toHaveLength(1)
   })
 })
+
+describe('a transform paused for an edit preview (#83)', () => {
+  const route = (url: string) =>
+    h.listeners.get('browser.webNavigation.onHistoryStateUpdated')!({ frameId: 0, tabId: TAB, url })
+  const stamped = `/* ${app.name} */\n${app.code}`
+
+  beforeEach(async () => {
+    await commit()
+    expect(h.calls.insertCSS.at(-1)?.css).toBe(stamped)
+    await h.onMessage({ type: 'suspend-transform', tabId: TAB, id: app.id })
+    expect(h.calls.removeCSS).toEqual([{ tabId: TAB, css: stamped }])
+  })
+
+  it('stays out of the page when the route changes', async () => {
+    await route('https://example.com/app/two')
+    expect(h.calls.insertCSS).toHaveLength(1)
+  })
+
+  it('stays out of the page when the tab is reapplied after a suspension', async () => {
+    await h.boot()
+    await h.onMessage({ type: 'reorder-transforms', orderedIds: [app.id], tabId: TAB })
+    expect(h.calls.insertCSS).toHaveLength(1)
+  })
+
+  it('comes back when the sidebar resumes it', async () => {
+    // Control: the record is what keeps it out, and clearing it restores it.
+    await h.onMessage({ type: 'suspend-transform', tabId: TAB, id: null })
+    expect(h.calls.insertCSS).toHaveLength(2)
+    await route('https://example.com/app/two')
+    expect(h.calls.insertCSS).toHaveLength(2)
+    expect(h.calls.removeCSS).toHaveLength(1)
+  })
+})

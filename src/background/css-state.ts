@@ -69,3 +69,26 @@ export async function removePreviewedScript(id: string): Promise<void> {
   const ids = await previewedScriptIds()
   await browser.storage.session.set({ [SCRIPTS_KEY]: ids.filter((existing) => existing !== id) })
 }
+
+/*
+ * The transform the sidebar has paused on a tab while the user edits a preview
+ * of it. It is stored for the same reason the CSS strings are: any later
+ * evaluation of the tab (a route change, a save, a toggle) recomputes the full
+ * enabled set, and without a record of the pause the paused version reappears
+ * under the preview.
+ */
+const SUSPENDED_PREFIX = 'wa-suspended-'
+
+export async function readSuspended(tabId: number): Promise<string | undefined> {
+  const key = `${SUSPENDED_PREFIX}${tabId}`
+  const value = (await browser.storage.session.get(key))[key]
+  return typeof value === 'string' ? value : undefined
+}
+
+export async function writeSuspended(tabId: number, id: string): Promise<void> {
+  await browser.storage.session.set({ [`${SUSPENDED_PREFIX}${tabId}`]: id })
+}
+
+export async function forgetSuspended(tabId: number): Promise<void> {
+  await browser.storage.session.remove(`${SUSPENDED_PREFIX}${tabId}`)
+}
