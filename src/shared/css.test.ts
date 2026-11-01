@@ -89,3 +89,43 @@ describe('propertiesIn', () => {
     )
   })
 })
+
+describe('a comment marker inside a string or an unquoted url (#97)', () => {
+  const sheet = 'a { content: "/*"; color: red } b { margin: 0 } /* x */'
+
+  test('does not hide the rules after it', () => {
+    const rules = parseRules(sheet)
+    expect(rules.map((r) => r.selectors[0])).toEqual(['a', 'b'])
+    expect(rules[0]?.declarations.map((d) => d.property)).toEqual(['content', 'color'])
+    expect(rules[1]?.declarations.map((d) => d.property)).toEqual(['margin'])
+  })
+
+  test('works with single quotes and an escaped quote before the marker', () => {
+    const rules = parseRules(`a { content: '/*'; color: red } b { margin: 0 } /* x */`)
+    expect(rules.map((r) => r.selectors[0])).toEqual(['a', 'b'])
+    const escaped = parseRules('a { content: "\\"/*"; color: red } b { margin: 0 } /* x */')
+    expect(escaped.map((r) => r.selectors[0])).toEqual(['a', 'b'])
+  })
+
+  test('does not read a comment marker in an unquoted url', () => {
+    const rules = parseRules('a { background: url(a/*b); color: red } b { margin: 0 } /* x */')
+    expect(rules.map((r) => r.selectors[0])).toEqual(['a', 'b'])
+  })
+
+  test('still removes real comments, including one that follows a string', () => {
+    const rules = parseRules('a { content: "x" /* gone: green */; color: red }')
+    expect(rules[0]?.declarations.map((d) => d.property)).toEqual(['content', 'color'])
+  })
+
+  test('control: a comment marker outside any string still starts a comment', () => {
+    // Shows the fix did not stop comments from being removed: this rule is
+    // inside a comment and must not be read.
+    const rules = parseRules('/* a { color: red } */ b { margin: 0 }')
+    expect(rules.map((r) => r.selectors[0])).toEqual(['b'])
+  })
+
+  test('treats an unterminated comment as running to the end', () => {
+    const rules = parseRules('a { color: red } /* b { margin: 0 }')
+    expect(rules.map((r) => r.selectors[0])).toEqual(['a'])
+  })
+})
