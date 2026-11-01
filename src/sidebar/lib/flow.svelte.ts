@@ -1645,6 +1645,9 @@ export class Flow {
    */
   async reloadAndRetry(): Promise<void> {
     if (this.tabId === null) return
+    // regenerate() ignores an empty follow-up, so without this the preview was
+    // cleared and the page reloaded and then nothing was generated.
+    if (!this.followUp.trim() || !this.result) return
     await this.clearPreview()
     this.ourReload = 'pending'
     await browser.tabs.reload(this.tabId)

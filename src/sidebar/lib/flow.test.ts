@@ -1320,3 +1320,41 @@ describe('a JavaScript preview that is answered after the run ended (#98)', () =
     expect(calls.some((c) => c.type === 'clear-preview-js')).toBe(false)
   })
 })
+
+describe('reload and try again with a script that has run (#114)', () => {
+  function flowWithRunScript() {
+    const flow = flowAtApprove()
+    flow.draft = { ...saved, kind: 'js' }
+    flow.jsRan = true
+    flow.step = 'refining'
+    return flow
+  }
+  const reloads: number[] = []
+  const realReload = (globalThis as any).browser.tabs.reload
+  beforeEach(() => {
+    reloads.length = 0
+    ;(globalThis as any).browser.tabs.reload = async (id: number) => void reloads.push(id)
+  })
+  afterEach(() => {
+    ;(globalThis as any).browser.tabs.reload = realReload
+  })
+
+  it('does nothing when the follow-up is empty', async () => {
+    const flow = flowWithRunScript()
+    flow.followUp = '   '
+    await flow.reloadAndRetry()
+    expect(reloads).toEqual([])
+    expect(calls.some((c) => c.type === 'clear-preview-js')).toBe(false)
+    expect(flow.jsRan).toBe(true)
+  })
+
+  it('clears the preview, reloads and regenerates when there is a follow-up (control)', async () => {
+    const flow = flowWithRunScript()
+    flow.followUp = 'make it smaller'
+    const generate = vi.spyOn(flow, 'generate').mockResolvedValue(undefined)
+    await flow.reloadAndRetry()
+    expect(reloads).toEqual([1])
+    expect(calls.filter((c) => c.type === 'clear-preview-js').map((c) => c.id)).toEqual(['OLD'])
+    expect(generate).toHaveBeenCalledTimes(1)
+  })
+})
