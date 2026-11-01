@@ -130,8 +130,25 @@ browser.webNavigation.onHistoryStateUpdated.addListener(async (details) => {
    * from a matching route to a non-matching one kept the CSS and the badge
    * count, and a move the other way gained neither.
    */
+  if (!(await urlChangedSinceLastEvaluation(details.tabId, details.url))) return
   await evaluateTab(details.tabId, details.url, { navigated: false })
 })
+
+/**
+ * replaceState and pushState with the URL the tab already has fire the same
+ * event as a real route change. Evaluating each one costs a storage read, a
+ * badge update and, in every-load mode, a full health check, for a page that
+ * has not changed. The last evaluated URL is kept in storage.session so the
+ * comparison still works after the event page is suspended; a missing entry
+ * counts as a change.
+ */
+async function urlChangedSinceLastEvaluation(tabId: number, url: string): Promise<boolean> {
+  const key = `wa-last-url-${tabId}`
+  const previous = (await browser.storage.session.get(key))[key]
+  if (previous === url) return false
+  await browser.storage.session.set({ [key]: url })
+  return true
+}
 
 browser.webNavigation.onCommitted.addListener(async (details) => {
   if (details.frameId !== 0) return
@@ -160,6 +177,7 @@ browser.webNavigation.onCommitted.addListener(async (details) => {
      */
     if (!restored) await forgetCss('preview', details.tabId)
   })
+  await browser.storage.session.set({ [`wa-last-url-${details.tabId}`]: details.url })
   await evaluateTab(details.tabId, details.url, { navigated: true })
 })
 
@@ -941,6 +959,7 @@ browser.tabs.onRemoved.addListener(async (tabId) => {
     await forgetCss('preview', tabId)
     await forgetCss('applied', tabId)
     forgetTab(tabId)
+    await browser.storage.session.remove(`wa-last-url-${tabId}`)
   })
   evaluations.delete(tabId)
 })

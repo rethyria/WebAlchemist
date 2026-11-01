@@ -51,3 +51,38 @@ describe('a preview when the page is shown again from the back-forward cache (#8
     expect(h.calls.insertCSS.filter((c) => c.css.includes('Dark'))).toHaveLength(2)
   })
 })
+
+describe('a history event that leaves the URL unchanged (#83)', () => {
+  const route = (url: string) =>
+    h.listeners.get('browser.webNavigation.onHistoryStateUpdated')!({ frameId: 0, tabId: TAB, url })
+  const checks = () => h.calls.sendMessage.filter((c) => c.message.type === 'run-health-check')
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 0))
+
+  it('does not run another health check', async () => {
+    await commit()
+    await settle()
+    expect(checks()).toHaveLength(1)
+    await route(PAGE)
+    await route(PAGE)
+    await settle()
+    expect(checks()).toHaveLength(1)
+  })
+
+  it('still evaluates a real route change', async () => {
+    // Control: the skip depends on the URL being the same, not on every
+    // history event being ignored.
+    await commit()
+    await route('https://example.com/app/two')
+    await settle()
+    expect(checks()).toHaveLength(2)
+  })
+
+  it('skips an unchanged URL after a suspension too', async () => {
+    await commit()
+    await settle()
+    await h.boot()
+    await route(PAGE)
+    await settle()
+    expect(checks()).toHaveLength(1)
+  })
+})
