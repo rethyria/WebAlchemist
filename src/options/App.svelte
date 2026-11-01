@@ -25,6 +25,8 @@
   let vault = $state({ sealed: false, unlocked: true })
   /** Set when the credentials could not be read and the vault is not locked. */
   let loadError = $state<string | null>(null)
+  /** Set when the vault unlocked but the stored keys could not be checked against their providers. */
+  let bindingError = $state<string | null>(null)
   let usage = $state<UsageStore>({ months: {}, transforms: {} })
   let transformNames = $state<Record<string, string>>({})
 
@@ -133,6 +135,13 @@
     </p>
   {/if}
 
+  {#if bindingError}
+    <p class="load-error" role="alert">
+      The vault is unlocked. The stored keys could not be checked against their providers: {bindingError}
+      Unlock the vault again to repeat the check.
+    </p>
+  {/if}
+
   {#if settings}
     <ProviderSettings
       {settings}
@@ -160,7 +169,10 @@
         await afterVault()
       }}
       onunlock={async (passphrase) => {
-        await call({ type: 'unlock-vault', passphrase })
+        const unlocked = await call<{ bindingError: string | null }>({ type: 'unlock-vault', passphrase })
+        // The vault is open at this point. A failed check of the stored keys is
+        // shown on its own, and is not an error of the unlock.
+        bindingError = unlocked.bindingError
         await afterVault()
       }}
       onlock={async () => {

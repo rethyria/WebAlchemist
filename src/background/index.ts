@@ -613,8 +613,7 @@ async function handle(
       return true
 
     case 'unlock-vault':
-      await unlockVault(message.passphrase)
-      return true
+      return unlockVault(message.passphrase)
 
     case 'lock-vault':
       await lockVault()

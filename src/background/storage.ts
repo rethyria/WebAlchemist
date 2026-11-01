@@ -644,11 +644,19 @@ export async function disableVault(passphrase: string): Promise<void> {
   })
 }
 
-/** Derives and remembers the key for this browser session. */
-export async function unlockVault(passphrase: string): Promise<void> {
+/**
+ * Derives and remembers the key for this browser session.
+ *
+ * Returns the message of a failed binding pass, or null. The pass runs after
+ * the vault is open, so its failure is not a failed unlock: throwing it made
+ * the caller report the unlock as failed while the vault was unlocked. The pass
+ * runs again at the next unlock, and until it has recorded that it ran, reads
+ * still bind unbound keys.
+ */
+export async function unlockVault(passphrase: string): Promise<{ bindingError: string | null }> {
   const stored = await browser.storage.local.get(KEY_CREDENTIALS)
   const existing = stored[KEY_CREDENTIALS]
-  if (!isSealed(existing)) return
+  if (!isSealed(existing)) return { bindingError: null }
 
   const key = await deriveKey(passphrase, saltOf(existing))
   // Decrypt once before remembering, so a wrong passphrase is refused here
@@ -658,7 +666,15 @@ export async function unlockVault(passphrase: string): Promise<void> {
   await armIdleLock()
   // The first moment the map can be written after an upgrade, so this is where
   // keys stored before bindings existed are bound; see bindStoredCredentials.
-  await bindStoredCredentials()
+  try {
+    await bindStoredCredentials()
+    return { bindingError: null }
+  } catch (error) {
+    // Only the message is kept. It never holds a credential.
+    const message = error instanceof Error ? error.message : 'unknown error'
+    console.error('Binding stored credentials failed:', message)
+    return { bindingError: message }
+  }
 }
 
 /**

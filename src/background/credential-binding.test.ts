@@ -378,3 +378,67 @@ describe('after the binding pass has run', () => {
     expect(localArea.raw()['credentialBindingPassDone']).toBe(true)
   })
 })
+
+describe('unlocking when the binding pass fails', () => {
+  async function sealedWithKey() {
+    const settings = await storage.getSettings()
+    await storage.saveSettings({ ...settings, providers: [remote()], activeProviderId: 'p1' })
+    await storage.setCredential('p1', KEY)
+    await storage.enableVault('correct horse battery')
+    await storage.lockVault()
+  }
+
+  // Makes only the pass fail: the write of the credentials after unlock, which
+  // is the first write the pass makes, is refused.
+  function failTheBindingWrite() {
+    const original = localArea.set.bind(localArea)
+    localArea.set = (async (values: Record<string, unknown>) => {
+      if ('credentials' in values) throw new Error('storage write failed')
+      return original(values)
+    }) as typeof localArea.set
+    return () => (localArea.set = original as typeof localArea.set)
+  }
+
+  it('reports the failure separately and leaves the vault unlocked', async () => {
+    await sealedWithKey()
+    const restore = failTheBindingWrite()
+    const quiet = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      const result = await storage.unlockVault('correct horse battery')
+      expect(result.bindingError).toBe('storage write failed')
+    } finally {
+      restore()
+      quiet.mockRestore()
+    }
+    expect(await storage.vaultState()).toEqual({ sealed: true, unlocked: true })
+    expect(localArea.raw()['credentialBindingPassDone']).toBeUndefined()
+  })
+
+  it('logs the message and not the key', async () => {
+    await sealedWithKey()
+    const restore = failTheBindingWrite()
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      await storage.unlockVault('correct horse battery')
+    } finally {
+      restore()
+    }
+    expect(JSON.stringify(logged.mock.calls)).toContain('storage write failed')
+    expect(JSON.stringify(logged.mock.calls)).not.toContain('sk-secret')
+    logged.mockRestore()
+  })
+
+  // Controls: a pass that succeeds reports no error, and a wrong passphrase is
+  // still an error of the unlock itself.
+  it('reports no error when the pass succeeds', async () => {
+    await sealedWithKey()
+    expect(await storage.unlockVault('correct horse battery')).toEqual({ bindingError: null })
+    expect(localArea.raw()['credentialBindingPassDone']).toBe(true)
+  })
+
+  it('still fails the unlock for a wrong passphrase, and the vault stays locked', async () => {
+    await sealedWithKey()
+    await expect(storage.unlockVault('not the passphrase')).rejects.toThrow()
+    expect((await storage.vaultState()).unlocked).toBe(false)
+  })
+})
