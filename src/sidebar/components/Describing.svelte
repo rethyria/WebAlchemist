@@ -4,6 +4,7 @@
   import Button from './Button.svelte'
   import Toggle from './Toggle.svelte'
   import Label from './Label.svelte'
+  import AddressNote from './AddressNote.svelte'
 
   interface Props {
     /** True when the pick came from a drawn rectangle. */
@@ -386,10 +387,7 @@
     </div>
   </section>
 
-  <section class="sent-address">
-    <p class="note">Page address sent to your AI provider, with query values and the fragment left out:</p>
-    <p class="address">{sentAddress}</p>
-  </section>
+  <AddressNote address={sentAddress} />
 
   {#if visionSupported}
     <section class="screenshot">
@@ -670,13 +668,6 @@
 
   .node.selected.in-scope {
     box-shadow: inset 2px 0 0 rgb(from var(--neutral) r g b / 0.45);
-  }
-
-  .address {
-    margin: 0;
-    overflow-wrap: anywhere;
-    font: 11px var(--font-mono);
-    color: var(--text-dim);
   }
 
   .screenshot {
