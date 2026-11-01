@@ -99,6 +99,8 @@ export async function createOpenAiCompatibleProvider(
     model: string
     system: string
     userContent: unknown
+    /** Earlier turns of a refinement session, sent as messages before the user message. */
+    history?: readonly { role: 'user' | 'assistant'; content: string }[]
     schema: unknown
     schemaName: string
     maxTokens: number
@@ -110,6 +112,7 @@ export async function createOpenAiCompatibleProvider(
       max_tokens: args.maxTokens,
       messages: [
         { role: 'system', content: args.system },
+        ...(args.history ?? []).map((turn) => ({ role: turn.role, content: turn.content })),
         { role: 'user', content: args.userContent },
       ],
       response_format: {
@@ -262,7 +265,10 @@ export async function createOpenAiCompatibleProvider(
         scopeInstruction(request.scopeDepth, request.scopeContainer ?? null, nonce),
         ...(request.repair ? [fenceSavedTransform(request.repair, nonce)] : []),
         fencePageContent(
-          JSON.stringify(request.context, null, 2) + pageDataSections(request, nonce),
+          // The screenshot is sent as an image part below. Serialised here it
+          // would add the whole image to the request a second time as text.
+          JSON.stringify({ ...request.context, screenshot: undefined }, null, 2) +
+            pageDataSections(request, nonce),
           nonce,
         ),
       ].join('\n\n')
@@ -279,6 +285,7 @@ export async function createOpenAiCompatibleProvider(
         model: provider.generateModel,
         system: GENERATE_SYSTEM_PROMPT,
         userContent,
+        history: request.history,
         schema: GENERATION_SCHEMA,
         schemaName: 'transform',
         maxTokens: 16000,
