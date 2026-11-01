@@ -218,15 +218,36 @@ function mutateTransforms<T>(work: () => Promise<T>): Promise<T> {
   return result
 }
 
-export function saveTransform(transform: Transform): Promise<void> {
+/**
+ * Stores a transform, replacing the record with the same id when there is one.
+ *
+ * When it replaces a record, the stored `order`, `enabled` and `createdAt` are
+ * kept and the caller's values for them are ignored. The sidebar and the editor
+ * send a copy of the record from when they loaded it, and nothing refreshes
+ * that copy, so a save from either one carried the old order after a reorder
+ * and the old enabled flag after a toggle, and undid both (#85). Only
+ * `reorderTransforms` and `updateTransform` change those fields. Returns the
+ * record as stored, which is what callers should register or apply.
+ */
+export function saveTransform(transform: Transform): Promise<Transform> {
   return mutateTransforms(async () => {
     const { valid: all, invalid } = await readStored()
     const index = all.findIndex((t) => t.id === transform.id)
-    const next = { ...transform, updatedAt: Date.now() }
+    const existing = index === -1 ? undefined : all[index]
+    const next = {
+      ...transform,
+      ...(existing && {
+        order: existing.order,
+        enabled: existing.enabled,
+        createdAt: existing.createdAt,
+      }),
+      updatedAt: Date.now(),
+    }
     assertValidTransform(next)
     if (index === -1) all.push(next)
     else all[index] = next
     await writeTransforms(all, invalid)
+    return next
   })
 }
 

@@ -349,9 +349,11 @@ async function handle(
         }
       }
 
-      await saveTransform(message.transform)
-      if (message.transform.kind === 'js') {
-        await registerTransform(message.transform)
+      // Register what was stored, not what was sent: a save keeps the stored
+      // `enabled`, and the copy that arrived may hold an older value.
+      const saved = await saveTransform(message.transform)
+      if (saved.kind === 'js') {
+        await registerTransform(saved)
       }
       // Apply it now rather than on the next navigation. The preview was just
       // taken down, so without this the page visibly reverts on save.
