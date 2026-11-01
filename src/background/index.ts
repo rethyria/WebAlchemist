@@ -45,7 +45,7 @@ import {
   writePreviewWindow,
   writeSuspended,
 } from './css-state'
-import { forgetSession, markChecked, runHealthCheck, shouldCheck } from './health'
+import { forgetSession, forgetSessionChecksFor, markChecked, runHealthCheck, shouldCheck } from './health'
 import { withKeepalive } from './keepalive'
 import { isContentEvent as isContentEventType, isExtensionPage } from './sender'
 import { connect as connectOAuth } from './oauth'
@@ -464,6 +464,8 @@ async function handle(
       const { accent } = await getSettings()
       await badge.transformEdited(saved.id, accent)
       await repaintOtherTabs([saved.match, before?.match], accent)
+      // After a repair the next load has to check again, even in once-per-session mode.
+      await forgetSessionChecksFor(saved.id)
       // Apply it now rather than on the next navigation. The preview was just
       // taken down, so without this the page visibly reverts on save.
       await reapply(message.tabId)

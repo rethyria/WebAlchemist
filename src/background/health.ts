@@ -167,3 +167,23 @@ export async function forgetSession(url: string, transforms: Transform[]): Promi
   const key = sessionKey(url, transforms)
   if (key) await browser.storage.session.remove(key)
 }
+
+/**
+ * Removes every once-per-session record whose transform ids include `id`.
+ *
+ * A save changes the code the earlier check judged, so the record that says
+ * "this host was checked" no longer holds. Without this, a repaired transform
+ * was not checked again on its site for the rest of the session. The record
+ * keys end in the comma-separated id list after the last colon, which is the
+ * part read here; a host that is an IPv6 address contains colons, which is why
+ * the last colon is used.
+ */
+export async function forgetSessionChecksFor(id: string): Promise<void> {
+  const prefix = 'wa-health-checked:'
+  const stored = await browser.storage.session.get(null)
+  const stale = Object.keys(stored).filter(
+    (key) =>
+      key.startsWith(prefix) && key.slice(key.lastIndexOf(':') + 1).split(',').includes(id),
+  )
+  if (stale.length > 0) await browser.storage.session.remove(stale)
+}

@@ -261,6 +261,27 @@ describe('once-per-session checks (#94)', () => {
     expect(checks()).toHaveLength(2)
   })
 
+  it('checks the site again after one of its transforms is saved', async () => {
+    await commit('https://example.com/a1')
+    await settle()
+    expect(checks()).toHaveLength(1)
+    await h.onMessage({ type: 'save-transform', transform: pathA })
+    await commit('https://example.com/a1')
+    await settle()
+    expect(checks()).toHaveLength(2)
+  })
+
+  it('keeps the record of a site whose transforms were not saved', async () => {
+    // Control: saving a transform that this site's check did not include leaves
+    // the record in place, so the re-check above comes from the saved id.
+    await commit('https://example.com/a1')
+    await settle()
+    await h.onMessage({ type: 'save-transform', transform: pathB })
+    await commit('https://example.com/a1')
+    await settle()
+    expect(checks()).toHaveLength(1)
+  })
+
   it('control: a second page with the same transforms is not checked', async () => {
     // Shows the tests above count checks that happen and not checks that are
     // always skipped: the case once-per-session exists for still skips.
