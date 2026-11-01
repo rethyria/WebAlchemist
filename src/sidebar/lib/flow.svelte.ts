@@ -381,6 +381,35 @@ export class Flow {
    */
   private keptInstruction: string | null = null
 
+  /**
+   * The element that was selected when "Change" started a new pick, held so
+   * that cancelling the pick can go back to it. Null when the pick did not
+   * start from the describing step, in which case there is nothing to go back
+   * to and cancelling discards the run.
+   */
+  private rePickFrom: { picked: Picked; tree: TreeRow[] } | null = null
+
+  /**
+   * Ends a cancelled or failed re-pick by returning to the describing step
+   * with the element, the draft, the match pattern and the typed text as they
+   * were. Returns false when the pick did not start from the describing step.
+   *
+   * Cancelling a re-pick used to discard the whole run, which is right for a
+   * first pick and wrong here: in Edit description it threw away an edit the
+   * user had only paused to point at a different element.
+   */
+  private returnFromRePick(): boolean {
+    const held = this.rePickFrom
+    this.rePickFrom = null
+    this.keptInstruction = null
+    if (!held) return false
+    this.picked = held.picked
+    this.tree = held.tree
+    this.hover = null
+    this.step = 'describing'
+    return true
+  }
+
   async startPicking(purpose: 'describe' | 'author' = 'describe'): Promise<void> {
     this.pickPurpose = purpose
     this.keptInstruction = this.step === 'describing' ? this.instruction : null
@@ -418,11 +447,20 @@ export class Flow {
 
       this.error = null
       this.hover = null
+      this.rePickFrom =
+        this.step === 'describing' && this.picked
+          ? { picked: this.picked, tree: this.tree }
+          : null
       this.picked = null
       this.step = 'picking'
       await send({ type: 'start-picking', tabId: this.tabId })
     } catch (cause) {
-      this.step = 'list'
+      /*
+       * A failed re-pick from the describing step goes back there, as a
+       * cancelled one does. Otherwise only the step was changed, which left
+       * the draft, the suspended CSS transform and the outline in place.
+       */
+      if (!this.returnFromRePick()) await this.discard()
       this.fail(cause, () => this.startPicking(purpose))
     }
   }
@@ -439,13 +477,15 @@ export class Flow {
     if (this.tabId !== null) {
       await send({ type: 'stop-picking', tabId: this.tabId }).catch(() => {})
     }
+    // Cancelling "Change" goes back to the description it was started from.
+    if (this.returnFromRePick()) return
     /*
-     * Through discard rather than a bare step change. Picking can start from
-     * "Change" inside Edit description, where a draft, its match pattern and a
-     * suspended saved transform are held. Going back to the list with only the
-     * step changed left all three in place: the suspended transform stayed off
-     * the page, and the next new pick inherited the draft's id and saved over
-     * the saved transform.
+     * Any other pick ends the run, through discard rather than a bare step
+     * change. A first pick can still hold a draft, its match pattern and a
+     * suspended saved transform; going back to the list with only the step
+     * changed left all three in place: the suspended transform stayed off the
+     * page, and the next new pick inherited the draft's id and saved over the
+     * saved transform.
      */
     await this.discard()
   }
@@ -474,6 +514,8 @@ export class Flow {
         // Retargeting must not wipe what has already been typed — the user is
         // adjusting the target of a description they are partway through.
         if (retargeting) return
+        // The new element replaces the one held for a cancelled re-pick.
+        this.rePickFrom = null
         if (this.pickPurpose === 'author') void this.openAuthoring()
         else {
           const kept = this.keptInstruction
@@ -509,8 +551,9 @@ export class Flow {
         // disabled: both panels disable it while this is true and offer no
         // other way out of region mode.
         this.choosingRegion = false
-        // Same reason as cancelPicking: the list must not keep the old run.
-        if (this.step === 'picking') void this.discard()
+        // Same as cancelPicking: back to the description for a re-pick, and
+        // otherwise the list must not keep the old run.
+        if (this.step === 'picking' && !this.returnFromRePick()) void this.discard()
         return
 
       case 'health-check-result':
@@ -1787,6 +1830,7 @@ export class Flow {
     this.dismissError()
     this.refinement = null
     this.keptInstruction = null
+    this.rePickFrom = null
     this.generation += 1
     // The run is over, so the all-sites grant it may have taken goes back.
     this.cancelScreenshot()

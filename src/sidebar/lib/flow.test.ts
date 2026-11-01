@@ -111,6 +111,10 @@ describe('leaving a run that started from a saved transform', () => {
     await flow.repair(saved, 'broken')
     expect(flow.step).toBe('list')
     expect(flow.error).not.toBeNull()
+    // Checked here, before startPicking: its own guard clears a stale draft,
+    // so asserting only after it passed even with the repair fix reverted.
+    expect(flow.draft).toBeNull()
+    expect(flow.matchPattern).toBe('')
 
     await flow.startPicking()
     pick(flow)
@@ -134,34 +138,79 @@ describe('leaving a run that started from a saved transform', () => {
     expect(flow.error).not.toBeNull()
   })
 
-  it('puts the saved transform back when the re-pick from Edit description is cancelled', async () => {
+  it('returns to Edit description with the edit intact when the re-pick is cancelled', async () => {
     const flow = newFlow()
     handler = (m) =>
       m.type === 'context-for-anchor' ? { ok: true, data: found } : { ok: true, data: null }
     await flow.editIntent(saved)
     expect(flow.step).toBe('describing')
     expect(flow.suspendedId).toBe('OLD')
+    flow.instruction = 'edited text'
 
     await flow.startPicking()
+    expect(flow.step).toBe('picking')
     await flow.cancelPicking()
-    expect(suspendCalls().map((c) => c.id)).toEqual(['OLD', null])
-    expect(flow.suspendedId).toBeNull()
-    expect(flow.draft).toBeNull()
-    expect(flow.step).toBe('list')
+
+    expect(flow.step).toBe('describing')
+    expect(flow.draft?.id).toBe('OLD')
+    expect(flow.instruction).toBe('edited text')
+    expect(flow.picked?.anchor.selector).toBe('div.x')
+    // The saved transform stays off the page: the edit is still open.
+    expect(flow.suspendedId).toBe('OLD')
+    expect(suspendCalls().map((c) => c.id)).toEqual(['OLD'])
   })
 
-  it('does the same when picking is cancelled from the page with Esc', async () => {
+  it('does the same when the re-pick is cancelled from the page with Esc', async () => {
     const flow = newFlow()
     handler = (m) =>
       m.type === 'context-for-anchor' ? { ok: true, data: found } : { ok: true, data: null }
     await flow.editIntent(saved)
+    flow.instruction = 'edited text'
     await flow.startPicking()
     flow.receive({ type: 'picking-cancelled' } as any)
     await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(flow.step).toBe('describing')
+    expect(flow.suspendedId).toBe('OLD')
+    expect(flow.draft?.id).toBe('OLD')
+    expect(flow.instruction).toBe('edited text')
+    expect(flow.picked?.anchor.selector).toBe('div.x')
+    expect(suspendCalls().map((c) => c.id)).toEqual(['OLD'])
+  })
+
+  it('returns to the description when starting the re-pick fails', async () => {
+    const flow = newFlow()
+    handler = (m) => {
+      if (m.type === 'context-for-anchor') return { ok: true, data: found }
+      if (m.type === 'start-picking') return failure('network')
+      return { ok: true, data: null }
+    }
+    await flow.editIntent(saved)
+    await flow.startPicking()
+    expect(flow.step).toBe('describing')
+    expect(flow.draft?.id).toBe('OLD')
+    expect(flow.suspendedId).toBe('OLD')
+    expect(flow.picked).not.toBeNull()
+    expect(flow.error).not.toBeNull()
+  })
+
+  it('still discards the run when a first pick fails to start', async () => {
+    const flow = newFlow()
+    flow.draft = saved
+    flow.suspendedId = 'OLD'
+    handler = (m) => (m.type === 'start-picking' ? failure('network') : { ok: true, data: null })
+    await flow.startPicking()
     expect(flow.step).toBe('list')
-    expect(flow.suspendedId).toBeNull()
     expect(flow.draft).toBeNull()
-    expect(suspendCalls().map((c) => c.id)).toEqual(['OLD', null])
+    expect(flow.suspendedId).toBeNull()
+    expect(flow.error).not.toBeNull()
+  })
+
+  it('still discards the run when a first pick is cancelled', async () => {
+    const flow = newFlow()
+    await flow.startPicking()
+    await flow.cancelPicking()
+    expect(flow.step).toBe('list')
+    expect(flow.picked).toBeNull()
   })
 
   it('keeps the draft when Change re-picks inside Edit description', async () => {
