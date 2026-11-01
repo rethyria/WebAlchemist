@@ -1,6 +1,6 @@
 /** Wording for the versions of a transform that the editor lists. */
 
-import type { TransformSource } from './types'
+import type { Capability, Transform, TransformSource, TransformVersion } from './types'
 
 /** What produced a version, in the words the editor shows. */
 export function sourceLabel(source: TransformSource | undefined): string {
@@ -16,4 +16,47 @@ export function sourceLabel(source: TransformSource | undefined): string {
     default:
       return 'Source not recorded'
   }
+}
+
+/** One line of the comparison shown before a version is restored. */
+export interface VersionDifference {
+  label: string
+  current: string
+  version: string
+  /** Stated in words as well as shown, so that the table does not rely on colour. */
+  status: 'Same' | 'Different'
+}
+
+function worldLabel(kind: Transform['kind'], world: Transform['world']): string {
+  if (kind !== 'js') return 'Not used by CSS'
+  return (world ?? 'USER_SCRIPT') === 'MAIN'
+    ? 'MAIN (runs in the page\'s own JavaScript context)'
+    : 'USER_SCRIPT (runs in a separate context)'
+}
+
+function capabilityLabel(capabilities: readonly Capability[]): string {
+  return capabilities.length === 0 ? 'None' : [...capabilities].sort().join(', ')
+}
+
+/**
+ * What differs between the saved transform and a version of it, for the
+ * confirmation shown before a restore. A restore brings back the match
+ * pattern, capabilities and world as well as the code, so each is listed next
+ * to the current value, including those the user may have removed on purpose.
+ */
+export function compareWithCurrent(current: Transform, version: TransformVersion): VersionDifference[] {
+  const rows: Omit<VersionDifference, 'status'>[] = [
+    { label: 'Match pattern', current: current.match, version: version.match },
+    {
+      label: 'Capabilities',
+      current: capabilityLabel(current.capabilities),
+      version: capabilityLabel(version.capabilities),
+    },
+    {
+      label: 'World',
+      current: worldLabel(current.kind, current.world),
+      version: worldLabel(current.kind, version.world),
+    },
+  ]
+  return rows.map((row) => ({ ...row, status: row.current === row.version ? 'Same' : 'Different' }))
 }

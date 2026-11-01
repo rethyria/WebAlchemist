@@ -5,6 +5,7 @@
   import { matchPresetsFor, matchesUrl, originPermissionFor, parsePattern } from '@shared/match'
   import { send } from '@shared/messaging.svelte'
 import { editorOriginToRequest, permissionRequestsFor, requestAll } from '@shared/permissions'
+import { excludedAccessMessage, excludedHostForPattern } from '@shared/excluded-sites'
   import CodeArea from './CodeArea.svelte'
   import { shouldConfirmLeaving } from './unload'
 
@@ -40,6 +41,12 @@ import { editorOriginToRequest, permissionRequestsFor, requestAll } from '@share
   /** Earlier versions of this transform, newest first. Empty while creating. */
   let versions = $state<TransformVersion[]>([])
   let restoring = $state(false)
+  /**
+   * The user's list of excluded sites, loaded when the page opens so that the
+   * save and restore handlers can check it before their first await. An await
+   * before a permission request ends the user gesture (#131).
+   */
+  let excludedSites = $state<string[]>([])
   let justSaved = $state(false)
 
   /*
@@ -174,6 +181,12 @@ import { editorOriginToRequest, permissionRequestsFor, requestAll } from '@share
   async function restore(version: TransformVersion) {
     const current = transform
     if (!current || restoring || saving) return
+    // Before the permission request, and with no await since the click.
+    const excluded = excludedHostForPattern(excludedSites, version.match)
+    if (excluded !== null) {
+      findings = [excludedAccessMessage(excluded)]
+      return
+    }
     restoring = true
     findings = []
     try {
@@ -210,6 +223,13 @@ import { editorOriginToRequest, permissionRequestsFor, requestAll } from '@share
     if (!current || saving) return
 
     const wanted = match.trim() || current.match
+
+    // Before the permission request, and with no await since the click.
+    const excluded = excludedHostForPattern(excludedSites, wanted)
+    if (excluded !== null) {
+      findings = [excludedAccessMessage(excluded)]
+      return
+    }
 
     saving = true
     findings = []
@@ -333,6 +353,19 @@ import { editorOriginToRequest, permissionRequestsFor, requestAll } from '@share
   }
 
   $effect(() => {
+    void send<string[]>({ type: 'get-excluded-sites' })
+      .then((sites) => (excludedSites = sites))
+      .catch(() => {
+        // Without the list the background still refuses picking and generating
+        // on those sites; only this page's early refusal is missing.
+      })
+    // The list is edited on the settings page while this page is open.
+    const onStored = (changes: Record<string, browser.storage.StorageChange>, area: string) => {
+      if (area === 'local' && changes['wa-excluded-sites']) {
+        excludedSites = (changes['wa-excluded-sites'].newValue as string[] | undefined) ?? []
+      }
+    }
+    browser.storage.onChanged.addListener(onStored)
     void load()
     void send<Settings>({ type: 'get-settings' })
       .then((settings) => {
@@ -341,6 +374,7 @@ import { editorOriginToRequest, permissionRequestsFor, requestAll } from '@share
       .catch(() => {
         // The accent is decoration; failing to read it must not stop editing.
       })
+    return () => browser.storage.onChanged.removeListener(onStored)
   })
 </script>
 

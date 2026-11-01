@@ -42,3 +42,34 @@ export function excludedSiteMessage(host: string): string {
 export const SENSITIVE_PAGE_TITLE = 'This page has password or payment fields'
 export const SENSITIVE_PAGE_MESSAGE =
   'Generating sends text from this page to your model provider, and the page may show private information. Send the page content only if that is acceptable.'
+
+/**
+ * The excluded host that a match pattern would give access to, or null.
+ *
+ * Checked before a permission request so that an excluded site is never asked
+ * for (#131). A pattern covers a host when its host is that host or a parent of
+ * it with a leading "*." (`*.bank.example` covers `login.bank.example`), and it
+ * reaches an entry from above when the entry is under the pattern's host. A
+ * pattern for every host reaches every entry, so it is refused whenever the
+ * list is not empty.
+ */
+export function excludedHostForPattern(entries: readonly string[], pattern: string): string | null {
+  if (entries.length === 0) return null
+  const found = /^(?:https?|\*):\/\//.exec(pattern)
+  const rest = found ? pattern.slice(found[0].length) : pattern
+  const slash = rest.indexOf('/')
+  let host = (slash === -1 ? rest : rest.slice(0, slash)).toLowerCase().replace(/:\d+$/, '').replace(/\.$/, '')
+  if (host === '' || host === '*' || pattern === '<all_urls>') return entries[0] ?? null
+  const wildcard = host.startsWith('*.')
+  if (wildcard) host = host.slice(2)
+  for (const entry of entries) {
+    if (host === entry || host.endsWith(`.${entry}`)) return entry
+    if (wildcard && entry.endsWith(`.${host}`)) return entry
+  }
+  return null
+}
+
+/** What the panel says when it refuses to ask for access to an excluded site. */
+export function excludedAccessMessage(host: string): string {
+  return `${host} is on your list of excluded sites, so Web Alchemist does not ask for access to it. Remove it from the list in the settings first.`
+}

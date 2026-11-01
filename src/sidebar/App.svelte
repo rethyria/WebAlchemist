@@ -174,6 +174,9 @@
    * already held resolves without a prompt.
    */
   async function grantAccess(transform: Transform) {
+    // Before the permission request, and with no await since the click: an
+    // excluded site is never asked for access (#131).
+    if (flow.refuseExcludedAccess(transform.match)) return
     try {
       const granted = await requestAll(
         (permissions) => browser.permissions.request(permissions),

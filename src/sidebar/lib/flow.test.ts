@@ -1775,3 +1775,50 @@ describe('a model the account may not use (#125)', () => {
     expect(flow.error?.kind).not.toBe('model-unavailable')
   })
 })
+
+describe('saving for a site on the excluded list (#131)', () => {
+  const requested: string[] = []
+  const api = (globalThis as any).browser.permissions
+  const real = { ...api }
+  beforeEach(() => {
+    requested.length = 0
+    api.request = async (p: any) => (requested.push((p.origins ?? p.permissions).join()), true)
+  })
+  afterEach(() => Object.assign(api, real))
+
+  function flowFor(pattern: string, excluded: string[]) {
+    const flow = newFlow()
+    flow.draft = { ...saved, kind: 'css', id: 'NEW' }
+    flow.matchPattern = pattern
+    flow.excludedSites = excluded
+    return flow
+  }
+
+  it('does not ask for a parent-domain pattern that covers an excluded host', async () => {
+    const flow = flowFor('*.example.com/*', ['www.example.com'])
+    await flow.save()
+    expect(requested).toEqual([])
+    expect(calls.some((c) => c.type === 'save-transform')).toBe(false)
+    expect(flow.error).toMatchObject({ kind: 'request-failed' })
+    expect(flow.error?.message).toContain('www.example.com')
+  })
+
+  it('does not ask for the excluded host itself', async () => {
+    const flow = flowFor('www.example.com/*', ['example.com'])
+    await flow.save()
+    expect(requested).toEqual([])
+  })
+
+  it('asks as before when another site is excluded (control)', async () => {
+    const flow = flowFor('*.example.com/*', ['other.test'])
+    await flow.save()
+    expect(requested).toEqual(['*://*.example.com/*'])
+    expect(calls.some((c) => c.type === 'save-transform')).toBe(true)
+  })
+
+  it('refuses before anything is awaited, so no gesture is spent (control for the order)', () => {
+    const flow = flowFor('*.example.com/*', ['www.example.com'])
+    void flow.save()
+    expect(flow.error).toMatchObject({ kind: 'request-failed' })
+  })
+})

@@ -46,7 +46,13 @@ import type {
   UsageReport,
 } from '@shared/types'
 import { extractPartialString } from '@shared/partial-json'
-import { excludedHostFor, excludedSiteMessage, SENSITIVE_PAGE_MESSAGE } from '@shared/excluded-sites'
+import {
+  excludedAccessMessage,
+  excludedHostFor,
+  excludedHostForPattern,
+  excludedSiteMessage,
+  SENSITIVE_PAGE_MESSAGE,
+} from '@shared/excluded-sites'
 import { readCaptureGrant, recordCaptureGrant } from '@shared/capture-grant'
 import { BackgroundError, generateOverPort, send } from './messaging.svelte'
 
@@ -1477,6 +1483,18 @@ export class Flow {
     return granted
   }
 
+  /**
+   * Shows the refusal and returns true when the pattern would give access to a
+   * site on the excluded list. Synchronous, so a caller can use it before the
+   * permission request without ending the user gesture (#131).
+   */
+  refuseExcludedAccess(pattern: string): boolean {
+    const excluded = excludedHostForPattern(this.excludedSites, pattern)
+    if (excluded === null) return false
+    this.show({ kind: 'request-failed', message: excludedAccessMessage(excluded) })
+    return true
+  }
+
   /** Reads the record at start-up, so a panel opened after a grant was taken still knows it. */
   async loadCaptureGrantRecord(): Promise<void> {
     this.captureGrantTaken = await readCaptureGrant().catch(() => false)
@@ -2010,6 +2028,7 @@ export class Flow {
      * Requesting something already granted resolves true without prompting,
      * so there is no need to check first.
      */
+    if (this.refuseExcludedAccess(this.matchPattern)) return
     try {
       const granted = await this.requestFor(
         draft.kind,
