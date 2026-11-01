@@ -742,7 +742,10 @@ export class Flow {
   async expand(path: TreePath): Promise<void> {
     if (this.tabId === null) return
     try {
-      this.tree = await send<TreeRow[]>({ type: 'expand-node', tabId: this.tabId, path })
+      const rows = await send<TreeRow[] | null>({ type: 'expand-node', tabId: this.tabId, path })
+      // The page answers null when it holds no element to expand. Storing it
+      // made the list null, and the row paths computed from it threw.
+      if (rows) this.tree = rows
     } catch {
       // The page moved on, or the node is gone. The list stands as it was:
       // a failed expansion is not worth an error card over.

@@ -631,6 +631,8 @@ function onKeyDown(event: KeyboardEvent): void {
     case 'Escape':
       handled()
       stopPicking()
+      // The outline came down when a target pick started; put it back.
+      updateLock()
       void send({ type: 'picking-cancelled' })
       return
     case 'Enter':
@@ -1546,8 +1548,15 @@ async function handleMessage(message: ContentMessage) {
        * had thrown the first one away.
        */
       if (pickMode === 'target') {
+        /*
+         * Only the outline comes down. describedElement is kept until a new
+         * target is confirmed (emitPicked replaces it), because a cancelled
+         * "Change" returns to the element that was selected and needs the page
+         * to still hold it. Clearing it here left the page with no selection
+         * after a cancel: the scope request answered 0, expanding a node
+         * answered null, and the panel had no tree to show.
+         */
         lock.hide()
-        describedElement = null
       }
       startPicking(message.palette)
       return true
@@ -1597,6 +1606,8 @@ async function handleMessage(message: ContentMessage) {
     }
     case 'cancel-picking':
       stopPicking()
+      // As with Escape: a cancelled target pick returns to the held element.
+      updateLock()
       return true
     case 'retarget':
       preview.unmount()

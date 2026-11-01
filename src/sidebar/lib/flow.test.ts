@@ -1095,3 +1095,27 @@ describe('cancelling while the preview is applied', () => {
     expect(previews().filter((c) => c.type === 'preview-css')).toHaveLength(1)
   })
 })
+
+describe('a re-pick from Edit description', () => {
+  const describing = async () => {
+    const flow = newFlow()
+    handler = (m) =>
+      m.type === 'context-for-anchor' ? { ok: true, data: found } : { ok: true, data: null }
+    await flow.editIntent(saved)
+    return flow
+  }
+  const withPermission = (request: () => Promise<boolean>) => {
+    const api = (globalThis as any).browser.permissions
+    const before = api.request
+    api.request = request
+    return () => (api.request = before)
+  }
+
+  it('keeps the tree when the page has no element to expand', async () => {
+    const flow = await describing()
+    flow.tree = [{ label: 'row' }] as any
+    handler = (m) => (m.type === 'expand-node' ? { ok: true, data: null } : { ok: true, data: null })
+    await flow.expand({ up: 0, down: [0] } as any)
+    expect(flow.tree).toEqual([{ label: 'row' }])
+  })
+})
