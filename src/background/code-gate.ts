@@ -54,6 +54,13 @@ export function problemWithStoredCode(
 ): string | null {
   if (!transform.code) return null
 
+  // Code runs in the page's own world only with the user's approval (#53). The
+  // record of that approval is checked here as well as when a record is saved,
+  // so a record without it is never registered.
+  if (transform.kind === 'js' && transform.world === 'MAIN' && transform.mainApprovedByUser !== true) {
+    return "It is set to run in the page's own world, which the user has not approved, so it is not running."
+  }
+
   const check =
     transform.kind === 'js'
       ? runStaticAnalysis(transform.code, transform.capabilities)

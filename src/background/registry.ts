@@ -342,6 +342,10 @@ async function registerPreviewScript(transform: Transform): Promise<void> {
       ...transform,
       enabled: true,
       id: previewIdFor(transform.id),
+      // The preview of a draft in MAIN is allowed by a review token that was
+      // issued for MAIN, which preview-js checks before it gets here. The
+      // draft has no stored record of the approval, and this copy is not stored.
+      ...(transform.world === 'MAIN' ? { mainApprovedByUser: true } : {}),
     },
     { exactPath: true },
   )
