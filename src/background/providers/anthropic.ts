@@ -138,6 +138,10 @@ export async function createAnthropicProvider(
     dangerouslyAllowBrowser: true,
     defaultHeaders: { 'anthropic-dangerous-direct-browser-access': 'true' },
     maxRetries: 2,
+    // A redirect would re-send the x-api-key header and the prompt to the
+    // address in the Location header. The request goes to a fixed address and
+    // never needs a redirect, so one is treated as a failure.
+    fetchOptions: { redirect: 'error' },
   })
 
   const generateModel = provider.generateModel || DEFAULT_GENERATE_MODEL
