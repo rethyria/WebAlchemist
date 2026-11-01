@@ -15,7 +15,8 @@
   import { parseRules } from '@shared/css'
   import { permissionRequestsFor, requestAll } from '@shared/permissions'
   import { hasAccess, requiredOrigin } from '@shared/site-access'
-  import { killSwitchNotice, reloadTabsOf } from '@shared/kill-switch'
+  import { killSwitchNotice } from '@shared/kill-switch'
+  import { changedFields } from '@shared/settings-fields'
   import { activeTab, BackgroundError, send } from './lib/messaging.svelte'
   import { isForTab, type HealthCheckResult } from './lib/health-result'
   import { Flow } from './lib/flow.svelte'
@@ -197,11 +198,25 @@
     document.documentElement.dataset['accent'] = next.accent
   }
 
+  /*
+   * Sends only the fields the user changed, as one patch the background applies
+   * to what is stored. A whole settings object would carry back every value this
+   * panel loaded earlier, and overwrite a change made on the settings page since
+   * (#85). The settings component still hands over a whole object, so the
+   * changed fields are found here by comparing with what is shown.
+   */
   async function saveSettings(next: Settings) {
-    const changed = settings?.aiJsKillSwitch !== next.aiJsKillSwitch
+    const current = settings
+    if (!current) return
+    const fields = changedFields(current, next)
+    if (Object.keys(fields).length === 0) return
+
     applySettings(next)
-    const answer = await send({ type: 'save-settings', settings: next })
-    if (changed) killNotice = killSwitchNotice(next.aiJsKillSwitch, reloadTabsOf(answer))
+    const saved = await send<Settings>({ type: 'patch-settings', change: { kind: 'fields', fields } })
+    applySettings(saved)
+    if ('aiJsKillSwitch' in fields) {
+      killNotice = killSwitchNotice(saved.aiJsKillSwitch, await send<number>({ type: 'count-js-tabs' }))
+    }
   }
 
   /*
