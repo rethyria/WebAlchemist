@@ -221,7 +221,7 @@
 
   {#if pendingMode !== null}
     <div class="preview">
-      <h3>{pendingMode === 'backup' ? 'Back up' : 'Export to share'}</h3>
+      <h3>{pendingMode === 'backup' ? t('optBackUp') : t('optExportShare')}</h3>
       <p class="subtitle">{EXPORT_WARNING}</p>
       <div class="field">
         <label for="export-passphrase">{t('optVaultPassphrase')}</label>

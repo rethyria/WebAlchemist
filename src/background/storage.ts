@@ -131,7 +131,7 @@ async function writeSettings(settings: Settings): Promise<void> {
   for (const provider of settings.providers) {
     for (const [what, url] of endpointsOf(provider)) {
       if (storedEndpoints.get(`${provider.id}\n${what}`) === url) continue
-      assertEndpoint(url, `${what} of ${provider.label}`)
+      assertEndpoint(url, what, provider.label)
     }
   }
   for (const provider of settings.providers) {

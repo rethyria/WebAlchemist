@@ -1305,4 +1305,8 @@ export const sidebarMessages = defineMessages({
     message: 'The review that allows a preview has no approval, so nothing was run. Read the code again.',
     description: 'Error shown when the preview of JavaScript is refused.',
   },
+  msgConnectionDropped: {
+    message: 'The connection to the extension dropped before the response arrived.',
+    description: 'Error shown when the background did not answer.',
+  },
 })

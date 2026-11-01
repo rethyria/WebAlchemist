@@ -384,4 +384,26 @@ export const sharedMessages = defineMessages({
     message: 'Never',
     description: 'Choice of how long the vault stays unlocked without a request to a provider.',
   },
+  endpointNotAllowed: {
+    message: 'The $WHAT$ is not allowed. $PROBLEM$',
+    description: 'Error about an address that is refused. $WHAT$ names the setting, for example the base URL, and $PROBLEM$ says why.',
+    placeholders: ['WHAT', 'PROBLEM'],
+  },
+  endpointNotAllowedFor: {
+    message: 'The $WHAT$ of $PROVIDER$ is not allowed. $PROBLEM$',
+    description: 'Error about an address that is refused. $WHAT$ names the setting, $PROVIDER$ is the name of a provider and $PROBLEM$ says why.',
+    placeholders: ['WHAT', 'PROVIDER', 'PROBLEM'],
+  },
+  endpointNameBase: {
+    message: 'base URL',
+    description: 'Name of a provider setting, used inside a sentence.',
+  },
+  endpointNameToken: {
+    message: 'token endpoint',
+    description: 'Name of a provider setting, used inside a sentence.',
+  },
+  endpointNameAuthorization: {
+    message: 'authorization endpoint',
+    description: 'Name of a provider setting, used inside a sentence.',
+  },
 })

@@ -15,6 +15,7 @@
 import { BackgroundError } from '@shared/messaging.svelte'
 import type { UsageReport } from '@shared/types'
 import { boundTab } from '@shared/panel-binding'
+import { t } from '@shared/i18n'
 export { BackgroundError, send } from '@shared/messaging.svelte'
 
 /**
@@ -98,7 +99,7 @@ export function generateOverPort(
       if (settled) return
       reject(
         new BackgroundError(
-          'The connection to the extension dropped before the response arrived.',
+          t('msgConnectionDropped'),
           'network',
           true,
         ),

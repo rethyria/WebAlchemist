@@ -41,9 +41,15 @@ export function endpointProblem(value: string): string | null {
 }
 
 /** Throws with the reason and the name of the setting, for the background. */
-export function assertEndpoint(value: string, what: string): void {
+export function assertEndpoint(value: string, what: string, providerLabel?: string): void {
   const problem = endpointProblem(value)
-  if (problem) throw new Error(`The ${what} is not allowed. ${problem}`)
+  if (!problem) return
+  const name = t(what === 'base URL' ? 'endpointNameBase' : what === 'token endpoint' ? 'endpointNameToken' : 'endpointNameAuthorization')
+  throw new Error(
+    providerLabel === undefined
+      ? t('endpointNotAllowed', name, problem)
+      : t('endpointNotAllowedFor', name, providerLabel, problem),
+  )
 }
 
 /** The endpoint fields of a provider, as [label, value] pairs. */

@@ -94,8 +94,13 @@ export function assessMatch(pattern: string): MatchAssessment {
   if (!isIp && labels.length < 2) return { ok: false, reason: t('importMatchNotSite', host) }
   if (!path.startsWith('/')) return { ok: false, reason: t('importMatchNoPath') }
 
-  const how = scheme === 'https' ? 'Https' : scheme === 'http' ? 'Http' : 'Both'
-  return { ok: true, sites: t(`importMatchSites${how}`, describePath(path), host) }
+  const key =
+    scheme === 'https'
+      ? 'importMatchSitesHttps'
+      : scheme === 'http'
+        ? 'importMatchSitesHttp'
+        : 'importMatchSitesBoth'
+  return { ok: true, sites: t(key, describePath(path), host) }
 }
 
 function describePath(path: string): string {
