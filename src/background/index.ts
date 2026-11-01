@@ -738,6 +738,7 @@ async function handle(
     case 'set-enabled': {
       // Turning on a transform with no code would store enabled: true while
       // nothing runs, which the list then shows as a working transform.
+      let approvedMain = false
       if (message.enabled) {
         const stored = (await getAllTransforms()).find((t) => t.id === message.id)
         if (stored && needsRegenerating(stored)) throw new Error(NEEDS_REGENERATING_NOTE)
@@ -756,6 +757,10 @@ async function handle(
             throw new Error(AWAITING_APPROVAL_NOTE)
           }
           await spendApproval(message.approvalToken!)
+          // The token is tied to the world, and the panel showed the risks of
+          // MAIN before it was requested, so this is the user's approval of
+          // MAIN. A restored record has no such record until now (#124, #53).
+          approvedMain = stored.world === 'MAIN'
         }
       }
       // One queued update rather than a read followed by saveTransform: the
@@ -764,6 +769,7 @@ async function handle(
         enabled: message.enabled,
         // Cleared once the approval has been used.
         ...(message.enabled ? { awaitsApproval: null } : {}),
+        ...(approvedMain ? { mainApprovedByUser: true } : {}),
       })
       if (!next) throw new Error('That transform no longer exists.')
       if (next.kind === 'js') {

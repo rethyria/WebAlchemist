@@ -320,6 +320,12 @@
               {:else}
                 {#if item.needsApproval}
                   <p>Code restored; it stays off until you approve it.</p>
+                  {#if item.world === 'MAIN'}
+                    <p class="problem">
+                      This code is set to run in the page's own world (MAIN), where the page can
+                      read and change it. The risks are listed when you approve it.
+                    </p>
+                  {/if}
                   <details>
                     <summary>Show code</summary>
                     <pre>{item.code}</pre>

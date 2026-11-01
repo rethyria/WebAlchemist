@@ -8,6 +8,7 @@
   } from '@shared/transform-state'
   import Toggle from './Toggle.svelte'
   import { WORLD_RESET_NOTICE } from '@shared/world'
+  import RestoredCodeApproval from './RestoredCodeApproval.svelte'
 
   interface Props {
     transform: Transform
@@ -279,27 +280,14 @@
       {/if}
     </div>
     {#if approving}
-      <div class="approval">
-        <pre>{transform.code}</pre>
-        {#if transform.capabilities.length > 0}
-          <p>It declares these capabilities: {transform.capabilities.join(', ')}.</p>
-        {/if}
-        <div class="actions">
-          <button
-            type="button"
-            class="primary"
-            onclick={() => {
-              approving = false
-              onapprove()
-            }}
-          >
-            Approve and turn on
-          </button>
-          <button type="button" class="secondary" onclick={() => (approving = false)}>
-            Cancel
-          </button>
-        </div>
-      </div>
+      <RestoredCodeApproval
+        {transform}
+        onapprove={() => {
+          approving = false
+          onapprove()
+        }}
+        oncancel={() => (approving = false)}
+      />
     {/if}
   {/if}
 
@@ -568,26 +556,6 @@
     font-weight: 400;
   }
 
-  .approval {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    padding: 0 var(--gutter-sidebar) 9px var(--indent-expanded);
-    font: 11.5px/1.5 var(--font-ui);
-  }
-
-  .approval pre {
-    max-height: 220px;
-    overflow: auto;
-    margin: 0;
-    font: 11px/1.5 var(--font-mono);
-    white-space: pre-wrap;
-    overflow-wrap: anywhere;
-  }
-
-  .approval p {
-    margin: 0;
-  }
 
   .body {
     display: flex;

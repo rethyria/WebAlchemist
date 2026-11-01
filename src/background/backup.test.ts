@@ -135,14 +135,17 @@ describe('restoring a backup into a fresh profile', () => {
       code: GOOD_JS,
       enabled: false,
       origin: 'imported',
-      world: 'USER_SCRIPT',
+      // A backup keeps the world the record names (#124).
+      world: 'MAIN',
       capabilities: ['network'],
       awaitsApproval: true,
     })
+    expect(good.mainApprovedByUser).toBeFalsy()
     expect(result.items.find((i: any) => i.name === 'Good')).toMatchObject({
       needsApproval: true,
       needsRegeneration: false,
       code: GOOD_JS,
+      world: 'MAIN',
     })
   })
 
@@ -339,6 +342,108 @@ describe('the settings in a backup', () => {
       healthCheckMode: 'manual',
     })
     expect((await ask({ type: 'preview-import', bundle: { ...file(), mode: 'share' } })).settings).toBeNull()
+  })
+})
+
+describe('what a restore keeps from the record (#124, #53)', () => {
+  const backup = (record: object, mode = 'backup') => ({
+    format: 'web-alchemist-export',
+    schemaVersion: 1,
+    exportedAt: 0,
+    mode,
+    transforms: [record],
+  })
+  const restored = () => stored()[0]
+
+  beforeEach(async () => {
+    await boot([], DEFAULT_SETTINGS)
+  })
+
+  it('keeps MAIN from a backup, with no record that the user approved it', async () => {
+    await ask({ type: 'import-transforms', bundle: backup(jsRecord({ world: 'MAIN' })) })
+    expect(restored()).toMatchObject({ world: 'MAIN', enabled: false, awaitsApproval: true })
+    expect(restored().mainApprovedByUser).toBeFalsy()
+  })
+
+  it('does not take the approval record or the reset notice from a hostile file', async () => {
+    const hostile = jsRecord({
+      world: 'MAIN',
+      mainApprovedByUser: true,
+      worldResetFromModel: true,
+      enabled: true,
+    })
+    await ask({ type: 'import-transforms', bundle: backup(hostile) })
+    expect(restored()).toMatchObject({ world: 'MAIN', enabled: false, awaitsApproval: true })
+    expect(restored().mainApprovedByUser).toBeFalsy()
+    expect(restored()).not.toHaveProperty('worldResetFromModel')
+  })
+
+  it('does the same for a share, and resets its world to the isolated one', async () => {
+    const hostile = jsRecord({ world: 'MAIN', mainApprovedByUser: true, worldResetFromModel: true })
+    await ask({ type: 'import-transforms', bundle: backup(hostile, 'share') })
+    expect(restored().world).toBe('USER_SCRIPT')
+    expect(restored().mainApprovedByUser).toBeFalsy()
+    expect(restored()).not.toHaveProperty('worldResetFromModel')
+  })
+
+  it('keeps the isolated world when the backup record names it (control)', async () => {
+    await ask({ type: 'import-transforms', bundle: backup(jsRecord({ world: 'USER_SCRIPT' })) })
+    expect(restored().world).toBe('USER_SCRIPT')
+  })
+
+  it('shows the world in the preview, so the approval panel can name it', async () => {
+    const { items } = await ask({ type: 'preview-import', bundle: backup(jsRecord({ world: 'MAIN' })) })
+    expect(items[0]).toMatchObject({ needsApproval: true, world: 'MAIN' })
+  })
+
+  describe('approving MAIN', () => {
+    const approveFor = async (world: 'MAIN' | 'USER_SCRIPT') =>
+      (
+        await ask({
+          type: 'approve-code',
+          code: GOOD_JS,
+          declaredCapabilities: [],
+          world,
+          transformId: restored().id,
+          match: 'https://shop.example.com/*',
+        })
+      ).approvalToken as string
+
+    beforeEach(async () => {
+      await ask({ type: 'import-transforms', bundle: backup(jsRecord({ world: 'MAIN' })) })
+    })
+
+    it('records the approval of MAIN only once the token for MAIN is used', async () => {
+      const id = restored().id
+      await ask({ type: 'set-enabled', id, enabled: true, approvalToken: await approveFor('MAIN') })
+      expect(restored()).toMatchObject({ enabled: true, world: 'MAIN', mainApprovedByUser: true })
+      expect(restored()).not.toHaveProperty('awaitsApproval')
+    })
+
+    it('refuses a token that was given for the isolated world', async () => {
+      const id = restored().id
+      await expect(
+        ask({ type: 'set-enabled', id, enabled: true, approvalToken: await approveFor('USER_SCRIPT') }),
+      ).rejects.toThrow('not been approved')
+      expect(restored()).toMatchObject({ enabled: false, awaitsApproval: true })
+      expect(restored().mainApprovedByUser).toBeFalsy()
+    })
+
+    it('does not record an approval of MAIN for a restored isolated-world record (control)', async () => {
+      await ask({ type: 'import-transforms', bundle: backup(jsRecord({ name: 'Other', world: 'USER_SCRIPT' })) })
+      const other = stored().find((t) => t.name === 'Other')
+      const token = (
+        await ask({
+          type: 'approve-code',
+          code: GOOD_JS,
+          declaredCapabilities: [],
+          transformId: other.id,
+          match: 'https://shop.example.com/*',
+        })
+      ).approvalToken
+      await ask({ type: 'set-enabled', id: other.id, enabled: true, approvalToken: token })
+      expect(stored().find((t) => t.name === 'Other').mainApprovedByUser).toBeFalsy()
+    })
   })
 })
 

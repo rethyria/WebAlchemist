@@ -20,6 +20,7 @@ import {
   type Accent,
   type Anchor,
   type Capability,
+  type ExecutionWorld,
   type HealthCheckMode,
   type SettingsFields,
   type Transform,
@@ -80,6 +81,8 @@ export interface PlannedTransform {
   needsRegeneration: boolean
   /** True when the record holds code that the user has to approve before it runs. */
   needsApproval: boolean
+  /** The world restored code runs in. Present only when `needsApproval` is true. */
+  world?: ExecutionWorld
   /** The JavaScript that is restored, for the preview to show. Present only when `needsApproval` is true. */
   code?: string
 }
@@ -127,7 +130,10 @@ function cleanAnchor(anchor: Anchor): Anchor {
  * Set here and not copied from the file: `id`, `order` (assigned when stored),
  * `createdAt` and `updatedAt`; `enabled`, always false, so nothing runs until
  * the user turns it on; `origin`, always `imported`; `world`, always the user
- * script world, so a file cannot ask for the page's own context; `capabilities`,
+ * script world, so a share file cannot ask for the page's own context (a
+ * backup keeps `MAIN` when the record says so, and the record then waits for
+ * approval of the code and the world); `mainApprovedByUser` and
+ * `worldResetFromModel`, which only the extension's own approval sets; `capabilities`,
  * empty until the code is regenerated and reviewed here (a backup keeps the
  * declared ones, limited to the three known names); and `approvedCssUrls`,
  * which an approval in someone else's file cannot give. Fields the type does
@@ -153,7 +159,7 @@ export function sanitiseIncoming(
     match: incoming.match.trim(),
     kind: incoming.kind,
     origin: 'imported',
-    ...(js ? { world: 'USER_SCRIPT' as const } : {}),
+    ...(js ? { world: keep && incoming.world === 'MAIN' ? ('MAIN' as const) : ('USER_SCRIPT' as const) } : {}),
     capabilities: keep
       ? CAPABILITIES.filter((c) => Array.isArray(incoming.capabilities) && incoming.capabilities.includes(c))
       : [],
@@ -322,7 +328,7 @@ export async function planImport(
       ...(reason === undefined ? {} : { reason }),
       needsRegeneration,
       needsApproval,
-      ...(needsApproval ? { code: record.code } : {}),
+      ...(needsApproval ? { code: record.code, world: record.world ?? 'USER_SCRIPT' } : {}),
     })
     records.push(record)
   }
