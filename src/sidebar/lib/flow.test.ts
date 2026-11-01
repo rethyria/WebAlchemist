@@ -1510,3 +1510,110 @@ describe('generating on a page with password or payment fields', () => {
     expect(flow.step).toBe('list')
   })
 })
+
+describe('ending a run that has a preview request in flight (#110, #98)', () => {
+  beforeEach(() => {
+    ports.length = 0
+    ;(globalThis as any).browser.runtime.connect = fakeConnect
+  })
+  afterEach(() => {
+    ;(globalThis as any).browser.runtime.connect = realConnect
+  })
+
+  const gateOf = () => {
+    let open: () => void = () => {}
+    const gate = new Promise<void>((resolve) => (open = resolve))
+    return { gate, open }
+  }
+  const previews = () => calls.filter((c) => c.type === 'preview-css' || c.type === 'clear-preview-css')
+
+  it('removes the late CSS when a refinement is cancelled and then discarded', async () => {
+    const flow = flowAtRefining()
+    flow.followUp = 'second'
+    const held = gateOf()
+    handler = async (m) => {
+      if (m.type === 'preview-css' && m.css === '/* A2 */') await held.gate
+      return { ok: true, data: null }
+    }
+    const run = flow.regenerate()
+    ;(await nextPort(1)).emit({ type: 'done', result: cssResult('A2') })
+    await vi.waitFor(() =>
+      expect(calls.some((c) => c.type === 'preview-css' && c.css === '/* A2 */')).toBe(true),
+    )
+
+    // Two steps of the generation counter and no new run in between. Before
+    // #110 was fixed this left the late CSS in the page.
+    flow.cancelGenerating()
+    await flow.discard()
+    held.open()
+    await run
+
+    expect(flow.step).toBe('list')
+    expect(previews().at(-1)?.type).toBe('clear-preview-css')
+    // The previous result's CSS was not put back after the discard.
+    expect(previews().filter((c) => c.type === 'preview-css' && c.css === '/* A1 */')).toEqual([])
+  })
+
+  it('removes CSS whose reply lands while a discard is still clearing the page', async () => {
+    const flow = newFlow()
+    flow.picked = { ...found, cropDrawn: false } as any
+    flow.instruction = 'first'
+    flow.step = 'describing'
+    const css = gateOf()
+    const lock = gateOf()
+    handler = async (m) => {
+      if (m.type === 'preview-css') await css.gate
+      if (m.type === 'clear-lock') await lock.gate
+      return { ok: true, data: null }
+    }
+    const run = flow.generate()
+    ;(await nextPort(1)).emit({ type: 'done', result: cssResult('A') })
+    await vi.waitFor(() => expect(calls.some((c) => c.type === 'preview-css')).toBe(true))
+
+    const discarding = flow.discard()
+    await vi.waitFor(() => expect(calls.some((c) => c.type === 'clear-lock')).toBe(true))
+    // The reply lands while discard() is waiting for the lock to clear.
+    css.open()
+    await run
+    lock.open()
+    await discarding
+
+    expect(flow.step).toBe('list')
+    expect(previews().at(-1)?.type).toBe('clear-preview-css')
+  })
+
+  it('clears a script whose preview reply lands while a discard is still clearing the page', async () => {
+    const flow = newFlow()
+    flow.draft = { ...saved, kind: 'js' }
+    flow.analysis = { static: [], undeclaredCapabilities: [], passed: true } as any
+    const reply = gateOf()
+    const lock = gateOf()
+    handler = async (m) => {
+      if (m.type === 'preview-js') await reply.gate
+      if (m.type === 'clear-lock') await lock.gate
+      return { ok: true, data: null }
+    }
+    const run = flow.runJs()
+    await vi.waitFor(() => expect(calls.some((c) => c.type === 'preview-js')).toBe(true))
+
+    const discarding = flow.discard()
+    await vi.waitFor(() => expect(calls.some((c) => c.type === 'clear-lock')).toBe(true))
+    reply.open()
+    await run
+    lock.open()
+    await discarding
+
+    expect(calls.filter((c) => c.type === 'clear-preview-js').map((c) => c.id)).toEqual(['OLD'])
+    expect(flow.jsRan).toBe(false)
+  })
+
+  it('leaves a script that ran alone while its run is current (control)', async () => {
+    const flow = newFlow()
+    flow.draft = { ...saved, kind: 'js' }
+    flow.analysis = { static: [], undeclaredCapabilities: [], passed: true } as any
+    handler = async () => ({ ok: true, data: null })
+    await flow.runJs()
+    expect(flow.jsRan).toBe(true)
+    expect(calls.filter((c) => c.type === 'clear-preview-js')).toEqual([])
+  })
+})

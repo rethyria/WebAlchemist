@@ -323,6 +323,15 @@ export class Flow {
    */
   private generation = 0
 
+  /**
+   * Counts the runs that have started: generate(), repair(), editIntent() and
+   * editWithAi() each add one, and cancelling, discarding and resetting do not.
+   * `generation` cannot answer "has another run started since?", because one
+   * Cancel followed by one Discard raises it twice with no run in between, and
+   * a cleanup that expected exactly one step then never ran (#110).
+   */
+  private runStarts = 0
+
   constructor(private readonly onSaved: () => void) {}
 
   get matchPresets(): MatchPreset[] {
@@ -875,6 +884,7 @@ export class Flow {
 
     this.producedBy = 'repair'
     const token = ++this.generation
+    const starts = ++this.runStarts
     const current = () => token === this.generation
 
     this.step = 'generating'
@@ -1002,6 +1012,7 @@ export class Flow {
 
     this.producedBy = 'ai-edit'
     const token = ++this.generation
+    const starts = ++this.runStarts
     const current = () => token === this.generation
 
     this.step = 'generating'
@@ -1071,6 +1082,7 @@ export class Flow {
 
     this.producedBy = 'ai-edit'
     const token = ++this.generation
+    const starts = ++this.runStarts
     const current = () => token === this.generation
 
     this.step = 'generating'
@@ -1227,6 +1239,7 @@ export class Flow {
 
     const from = this.step
     const token = ++this.generation
+    const starts = ++this.runStarts
     const current = () => token === this.generation
 
     this.stopSecondaryPicker()
@@ -1355,10 +1368,10 @@ export class Flow {
         // The request to add the new CSS may have been processed after that
         // happened, and nothing else knows about it: discard and reset read
         // previewedCss, which was still empty while the request was in flight.
-        // A cancel, discard or reset bumps the generation once, so token + 1
-        // is the value it left. A larger value means a new run has started on
-        // this flow and tab since, and its preview is not ours to remove.
-        await this.removeLatePreview(token + 1)
+        // Whether a new run has started on this flow since is decided by
+        // runStarts. A cancel followed by a discard raises the generation more
+        // than once without a new run, and the preview still has to come off.
+        await this.removeLatePreview(starts)
         return
       }
       this.refinement = null
@@ -1372,7 +1385,7 @@ export class Flow {
       // previous result's CSS, so it is put back along with the result.
       const replacedResult = this.refinement?.previous !== undefined
       this.undoRefinement()
-      if (replacedResult) await this.removeLatePreview(this.generation)
+      if (replacedResult) await this.removeLatePreview(starts)
       this.fail(cause, again)
     } finally {
       this.stopClock()
@@ -1597,18 +1610,18 @@ export class Flow {
    * for a refinement that went back to its previous result, puts that result's
    * CSS on the page again, since applyPreview had already removed it.
    *
-   * `generation` is the value the cleanup is for. It does nothing once the
-   * flow has moved past it, because the tab and the flow's preview state then
-   * belong to a newer run.
+   * `starts` is the value of `runStarts` when the attempt began. The cleanup
+   * does nothing once another run has started, because the tab and the flow's
+   * preview state then belong to that run.
    */
-  private async removeLatePreview(generation: number): Promise<void> {
-    if (this.tabId === null || this.generation !== generation) return
+  private async removeLatePreview(starts: number): Promise<void> {
+    if (this.tabId === null || this.runStarts !== starts) return
     const tabId = this.tabId
     await send({ type: 'clear-preview-css', tabId, css: '' }).catch(() => {})
     // The request takes time, and a new run may have started while it did.
-    if (this.generation !== generation || this.tabId !== tabId) return
+    if (this.runStarts !== starts || this.tabId !== tabId) return
     this.previewedCss = null
-    const back = this.step === 'refining' ? this.result : null
+    const back = this.step === 'refining' && !this.discarding ? this.result : null
     if (back?.kind === 'css') {
       await send({ type: 'preview-css', tabId: this.tabId, css: back.code }).catch(() => {})
       this.previewedCss = back.code
@@ -1755,11 +1768,25 @@ export class Flow {
   }
 
   async discard(): Promise<void> {
-    await this.clearPreview()
-    await this.resumeSuspended()
-    await this.clearLock()
-    this.reset()
+    // The run ends here, before the first await. The clears below take time,
+    // and a preview reply that lands meanwhile has to see a run that is over:
+    // it then removes what it applied instead of recording it in state that
+    // reset() is about to wipe (#98). `discarding` tells a late cleanup not to
+    // put an earlier result's CSS back while the run is being taken apart.
+    this.generation += 1
+    this.discarding = true
+    try {
+      await this.clearPreview()
+      await this.resumeSuspended()
+      await this.clearLock()
+      this.reset()
+    } finally {
+      this.discarding = false
+    }
   }
+
+  /** True while discard() is clearing the page, before reset() has run. */
+  private discarding = false
 
   /**
    * Puts a suspended transform back on the page.
