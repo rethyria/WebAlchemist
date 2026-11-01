@@ -18,11 +18,10 @@ import {
   repairPrompt,
   scopeInstruction,
 } from '../prompts'
-import { credentialFrom, needsRefresh, type TokenPayload } from '../oauth'
+import { TOKEN_REQUEST_TIMEOUT_MS, credentialFrom, needsRefresh, type TokenPayload } from '../oauth'
 import { endpointProblem, isLoopbackHostname } from '@shared/endpoint-policy'
 import { retryAfterSeconds } from './retry-after'
-import { setCredential } from '../storage'
-import { readCredentialOrProviderError } from './credential'
+import { readCredentialOrProviderError, withCredentialOrProviderError } from './credential'
 import {
   GENERATION_SCHEMA,
   ProviderError,
@@ -283,19 +282,22 @@ function ensureFreshToken(
   const running = refreshesInFlight.get(providerId)
   if (running) return running
 
-  const started = (async () => {
-    /*
-     * The credential is read again, because the caller's copy may be older than
-     * a refresh that finished between its read and this point. Without this, a
-     * caller that missed the in-flight window would refresh with a token that
-     * has already been spent.
-     */
-    const latest = await readCredentialOrProviderError(provider)
+  /*
+   * The credential is read inside the lock, not taken from the caller. The
+   * caller's copy may be older than a refresh that finished between its read
+   * and this point, and refreshing with it would send a token that has already
+   * been spent. Reading, requesting and storing all happen under the lock; see
+   * withCredentialForRequest.
+   */
+  const started = withCredentialOrProviderError(provider, async (latest, store) => {
     // Removed or replaced while this call was starting. Refreshing the old
     // copy would store it again and undo the removal.
-    if (latest?.kind !== 'oauth') {
+    if (!latest) {
       throw new ProviderError('The sign-in for this provider was removed. Reconnect it in settings.', 'no-credential', false)
     }
+    // Replaced by an API key. Both are sent as a bearer token, and a call made
+    // a moment later would use the key, so this one does too.
+    if (latest.kind === 'api_key') return latest.value
     if (!stale(latest)) return latest.accessToken
     if (!latest.refreshToken) {
       // The provider issued no refresh token, so there is nothing to renew
@@ -307,8 +309,14 @@ function ensureFreshToken(
         false,
       )
     }
-    return refreshToken(providerId, { ...latest, refreshToken: latest.refreshToken })
-  })().finally(() => {
+    const refreshed = await requestRefresh({ ...latest, refreshToken: latest.refreshToken })
+    // Not stored when the sign-in was changed behind the lock's back. The token
+    // belongs to a grant that is no longer the one on record, so it is not used.
+    if (!(await store(refreshed))) {
+      throw new ProviderError('The sign-in for this provider changed while it was being renewed. Try again.', 'no-credential', false)
+    }
+    return refreshed.accessToken
+  }).finally(() => {
     refreshesInFlight.delete(providerId)
   })
   refreshesInFlight.set(providerId, started)
@@ -329,17 +337,21 @@ async function refreshAfterRejection(provider: Provider, rejected: string): Prom
     if (token !== rejected) return token
   }
   const credential = await readCredentialOrProviderError(provider)
-  if (credential?.kind !== 'oauth') {
+  if (!credential) {
     throw new ProviderError('The sign-in for this provider was removed. Reconnect it in settings.', 'no-credential', false)
   }
+  // Replaced by an API key after the rejected request was sent; retry with it.
+  if (credential.kind === 'api_key') return credential.value
   return ensureFreshToken(provider, credential, rejected)
 }
 
-/** Refreshes an OAuth token a minute ahead of expiry and persists the result. */
-async function refreshToken(
-  providerId: string,
+/**
+ * Sends the refresh request and returns the credential to store. Does not
+ * store it; the caller holds the credential lock and decides.
+ */
+async function requestRefresh(
   credential: OAuthCredential & { refreshToken: string },
-): Promise<string> {
+): Promise<OAuthCredential> {
   /*
    * The header call no longer sits inside the chat request's `try`, so a
    * transport failure here has to be classified on its own. It used to be
@@ -366,6 +378,8 @@ async function refreshToken(
         refresh_token: credential.refreshToken,
         client_id: credential.clientId,
       }),
+      // The caller holds the credential lock while this waits.
+      signal: AbortSignal.timeout(TOKEN_REQUEST_TIMEOUT_MS),
     })
   } catch (error) {
     throw new ProviderError('Could not reach the sign-in server.', 'network', true, {
@@ -421,11 +435,10 @@ async function refreshToken(
   }
   // Carried over: the refreshed token goes to the same destination as the one
   // it replaces, and dropping the binding would send it back through migration.
-  await setCredential(providerId, {
+  return {
     ...refreshed,
     ...(credential.boundTo ? { boundTo: credential.boundTo } : {}),
-  })
-  return refreshed.accessToken
+  }
 }
 
 function httpToProviderError(

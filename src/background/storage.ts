@@ -514,8 +514,14 @@ export async function unlockVault(passphrase: string): Promise<void> {
   await armIdleLock()
 }
 
+/**
+ * Through the credential lock, so a lock waits for a refresh that is in
+ * progress. A provider that rotates refresh tokens has already invalidated the
+ * old one when its response arrives; forgetting the key before the new one is
+ * stored makes that write fail as locked, and the sign-in is lost.
+ */
 export async function lockVault(): Promise<void> {
-  await forgetKey()
+  await withCredentialLock(() => forgetKey())
 }
 
 /**
@@ -576,30 +582,88 @@ export class CredentialOriginError extends Error {
 export async function readCredentialForRequest(provider: Provider): Promise<Credential | null> {
   const found = (await readCredentialMap(true))[provider.id]
   if (!found) return null
+  if (found.boundTo) return checkedForProvider(provider, found)
+
+  return withCredentialLock(async () => {
+    const map = await readCredentialMap()
+    const current = map[provider.id]
+    if (!current) return null
+    const checked = checkedForProvider(provider, current)
+    if (!current.boundTo) {
+      map[provider.id] = checked
+      await writeCredentialMap(map)
+    }
+    return checked
+  })
+}
+
+/**
+ * Returns the credential bound to the provider's destination, binding a legacy
+ * one that has no binding, or throws when the binding names another destination.
+ * Does not write; the caller stores the bound copy when it has a reason to.
+ */
+function checkedForProvider(provider: Provider, credential: Credential): Credential {
   const destination = destinationOf(provider)
-
-  let credential: Credential | undefined = found
-  if (!credential.boundTo && destination) {
-    credential = await withCredentialLock(async () => {
-      const map = await readCredentialMap()
-      const current = map[provider.id]
-      if (current && !current.boundTo) {
-        current.boundTo = destination
-        await writeCredentialMap(map)
-      }
-      return current
-    })
-    if (!credential) return null
-  }
-
-  if (!destination || !credential.boundTo || !sameBinding(credential.boundTo, destination)) {
+  const bound = credential.boundTo ?? destination ?? undefined
+  if (!destination || !bound || !sameBinding(bound, destination)) {
     throw new CredentialOriginError(
       provider.label,
       credential.boundTo?.origin ?? '(unknown)',
       destination?.origin ?? null,
     )
   }
-  return credential
+  return credential.boundTo ? credential : { ...credential, boundTo: destination }
+}
+
+/**
+ * Runs `step` with the provider's credential while holding the credential lock,
+ * and gives it a function that stores a replacement.
+ *
+ * For a refresh, which has to read the credential, wait for the token endpoint
+ * and store what comes back as one operation. Done in three separate steps, a
+ * credential removed or reconnected while the request was waiting was
+ * overwritten by the old grant's refreshed copy. Holding the lock means a
+ * removal or reconnection waits until the refresh has stored its token, and
+ * then applies on top of it. The cost is that those changes wait as long as
+ * the request does, which is why the request has a timeout.
+ *
+ * The store function writes only if the stored credential is still the same
+ * sign-in (same refresh token and token endpoint) as the one the step was
+ * given, and returns whether it did. The lock already prevents a change by any
+ * code that takes it; this covers a write that does not.
+ *
+ * Inside `step`, do not call a function that takes the lock itself, such as
+ * setCredential, because it would wait for this step to finish.
+ */
+export function withCredentialForRequest<T>(
+  provider: Provider,
+  step: (
+    credential: Credential | null,
+    store: (replacement: Credential) => Promise<boolean>,
+  ) => Promise<T>,
+): Promise<T> {
+  return withCredentialLock(async () => {
+    const found = (await readCredentialMap())[provider.id]
+    const credential = found ? checkedForProvider(provider, found) : null
+    const store = async (replacement: Credential): Promise<boolean> => {
+      const map = await readCredentialMap()
+      const current = map[provider.id]
+      if (!credential || !current || !sameSignIn(current, credential)) return false
+      map[provider.id] = replacement
+      await writeCredentialMap(map)
+      return true
+    }
+    return step(credential, store)
+  })
+}
+
+function sameSignIn(a: Credential, b: Credential): boolean {
+  return (
+    a.kind === 'oauth' &&
+    b.kind === 'oauth' &&
+    a.refreshToken === b.refreshToken &&
+    a.tokenEndpoint === b.tokenEndpoint
+  )
 }
 
 /**

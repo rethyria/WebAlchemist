@@ -152,6 +152,13 @@ export function expiryFrom(payload: TokenPayload, now: number): number {
   return now + (payload.expires_in ?? ASSUMED_LIFETIME_SECONDS) * 1000
 }
 
+/**
+ * How long a token request may take. A refresh holds the credential lock while
+ * it waits, so an endpoint that never answers would otherwise block every
+ * credential change.
+ */
+export const TOKEN_REQUEST_TIMEOUT_MS = 15_000
+
 /** Refresh this far ahead of expiry, so a request in flight does not expire. */
 export const REFRESH_MARGIN_MS = 60_000
 
