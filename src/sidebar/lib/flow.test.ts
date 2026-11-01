@@ -24,7 +24,7 @@ const calls: any[] = []
     },
     getURL: (path: string) => path,
   },
-  permissions: { request: async () => true, remove: async () => true },
+  permissions: { request: async () => true, remove: async () => true, contains: async () => true },
   tabs: { update: async () => {}, reload: async () => {}, create: async () => {} },
   storage: { session: { set: async () => {} } },
 }
@@ -1615,5 +1615,58 @@ describe('ending a run that has a preview request in flight (#110, #98)', () => 
     await flow.runJs()
     expect(flow.jsRan).toBe(true)
     expect(calls.filter((c) => c.type === 'clear-preview-js')).toEqual([])
+  })
+})
+
+describe('saving while the all-sites screenshot grant is held (#134)', () => {
+  const order: string[] = []
+  const api = (globalThis as any).browser.permissions
+  const real = { ...api }
+  let originRecorded = true
+  beforeEach(() => {
+    order.length = 0
+    originRecorded = true
+    api.request = async (p: any) => (order.push(`request:${(p.origins ?? p.permissions).join()}`), true)
+    api.remove = async (p: any) => (order.push(`remove:${p.origins.join()}`), true)
+    api.contains = async (p: any) => (order.push(`contains:${p.origins.join()}`), originRecorded)
+  })
+  afterEach(() => Object.assign(api, real))
+
+  function flowAtSave(keep: boolean) {
+    const flow = newFlow()
+    flow.draft = { ...saved, kind: 'css', id: 'NEW' }
+    flow.matchPattern = '*.example.com/*'
+    flow.keepScreenshotPermission = keep
+    return flow
+  }
+
+  it('removes <all_urls> and then requests the site, both before the first await', () => {
+    const flow = flowAtSave(false)
+    void flow.save()
+    // Read with no await since save() was called: the gesture is still live only
+    // if both calls were already made.
+    expect(order).toEqual(['remove:<all_urls>', 'request:*://*.example.com/*'])
+  })
+
+  it('checks that the site was recorded and saves when it was', async () => {
+    const flow = flowAtSave(false)
+    await flow.save()
+    expect(order).toContain('contains:*://*.example.com/*')
+    expect(calls.some((c) => c.type === 'save-transform')).toBe(true)
+  })
+
+  it('reports the permission as missing and saves nothing when the site was not recorded', async () => {
+    originRecorded = false
+    const flow = flowAtSave(false)
+    await flow.save()
+    expect(flow.permissionDenied).toBe(true)
+    expect(calls.some((c) => c.type === 'save-transform')).toBe(false)
+  })
+
+  it('removes nothing and does not check when the grant is kept on purpose (control)', async () => {
+    const flow = flowAtSave(true)
+    await flow.save()
+    expect(order).toEqual(['request:*://*.example.com/*'])
+    expect(calls.some((c) => c.type === 'save-transform')).toBe(true)
   })
 })

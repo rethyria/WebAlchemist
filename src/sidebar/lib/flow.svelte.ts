@@ -1913,12 +1913,27 @@ export class Flow {
    * whose contents are already granted is filtered to nothing and resolves
    * true without a doorhanger.
    */
-  requestFor(kind: TransformKind, match: string): Promise<boolean> {
+  requestFor(kind: TransformKind, match: string, releaseAllSites = false): Promise<boolean> {
     // A blank pattern would yield `*:///*`, which Firefox rejects outright and
     // which would take the whole request down with it.
     const origin = match
       ? originPermissionFor(match)
       : (originPermissionForUrl(this.url) ?? '')
+
+    /*
+     * While the all-sites grant a screenshot needed is still held, Firefox may
+     * answer a request for one site with true without recording that site, and
+     * the transform then loses its access when the run gives `<all_urls>` back.
+     * So the grant is removed first. Both calls are made in the same tick and
+     * not one after the other, because an await between them would spend the
+     * gesture the request needs; the removal is sent first and is expected to
+     * be handled first (not measured, since no browser was run). The origin is
+     * then looked up to confirm it was recorded; if it was not, the save reports
+     * the permission as missing and the next click asks again with nothing held.
+     */
+    const released = releaseAllSites
+      ? browser.permissions.remove({ origins: ['<all_urls>'] }).catch(() => false)
+      : null
 
     const forOrigin = origin
       ? browser.permissions.request({ origins: [origin] })
@@ -1934,8 +1949,12 @@ export class Flow {
           } as unknown as browser.permissions.Permissions)
         : Promise.resolve(true)
 
-    return Promise.all([forOrigin, forScripts]).then(
-      ([originGranted, scriptsGranted]) => originGranted && scriptsGranted,
+    return Promise.all([forOrigin, forScripts, released]).then(
+      async ([originGranted, scriptsGranted]) => {
+        if (!originGranted || !scriptsGranted) return false
+        if (released === null || !origin) return true
+        return browser.permissions.contains({ origins: [origin] }).catch(() => false)
+      },
     )
   }
 
@@ -1956,7 +1975,11 @@ export class Flow {
      * so there is no need to check first.
      */
     try {
-      const granted = await this.requestFor(draft.kind, this.matchPattern)
+      const granted = await this.requestFor(
+        draft.kind,
+        this.matchPattern,
+        !this.keepScreenshotPermission,
+      )
       if (!granted) {
         this.permissionDenied = true
         return
