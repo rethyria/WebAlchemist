@@ -94,6 +94,12 @@ export type FlowError =
   | { kind: 'credential-expired'; message: string }
   /** The configured model is unknown or retired. The way out is the model setting. */
   | { kind: 'model-unavailable'; message: string; descriptionKept?: boolean }
+  /**
+   * The model exists but this account may not use it. Like model-unavailable the
+   * way out is another model, but the account setting that blocked it is in the
+   * provider's console, so the card says so and offers no retry.
+   */
+  | { kind: 'model-not-permitted'; message: string; descriptionKept?: boolean }
   /** No credit or a billing problem. Retrying cannot help until the user fixes it. */
   | { kind: 'billing'; message: string; descriptionKept?: boolean }
   /**
@@ -2041,6 +2047,7 @@ export class Flow {
     this.error =
       (error.kind === 'request-failed' ||
         error.kind === 'model-unavailable' ||
+        error.kind === 'model-not-permitted' ||
         error.kind === 'billing') &&
       error.descriptionKept === undefined
         ? { ...error, descriptionKept: DESCRIPTION_STEPS.includes(this.step) }
@@ -2078,6 +2085,12 @@ export class Flow {
         // Only the error is set. The description, scope and picked element stay
         // as they are, so choosing another model and retrying needs no retyping.
         this.error = { kind: 'model-unavailable', message: cause.message }
+        return
+      case 'model-not-permitted':
+        // As for model-unavailable: only the error is set, so the description
+        // is kept, and no retry is recorded because repeating the request with
+        // the same model fails the same way.
+        this.error = { kind: 'model-not-permitted', message: cause.message }
         return
       case 'billing':
         this.error = { kind: 'billing', message: cause.message }

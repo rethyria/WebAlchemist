@@ -84,6 +84,16 @@
       {/if}
       <Button small onclick={ondismiss}>Dismiss</Button>
     </div>
+  {:else if error.kind === 'model-not-permitted'}
+    <div class="head">
+      <span class="dot block" aria-hidden="true"></span>
+      <span class="title">Model not permitted</span>
+    </div>
+    <p>{error.message}{error.descriptionKept ? ' Your description is kept.' : ''}</p>
+    <div class="actions">
+      <Button variant="primary" small onclick={onmodelsettings}>Open model settings</Button>
+      <Button small onclick={ondismiss}>Dismiss</Button>
+    </div>
   {:else if error.kind === 'billing'}
     <div class="head">
       <span class="dot block" aria-hidden="true"></span>

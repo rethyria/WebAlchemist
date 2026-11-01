@@ -1670,3 +1670,37 @@ describe('saving while the all-sites screenshot grant is held (#134)', () => {
     expect(calls.some((c) => c.type === 'save-transform')).toBe(true)
   })
 })
+
+describe('a model the account may not use (#125)', () => {
+  const repairWith = async (kind: string) => {
+    const flow = newFlow()
+    handler = (m) => {
+      if (m.type === 'context-for-anchor') return { ok: true, data: found }
+      if (m.type === 'repair') return failure(kind)
+      return { ok: true, data: null }
+    }
+    await flow.repair(saved, 'broken')
+    return flow
+  }
+
+  it('shows its own card kind with the provider message', async () => {
+    const flow = await repairWith('model-not-permitted')
+    expect(flow.error).toMatchObject({ kind: 'model-not-permitted', message: 'failed' })
+  })
+
+  it('offers no retry, so nothing repeats on its own', async () => {
+    const flow = await repairWith('model-not-permitted')
+    expect(flow.canRetry).toBe(false)
+  })
+
+  it('still offers a retry for an ordinary failure (control)', async () => {
+    const flow = await repairWith('network')
+    expect(flow.error).toMatchObject({ kind: 'request-failed' })
+    expect(flow.canRetry).toBe(true)
+  })
+
+  it('is not shown as a retired model', async () => {
+    const flow = await repairWith('model-not-permitted')
+    expect(flow.error?.kind).not.toBe('model-unavailable')
+  })
+})
