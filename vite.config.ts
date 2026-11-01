@@ -2,6 +2,7 @@ import { defineConfig } from 'vite'
 import { svelte } from '@sveltejs/vite-plugin-svelte'
 import webExtension from 'vite-plugin-web-extension'
 import { resolve } from 'node:path'
+import { buildMessagesJson } from './src/shared/locale-file'
 
 export default defineConfig(({ mode }) => ({
   resolve: {
@@ -15,6 +16,18 @@ export default defineConfig(({ mode }) => ({
   },
   plugins: [
     svelte(),
+    {
+      // Writes _locales/en/messages.json from the English catalogue, so the
+      // catalogue is the only source of the text (see src/shared/catalogue).
+      name: 'wa-english-locale',
+      generateBundle() {
+        this.emitFile({
+          type: 'asset',
+          fileName: '_locales/en/messages.json',
+          source: buildMessagesJson(),
+        })
+      },
+    },
     webExtension({
       manifest: 'src/manifest.json',
       browser: 'firefox',
