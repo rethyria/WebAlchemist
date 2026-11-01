@@ -59,9 +59,23 @@ export type Step =
  * way out. Collapsing them into one "something went wrong" card would lose the
  * only useful part — what to do next.
  */
+/** The steps in which the typed description is still shown after a failure. */
+const DESCRIPTION_STEPS: Step[] = ['describing', 'refining', 'reviewing', 'saving']
+
 export type FlowError =
   | { kind: 'no-provider'; message: string }
-  | { kind: 'request-failed'; message: string; detail?: string }
+  | {
+      kind: 'request-failed'
+      message: string
+      detail?: string
+      /**
+       * Whether the description the user typed is still on screen. Set by
+       * show(); the card says "Your description is kept." only when true,
+       * because a failed repair, AI edit or delete leaves the list and keeps
+       * nothing.
+       */
+      descriptionKept?: boolean
+    }
   /**
    * `retryInSeconds` counts down to zero and then the retry fires on its own.
    *
@@ -282,6 +296,10 @@ export class Flow {
     // A run in progress keeps the tab it started on. Rebinding would silently
     // move the subject out from under the user.
     if (this.step !== 'list') return
+    // An error card on the list, and the retry or countdown behind it, belong
+    // to the tab it came from. Leaving them up let "Try again" or the
+    // countdown run a paid request against the tab the user had moved to.
+    if ((tabId ?? null) !== this.tabId) this.dismissError()
     this.tabId = tabId ?? null
     this.url = url
     this.ownerHost = this.hostname()
@@ -318,7 +336,13 @@ export class Flow {
    * anchored to it.
    */
   pageReloading(tabId: number): void {
-    if (tabId !== this.tabId || this.step === 'list') return
+    if (tabId !== this.tabId) return
+    if (this.step === 'list') {
+      // No run to end, but an error card here refers to the page that is
+      // being replaced, and its retry would act on the new page.
+      this.dismissError()
+      return
+    }
     if (this.ourReload !== 'none') {
       // Ours. Stay armed: the same navigation may report loading again, and
       // only the load settling tells us it is over.
@@ -1691,8 +1715,20 @@ export class Flow {
 
   /** Records an error that has no request to repeat. */
   show(error: FlowError, retry: (() => Promise<void>) | null = null): void {
-    this.error = error
-    this.retryAction = retry
+    this.error =
+      error.kind === 'request-failed' && error.descriptionKept === undefined
+        ? { ...error, descriptionKept: DESCRIPTION_STEPS.includes(this.step) }
+        : error
+    /*
+     * The retry belongs to the tab the failure happened on. Without this, a
+     * retry or a countdown left on the list survived a tab switch and then ran
+     * a paid request on the newly bound tab with the old transform. bindTab
+     * and pageReloading also clear the card; this covers a path that reaches
+     * retry() some other way.
+     */
+    const tab = this.tabId
+    this.retryAction =
+      retry === null ? null : async () => (this.tabId === tab ? retry() : undefined)
   }
 
   /**

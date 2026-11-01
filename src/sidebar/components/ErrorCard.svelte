@@ -40,7 +40,7 @@
       <span class="dot block" aria-hidden="true"></span>
       <span class="title">The request failed</span>
     </div>
-    <p>{error.message} Your description is kept.</p>
+    <p>{error.message}{error.descriptionKept ? ' Your description is kept.' : ''}</p>
     {#if detailOpen && error.detail}
       <pre>{error.detail}</pre>
     {/if}

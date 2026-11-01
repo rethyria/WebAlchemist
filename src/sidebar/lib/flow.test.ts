@@ -712,3 +712,93 @@ describe('Esc in the page during a screenshot region pick', () => {
     expect(flow.step).toBe('refining')
   })
 })
+
+describe('an error card left on the list when the page changes', () => {
+  afterEach(() => vi.useRealTimers())
+
+  it('is cleared, with its retry, when another tab is bound', () => {
+    const flow = newFlow()
+    const again = vi.fn(async () => {})
+    flow.fail(new Error('delete failed'), again)
+    expect(flow.canRetry).toBe(true)
+
+    flow.bindTab(2, 'https://other.example/')
+    expect(flow.error).toBeNull()
+    expect(flow.canRetry).toBe(false)
+  })
+
+  it('is kept when the same tab is bound again', () => {
+    // Control for the test above: binding the unchanged tab (the sidebar does
+    // this on every tab event) must not clear a card that still applies.
+    const flow = newFlow()
+    flow.fail(new Error('delete failed'), vi.fn(async () => {}))
+    flow.bindTab(1, URL_)
+    expect(flow.error).not.toBeNull()
+    expect(flow.canRetry).toBe(true)
+  })
+
+  it('is cleared when the bound page reloads, and stops the countdown', async () => {
+    vi.useFakeTimers()
+    const flow = newFlow()
+    const again = vi.fn(async () => {})
+    flow.fail(new BackgroundError('slow down', 'rate-limit', true, 3), again)
+    expect(flow.error?.kind).toBe('rate-limited')
+
+    flow.pageReloading(1)
+    expect(flow.error).toBeNull()
+    await vi.advanceTimersByTimeAsync(4000)
+    expect(again).not.toHaveBeenCalled()
+  })
+
+  it('is kept when a different tab reloads', () => {
+    const flow = newFlow()
+    flow.fail(new Error('delete failed'), vi.fn(async () => {}))
+    flow.pageReloading(9)
+    expect(flow.error).not.toBeNull()
+  })
+
+  it('does not run its retry on a tab other than the one it came from', async () => {
+    const flow = newFlow()
+    const again = vi.fn(async () => {})
+    flow.fail(new Error('delete failed'), again)
+    // Reaches retry() without going through bindTab or pageReloading.
+    ;(flow as any).tabId = 2
+    await flow.retry()
+    expect(again).not.toHaveBeenCalled()
+  })
+
+  it('runs its retry on the tab it came from', async () => {
+    const flow = newFlow()
+    const again = vi.fn(async () => {})
+    flow.fail(new Error('delete failed'), again)
+    await flow.retry()
+    expect(again).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('whether the error card says the description is kept', () => {
+  it('says so for a failure on the refining step', () => {
+    const flow = newFlow()
+    flow.step = 'refining'
+    flow.fail(new Error('failed'))
+    expect((flow.error as any).descriptionKept).toBe(true)
+  })
+
+  it('does not say so for a failed repair, which leaves the run', async () => {
+    const flow = newFlow()
+    handler = (m) => {
+      if (m.type === 'context-for-anchor') return { ok: true, data: found }
+      if (m.type === 'repair') return failure('network')
+      return { ok: true, data: null }
+    }
+    await flow.repair(saved, 'broken')
+    expect(flow.step).toBe('list')
+    expect((flow.error as any).descriptionKept).toBe(false)
+  })
+
+  it('does not say so for a failure on the list', () => {
+    const flow = newFlow()
+    flow.fail(new Error('delete failed'))
+    expect((flow.error as any).descriptionKept).toBe(false)
+  })
+})
