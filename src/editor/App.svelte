@@ -1,7 +1,7 @@
 <script lang="ts">
   import '@shared/tokens.css'
   import type { ReviewResult, Settings, Transform, TransformVersion } from '@shared/types'
-  import { sourceLabel } from '@shared/versions'
+  import { compareWithCurrent, sourceLabel } from '@shared/versions'
   import { matchPresetsFor, matchesUrl, originPermissionFor, parsePattern } from '@shared/match'
   import { send } from '@shared/messaging.svelte'
 import { editorOriginToRequest, permissionRequestsFor, requestAll } from '@shared/permissions'
@@ -41,6 +41,8 @@ import { excludedAccessMessage, excludedHostForPattern } from '@shared/excluded-
   /** Earlier versions of this transform, newest first. Empty while creating. */
   let versions = $state<TransformVersion[]>([])
   let restoring = $state(false)
+  /** The version shown for confirmation. Nothing is restored until it is confirmed. */
+  let reviewing = $state<TransformVersion | null>(null)
   /**
    * The user's list of excluded sites, loaded when the page opens so that the
    * save and restore handlers can check it before their first await. An await
@@ -172,6 +174,25 @@ import { excludedAccessMessage, excludedHostForPattern } from '@shared/excluded-
     versions = await send<TransformVersion[]>({ type: 'get-transform-versions', id })
   }
 
+  /**
+   * The approval a restored JavaScript version needs before the background
+   * saves it, as fields to add to the restore request. Restore has no
+   * exemption from the approval rules.
+   *
+   * THE ONE PLACE FOR THE APPROVAL TOKEN. `approve-code` is not on main yet (it
+   * is in the safety lane). When it lands, this function sends it for a
+   * JavaScript transform, with the code, world and capabilities of `version`,
+   * the transform id and `version.match`, as the editor's save does, and
+   * returns `{ approvalToken }`. The background's restore case then has to pass
+   * that token to the save it makes through saveAndApply.
+   */
+  async function approvalForRestore(
+    _current: Transform,
+    _version: TransformVersion,
+  ): Promise<Record<string, never>> {
+    return {}
+  }
+
   /*
    * Goes through the background's save path, which analyses restored
    * JavaScript again and refuses it if it no longer passes. The permission
@@ -198,7 +219,13 @@ import { excludedAccessMessage, excludedHostForPattern } from '@shared/excluded-
         findings = ['Web Alchemist needs permission for the site this version applies to before it can restore it.']
         return
       }
-      await send({ type: 'restore-transform-version', id: current.id, versionId: version.id })
+      const approval = await approvalForRestore(current, version)
+      await send({
+        type: 'restore-transform-version',
+        id: current.id,
+        versionId: version.id,
+        ...approval,
+      })
       await send({ type: 'reapply-everywhere', id: current.id })
       const found = await send<Transform | null>({ type: 'get-transform', id: current.id })
       if (found) {
@@ -209,6 +236,7 @@ import { excludedAccessMessage, excludedHostForPattern } from '@shared/excluded-
         savedMatch = found.match
       }
       await loadVersions()
+      reviewing = null
       justSaved = true
       setTimeout(() => (justSaved = false), 2000)
     } catch (cause) {
@@ -517,13 +545,55 @@ import { excludedAccessMessage, excludedHostForPattern } from '@shared/excluded-
                 type="button"
                 class="secondary"
                 disabled={dirty || restoring || saving}
-                onclick={() => void restore(version)}
+                onclick={() => (reviewing = version)}
               >
-                Restore this version
+                Review this version
               </button>
             </li>
           {/each}
         </ul>
+        {#if reviewing && transform}
+          {@const differences = compareWithCurrent(transform, reviewing)}
+          <section class="review" aria-labelledby="review-title">
+            <h2 id="review-title">Version from {new Date(reviewing.savedAt).toLocaleString()}</h2>
+            <p class="hint">
+              Restoring replaces the code, match pattern, capabilities and world of this transform
+              with the values of this version. The current state is kept as a version, so a restore
+              can be undone.
+            </p>
+            <table>
+              <caption>Current values and the values of this version</caption>
+              <thead>
+                <tr><th scope="col">Item</th><th scope="col">Current</th><th scope="col">This version</th><th scope="col">Difference</th></tr>
+              </thead>
+              <tbody>
+                {#each differences as row (row.label)}
+                  <tr>
+                    <th scope="row">{row.label}</th>
+                    <td>{row.current}</td>
+                    <td>{row.version}</td>
+                    <td>{row.status}</td>
+                  </tr>
+                {/each}
+                <tr>
+                  <th scope="row">Code</th>
+                  <td colspan="2">Shown below</td>
+                  <td>{reviewing.code === transform.code ? 'Same' : 'Different'}</td>
+                </tr>
+              </tbody>
+            </table>
+            <h3>Code in this version</h3>
+            <pre class="version-code">{reviewing.code}</pre>
+            <div class="actions">
+              <button type="button" disabled={restoring || saving} onclick={() => void restore(reviewing!)}>
+                Restore this version
+              </button>
+              <button type="button" class="secondary" disabled={restoring} onclick={() => (reviewing = null)}>
+                Cancel
+              </button>
+            </div>
+          </section>
+        {/if}
         {#if dirty}
           <p class="hint">Save or revert the changes in the editor before restoring a version.</p>
         {/if}
@@ -754,6 +824,50 @@ import { excludedAccessMessage, excludedHostForPattern } from '@shared/excluded-
     padding: var(--sp-5) 0;
     font: 12px var(--font-ui);
     color: var(--text-dim);
+  }
+  .review {
+    margin-top: var(--sp-9);
+    padding: var(--sp-11) var(--sp-13);
+    border: 1px solid var(--border);
+    border-radius: var(--r-card);
+  }
+  .review h2 {
+    margin: 0;
+    font: 600 13px var(--font-ui);
+  }
+  .review h3 {
+    margin: var(--sp-9) 0 var(--sp-5);
+    font: 600 12px var(--font-ui);
+  }
+  .review table {
+    width: 100%;
+    margin-top: var(--sp-9);
+    border-collapse: collapse;
+    font: 12px var(--font-ui);
+  }
+  .review caption {
+    text-align: left;
+    color: var(--text-faint);
+    padding-bottom: var(--sp-5);
+  }
+  .review th,
+  .review td {
+    padding: var(--sp-5);
+    text-align: left;
+    border-top: 1px solid var(--border);
+    overflow-wrap: anywhere;
+  }
+  .version-code {
+    max-height: 240px;
+    margin: 0;
+    overflow: auto;
+    font: 12px/1.5 var(--font-mono, monospace);
+    white-space: pre-wrap;
+  }
+  .actions {
+    display: flex;
+    gap: var(--sp-9);
+    margin-top: var(--sp-9);
   }
   .versions summary {
     cursor: pointer;
