@@ -6,7 +6,7 @@
   "private": true,
   "license": "GPL-3.0-or-later",
   "scripts": {
-    "dev": "vite build --watch",
+    "dev": "vite build --watch --mode development",
     "build": "vite build",
     "check": "svelte-check --tsconfig ./tsconfig.json",
     "test": "vitest run",
