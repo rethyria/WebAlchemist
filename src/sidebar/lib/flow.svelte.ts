@@ -23,6 +23,7 @@
 
 import type { AnchoredElement, ContentEvent } from '@shared/messages'
 import type { RefinementTurn } from '@background/providers/types'
+import type { ScrollOffset } from '@shared/region'
 import {
   matchPresetsFor,
   originPermissionFor,
@@ -41,6 +42,7 @@ import type {
   TransformKind,
   TreePath,
   TreeRow,
+  UsageReport,
 } from '@shared/types'
 import { extractPartialString } from '@shared/partial-json'
 import { recordCaptureGrant } from '@shared/capture-grant'
@@ -85,6 +87,10 @@ export type FlowError =
    */
   | { kind: 'rate-limited'; message: string; retryInSeconds: number | null }
   | { kind: 'credential-expired'; message: string }
+  /** The configured model is unknown or retired. The way out is the model setting. */
+  | { kind: 'model-unavailable'; message: string; descriptionKept?: boolean }
+  /** No credit or a billing problem. Retrying cannot help until the user fixes it. */
+  | { kind: 'billing'; message: string; descriptionKept?: boolean }
 
 interface Picked {
   context: PageContext
@@ -95,6 +101,9 @@ interface Picked {
   cropDrawn: boolean
   target: HoverTarget
   viewportWidth: number
+  devicePixelRatio?: number
+  /** The scroll offset `crop` was measured at, for a capture made after scrolling. */
+  scrolledTo?: ScrollOffset
 }
 
 /** Named so the generating checklist can render them in order. */
@@ -172,8 +181,10 @@ export class Flow {
   }
 
   /** The captured image, sent with the next request. */
-  shot = $state<{ dataUrl: string; rect: Rect; clipped: boolean } | null>(null)
+  shot = $state<{ dataUrl: string; rect: Rect; clipped: boolean; moved?: boolean } | null>(null)
   shotClipped = $state(false)
+  /** The area was moved to follow the page after it scrolled. The preview says so. */
+  shotMoved = $state(false)
   /**
    * The captured image itself, shown in the panel.
    *
@@ -206,6 +217,21 @@ export class Flow {
    * same path as saving is what makes the preview trustworthy.
    */
   draft = $state<Transform | null>(null)
+  /**
+   * What the last model call used, kept for the panel. Undefined until a call
+   * returns a response; a report whose `usage` is null means the provider sent
+   * no usage block, which the panel shows as "not reported".
+   */
+  lastUsage = $state<UsageReport | undefined>(undefined)
+  /**
+   * The id a new transform will be saved under, chosen before the first
+   * request so that the cost of generating and reviewing it is attributed to
+   * it. An existing transform keeps its own id through `draft`.
+   */
+  private pendingId: string | null = null
+  private transformKey(): string {
+    return this.draft?.id ?? (this.pendingId ??= crypto.randomUUID())
+  }
   /** Exactly what was injected, so removal takes the same string back out. */
   previewedCss = $state<string | null>(null)
   /** Set once the draft has been registered and the page reloaded. */
@@ -325,6 +351,13 @@ export class Flow {
   /** The run cannot outlive the page it is about. */
   tabClosed(tabId: number): void {
     if (tabId !== this.tabId) return
+    // reset() only forgets the run. A preview that already ran is registered in
+    // the background, and the saved script it paused stays paused until the
+    // preview is cleared, so the clear has to be sent before the state that
+    // says it is needed is wiped.
+    if (this.draft && this.jsRan) {
+      void send({ type: 'clear-preview-js', id: this.draft.id }).catch(() => {})
+    }
     this.reset()
   }
 
@@ -444,6 +477,17 @@ export class Flow {
     if (!origin) return
 
     /*
+     * Held next to keptInstruction, before the first await. It used to be set
+     * after the permission request, so a request that threw reached the catch
+     * below with nothing held, and the run was discarded instead of returning
+     * to the description.
+     */
+    this.rePickFrom =
+      this.step === 'describing' && this.picked
+        ? { picked: this.picked, tree: this.tree }
+        : null
+
+    /*
      * A new pick from the list starts a new transform. Anything still held
      * from an earlier run would otherwise become part of it, and a draft's id
      * decides which saved transform a save replaces. Synchronous on purpose:
@@ -463,6 +507,8 @@ export class Flow {
       // runJs for why the request is inside the try rather than before it.
       const granted = await browser.permissions.request({ origins: [origin] })
       if (!granted) {
+        // Nothing was started, so there is nothing to return from.
+        this.rePickFrom = null
         this.show({
           kind: 'request-failed',
           message: `Web Alchemist needs permission to read ${this.hostname()} before it can point at anything on it.`,
@@ -472,10 +518,6 @@ export class Flow {
 
       this.error = null
       this.hover = null
-      this.rePickFrom =
-        this.step === 'describing' && this.picked
-          ? { picked: this.picked, tree: this.tree }
-          : null
       this.picked = null
       this.step = 'picking'
       await send({ type: 'start-picking', tabId: this.tabId })
@@ -559,6 +601,8 @@ export class Flow {
           cropDrawn: event.cropDrawn,
           target: event.target,
           viewportWidth: event.viewportWidth,
+          devicePixelRatio: event.devicePixelRatio,
+          scrolledTo: event.scrolledTo,
         }
         this.tree = event.tree
         // Retargeting must not wipe what has already been typed — the user is
@@ -711,6 +755,18 @@ export class Flow {
   }
 
   /**
+   * Applies a saved transform's scope depth through the page, as the slider
+   * does, so the count and the container name come from the live DOM.
+   *
+   * Assigning only the number left the count at 1 and the container null while
+   * the depth was not 0: the panel read "Every element like this one" and the
+   * request carried a depth with no container to go with it.
+   */
+  private async restoreScopeDepth(transform: Transform): Promise<void> {
+    await this.setScopeDepth(transform.scopeDepth ?? 0)
+  }
+
+  /**
    * Asks for one node's children in full.
    *
    * Nothing about the target changes, so this replaces the tree and leaves
@@ -720,7 +776,10 @@ export class Flow {
   async expand(path: TreePath): Promise<void> {
     if (this.tabId === null) return
     try {
-      this.tree = await send<TreeRow[]>({ type: 'expand-node', tabId: this.tabId, path })
+      const rows = await send<TreeRow[] | null>({ type: 'expand-node', tabId: this.tabId, path })
+      // The page answers null when it holds no element to expand. Storing it
+      // made the list null, and the row paths computed from it threw.
+      if (rows) this.tree = rows
     } catch {
       // The page moved on, or the node is gone. The list stands as it was:
       // a failed expansion is not worth an error card over.
@@ -808,23 +867,26 @@ export class Flow {
       // What a regeneration from the refining panel will build on.
       this.matchPattern = transform.match
       this.intent = transform.intent
-      this.scopeDepth = transform.scopeDepth ?? 0
       this.instruction = transform.intent
       this.history = []
       this.references = []
       this.draft = transform
+      await this.restoreScopeDepth(transform)
+      if (!current()) return
 
       this.stage = 'sent'
       this.streamed = ''
       this.thinkingChars = 0
       this.streamedKind = transform.kind
-      const result = await send<GenerationResult>({
+      const repaired = await send<{ result: GenerationResult; usage?: UsageReport }>({
         type: 'repair',
         transformId: transform.id,
         context: found.context,
         brokenReason,
       })
       if (!current()) return
+      const result = repaired.result
+      if (repaired.usage) this.lastUsage = repaired.usage
 
       this.result = result
       // Not result.intent: the destination was never what broke.
@@ -934,7 +996,8 @@ export class Flow {
       this.enterDescribing()
       this.instruction = transform.intent
       this.intent = transform.intent
-      this.scopeDepth = transform.scopeDepth ?? 0
+      await this.restoreScopeDepth(transform)
+      if (!current()) return
 
       /*
        * The saved copy comes off the page while this is open, for the reason
@@ -989,11 +1052,12 @@ export class Flow {
       this.picked = { ...found, cropDrawn: false }
       this.matchPattern = transform.match
       this.intent = transform.intent
-      this.scopeDepth = transform.scopeDepth ?? 0
       this.instruction = transform.intent
       this.references = []
       this.followUp = ''
       this.draft = transform
+      await this.restoreScopeDepth(transform)
+      if (!current()) return
 
       this.result = {
         name: transform.name,
@@ -1004,10 +1068,12 @@ export class Flow {
         rationale: transform.rationale,
         intent: transform.intent,
       }
-      this.history = [
-        { role: 'user', content: transform.intent },
-        { role: 'assistant', content: transform.rationale.approach },
-      ]
+      // Empty on purpose. The intent and the approach are already the current
+      // instruction and the current result, and regenerate() moves that pair
+      // into history when the first follow-up is sent. Seeding them here as
+      // well showed the first exchange twice in the transcript and sent it to
+      // the model twice.
+      this.history = []
 
       /*
        * The saved copy comes off the page for the duration. Both it and any
@@ -1055,12 +1121,34 @@ export class Flow {
    * old result's rationale as the assistant's answer to a request it never
    * answered.
    */
-  private refinement: { history: RefinementTurn[]; instruction: string; followUp: string } | null = null
+  private refinement: {
+    history: RefinementTurn[]
+    instruction: string
+    followUp: string
+    /**
+     * The result the attempt replaced, set when the new result is stored. The
+     * marker has to outlive that point, until the new preview is on the page,
+     * because Cancel during the preview stage must still return to the
+     * previous result and not discard the run.
+     */
+    previous?: {
+      result: GenerationResult | null
+      draft: Transform | null
+      analysis: ReviewResult | null
+      intent: string
+    }
+  } | null = null
 
   private undoRefinement(): void {
     const held = this.refinement
     this.refinement = null
     if (!held) return
+    if (held.previous) {
+      this.result = held.previous.result
+      this.draft = held.previous.draft
+      this.analysis = held.previous.analysis
+      this.intent = held.previous.intent
+    }
     this.history = held.history
     this.instruction = held.instruction
     this.followUp = held.followUp
@@ -1109,6 +1197,7 @@ export class Flow {
           scopeDepth: this.scopeDepth,
           scopeContainer: this.scopeContainer,
           tabId: this.tabId ?? undefined,
+          transformId: this.transformKey(),
         },
         {
           onSent: () => {
@@ -1118,6 +1207,9 @@ export class Flow {
             if (!current()) return
             this.stage = 'thinking'
             this.thinkingChars = characters
+          },
+          onUsage: (usage) => {
+            if (current() && usage) this.lastUsage = usage
           },
           onChunk: (accumulated) => {
             if (!current()) return
@@ -1165,6 +1257,14 @@ export class Flow {
           : { static: [], undeclaredCapabilities: [], passed: true }
       if (!current()) return
 
+      if (this.refinement) {
+        this.refinement.previous = {
+          result: this.result,
+          draft: this.draft,
+          analysis: this.analysis,
+          intent: this.intent,
+        }
+      }
       this.result = result
       this.intent = result.intent
       // Keep the user's scope choice across a regeneration; only seed it once.
@@ -1174,18 +1274,32 @@ export class Flow {
         ''
       this.draft = this.buildDraft(result, picked.anchor)
       this.analysis = analysis
-      this.refinement = null
 
       this.stage = 'preview'
       await this.applyPreview(result)
-      if (!current()) return
+      if (!current()) {
+        // Cancelled, discarded or reset while the preview was being applied.
+        // The request to add the new CSS may have been processed after that
+        // happened, and nothing else knows about it: discard and reset read
+        // previewedCss, which was still empty while the request was in flight.
+        // A cancel, discard or reset bumps the generation once, so token + 1
+        // is the value it left. A larger value means a new run has started on
+        // this flow and tab since, and its preview is not ours to remove.
+        await this.removeLatePreview(token + 1)
+        return
+      }
+      this.refinement = null
       this.step = 'refining'
     } catch (cause) {
       if (!current()) return
       // Back where they started, with what they typed intact — a failed
       // request should not cost the user their description.
       this.step = from === 'refining' ? 'refining' : 'describing'
+      // A failure while the new preview was applied has already removed the
+      // previous result's CSS, so it is put back along with the result.
+      const replacedResult = this.refinement?.previous !== undefined
       this.undoRefinement()
+      if (replacedResult) await this.removeLatePreview(this.generation)
       this.fail(cause, again)
     } finally {
       this.stopClock()
@@ -1229,7 +1343,12 @@ export class Flow {
     if (!(await this.requestCaptureAccess())) return
     this.shotPreview = null
     this.shot = null
-    await this.captureRegion(picked.crop, picked.viewportWidth)
+    await this.captureRegion(
+      picked.crop,
+      picked.viewportWidth,
+      picked.scrolledTo,
+      picked.devicePixelRatio,
+    )
   }
 
   /**
@@ -1271,27 +1390,36 @@ export class Flow {
     }
   }
 
-  private acceptShot(shot: { dataUrl: string; rect: Rect; clipped: boolean }): void {
+  private acceptShot(shot: { dataUrl: string; rect: Rect; clipped: boolean; moved?: boolean }): void {
     this.shot = shot
     this.shotPreview = shot.dataUrl
     this.shotClipped = shot.clipped
+    this.shotMoved = shot.moved === true
     this.sendScreenshot = true
   }
 
   /** Takes the shot as soon as the region is drawn. */
-  private async captureRegion(rect: Rect, viewportWidth: number): Promise<void> {
+  private async captureRegion(
+    rect: Rect,
+    viewportWidth: number,
+    scrolledTo?: ScrollOffset,
+    devicePixelRatio?: number,
+  ): Promise<void> {
     if (this.tabId === null) return
     try {
       this.acceptShot(
-        await send<{ dataUrl: string; rect: Rect; clipped: boolean }>({
+        await send<{ dataUrl: string; rect: Rect; clipped: boolean; moved?: boolean }>({
           type: 'capture-region',
           tabId: this.tabId,
           rect,
           viewportWidth,
+          url: this.url,
+          ...(devicePixelRatio !== undefined ? { devicePixelRatio } : {}),
+          ...(scrolledTo ? { scrolledTo } : {}),
         }),
       )
     } catch (cause) {
-      this.fail(cause, () => this.captureRegion(rect, viewportWidth))
+      this.fail(cause, () => this.captureRegion(rect, viewportWidth, scrolledTo, devicePixelRatio))
     }
   }
 
@@ -1356,7 +1484,7 @@ export class Flow {
   private buildDraft(result: GenerationResult, anchor: Anchor): Transform {
     const now = Date.now()
     return {
-      id: this.draft?.id ?? crypto.randomUUID(),
+      id: this.transformKey(),
       name: result.name,
       // A repair of a disabled transform must not switch it back on, and a
       // regeneration must not either.
@@ -1399,6 +1527,29 @@ export class Flow {
   }
 
   /**
+   * Takes out CSS that a cancelled attempt applied after it was cancelled, and
+   * for a refinement that went back to its previous result, puts that result's
+   * CSS on the page again, since applyPreview had already removed it.
+   *
+   * `generation` is the value the cleanup is for. It does nothing once the
+   * flow has moved past it, because the tab and the flow's preview state then
+   * belong to a newer run.
+   */
+  private async removeLatePreview(generation: number): Promise<void> {
+    if (this.tabId === null || this.generation !== generation) return
+    const tabId = this.tabId
+    await send({ type: 'clear-preview-css', tabId, css: '' }).catch(() => {})
+    // The request takes time, and a new run may have started while it did.
+    if (this.generation !== generation || this.tabId !== tabId) return
+    this.previewedCss = null
+    const back = this.step === 'refining' ? this.result : null
+    if (back?.kind === 'css') {
+      await send({ type: 'preview-css', tabId: this.tabId, css: back.code }).catch(() => {})
+      this.previewedCss = back.code
+    }
+  }
+
+  /**
    * JS only. Registers the draft and reloads, so it runs the way it will run.
    *
    * The permission has to be asked for here, not left to the save step.
@@ -1410,6 +1561,11 @@ export class Flow {
   async runJs(): Promise<void> {
     const draft = this.draft
     if (!draft || this.tabId === null || !this.analysis?.passed) return
+    // Discard, a tab close and a new generation all bump the generation. The
+    // reply to preview-js arrives after the registration already exists, so a
+    // run that is no longer current has to take that registration out again.
+    const token = this.generation
+    const current = () => token === this.generation
 
     /*
      * The whole body is guarded, not just the send.
@@ -1434,7 +1590,7 @@ export class Flow {
         this.show({
           kind: 'request-failed',
           message:
-            'Running a script needs Firefox’s user scripts permission. Nothing was run, and your description is kept.',
+            'Running a script needs Firefox’s user scripts permission. Nothing was run.',
         })
         return
       }
@@ -1442,6 +1598,13 @@ export class Flow {
       // The background reloads the tab to run it; that reload is ours.
       this.ourReload = 'pending'
       await send({ type: 'preview-js', tabId: this.tabId, transform: draft })
+      if (!current()) {
+        // jsRan was still false when discard or tabClosed looked at it, so
+        // neither sent the clear, and the saved script would stay paused.
+        this.ourReload = 'none'
+        await send({ type: 'clear-preview-js', id: draft.id }).catch(() => {})
+        return
+      }
       this.jsRan = true
     } catch (cause) {
       // Otherwise a reload that never came leaves us armed, and the next
@@ -1488,6 +1651,11 @@ export class Flow {
   async regenerate(): Promise<void> {
     const text = this.followUp.trim()
     if (!text || !this.result) return
+    // A script that has run has already altered the page, and a second one
+    // would run on top of it. The panel hides Regenerate in this state, but
+    // Ctrl+Enter in the follow-up field reached this method directly. The
+    // caller has to go through reloadAndRetry, which clears jsRan first.
+    if (this.jsRan && this.result.kind === 'js') return
 
     this.refinement = {
       history: this.history,
@@ -1511,6 +1679,9 @@ export class Flow {
    */
   async reloadAndRetry(): Promise<void> {
     if (this.tabId === null) return
+    // regenerate() ignores an empty follow-up, so without this the preview was
+    // cleared and the page reloaded and then nothing was generated.
+    if (!this.followUp.trim() || !this.result) return
     await this.clearPreview()
     this.ourReload = 'pending'
     await browser.tabs.reload(this.tabId)
@@ -1592,7 +1763,9 @@ export class Flow {
         // the code matches what the user says they wanted.
         intent: this.intent,
         declaredCapabilities: result.capabilities,
+        transformId: this.transformKey(),
       })
+      if (this.review.usage) this.lastUsage = this.review.usage
     } catch (cause) {
       this.step = 'saving'
       this.fail(cause, () => this.toReview())
@@ -1749,7 +1922,10 @@ export class Flow {
   /** Records an error that has no request to repeat. */
   show(error: FlowError, retry: (() => Promise<void>) | null = null): void {
     this.error =
-      error.kind === 'request-failed' && error.descriptionKept === undefined
+      (error.kind === 'request-failed' ||
+        error.kind === 'model-unavailable' ||
+        error.kind === 'billing') &&
+      error.descriptionKept === undefined
         ? { ...error, descriptionKept: DESCRIPTION_STEPS.includes(this.step) }
         : error
     /*
@@ -1780,6 +1956,14 @@ export class Flow {
         return
       case 'auth':
         this.show({ kind: 'credential-expired', message: cause.message })
+        return
+      case 'model-unavailable':
+        // Only the error is set. The description, scope and picked element stay
+        // as they are, so choosing another model and retrying needs no retyping.
+        this.error = { kind: 'model-unavailable', message: cause.message }
+        return
+      case 'billing':
+        this.error = { kind: 'billing', message: cause.message }
         return
       case 'rate-limit':
         this.show(
@@ -1916,6 +2100,8 @@ export class Flow {
     this.followUp = ''
     this.result = null
     this.draft = null
+    this.pendingId = null
+    this.lastUsage = undefined
     this.previewedCss = null
     this.jsRan = false
     this.analysis = null

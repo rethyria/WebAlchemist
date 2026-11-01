@@ -13,6 +13,8 @@
   } from '@shared/types'
   import type { ConflictSpec } from '@shared/messages'
   import { parseRules } from '@shared/css'
+  import { permissionRequestsFor, requestAll } from '@shared/permissions'
+  import { hasAccess, requiredOrigin } from '@shared/site-access'
   import { activeTab, BackgroundError, send } from './lib/messaging.svelte'
   import { isForTab, type HealthCheckResult } from './lib/health-result'
   import { Flow } from './lib/flow.svelte'
@@ -23,6 +25,7 @@
   import Picking from './components/Picking.svelte'
   import Refining from './components/Refining.svelte'
   import Reviewing from './components/Reviewing.svelte'
+  import UsageLine from './components/UsageLine.svelte'
   import Saving from './components/Saving.svelte'
   import SettingsPanel from './components/Settings.svelte'
   import type { VaultView } from '@shared/vault-disclosure'
@@ -35,6 +38,8 @@
   let runtimeStates = $state<TransformRuntimeState[]>([])
   let conflicts = $state<Conflict[]>([])
   let url = $state('')
+  /* Origins currently held, for the rows' "No access to this site" state. */
+  let heldOrigins = $state<string[]>([])
   let expandedId = $state<string | null>(null)
   let loadError = $state<{ message: string; retryable: boolean } | null>(null)
   let checking = $state(false)
@@ -125,8 +130,37 @@
       conflicts = []
       return
     }
+    await readGrants()
     transforms = await send<Transform[]>({ type: 'get-transforms-for-url', url })
     await findConflicts()
+  }
+
+  async function readGrants() {
+    heldOrigins = (await browser.permissions.getAll()).origins ?? []
+  }
+
+  /*
+   * Granting is requested here rather than in the background, which has no
+   * user gesture. Both requests are issued before the first await; see
+   * requestAll. A JavaScript transform also needs userScripts, and one that is
+   * already held resolves without a prompt.
+   */
+  async function grantAccess(transform: Transform) {
+    try {
+      const granted = await requestAll(
+        (permissions) => browser.permissions.request(permissions),
+        permissionRequestsFor(transform.kind, requiredOrigin(transform)),
+      )
+      if (granted) {
+        // CSS is inserted by the background per tab, so tabs already open on the
+        // site need telling; the content script registration follows the grant
+        // by itself through permissions.onAdded.
+        await send({ type: 'reapply-everywhere', id: transform.id })
+        await afterSave()
+      }
+    } catch (cause) {
+      flow.fail(cause)
+    }
   }
 
   function applySettings(next: Settings) {
@@ -395,6 +429,14 @@
     if (isForTab(message, tab?.id)) runtimeStates = message.states
   }
 
+  /*
+   * openOptionsPage takes no fragment, so the page is opened as a tab to land
+   * on the model pickers. The options page scrolls to the element with this id.
+   */
+  function openModelSettings() {
+    void browser.tabs.create({ url: `${browser.runtime.getURL('src/options/index.html')}#models` })
+  }
+
   $effect(() => {
     void load()
 
@@ -419,6 +461,12 @@
       applySettings(changes['settings'].newValue as Settings)
     }
     browser.storage.onChanged.addListener(onStored)
+
+    // Access can be removed on the settings page or from about:addons while
+    // this panel is open.
+    const onGrantsChanged = () => void readGrants().catch(() => {})
+    browser.permissions.onAdded.addListener(onGrantsChanged)
+    browser.permissions.onRemoved.addListener(onGrantsChanged)
 
     /*
      * The panel persists while tabs come and go. Bound once, it kept showing
@@ -459,6 +507,8 @@
     return () => {
       browser.runtime.onMessage.removeListener(onMessage)
       browser.storage.onChanged.removeListener(onStored)
+      browser.permissions.onAdded.removeListener(onGrantsChanged)
+      browser.permissions.onRemoved.removeListener(onGrantsChanged)
       browser.tabs.onActivated.removeListener(onTabChange)
       browser.tabs.onUpdated.removeListener(onTabUpdated)
       browser.tabs.onRemoved.removeListener(onTabRemoved)
@@ -499,6 +549,7 @@
       error={flow.error}
       onretry={flow.canRetry ? () => void flow.retry() : null}
       onsettings={openSettingsPage}
+      onmodelsettings={openModelSettings}
       ondismiss={() => flow.dismissError()}
     />
   {/if}
@@ -547,6 +598,7 @@
       choosingRegion={flow.choosingRegion}
       shotPreview={flow.shotPreview}
       shotClipped={flow.shotClipped}
+      shotMoved={flow.shotMoved}
       visionSupported={flow.visionSupported}
       onchange={(value) => (flow.instruction = value)}
       onscreenshot={(value) =>
@@ -589,6 +641,7 @@
       choosingRegion={flow.choosingRegion}
       shotPreview={flow.shotPreview}
       shotClipped={flow.shotClipped}
+      shotMoved={flow.shotMoved}
       visionSupported={flow.visionSupported}
       onfollowup={(value) => (flow.followUp = value)}
       onaddreference={() => void flow.addReference()}
@@ -601,6 +654,7 @@
       ondiscard={() => void flow.discard()}
       onkeep={() => flow.toSaving()}
     />
+    <UsageLine report={flow.lastUsage} />
   {:else if flow.step === 'saving' && flow.result}
     <Saving
       result={flow.result}
@@ -623,6 +677,7 @@
       onsave={() => void flow.save()}
       onback={() => flow.toSaving()}
     />
+    <UsageLine report={flow.lastUsage} />
   {:else if transforms.length === 0}
     <div class="empty">
       <div class="diagram" aria-hidden="true">
@@ -692,6 +747,8 @@
           {transform}
           position={index + 1}
           runtime={stateFor(transform.id)}
+          hasAccess={hasAccess(heldOrigins, transform)}
+          ongrant={() => void grantAccess(transform)}
           expanded={expandedId === transform.id}
           ontoggle={(enabled) => void setEnabled(transform, enabled)}
           onexpand={() =>

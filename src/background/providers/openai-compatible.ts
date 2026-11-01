@@ -10,7 +10,13 @@
  * support cannot be queried and is set by hand on the Provider record.
  */
 
-import type { Credential, GenerationResult, ModelReview, Provider } from '@shared/types'
+import {
+  modelDisplayName,
+  type Credential,
+  type GenerationResult,
+  type ModelReview,
+  type Provider,
+} from '@shared/types'
 import {
   GENERATE_SYSTEM_PROMPT,
   REVIEW_SYSTEM_PROMPT,
@@ -20,6 +26,7 @@ import {
 } from '../prompts'
 import { TOKEN_REQUEST_TIMEOUT_MS, credentialFrom, needsRefresh, type TokenPayload } from '../oauth'
 import { endpointProblem, isLoopbackHostname } from '@shared/endpoint-policy'
+import { destinationOf } from '@shared/credential-binding'
 import { retryAfterSeconds } from './retry-after'
 import { readCredentialOrProviderError, withCredentialOrProviderError } from './credential'
 import {
@@ -28,10 +35,13 @@ import {
   REVIEW_SCHEMA,
   type AiProvider,
   type GenerateRequest,
+  type UsageListener,
 } from './types'
+import { readUsage } from '@shared/usage'
 
 export async function createOpenAiCompatibleProvider(
   provider: Provider,
+  onUsage?: UsageListener,
 ): Promise<AiProvider> {
   if (!provider.baseUrl) {
     throw new ProviderError(
@@ -104,6 +114,9 @@ export async function createOpenAiCompatibleProvider(
         return await fetch(`${baseUrl}/chat/completions`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', ...auth },
+          // A redirect would re-send the bearer token and the prompt to a
+          // location the base URL check never saw.
+          redirect: 'error',
           body,
           ...(args.signal ? { signal: args.signal } : {}),
         })
@@ -147,7 +160,9 @@ export async function createOpenAiCompatibleProvider(
       response = await send({ Authorization: `Bearer ${token}` })
     }
 
-    if (!response.ok) throw httpToProviderError(response.status, provider.label, response.headers)
+    if (!response.ok) {
+      throw await httpToProviderError(response, provider.label, args.model)
+    }
 
     /*
      * A proxy, captive portal or misconfigured local server can answer with an
@@ -155,7 +170,10 @@ export async function createOpenAiCompatibleProvider(
      * browser's own parser message, which says nothing about what went wrong
      * or whose fault it is.
      */
-    let payload: { choices?: { message?: { content?: string }; finish_reason?: string }[] }
+    let payload: {
+      choices?: { message?: { content?: string }; finish_reason?: string }[]
+      usage?: unknown
+    }
     try {
       payload = (await response.json()) as typeof payload
     } catch (error) {
@@ -166,6 +184,15 @@ export async function createOpenAiCompatibleProvider(
         { cause: error },
       )
     }
+    /*
+     * Reported before the content is checked, because a response that is empty
+     * or cannot be parsed was still generated and billed. Many local servers
+     * and some gateways omit `usage`; that is reported as null, not zero.
+     */
+    onUsage?.({
+      model: args.model,
+      usage: readUsage(payload?.usage, { input: 'prompt_tokens', output: 'completion_tokens' }),
+    })
     const text = payload.choices?.[0]?.message?.content
     if (!text) {
       throw new ProviderError(
@@ -260,14 +287,40 @@ function isLoopback(baseUrl: string): boolean {
 }
 
 /**
- * Refreshes that are running now, one per provider.
+ * Refreshes that are running now, one per provider and destination.
  *
  * Providers rotate refresh tokens, so a second request with the token the first
  * one used is rejected, and a provider that follows RFC 9700 section 4.14.2
  * answers reuse by revoking the whole grant. Callers that arrive while a
  * refresh is running wait for it instead of sending their own.
+ *
+ * The key includes the destination because a provider id survives an edit of
+ * the base URL. Keyed by id alone, a request still in flight to the old address
+ * joined a refresh that had been started for the re-bound credential and was
+ * handed the new token, which it then sent to the old address. Callers for
+ * different destinations now never share a refresh, and a caller that did wait
+ * for one reads the credential again through the binding check instead of
+ * using what the refresh returned.
  */
 const refreshesInFlight = new Map<string, Promise<string>>()
+
+function refreshKey(provider: Provider): string {
+  const destination = destinationOf(provider)
+  return `${provider.id}\n${destination?.type ?? ''}\n${destination?.origin ?? ''}`
+}
+
+/**
+ * The bearer value for this provider after another call's refresh has ended.
+ * Read through the binding check, so a credential that now belongs to a
+ * different destination is refused here and its token is not returned.
+ */
+async function tokenAfterJoining(provider: Provider): Promise<string> {
+  const credential = await readCredentialOrProviderError(provider)
+  if (!credential) {
+    throw new ProviderError('The sign-in for this provider was removed. Reconnect it in settings.', 'no-credential', false)
+  }
+  return credential.kind === 'api_key' ? credential.value : credential.accessToken
+}
 
 type OAuthCredential = Extract<Credential, { kind: 'oauth' }>
 
@@ -277,14 +330,14 @@ function ensureFreshToken(
   /** The access token a server just rejected, when called after a 401. */
   rejected?: string,
 ): Promise<string> {
-  const providerId = provider.id
   // After a 401 the clock is not consulted: the server has said this token is
   // no good, whatever its recorded expiry.
   const stale = (c: OAuthCredential) =>
-    rejected !== undefined ? c.accessToken === rejected : needsRefresh(c.expiresAt, Date.now())
+    rejected !== undefined ? c.accessToken === rejected : needsRefresh(c.expiresAt, Date.now(), Boolean(c.refreshToken))
   if (!stale(credential)) return Promise.resolve(credential.accessToken)
-  const running = refreshesInFlight.get(providerId)
-  if (running) return running
+  const key = refreshKey(provider)
+  const running = refreshesInFlight.get(key)
+  if (running) return running.then(() => tokenAfterJoining(provider))
 
   /*
    * The credential is read inside the lock, not taken from the caller. The
@@ -321,9 +374,9 @@ function ensureFreshToken(
     }
     return refreshed.accessToken
   }).finally(() => {
-    refreshesInFlight.delete(providerId)
+    refreshesInFlight.delete(key)
   })
-  refreshesInFlight.set(providerId, started)
+  refreshesInFlight.set(key, started)
   return started
 }
 
@@ -335,17 +388,17 @@ function ensureFreshToken(
  * would produce the replacement.
  */
 async function refreshAfterRejection(provider: Provider, rejected: string): Promise<string> {
-  const running = refreshesInFlight.get(provider.id)
-  if (running) {
-    const token = await running
-    if (token !== rejected) return token
-  }
+  // Only waited for. What it returned is not used: the credential is read
+  // again below, through the binding check, and that is what is sent.
+  await refreshesInFlight.get(refreshKey(provider))
   const credential = await readCredentialOrProviderError(provider)
   if (!credential) {
     throw new ProviderError('The sign-in for this provider was removed. Reconnect it in settings.', 'no-credential', false)
   }
   // Replaced by an API key after the rejected request was sent; retry with it.
   if (credential.kind === 'api_key') return credential.value
+  // Replaced by the refresh just waited for, or by another call's.
+  if (credential.accessToken !== rejected) return credential.accessToken
   return ensureFreshToken(provider, credential, rejected)
 }
 
@@ -382,6 +435,8 @@ async function requestRefresh(
         refresh_token: credential.refreshToken,
         client_id: credential.clientId,
       }),
+      // A 307 or 308 would send the refresh token to the new location.
+      redirect: 'error',
       // The caller holds the credential lock while this waits.
       signal: AbortSignal.timeout(TOKEN_REQUEST_TIMEOUT_MS),
     })
@@ -445,11 +500,91 @@ async function requestRefresh(
   }
 }
 
-function httpToProviderError(
-  status: number,
+/** The fields of an error body that the checks below read. */
+interface ErrorFields {
+  message: string
+  code: string
+  type: string
+}
+
+/**
+ * Reads the error body without letting a missing or non-JSON body raise.
+ * Servers in this ecosystem differ in shape: OpenAI nests the fields under
+ * `error`, and some local servers send `error` as a plain string.
+ */
+async function readErrorFields(response: Response): Promise<ErrorFields> {
+  const fields: ErrorFields = { message: '', code: '', type: '' }
+  try {
+    const body = (await response.json()) as { error?: unknown; message?: unknown }
+    const error = body?.error
+    if (typeof error === 'string') fields.message = error
+    else if (error && typeof error === 'object') {
+      const e = error as { message?: unknown; code?: unknown; type?: unknown }
+      fields.message = typeof e.message === 'string' ? e.message : ''
+      fields.code = typeof e.code === 'string' ? e.code : ''
+      fields.type = typeof e.type === 'string' ? e.type : ''
+    } else if (typeof body?.message === 'string') fields.message = body.message
+  } catch {
+    // No usable body; the status alone decides.
+  }
+  return fields
+}
+
+/**
+ * A 404 on the chat endpoint is a missing model only when the server says so.
+ * The same status answers a wrong base URL, which the user fixes in a different
+ * place, so a 404 with no model wording stays a generic error rather than
+ * sending the user to the model setting. OpenAI sends code model_not_found,
+ * Ollama words it "model 'x' not found", and OpenRouter says "No endpoints
+ * found for x".
+ */
+function isModelNotFound(fields: ErrorFields): boolean {
+  return (
+    fields.code === 'model_not_found' ||
+    /\bmodel\b/i.test(fields.message) ||
+    /no endpoints found/i.test(fields.message)
+  )
+}
+
+/**
+ * A billing problem is 402 (OpenRouter and others) or OpenAI's
+ * insufficient_quota, which arrives with status 429. The second is checked
+ * before the rate-limit branch, or an empty balance is reported as a wait
+ * that never ends.
+ */
+function isBillingProblem(status: number, fields: ErrorFields): boolean {
+  return (
+    status === 402 || fields.code === 'insufficient_quota' || fields.type === 'insufficient_quota'
+  )
+}
+
+async function httpToProviderError(
+  response: Response,
   label: string,
-  headers?: Headers,
-): ProviderError {
+  model: string,
+): Promise<ProviderError> {
+  const { status, headers } = response
+  // Only the statuses that can carry these cases have their body read.
+  const fields: ErrorFields =
+    status === 404 || status === 402 || status === 429
+      ? await readErrorFields(response)
+      : { message: '', code: '', type: '' }
+
+  if (status === 404 && isModelNotFound(fields)) {
+    return new ProviderError(
+      `The model ${modelDisplayName(model)} is not available from ${label}. Choose another model in settings.`,
+      'model-unavailable',
+      false,
+    )
+  }
+  if (isBillingProblem(status, fields)) {
+    return new ProviderError(
+      `${label} reports a billing problem, such as no remaining credit. Add credit or fix billing with the provider, then try again.`,
+      'billing',
+      false,
+    )
+  }
+
   if (status === 401 || status === 403) {
     return new ProviderError(
       `${label} rejected the credential. Check it in settings.`,

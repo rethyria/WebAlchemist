@@ -2,6 +2,7 @@
   import type { RefinementTurn } from '@background/providers/types'
   import type { GenerationResult, ReviewResult } from '@shared/types'
   import type { ElementContext } from '@shared/types'
+  import { attemptNumber } from '../lib/attempt'
   import { autogrow } from '../lib/autogrow'
   import Button from './Button.svelte'
   import CodeBlock from './CodeBlock.svelte'
@@ -22,6 +23,7 @@
     choosingRegion: boolean
     shotPreview: string | null
     shotClipped: boolean
+    shotMoved: boolean
     visionSupported: boolean
     onfollowup: (text: string) => void
     onaddreference: () => void
@@ -46,6 +48,7 @@
     choosingRegion,
     shotPreview,
     shotClipped,
+    shotMoved,
     visionSupported,
     onfollowup,
     onaddreference,
@@ -60,7 +63,7 @@
 
   let isJs = $derived(result.kind === 'js')
   let blocked = $derived(analysis !== null && !analysis.passed)
-  let attempt = $derived(Math.floor(history.length / 3) + 1)
+  let attempt = $derived(attemptNumber(history.length))
 
   /*
    * The transcript is the conversation as the user experienced it: their
@@ -81,7 +84,10 @@
   function onKeyDown(event: KeyboardEvent) {
     if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
       event.preventDefault()
-      onregenerate()
+      // The same choice the buttons make: after a script ran, the page has to
+      // be reloaded before another attempt.
+      if (isJs && jsRan) onreload()
+      else onregenerate()
     }
   }
 </script>
@@ -226,6 +232,8 @@
             too — names, messages, account details, anything personal that
             happens to be on screen.{shotClipped
               ? ' Clipped at the viewport; only the visible part was captured.'
+              : ''}{shotMoved
+              ? ' The area was moved because the page scrolled after it was drawn.'
               : ''}
           </p>
           <button type="button" class="shot-action" onclick={() => onscreenshot(false)}>

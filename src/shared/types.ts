@@ -257,6 +257,16 @@ export const ANTHROPIC_MODELS: ModelOption[] = [
 ]
 
 /**
+ * How a model is named in messages: "Opus 5 (claude-opus-5)" for a listed
+ * model, and the id alone for any other, since an id typed by hand has no
+ * label to show.
+ */
+export function modelDisplayName(id: string): string {
+  const known = ANTHROPIC_MODELS.find((m) => m.id === id)
+  return known ? `${known.label} (${id})` : id
+}
+
+/**
  * What an OpenAI-compatible provider needs before it can be signed into.
  *
  * Typed in by hand rather than discovered. There is no registry of these, and
@@ -294,6 +304,60 @@ export interface Provider {
    * OpenAI-compatible endpoints there is no equivalent, so it is set by hand.
    */
   supportsVision: boolean
+  /**
+   * Optional price the user entered, in US dollars per million tokens. Used for
+   * OpenAI-compatible providers only, because they have no price list the
+   * extension could read. Anthropic prices come from ANTHROPIC_MODELS.
+   */
+  price?: TokenPrice
+}
+
+/** US dollars per million tokens. */
+export interface TokenPrice {
+  input: number
+  output: number
+}
+
+/** Token counts a provider reported for one call. */
+export interface TokenUsage {
+  inputTokens: number
+  outputTokens: number
+}
+
+/**
+ * What one model call used, for showing in the panel.
+ *
+ * `usage` is null when the response carried no usable usage block, which the
+ * panel shows as "not reported" and which is not the same as zero tokens.
+ * `costUsd` is null when no price is known for the model.
+ */
+export interface UsageReport {
+  model: string
+  usage: TokenUsage | null
+  costUsd: number | null
+}
+
+/** Running totals for one provider in one month, or for one transform. */
+export interface UsageTotals {
+  /** Every call made, including those whose response had no usage block. */
+  calls: number
+  /** Calls whose response reported usage. The token sums cover these only. */
+  reportedCalls: number
+  inputTokens: number
+  outputTokens: number
+  /** Cost of the calls that had a price. Summed when each call was made. */
+  costUsd: number
+  /** Calls that were priced; may be fewer than reportedCalls. */
+  pricedCalls: number
+}
+
+/**
+ * Everything recorded. Months are UTC calendar months written "2026-11",
+ * since providers bill and reset limits on UTC.
+ */
+export interface UsageStore {
+  months: Record<string, Record<string, UsageTotals>>
+  transforms: Record<string, UsageTotals>
 }
 
 /** What the sidebar is allowed to know about a credential. Never the value. */
@@ -305,6 +369,12 @@ export interface CredentialStatus {
   expiresAt?: number
   /** Oauth only. False when there is no refresh token and sign-in must be repeated at expiry. */
   renewable?: boolean
+  /**
+   * True when the stored credential is bound to a different origin or provider
+   * type than the provider now uses, so requests refuse it. `configured` stays
+   * true so the credential can still be replaced or cleared.
+   */
+  needsReentry?: boolean
 }
 
 /* ------------------------------------------------------------------ */
@@ -404,6 +474,8 @@ export interface ReviewResult {
   model?: ModelReview
   /** False when anything blocking is outstanding. */
   passed: boolean
+  /** Present when a model call was made for this result. */
+  usage?: UsageReport
 }
 
 /* ------------------------------------------------------------------ */

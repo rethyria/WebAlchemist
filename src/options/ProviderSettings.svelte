@@ -10,6 +10,7 @@
    * The field is therefore always empty on open. Typing into it replaces
    * whatever is stored; leaving it alone changes nothing.
    */
+  import { REVOKE_KEY_NOTICE } from '@shared/disclosure'
   import {
     ANTHROPIC_MODELS,
     DEFAULT_GENERATE_MODEL,
@@ -21,6 +22,7 @@
   } from '@shared/types'
   import { endpointProblem } from '@shared/endpoint-policy'
   import ModelPicker from './ModelPicker.svelte'
+  import { addProviderWithKey } from './provider-add'
   import Button from '@sidebar/components/Button.svelte'
 
   interface Props {
@@ -28,11 +30,23 @@
     statuses: CredentialStatus[]
     onsave: (settings: Settings) => Promise<void>
     onsetkey: (providerId: string, key: string) => Promise<void>
+    /** The settings as stored now, for the rollback of a failed add. */
+    onreadsettings: () => Promise<Settings>
     onclearkey: (providerId: string) => Promise<void>
     onconnectoauth: (providerId: string) => Promise<void>
   }
 
-  let { settings, statuses, onsave, onsetkey, onclearkey, onconnectoauth }: Props = $props()
+  let { settings, statuses, onsave, onsetkey, onreadsettings, onclearkey, onconnectoauth }: Props = $props()
+
+  /*
+   * The sidebar links here with #models after a model error. A browser scrolls
+   * to a fragment only when the element exists at load, and this list renders
+   * after settings are fetched, so the scroll is done once it is on the page.
+   */
+  $effect(() => {
+    if (location.hash !== '#models') return
+    document.getElementById('models')?.scrollIntoView({ block: 'center' })
+  })
 
   let adding = $state(false)
   let draftType = $state<ProviderType>('anthropic')
@@ -188,22 +202,18 @@
         supportsVision: draftType === 'anthropic',
       }
 
-      // The provider is saved first, because the background binds the key to
-      // the saved provider's address and refuses a key for a provider it does
-      // not know. If saving the key fails, the provider is removed again, so a
-      // dead entry without a key is not left behind.
-      const previous = settings
-      await onsave({
-        ...settings,
-        providers: [...settings.providers, provider],
-        activeProviderId: settings.activeProviderId ?? provider.id,
-      })
-      try {
-        await onsetkey(provider.id, draftKey.trim())
-      } catch (error) {
-        await onsave(previous)
-        throw error
-      }
+      // See addProviderWithKey for the order and for what a failed key save
+      // does to the provider.
+      await addProviderWithKey(
+        {
+          current: () => settings,
+          readSettings: onreadsettings,
+          save: onsave,
+          setKey: onsetkey,
+        },
+        provider,
+        draftKey.trim(),
+      )
       resetDraft()
     } finally {
       busy = false
@@ -238,6 +248,29 @@
       if (known) next.supportsVision = known.vision
     }
 
+    await onsave({
+      ...settings,
+      providers: settings.providers.map((p) => (p.id === provider.id ? next : p)),
+    })
+  }
+
+  /**
+   * Saves the optional price of an OpenAI-compatible provider. Both fields
+   * empty removes it. One field filled and the other empty is not saved,
+   * because a half price would give a cost that counts one direction only.
+   */
+  async function setPrice(provider: Provider, input: string, output: string) {
+    let price: Provider['price']
+    if (input.trim() === '' && output.trim() === '') {
+      price = undefined
+    } else {
+      const parsed = { input: Number(input), output: Number(output) }
+      const valid = (n: number) => input.trim() !== '' && output.trim() !== '' && Number.isFinite(n) && n >= 0
+      if (!valid(parsed.input) || !valid(parsed.output)) return
+      price = parsed
+    }
+    const { price: _old, ...rest } = provider
+    const next: Provider = price ? { ...rest, price } : rest
     await onsave({
       ...settings,
       providers: settings.providers.map((p) => (p.id === provider.id ? next : p)),
@@ -295,7 +328,16 @@
             </div>
 
             <div class="state">
-              {#if status?.configured && status.kind === 'oauth'}
+              {#if status?.needsReentry}
+                <!--
+                  Checked before the other states because a refused credential
+                  is not usable whatever its kind, and "Key configured" next to
+                  a request that will fail is the misleading state this replaces.
+                -->
+                <span class="missing">
+                  {status.kind === 'oauth' ? 'Sign in again' : 'Enter the key again'} for this provider
+                </span>
+              {:else if status?.configured && status.kind === 'oauth'}
                 <span class="configured">Signed in</span>
                 {#if status.expiresAt}
                   <!--
@@ -357,7 +399,7 @@
             <Button small onclick={() => void removeProvider(provider)}>Remove</Button>
           </div>
 
-          <div class="models">
+          <div class="models" id={active ? 'models' : undefined}>
             <ModelPicker
               label="Writes the code"
               value={provider.generateModel}
@@ -370,6 +412,44 @@
               onchange={(model) => void setModel(provider, 'reviewModel', model)}
             />
           </div>
+
+          {#if provider.type !== 'anthropic'}
+            <!--
+              Optional. These endpoints have no price list the extension could
+              read, so the totals show tokens only until a price is entered.
+            -->
+            <div class="price">
+              <span class="price-label">Price, US dollars per million tokens (optional)</span>
+              <label>
+                Input
+                <input
+                  type="number"
+                  min="0"
+                  step="any"
+                  value={provider.price?.input ?? ''}
+                  onchange={(event) => {
+                    const row = event.currentTarget.closest('.price')
+                    const fields = row?.querySelectorAll('input')
+                    void setPrice(provider, event.currentTarget.value, fields?.[1]?.value ?? '')
+                  }}
+                />
+              </label>
+              <label>
+                Output
+                <input
+                  type="number"
+                  min="0"
+                  step="any"
+                  value={provider.price?.output ?? ''}
+                  onchange={(event) => {
+                    const row = event.currentTarget.closest('.price')
+                    const fields = row?.querySelectorAll('input')
+                    void setPrice(provider, fields?.[0]?.value ?? '', event.currentTarget.value)
+                  }}
+                />
+              </label>
+            </div>
+          {/if}
 
           {#if editingKeyFor === provider.id}
             <div class="key-field">
@@ -532,6 +612,8 @@
       </div>
     </div>
   {/if}
+
+  <p class="revoke">{REVOKE_KEY_NOTICE}</p>
 </section>
 
 <style>
@@ -554,6 +636,13 @@
     padding: var(--sp-13);
     border: 1px solid var(--border);
     border-radius: var(--r-card);
+  }
+
+  .revoke {
+    margin: var(--sp-11) 0 0;
+    max-width: 60ch;
+    font: 11.5px/1.5 var(--font-ui);
+    color: var(--text-faint);
   }
 
   .none p {
@@ -640,6 +729,25 @@
     display: flex;
     flex-wrap: wrap;
     gap: var(--sp-6);
+  }
+
+  .price {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--sp-9);
+    font: 11px var(--font-ui);
+    color: var(--text-faint);
+  }
+
+  .price input {
+    width: 90px;
+    padding: 4px 8px;
+    border: 1px solid var(--border);
+    border-radius: var(--r-button);
+    background: var(--surface-sunken);
+    font: 11.5px var(--font-mono);
+    color: var(--text);
   }
 
   .models {

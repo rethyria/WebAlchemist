@@ -44,6 +44,42 @@ beforeEach(() => {
   resetBrowserMock()
 })
 
+describe('saving settings with an endpoint stored before the rule', () => {
+  const legacy = provider({ baseUrl: 'http://api.example.com/v1' })
+
+  beforeEach(() => {
+    // Written directly, as an older version would have stored it.
+    localArea.raw()['settings'] = { ...DEFAULT_SETTINGS, providers: [legacy] }
+  })
+
+  it('saves an unrelated change while the stored endpoint is still unchanged', async () => {
+    await storage.saveSettings({ ...DEFAULT_SETTINGS, providers: [legacy], aiJsKillSwitch: true })
+    expect((await storage.getSettings()).aiJsKillSwitch).toBe(true)
+  })
+
+  // Controls: the check is not switched off. A changed endpoint, a new
+  // provider, and another provider with the same address are all checked.
+  it('still refuses a changed endpoint', async () => {
+    await expect(
+      storage.saveSettings(settingsWith(provider({ baseUrl: 'http://other.example.com/v1' }))),
+    ).rejects.toThrow(/https/)
+  })
+
+  it('still refuses a new provider with a bad endpoint, even beside the stored one', async () => {
+    const added = provider({ id: 'p2', baseUrl: 'http://new.example.com/v1' })
+    await expect(
+      storage.saveSettings({ ...DEFAULT_SETTINGS, providers: [legacy, added] }),
+    ).rejects.toThrow(/https/)
+  })
+
+  it('does not treat the same address under another provider id as unchanged', async () => {
+    const copy = provider({ id: 'p2', baseUrl: legacy.baseUrl as string })
+    await expect(
+      storage.saveSettings({ ...DEFAULT_SETTINGS, providers: [legacy, copy] }),
+    ).rejects.toThrow(/https/)
+  })
+})
+
 describe('saving settings', () => {
   it('refuses an http base URL on a remote host and writes nothing', async () => {
     await expect(

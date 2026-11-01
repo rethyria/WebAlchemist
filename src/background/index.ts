@@ -15,8 +15,11 @@ import type {
 } from '@shared/messages'
 import { matchesUrl } from '@shared/match'
 import { CAPTURE_GRANT_KEY } from '@shared/capture-grant'
+import { regionAtScroll, viewportChanged, type ScrollOffset, type Viewport } from '@shared/region'
 import type {
   Accent,
+  GenerationResult,
+  ModelReview,
   PageContext,
   Rect,
   ReviewResult,
@@ -55,6 +58,7 @@ import { withKeepalive } from './keepalive'
 import { isContentEvent as isContentEventType, isExtensionPage } from './sender'
 import { connect as connectOAuth } from './oauth'
 import { resolveActiveProvider, ProviderError } from './providers'
+import { createUsageRecorder } from './usage'
 import {
   hasUserScriptsPermission,
   registerPreview,
@@ -65,6 +69,7 @@ import {
 } from './registry'
 import {
   assertValidTransform,
+  bindStoredCredentials,
   clearCredential,
   deleteTransform,
   disableVault,
@@ -75,6 +80,7 @@ import {
   getAllTransforms,
   getCredentialStatus,
   getSettings,
+  getUsage,
   handleVaultIdleAlarm,
   importTransforms,
   lockVault,
@@ -126,6 +132,10 @@ browser.runtime.onInstalled.addListener(async (details) => {
     await reregister()
     await reconcileContentScripts()
   }
+  // Keys stored before bindings existed are bound now, while the settings are
+  // still the ones they were entered under. A sealed vault is locked after a
+  // restart; its keys are bound when it is unlocked.
+  if (details.reason === 'update') await bindStoredCredentials().catch(() => {})
 })
 
 /*
@@ -141,7 +151,13 @@ browser.alarms.onAlarm.addListener((alarm) => void handleVaultIdleAlarm(alarm))
 
 browser.permissions.onAdded.addListener(async (permissions) => {
   const granted = permissions.permissions as string[] | undefined
-  if (granted?.includes('userScripts')) await reregister()
+  // A JavaScript transform whose origin was revoked is not registered, and
+  // granting the origin again (from the sidebar's "Grant access") is not a
+  // userScripts grant, so it has to trigger registration too. reregister
+  // is idempotent, so running it for an origin that changes nothing is safe.
+  if (granted?.includes('userScripts') || (permissions.origins?.length ?? 0) > 0) {
+    await reregister()
+  }
   await reconcileContentScripts()
 })
 
@@ -397,6 +413,9 @@ async function handle(
     case 'get-transforms-for-url':
       return matchingTransforms(message.url)
 
+    case 'get-all-transforms':
+      return getAllTransforms()
+
     case 'get-transform': {
       const all = await getAllTransforms()
       return all.find((t) => t.id === message.id) ?? null
@@ -445,14 +464,19 @@ async function handle(
     }
 
     case 'generate': {
-      const provider = await resolveActiveProvider()
-      return withKeepalive(() =>
-        provider.generate({
-          context: message.context,
-          instruction: message.instruction,
-          history: message.history,
-        }),
-      )
+      const usage = createUsageRecorder(message.transformId)
+      try {
+        const provider = await resolveActiveProvider(usage.listener)
+        return await withKeepalive(() =>
+          provider.generate({
+            context: message.context,
+            instruction: message.instruction,
+            history: message.history,
+          }),
+        )
+      } finally {
+        await usage.settled()
+      }
     }
 
     case 'repair': {
@@ -460,24 +484,40 @@ async function handle(
       const existing = transforms.find((t) => t.id === message.transformId)
       if (!existing) throw new Error('That transform no longer exists.')
 
-      const provider = await resolveActiveProvider()
-      return withKeepalive(() =>
-        provider.generate({
-          context: message.context,
-          instruction: existing.intent,
-          history: [],
-          repair: {
-            intent: existing.intent,
-            previousCode: existing.code,
-            previousRationale: existing.rationale,
-            brokenReason: message.brokenReason,
-          },
-        }),
-      )
+      const usage = createUsageRecorder(existing.id)
+      let result: GenerationResult
+      try {
+        const provider = await resolveActiveProvider(usage.listener)
+        result = await withKeepalive(() =>
+          provider.generate({
+            context: message.context,
+            instruction: existing.intent,
+            history: [],
+            repair: {
+              intent: existing.intent,
+              previousCode: existing.code,
+              previousRationale: existing.rationale,
+              brokenReason: message.brokenReason,
+            },
+          }),
+        )
+      } finally {
+        // In `finally` so a billed call that then failed to parse is counted.
+        await usage.settled()
+      }
+      return { result, usage: await usage.settled() }
     }
 
     case 'review':
-      return runReview(message.code, message.intent, message.declaredCapabilities)
+      return runReview(
+        message.code,
+        message.intent,
+        message.declaredCapabilities,
+        message.transformId,
+      )
+
+    case 'get-usage':
+      return getUsage()
 
     case 'analyse':
       return runStaticAnalysis(message.code, message.declaredCapabilities)
@@ -648,12 +688,31 @@ async function handle(
       if (!analysis.passed) {
         throw new Error('Static analysis rejected this code, so it was not run.')
       }
+      // Recorded before registering: registerPreview pauses the saved script
+      // first, so a close of the sidebar during or after a failed registration
+      // has to find the id in storage to restore it. Registration runs in the
+      // same queue as the start-up rebuild, so the rebuild cannot remove a
+      // preview that is being added (#91).
       const windowId = await windowOfTab(message.tabId)
       await inRegistryQueue(async () => {
-        await registerPreview(message.transform)
         await addPreviewedScript(message.transform.id, windowId)
+        try {
+          await registerPreview(message.transform)
+        } catch (cause) {
+          await removePreviewedScript(message.transform.id)
+          throw cause
+        }
       })
-      await browser.tabs.reload(message.tabId)
+      try {
+        await browser.tabs.reload(message.tabId)
+      } catch (cause) {
+        // The preview is registered and the saved script paused, but the
+        // sidebar treats a rejected request as "nothing ran" and never sends a
+        // clear, so the registration is removed here.
+        await inRegistryQueue(() => unregisterPreview(message.transform.id)).catch(() => {})
+        await removePreviewedScript(message.transform.id)
+        throw cause
+      }
       return true
     }
 
@@ -695,8 +754,17 @@ async function handle(
     case 'recapture':
       return askContent(message.tabId, { type: 'recapture' })
 
-    case 'context-for-anchor':
-      return askContent(message.tabId, { type: 'context-for-anchor', anchor: message.anchor })
+    case 'context-for-anchor': {
+      // The page keeps the palette from the last start-picking, and a page
+      // that has had no pick has none, so Edit description drew no outline.
+      const settings = await getSettings()
+      const dark = matchMedia('(prefers-color-scheme: dark)').matches
+      return askContent(message.tabId, {
+        type: 'context-for-anchor',
+        anchor: message.anchor,
+        palette: overlayPaletteFor(settings.accent, dark),
+      })
+    }
 
     case 'suspend-transform': {
       const tab = await browser.tabs.get(message.tabId).catch(() => undefined)
@@ -790,7 +858,14 @@ async function handle(
     }
 
     case 'capture-region':
-      return captureWithLockDown(message.tabId, message.rect, message.viewportWidth)
+      return captureWithLockDown(
+        message.tabId,
+        message.rect,
+        message.viewportWidth,
+        message.url,
+        message.scrolledTo,
+        message.devicePixelRatio,
+      )
 
 
     case 'export-transforms':
@@ -1062,6 +1137,8 @@ interface GenerateOverPort {
    * valid without a badge to update.
    */
   tabId?: number
+  /** The transform being authored or repaired, for attributing cost. */
+  transformId?: string
 }
 
 /**
@@ -1105,10 +1182,11 @@ async function runGeneration(
     await restoreBadgeFacts(tabId, accent)
     await badge.generationStarted(tabId, accent)
   }
+  const usage = createUsageRecorder(request.transformId)
 
   try {
     if (signal.aborted) return
-    const provider = await resolveActiveProvider()
+    const provider = await resolveActiveProvider(usage.listener)
     if (signal.aborted) return
     post({ type: 'sent' })
 
@@ -1127,7 +1205,7 @@ async function runGeneration(
         : provider.generate(withSignal),
     )
 
-    post({ type: 'done', result })
+    post({ type: 'done', result, usage: await usage.settled() })
   } catch (error) {
     // An aborted request fails with an error about the abort; the panel that
     // would show it is gone.
@@ -1146,6 +1224,9 @@ async function runGeneration(
           : { message: error instanceof Error ? error.message : String(error) },
     })
   } finally {
+    // A call that was billed and then failed to parse is still counted. After
+    // `done` this has nothing left to wait for.
+    await usage.settled()
     // In `finally` so a failed generation does not leave the tab showing `··`
     // for as long as the tab is open.
     if (tabId !== undefined) {
@@ -1253,11 +1334,13 @@ async function runReview(
   code: string,
   intent: string,
   declared: Transform['capabilities'],
+  transformId?: string,
 ): Promise<ReviewResult> {
   const analysis = runStaticAnalysis(code, declared)
   if (!analysis.passed) return analysis
 
-  const provider = await resolveActiveProvider()
+  const usage = createUsageRecorder(transformId)
+  const provider = await resolveActiveProvider(usage.listener)
   // No page content crosses into this call. That is the entire basis of the
   // reviewer's independence — see REVIEW_SYSTEM_PROMPT.
   //
@@ -1265,9 +1348,21 @@ async function runReview(
   // arrives over sendMessage rather than a port — a pending listener promise
   // resets the idle timer exactly once, giving it 60 seconds before the page
   // is suspended and the caller is told the receiving end does not exist.
-  const model = await withKeepalive(() => provider.review({ code, intent }))
+  let model: ModelReview
+  try {
+    model = await withKeepalive(() => provider.review({ code, intent }))
+  } finally {
+    // In `finally` so a billed response that failed to parse is still counted.
+    await usage.settled()
+  }
 
-  return { ...analysis, model, passed: model.verdict === 'match' }
+  const report = await usage.settled()
+  return {
+    ...analysis,
+    model,
+    passed: model.verdict === 'match',
+    ...(report ? { usage: report } : {}),
+  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -1429,21 +1524,75 @@ async function captureWithLockDown(
   tabId: number,
   rect: Rect,
   viewportWidth: number,
-): Promise<{ dataUrl: string; rect: Rect; clipped: boolean }> {
+  url: string,
+  scrolledTo?: ScrollOffset,
+  devicePixelRatio?: number,
+): Promise<{ dataUrl: string; rect: Rect; clipped: boolean; moved: boolean }> {
+  /*
+   * A rectangle stored from a pick is in viewport coordinates, so it is moved
+   * by however far the page has scrolled since. Asked of the page, because
+   * the background cannot read it. Without a reply the rectangle is used as
+   * it is, which is what happened before and is right when nothing scrolled.
+   */
+  let target = rect
+  let moveClipped = false
+  let pageScrolled = false
+  // The width the rectangle is scaled by when the capture is cropped.
+  let width = viewportWidth
+  if (scrolledTo) {
+    const now = (await askContent(tabId, { type: 'get-viewport' })) as Viewport | undefined
+    if (now) {
+      if (viewportChanged({ width: viewportWidth, devicePixelRatio }, now)) {
+        throw new Error(
+          'The window size or zoom changed after you drew the area, so it no longer matches the page. Draw the area again.',
+        )
+      }
+      width = now.width
+      const moved = regionAtScroll(rect, scrolledTo, now)
+      if (!moved) {
+        throw new Error(
+          'The area you drew is no longer on screen. Scroll it back into view, or draw it again.',
+        )
+      }
+      target = moved.rect
+      moveClipped = moved.clipped
+      pageScrolled = now.x !== scrolledTo.x || now.y !== scrolledTo.y
+    }
+  }
   await sendToContent(tabId, { type: 'set-lock-visible', visible: false })
   try {
-    const shot = await captureRegion(rect, viewportWidth)
-    return { ...shot, rect }
+    const shot = await captureRegion(tabId, url, target, width)
+    return { ...shot, clipped: shot.clipped || moveClipped, rect: target, moved: pageScrolled }
   } finally {
     await sendToContent(tabId, { type: 'set-lock-visible', visible: true })
   }
 }
 
 async function captureRegion(
+  tabId: number,
+  url: string,
   rect: Rect,
   viewportWidth: number,
 ): Promise<{ dataUrl: string; clipped: boolean }> {
-  const full = await browser.tabs.captureVisibleTab({ format: 'png' })
+  // captureVisibleTab photographs whichever tab is active in a window, which
+  // after the user switches tabs is not the run's tab, and can be a different
+  // site they are signed in to. It is read again here, just before the call,
+  // rather than once when the request arrived.
+  const tab = await browser.tabs.get(tabId).catch(() => undefined)
+  if (!tab || tab.windowId === undefined) {
+    throw new Error('The page this run is about is no longer open, so nothing was captured.')
+  }
+  if (!tab.active) {
+    throw new Error(
+      'The page this run is about is not the tab in front, so nothing was captured. Switch back to it and try again.',
+    )
+  }
+  if (tab.url !== url) {
+    throw new Error(
+      'The page this run is about has moved to another address, so nothing was captured.',
+    )
+  }
+  const full = await browser.tabs.captureVisibleTab(tab.windowId, { format: 'png' })
 
   // Cropping happens here so the full-viewport capture never leaves this scope.
   const blob = await (await fetch(full)).blob()

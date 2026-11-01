@@ -43,8 +43,11 @@ import {
   type Credential,
   type CredentialStatus,
   type Settings,
+  type TokenUsage,
   type Transform,
+  type UsageStore,
 } from '@shared/types'
+import { addCall, monthOf } from '@shared/usage'
 import {
   LockedError,
   deriveKey,
@@ -66,6 +69,7 @@ import type { Provider } from '@shared/types'
 const KEY_SETTINGS = 'settings'
 const KEY_TRANSFORMS = 'transforms'
 const KEY_CREDENTIALS = 'credentials'
+const KEY_USAGE = 'usage'
 
 type CredentialMap = Record<string, Credential>
 
@@ -90,9 +94,31 @@ export async function saveSettings(settings: Settings): Promise<void> {
     | undefined
   // Checked here and not only in the settings page: this is reached by a
   // message that any extension context can send.
+  //
+  // Only endpoints that are new or differ from the stored ones are checked.
+  // Checking every provider made one stored provider whose endpoint breaks a
+  // rule added later (for example a plain http address saved by an older
+  // version) fail every settings save, including the switch that stops
+  // AI-written JavaScript. An unchanged endpoint is compared against what is
+  // stored, not against what the message claims, so this cannot be used to
+  // smuggle in a new one. The request paths check the endpoint again before
+  // anything is sent.
+  const storedEndpoints = new Map<string, string>()
+  for (const stored of previous?.providers ?? []) {
+    for (const [what, url] of endpointsOf(stored)) storedEndpoints.set(`${stored.id}\n${what}`, url)
+  }
   for (const provider of settings.providers) {
     for (const [what, url] of endpointsOf(provider)) {
+      if (storedEndpoints.get(`${provider.id}\n${what}`) === url) continue
       assertEndpoint(url, `${what} of ${provider.label}`)
+    }
+  }
+  for (const provider of settings.providers) {
+    const price = provider.price
+    if (price === undefined) continue
+    const valid = (n: unknown) => typeof n === 'number' && Number.isFinite(n) && n >= 0
+    if (!valid(price.input) || !valid(price.output)) {
+      throw new Error(`The price for ${provider.label} must be two numbers of 0 or more.`)
     }
   }
   await browser.storage.local.set({ [KEY_SETTINGS]: settings })
@@ -542,6 +568,9 @@ export async function unlockVault(passphrase: string): Promise<void> {
   await unseal(key, existing)
   await rememberKey(key)
   await armIdleLock()
+  // The first moment the map can be written after an upgrade, so this is where
+  // keys stored before bindings existed are bound; see bindStoredCredentials.
+  await bindStoredCredentials()
 }
 
 /**
@@ -643,6 +672,36 @@ function checkedForProvider(provider: Provider, credential: Credential): Credent
     )
   }
   return credential.boundTo ? credential : { ...credential, boundTo: destination }
+}
+
+/**
+ * Binds every stored credential that has no binding to its provider's current
+ * destination, in one pass.
+ *
+ * Without this a key stored before bindings existed was bound by whichever
+ * request read it first, which could be months after the upgrade and after the
+ * base URL had been edited, so the key was bound to an address it was never
+ * entered for. Doing it once, at the first point the extension runs after the
+ * upgrade (a plaintext store) or the first point the sealed map can be written
+ * (unlock), keeps that window short. A credential whose provider has been
+ * removed, or has no valid address, is left unbound and is refused on use.
+ * Throws LockedError for a sealed vault that is locked.
+ */
+export async function bindStoredCredentials(): Promise<void> {
+  await withCredentialLock(async () => {
+    const map = await readCredentialMap()
+    const providers = (await getSettings()).providers
+    let changed = false
+    for (const [providerId, credential] of Object.entries(map)) {
+      if (credential.boundTo) continue
+      const provider = providers.find((p) => p.id === providerId)
+      const destination = provider ? destinationOf(provider) : null
+      if (!destination) continue
+      map[providerId] = { ...credential, boundTo: destination }
+      changed = true
+    }
+    if (changed) await writeCredentialMap(map)
+  })
 }
 
 /**
@@ -751,27 +810,101 @@ function oauthStatus(
   }
 }
 
-/** The only credential shape any other context is allowed to see. */
-export async function getCredentialStatus(
+/**
+ * True when requests would refuse this credential because of where it was
+ * entered. A credential with no binding is not a mismatch: it is bound on its
+ * first read, so reporting it here would flag every key stored before binding
+ * existed. Uses the same comparison as the request path so the two cannot
+ * disagree.
+ */
+function refusedForProvider(provider: Provider | undefined, credential: Credential): boolean {
+  if (!provider) return false
+  try {
+    checkedForProvider(provider, credential)
+    return false
+  } catch (error) {
+    if (error instanceof CredentialOriginError) return true
+    throw error
+  }
+}
+
+function statusFor(
   providerId: string,
-): Promise<CredentialStatus> {
-  const credential = (await readCredentialMap())[providerId]
+  provider: Provider | undefined,
+  credential: Credential | undefined,
+): CredentialStatus {
   if (!credential) return { providerId, configured: false }
-  return credential.kind === 'oauth'
-    ? oauthStatus(providerId, credential)
-    : { providerId, configured: true, kind: 'api_key' }
+  const base: CredentialStatus =
+    credential.kind === 'oauth'
+      ? oauthStatus(providerId, credential)
+      : { providerId, configured: true, kind: 'api_key' }
+  return refusedForProvider(provider, credential) ? { ...base, needsReentry: true } : base
+}
+
+/** The only credential shape any other context is allowed to see. */
+export async function getCredentialStatus(providerId: string): Promise<CredentialStatus> {
+  const credential = (await readCredentialMap())[providerId]
+  const provider = credential
+    ? (await getSettings()).providers.find((p) => p.id === providerId)
+    : undefined
+  return statusFor(providerId, provider, credential)
 }
 
 export async function getAllCredentialStatuses(): Promise<CredentialStatus[]> {
   const map = await readCredentialMap()
   const settings = await getSettings()
-  return settings.providers.map((provider) => {
-    const credential = map[provider.id]
-    if (!credential) return { providerId: provider.id, configured: false }
-    return credential.kind === 'oauth'
-      ? oauthStatus(provider.id, credential)
-      : { providerId: provider.id, configured: true, kind: 'api_key' as const }
-  })
+  return settings.providers.map((provider) => statusFor(provider.id, provider, map[provider.id]))
+}
+
+/* ------------------------------------------------------------------ */
+/* Usage                                                               */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Calls to recordUsage run one after another. Each is a read, an add and a
+ * write of the whole store, and a review that finishes while a generation is
+ * being recorded would otherwise read the same starting value and one of the
+ * two additions would be lost.
+ */
+let usageQueue: Promise<unknown> = Promise.resolve()
+
+export async function getUsage(): Promise<UsageStore> {
+  const stored = (await browser.storage.local.get(KEY_USAGE))[KEY_USAGE] as
+    | Partial<UsageStore>
+    | undefined
+  return { months: stored?.months ?? {}, transforms: stored?.transforms ?? {} }
+}
+
+/**
+ * Adds one call to the provider's total for the month and, when the call
+ * belongs to a transform, to that transform's total. A call whose response had
+ * no usage block still counts as a call, so "not reported" is visible in the
+ * totals and is not turned into zero tokens.
+ */
+export function recordUsage(call: {
+  providerId: string
+  transformId?: string
+  usage: TokenUsage | null
+  costUsd: number | null
+  at?: number
+}): Promise<void> {
+  const run = async () => {
+    const store = await getUsage()
+    const month = monthOf(call.at ?? Date.now())
+    const byProvider = (store.months[month] ??= {})
+    byProvider[call.providerId] = addCall(byProvider[call.providerId], call.usage, call.costUsd)
+    if (call.transformId) {
+      store.transforms[call.transformId] = addCall(
+        store.transforms[call.transformId],
+        call.usage,
+        call.costUsd,
+      )
+    }
+    await browser.storage.local.set({ [KEY_USAGE]: store })
+  }
+  const next = usageQueue.then(run, run)
+  usageQueue = next.catch(() => undefined)
+  return next
 }
 
 /* ------------------------------------------------------------------ */

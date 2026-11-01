@@ -183,3 +183,111 @@ describe('the adapters', () => {
     })
   })
 })
+
+describe('credential status after the provider changes', () => {
+  async function withProvider(provider: Provider) {
+    const settings = await storage.getSettings()
+    await storage.saveSettings({ ...settings, providers: [provider], activeProviderId: provider.id })
+  }
+
+  it('says the key must be entered again once the origin differs', async () => {
+    await withProvider(remote())
+    await storage.saveCredentialFor(remote(), KEY)
+    await withProvider(remote({ baseUrl: 'https://evil.example.net/v1' }))
+
+    const status = (await storage.getAllCredentialStatuses())[0]!
+    expect(status).toMatchObject({ configured: true, kind: 'api_key', needsReentry: true })
+    expect(await storage.getCredentialStatus('p1')).toMatchObject({ needsReentry: true })
+  })
+
+  // Control: the same statuses with no change of destination must not be flagged,
+  // and neither must a path-only change or a key stored before bindings existed.
+  it('does not flag a key whose destination is unchanged', async () => {
+    await withProvider(remote())
+    await storage.saveCredentialFor(remote(), KEY)
+    await withProvider(remote({ baseUrl: 'https://API.example.com:443/v2' }))
+
+    const status = (await storage.getAllCredentialStatuses())[0]!
+    expect(status).toMatchObject({ configured: true })
+    expect(status.needsReentry).toBeUndefined()
+  })
+
+  it('does not flag a stored key that has no binding yet', async () => {
+    await withProvider(remote())
+    await storage.setCredential('p1', KEY)
+
+    const status = (await storage.getAllCredentialStatuses())[0]!
+    expect(status.needsReentry).toBeUndefined()
+  })
+
+  it('clears the flag after the key is entered again for the new destination', async () => {
+    await withProvider(remote())
+    await storage.saveCredentialFor(remote(), KEY)
+    const moved = remote({ baseUrl: 'https://evil.example.net/v1' })
+    await withProvider(moved)
+    await storage.saveCredentialFor(moved, KEY)
+
+    expect((await storage.getAllCredentialStatuses())[0]!.needsReentry).toBeUndefined()
+  })
+})
+
+describe('binding keys stored before bindings existed, in one pass', () => {
+  async function withProvider(provider: Provider) {
+    const settings = await storage.getSettings()
+    await storage.saveSettings({ ...settings, providers: [provider], activeProviderId: provider.id })
+  }
+
+  it('binds an unbound key to the settings as they are now, so a later edit is refused', async () => {
+    await withProvider(remote())
+    await storage.setCredential('p1', KEY)
+
+    await storage.bindStoredCredentials()
+    expect(await storage.readStoredCredential('p1')).toMatchObject({
+      boundTo: { type: 'openai-compatible', origin: 'https://api.example.com' },
+    })
+
+    // The edit after the pass is refused. Without the pass this read would
+    // have bound the key to the edited address, which is the finding.
+    await expect(
+      storage.readCredentialForRequest(remote({ baseUrl: 'https://evil.example.net/v1' })),
+    ).rejects.toBeInstanceOf(storage.CredentialOriginError)
+  })
+
+  // Control: with no pass, the first read after an edit binds the key to the
+  // edited address. This is the behaviour the pass exists to shorten.
+  it('without the pass, the first read after an edit binds the key to the edited address', async () => {
+    await withProvider(remote())
+    await storage.setCredential('p1', KEY)
+
+    const edited = remote({ baseUrl: 'https://evil.example.net/v1' })
+    expect(await storage.readCredentialForRequest(edited)).toMatchObject({
+      boundTo: { origin: 'https://evil.example.net' },
+    })
+  })
+
+  it('leaves a bound key alone and skips a key whose provider is gone', async () => {
+    await withProvider(remote())
+    await storage.saveCredentialFor(remote(), KEY)
+    await storage.setCredential('gone', KEY)
+    const before = await storage.readStoredCredential('p1')
+
+    await storage.bindStoredCredentials()
+
+    expect(await storage.readStoredCredential('p1')).toEqual(before)
+    expect((await storage.readStoredCredential('gone'))?.boundTo).toBeUndefined()
+  })
+
+  it('binds keys in a sealed vault when it is unlocked, not before', async () => {
+    await withProvider(remote())
+    await storage.setCredential('p1', KEY)
+    await storage.enableVault('correct horse battery')
+    await storage.lockVault()
+    await expect(storage.bindStoredCredentials()).rejects.toThrow()
+
+    await storage.unlockVault('correct horse battery')
+
+    expect(await storage.readStoredCredential('p1')).toMatchObject({
+      boundTo: { origin: 'https://api.example.com' },
+    })
+  })
+})

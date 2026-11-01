@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { announcement } from '../lib/countdown'
   import type { FlowError } from '../lib/flow.svelte'
   import Button from './Button.svelte'
 
@@ -12,19 +13,21 @@
     /** Null when there is no request to repeat; the retry buttons are then not shown. */
     onretry: (() => void) | null
     onsettings: () => void
+    /** Opens settings at the model pickers. */
+    onmodelsettings: () => void
     ondismiss: () => void
   }
 
-  let { error, onretry, onsettings, ondismiss }: Props = $props()
+  let { error, onretry, onsettings, onmodelsettings, ondismiss }: Props = $props()
 
   let detailOpen = $state(false)
 </script>
 
 <div
   class="card"
-  class:block={error.kind === 'request-failed'}
+  class:block={error.kind === 'request-failed' || error.kind === 'billing'}
   class:attention={error.kind === 'rate-limited'}
-  role="alert"
+  role={error.kind === 'rate-limited' ? undefined : 'alert'}
 >
   {#if error.kind === 'no-provider'}
     <span class="title">No provider set up</span>
@@ -55,12 +58,46 @@
       {/if}
       <Button small onclick={ondismiss}>Dismiss</Button>
     </div>
-  {:else if error.kind === 'rate-limited'}
+  {:else if error.kind === 'model-unavailable'}
     <div class="head">
-      <span class="dot attention" aria-hidden="true"></span>
-      <span class="title">Rate limited</span>
+      <span class="dot block" aria-hidden="true"></span>
+      <span class="title">Model not available</span>
     </div>
-    <p>{error.message}</p>
+    <p>{error.message}{error.descriptionKept ? ' Your description is kept.' : ''}</p>
+    <div class="actions">
+      <Button variant="primary" small onclick={onmodelsettings}>Open model settings</Button>
+      {#if onretry}
+        <Button small onclick={onretry}>Try again</Button>
+      {/if}
+      <Button small onclick={ondismiss}>Dismiss</Button>
+    </div>
+  {:else if error.kind === 'billing'}
+    <div class="head">
+      <span class="dot block" aria-hidden="true"></span>
+      <span class="title">Billing problem</span>
+    </div>
+    <p>{error.message}{error.descriptionKept ? ' Your description is kept.' : ''}</p>
+    <div class="actions">
+      {#if onretry}
+        <Button variant="primary" small onclick={onretry}>Try again</Button>
+      {/if}
+      <Button small onclick={ondismiss}>Dismiss</Button>
+    </div>
+  {:else if error.kind === 'rate-limited'}
+    <!--
+      The alert holds the title and the provider's message, which is what a
+      screen-reader user needs to hear. The countdown below it changes every
+      second, so it stays outside the alert; with the alert on the whole card a
+      screen reader was likely to announce every change (not tested with a
+      screen reader).
+    -->
+    <div class="alert" role="alert">
+      <div class="head">
+        <span class="dot attention" aria-hidden="true"></span>
+        <span class="title">Rate limited</span>
+      </div>
+      <p>{error.message}</p>
+    </div>
     {#if error.retryInSeconds !== null}
       <!--
         A real countdown, not a label. It reaches zero and the request goes
@@ -70,9 +107,13 @@
         Waiting is the primary action, so Cancel is the one that has to be
         clicked: an automatic request is only acceptable if it can be stopped.
       -->
-      <p class="countdown" aria-live="polite">
+      <p class="countdown" aria-hidden="true">
         Trying again in {error.retryInSeconds}
         {error.retryInSeconds === 1 ? 'second' : 'seconds'}
+      </p>
+      <!-- What assistive technology gets instead: a polite region whose text changes at coarse steps. -->
+      <p class="hidden" role="status">
+        {announcement(error.retryInSeconds)}
       </p>
       <div class="actions">
         {#if onretry}
@@ -101,6 +142,21 @@
 </div>
 
 <style>
+  .hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .alert {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
   .countdown {
     font-variant-numeric: tabular-nums;
     color: var(--attention);

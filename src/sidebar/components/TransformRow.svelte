@@ -12,6 +12,14 @@
     expanded: boolean
     /** True while this row is the one being dragged. */
     dragging: boolean
+    /**
+     * False when the origin the transform needs is not held, for example after
+     * the user removed it on the settings page. Nothing else reports this: the
+     * row still looks enabled while CSS insertion fails.
+     */
+    hasAccess: boolean
+    /** Requests the missing origin. Called from the click, before any await. */
+    ongrant: () => void
     ontoggle: (enabled: boolean) => void
     onexpand: () => void
     onrename: (name: string) => void
@@ -41,6 +49,8 @@
     position,
     expanded,
     dragging,
+    hasAccess,
+    ongrant,
     ontoggle,
     onexpand,
     onrename,
@@ -201,6 +211,13 @@
       </span>
     </div>
   </div>
+
+  {#if !hasAccess}
+    <div class="no-access">
+      <span>No access to this site</span>
+      <button type="button" class="secondary" onclick={ongrant}>Grant access</button>
+    </div>
+  {/if}
 
   {#if expanded}
     <div class="body">
@@ -433,6 +450,20 @@
     background: rgb(from var(--attention) r g b / 0.16);
     border-color: rgb(from var(--attention) r g b / 0.35);
     color: var(--attention);
+  }
+
+  .no-access {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 var(--gutter-sidebar) 9px var(--indent-expanded);
+    font: 11.5px var(--font-ui);
+    color: var(--text-dim);
+  }
+
+  .no-access button {
+    padding: 3px 8px;
+    font-weight: 400;
   }
 
   .body {
