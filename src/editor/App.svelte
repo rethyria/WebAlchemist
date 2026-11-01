@@ -1,7 +1,7 @@
 <script lang="ts">
   import '@shared/tokens.css'
   import type { CssUrlMode, ReviewResult, Settings, Transform } from '@shared/types'
-  import { hostOfPattern, modeForHost } from '@safety/css-check'
+  import { hostOfPattern, modeForHost, policyKeyOfPattern } from '@safety/css-check'
   import { matchPresetsFor, matchesUrl, originPermissionFor } from '@shared/match'
   import { send } from '@shared/messaging.svelte'
   import CodeArea from './CodeArea.svelte'
@@ -44,18 +44,20 @@
    */
   let cssPolicy = $state<Record<string, CssUrlMode>>({})
   let cssSiteHost = $derived(hostOfPattern(match.trim() || savedMatch))
+  /* `*.host` for a pattern that covers subdomains, `host` for one host, null when neither can be set. */
+  let cssPolicyKey = $derived(policyKeyOfPattern(match.trim() || savedMatch))
   let cssMode = $derived<CssUrlMode>(cssSiteHost ? modeForHost(cssPolicy, cssSiteHost) : 'block')
   /* External addresses waiting for approval, and whether the user ticked the box. */
   let pendingUrls = $state<string[]>([])
   let approveListed = $state(false)
 
   async function setCssMode(mode: CssUrlMode) {
-    if (!cssSiteHost) return
+    if (!cssPolicyKey) return
     try {
       const fresh = await send<Settings>({ type: 'get-settings' })
       const next = { ...fresh.cssUrlPolicy }
-      if (mode === 'block') delete next[cssSiteHost]
-      else next[cssSiteHost] = mode
+      if (mode === 'block') delete next[cssPolicyKey]
+      else next[cssPolicyKey] = mode
       await send({ type: 'save-settings', settings: { ...fresh, cssUrlPolicy: next } })
       cssPolicy = next
       pendingUrls = []
@@ -481,7 +483,7 @@
         <select
           id="css-mode"
           value={cssMode}
-          disabled={!cssSiteHost}
+          disabled={!cssPolicyKey}
           onchange={(event) => void setCssMode(event.currentTarget.value as CssUrlMode)}
         >
           <option value="block">Only data: addresses (default)</option>
@@ -491,7 +493,8 @@
         <p class="hint">
           CSS that loads an address makes the browser send a request on every visit, and a
           request can carry information about the page. @import is never allowed.
-          {#if !cssSiteHost}This pattern has no fixed host name, so the default applies.{/if}
+          {#if !cssPolicyKey}This pattern has no fixed host name, or covers every site under a public
+            suffix such as .com, so the default applies.{/if}
         </p>
       </details>
       {#if pendingUrls.length > 0}

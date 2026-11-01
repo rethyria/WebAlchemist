@@ -343,8 +343,10 @@ export interface Settings {
   /** Disables execution of every AI-authored JS transform, everywhere. */
   aiJsKillSwitch: boolean
   /**
-   * Per-site CSS URL mode, keyed by host name without a leading `*.`. A site
-   * with no entry uses `block`. A key also covers its subdomains.
+   * Per-site CSS URL mode, keyed the way a match pattern names a host. A key
+   * `*.example.com` covers example.com and its subdomains; a key
+   * `shop.example.com` covers that host only. A site with no entry uses
+   * `block`. A wildcard key for a public suffix such as `*.com` is ignored.
    */
   cssUrlPolicy: Record<string, CssUrlMode>
 }

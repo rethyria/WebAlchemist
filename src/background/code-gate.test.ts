@@ -99,7 +99,7 @@ describe('problemWithStoredCode', () => {
 
   it('checks CSS against the page it is applied to and the stored approvals', () => {
     const t = base({ kind: 'css', code: BAD_CSS })
-    settings = { ...DEFAULT_SETTINGS, cssUrlPolicy: { 'example.com': 'list-external' } }
+    settings = { ...DEFAULT_SETTINGS, cssUrlPolicy: { '*.example.com': 'list-external' } }
     expect(problemWithStoredCode(t, settings, 'https://shop.example.com/')).not.toBeNull()
     const approved = { ...t, approvedCssUrls: ['https://evil.example/t'] }
     expect(problemWithStoredCode(approved, settings, 'https://shop.example.com/')).toBeNull()

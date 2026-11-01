@@ -173,7 +173,7 @@ describe('handleSaveTransform: CSS', () => {
     const css = 'a { background: url(/local.png) }'
     const { deps: strict } = saveDeps()
     await expect(handleSaveTransform(saveMessage(transform({ kind: 'css', code: css })), strict)).rejects.toThrow()
-    const relaxed = { ...DEFAULT_SETTINGS, cssUrlPolicy: { 'example.com': 'same-origin' as const } }
+    const relaxed = { ...DEFAULT_SETTINGS, cssUrlPolicy: { '*.example.com': 'same-origin' as const } }
     const { deps, calls } = saveDeps([], relaxed)
     await handleSaveTransform(saveMessage(transform({ kind: 'css', code: css })), deps)
     expect(calls).toContain('save:t')
@@ -209,7 +209,7 @@ describe('handlePreviewCss', () => {
   })
 
   it('does not inject CSS that is waiting for approval of an external address', async () => {
-    const settings = { ...DEFAULT_SETTINGS, cssUrlPolicy: { 'example.com': 'list-external' as const } }
+    const settings = { ...DEFAULT_SETTINGS, cssUrlPolicy: { '*.example.com': 'list-external' as const } }
     const { deps, injected } = previewDeps(settings)
     await expect(handlePreviewCss({ type: 'preview-css', tabId: 1, css: BAD_CSS }, deps)).rejects.toThrow(/not approved/)
     expect(injected).toEqual([])
@@ -341,14 +341,14 @@ describe('applyCssTransforms', () => {
     await applyCssTransforms(strict, 1, [transform({ kind: 'css', code: css })], URL_ON_PAGE)
     expect(strictLog).toEqual([])
 
-    const { deps, log } = cssDeps({ ...DEFAULT_SETTINGS, cssUrlPolicy: { 'example.com': 'same-origin' } })
+    const { deps, log } = cssDeps({ ...DEFAULT_SETTINGS, cssUrlPolicy: { '*.example.com': 'same-origin' } })
     await applyCssTransforms(deps, 1, [transform({ kind: 'css', code: css })], URL_ON_PAGE)
     expect(log).toHaveLength(1)
   })
 
   it('takes back CSS that was injected before the rules changed', async () => {
     const css = 'a { background: url(/local.png) }'
-    const relaxed = { ...DEFAULT_SETTINGS, cssUrlPolicy: { 'example.com': 'same-origin' as const } }
+    const relaxed = { ...DEFAULT_SETTINGS, cssUrlPolicy: { '*.example.com': 'same-origin' as const } }
     const { deps, log, applied } = cssDeps(relaxed)
     const t = [transform({ kind: 'css', code: css, name: 'n' })]
     await applyCssTransforms(deps, 1, t, URL_ON_PAGE)

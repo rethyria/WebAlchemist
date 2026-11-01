@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { DEFAULT_SETTINGS } from '@shared/types'
 import { assertPreviewable, checkCssForPage } from '../background/css-gate'
-import { checkCss, hostOfPattern, modeForHost, tokenize } from './css-check'
+import { checkCss, hostOfPattern, modeForHost, policyKeyOfPattern, tokenize } from './css-check'
 
 const PAGE = 'https://shop.example.com/cart'
 
@@ -235,16 +235,42 @@ describe('list-external mode', () => {
 })
 
 describe('per-site mode lookup', () => {
-  it('uses the most specific host and covers subdomains', () => {
-    const policy = { 'example.com': 'same-origin', 'shop.example.com': 'list-external' } as const
+  it('uses the most specific key, and a wildcard key covers the host itself and its subdomains', () => {
+    const policy = { '*.example.com': 'same-origin', 'shop.example.com': 'list-external' } as const
     expect(modeForHost(policy, 'shop.example.com')).toBe('list-external')
     expect(modeForHost(policy, 'www.example.com')).toBe('same-origin')
+    expect(modeForHost(policy, 'example.com')).toBe('same-origin')
+    expect(modeForHost(policy, 'a.b.example.com')).toBe('same-origin')
     expect(modeForHost(policy, 'example.org')).toBe('block')
     expect(modeForHost(undefined, 'example.com')).toBe('block')
   })
 
+  it('does not extend an exact-host key to subdomains', () => {
+    // A key from a pattern such as `shop.example.com/*` names that host only.
+    const policy = { 'shop.example.com': 'same-origin' } as const
+    expect(modeForHost(policy, 'shop.example.com')).toBe('same-origin')
+    expect(modeForHost(policy, 'cdn.shop.example.com')).toBe('block')
+    expect(modeForHost(policy, 'example.com')).toBe('block')
+  })
+
+  it('prefers an exact key over a wildcard key for the same host', () => {
+    const policy = { '*.example.com': 'same-origin', 'example.com': 'block' } as const
+    expect(modeForHost(policy, 'example.com')).toBe('block')
+    expect(modeForHost(policy, 'www.example.com')).toBe('same-origin')
+  })
+
   it('does not match a host that only ends in the same letters', () => {
-    expect(modeForHost({ 'example.com': 'same-origin' }, 'notexample.com')).toBe('block')
+    expect(modeForHost({ '*.example.com': 'same-origin' }, 'notexample.com')).toBe('block')
+  })
+
+  it('ignores a wildcard key for a public suffix, even one written into settings by hand', () => {
+    const policy = { '*.com': 'list-external', '*.co.uk': 'same-origin', '*.github.io': 'same-origin' } as const
+    expect(modeForHost(policy, 'example.com')).toBe('block')
+    expect(modeForHost(policy, 'shop.example.co.uk')).toBe('block')
+    expect(modeForHost(policy, 'someone.github.io')).toBe('block')
+    // Control: the same keys one label longer are ordinary sites and do apply.
+    expect(modeForHost({ '*.example.co.uk': 'same-origin' }, 'shop.example.co.uk')).toBe('same-origin')
+    expect(modeForHost({ '*.someone.github.io': 'same-origin' }, 'a.someone.github.io')).toBe('same-origin')
   })
 
   it('reads the host from a match pattern', () => {
@@ -252,10 +278,29 @@ describe('per-site mode lookup', () => {
     expect(hostOfPattern('shop.example.com/*')).toBe('shop.example.com')
     expect(hostOfPattern('*/foo')).toBeNull()
   })
+
+  it('derives the key from the pattern and keeps whether it covers subdomains', () => {
+    expect(policyKeyOfPattern('*.reddit.com/r/x*')).toBe('*.reddit.com')
+    expect(policyKeyOfPattern('shop.example.com/*')).toBe('shop.example.com')
+    expect(policyKeyOfPattern('*.Example.COM/*')).toBe('*.example.com')
+    expect(policyKeyOfPattern('localhost/*')).toBe('localhost')
+    expect(policyKeyOfPattern('*/foo')).toBeNull()
+    expect(policyKeyOfPattern('*.*.example.com/*')).toBeNull()
+  })
+
+  it('refuses a key that would cover a whole public suffix', () => {
+    for (const pattern of ['*.com/*', '*.org/*', '*.uk/*', '*.co.uk/*', '*.com.au/*', '*.github.io/*', '*.blogspot.com/*']) {
+      expect(policyKeyOfPattern(pattern), pattern).toBeNull()
+    }
+    // An exact host is one site even when its name is a suffix, and a registrable name is allowed.
+    expect(policyKeyOfPattern('github.io/*')).toBe('github.io')
+    expect(policyKeyOfPattern('*.example.co.uk/*')).toBe('*.example.co.uk')
+    expect(policyKeyOfPattern('*.someone.github.io/*')).toBe('*.someone.github.io')
+  })
 })
 
 describe('checkCssForPage', () => {
-  const settings = { ...DEFAULT_SETTINGS, cssUrlPolicy: { 'example.com': 'list-external' as const } }
+  const settings = { ...DEFAULT_SETTINGS, cssUrlPolicy: { '*.example.com': 'list-external' as const } }
 
   it('uses the site mode from settings and returns the panel shape', () => {
     const css = 'a{background:url(https://cdn.example/a.png)}'
@@ -280,12 +325,12 @@ describe('assertPreviewable', () => {
   })
 
   it('refuses CSS that is only waiting for approval', () => {
-    const settings = { ...DEFAULT_SETTINGS, cssUrlPolicy: { 'example.com': 'list-external' as const } }
+    const settings = { ...DEFAULT_SETTINGS, cssUrlPolicy: { '*.example.com': 'list-external' as const } }
     expect(() => assertPreviewable(attack, settings, PAGE, undefined)).toThrow(/not approved/)
   })
 
   it('allows the same CSS once its address is approved', () => {
-    const settings = { ...DEFAULT_SETTINGS, cssUrlPolicy: { 'example.com': 'list-external' as const } }
+    const settings = { ...DEFAULT_SETTINGS, cssUrlPolicy: { '*.example.com': 'list-external' as const } }
     expect(() =>
       assertPreviewable(attack, settings, PAGE, ['https://evil.example/t?a']),
     ).not.toThrow()

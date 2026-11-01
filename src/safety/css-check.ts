@@ -515,12 +515,42 @@ export function checkCss(css: string, options: CssCheckOptions): CssCheckResult 
 }
 
 /**
+ * Suffixes under which unrelated parties register their own names, so that a
+ * setting for the whole suffix would cover sites that have nothing to do with
+ * each other. A one-label suffix (`com`, `uk`) is always one, and is detected
+ * without the list. This list covers the common multi-label suffixes and hosting
+ * domains only. It is not the Public Suffix List (publicsuffix.org), which has
+ * thousands of entries and changes; a name missing here can still be set for
+ * the whole suffix. Extending it is a one-line change.
+ */
+const PUBLIC_SUFFIXES = new Set([
+  'co.uk', 'org.uk', 'ac.uk', 'gov.uk', 'me.uk', 'ltd.uk', 'plc.uk', 'net.uk', 'sch.uk',
+  'com.au', 'net.au', 'org.au', 'edu.au', 'gov.au', 'co.nz', 'org.nz', 'net.nz', 'govt.nz',
+  'co.jp', 'or.jp', 'ne.jp', 'ac.jp', 'go.jp', 'co.kr', 'or.kr', 'com.cn', 'net.cn', 'org.cn', 'gov.cn',
+  'com.br', 'net.br', 'org.br', 'gov.br', 'com.mx', 'org.mx', 'gob.mx', 'co.in', 'net.in', 'org.in', 'gov.in', 'ac.in',
+  'co.za', 'org.za', 'com.tr', 'com.tw', 'com.hk', 'com.sg', 'com.ar', 'com.co', 'co.il', 'co.id',
+  'github.io', 'gitlab.io', 'pages.dev', 'workers.dev', 'netlify.app', 'vercel.app', 'herokuapp.com',
+  'blogspot.com', 'wordpress.com', 'appspot.com', 'web.app', 'firebaseapp.com', 'azurewebsites.net',
+  'cloudfront.net', 'amazonaws.com', 's3.amazonaws.com', 'onrender.com', 'fly.dev', 'glitch.me',
+  'repl.co', 'myshopify.com', 'weebly.com', 'wixsite.com', 'tumblr.com', 'substack.com',
+])
+
+/** True for a name under which anyone can register, so a setting for it would cover unrelated sites. */
+export function isPublicSuffix(host: string): boolean {
+  const name = host.toLowerCase()
+  return !name.includes('.') || PUBLIC_SUFFIXES.has(name)
+}
+
+/**
  * The mode for a page, from the per-site table.
  *
- * Keys are host names without a leading `*.`, as the editor derives them from
- * a match pattern. A setting for `example.com` also covers `www.example.com`,
- * because a match pattern of `*.example.com/*` covers both; the most specific
- * key wins.
+ * A key is a host name, written the way a match pattern writes it. `*.example.com`
+ * covers `example.com` and every subdomain of it. `shop.example.com` covers that
+ * host only. Before, every key covered its subdomains, so a setting made for an
+ * exact-host pattern also applied to hosts the pattern did not match (found in
+ * the review of 4dab39a). A wildcard key for a public suffix is ignored, so
+ * `*.com` in settings does not relax every `.com` site. The most specific key
+ * wins, and an exact key wins over a wildcard key for the same host.
  */
 export function modeForHost(
   policy: Record<string, CssUrlMode> | undefined,
@@ -529,8 +559,15 @@ export function modeForHost(
   if (!policy) return 'block'
   const labels = hostname.toLowerCase().split('.')
   for (let i = 0; i < labels.length; i += 1) {
-    const mode = policy[labels.slice(i).join('.')]
-    if (mode) return mode
+    const suffix = labels.slice(i).join('.')
+    if (i === 0) {
+      const exact = policy[suffix]
+      if (exact) return exact
+    }
+    if (!isPublicSuffix(suffix)) {
+      const wildcard = policy[`*.${suffix}`]
+      if (wildcard) return wildcard
+    }
   }
   return 'block'
 }
@@ -540,4 +577,17 @@ export function hostOfPattern(pattern: string): string | null {
   const host = (pattern.split('/')[0] ?? '').replace(/^\*\./, '').toLowerCase()
   if (!host || host.includes('*')) return null
   return host
+}
+
+/**
+ * The key under which a pattern's CSS setting is stored: `*.host` when the
+ * pattern covers subdomains, and `host` when it names one host. Null when the
+ * pattern has no fixed host, or when the key would cover a public suffix.
+ */
+export function policyKeyOfPattern(pattern: string): string | null {
+  const host = hostOfPattern(pattern)
+  if (host === null) return null
+  const wildcard = (pattern.split('/')[0] ?? '').startsWith('*.')
+  if (!wildcard) return host
+  return isPublicSuffix(host) ? null : `*.${host}`
 }
