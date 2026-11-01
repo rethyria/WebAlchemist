@@ -1,5 +1,6 @@
 import type {
   GenerationResult,
+  TokenUsage,
   ModelReview,
   PageContext,
   Provider,
@@ -88,6 +89,15 @@ export interface AiProvider {
   supportsVision(): Promise<boolean>
 }
 
+/**
+ * Called once for each model call that returned a response, before the
+ * response is parsed, so a call that was billed and then rejected as a refusal
+ * or unreadable is still counted. `usage` is null when the response had no
+ * usable usage block. Calls that failed with an HTTP error are not reported,
+ * since a rejected request runs no inference.
+ */
+export type UsageListener = (call: { model: string; usage: TokenUsage | null }) => void
+
 export class ProviderError extends Error {
   constructor(
     message: string,
@@ -128,7 +138,10 @@ export class ProviderError extends Error {
   readonly retryInSeconds: number | undefined
 }
 
-export type ProviderFactory = (provider: Provider) => Promise<AiProvider>
+export type ProviderFactory = (
+  provider: Provider,
+  onUsage?: UsageListener,
+) => Promise<AiProvider>
 
 /* ------------------------------------------------------------------ */
 /* Response schemas, shared across adapters                            */

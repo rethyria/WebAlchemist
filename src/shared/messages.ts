@@ -22,6 +22,8 @@ import type {
   Rect,
   ReviewResult,
   Settings,
+  UsageReport,
+  UsageStore,
   Conflict,
   Transform,
   TransformRuntimeState,
@@ -60,9 +62,19 @@ export type Message =
       history: RefinementTurn[]
       scopeDepth?: number
       scopeContainer?: string | null
+      transformId?: string
     }
   | { type: 'repair'; transformId: string; context: PageContext; brokenReason: string }
-  | { type: 'review'; code: string; intent: string; declaredCapabilities: Transform['capabilities'] }
+  | {
+      type: 'review'
+      code: string
+      intent: string
+      declaredCapabilities: Transform['capabilities']
+      /** The transform the call is for, so its cost is added to that transform. */
+      transformId?: string
+    }
+  /** Recorded token usage, for the settings page. */
+  | { type: 'get-usage' }
   /** Static analysis alone — no model call, so it is free to run before preview. */
   | { type: 'analyse'; code: string; declaredCapabilities: Transform['capabilities'] }
 
@@ -354,7 +366,9 @@ export interface Responses {
   'vault-state': { sealed: boolean; unlocked: boolean }
   'get-vision-support': boolean
   generate: GenerationResult
-  repair: GenerationResult
+  /** `usage` is absent when no call returned a response. */
+  repair: { result: GenerationResult; usage?: UsageReport }
+  'get-usage': UsageStore
   /** Null when the anchor no longer resolves on this page. */
   'context-for-anchor': AnchoredElement | null
   'find-conflicts': Conflict[]

@@ -37,7 +37,9 @@ import {
   type GenerateRequest,
   type StreamListener,
   type ThinkingListener,
+  type UsageListener,
 } from './types'
+import { readUsage } from '@shared/usage'
 
 /**
  * Anthropic's guidance is that model downgrades are the caller's decision, not
@@ -109,7 +111,10 @@ async function withoutUnsupportedFields<T>(
   }
 }
 
-export async function createAnthropicProvider(provider: Provider): Promise<AiProvider> {
+export async function createAnthropicProvider(
+  provider: Provider,
+  onUsage?: UsageListener,
+): Promise<AiProvider> {
   const credential = await readCredentialOrProviderError(provider)
   if (!credential) {
     throw new ProviderError(
@@ -135,6 +140,21 @@ export async function createAnthropicProvider(provider: Provider): Promise<AiPro
 
   const generateModel = provider.generateModel || DEFAULT_GENERATE_MODEL
   const reviewModel = provider.reviewModel || DEFAULT_REVIEW_MODEL
+
+  /*
+   * Only input_tokens and output_tokens are read. Thinking tokens are already
+   * inside output_tokens, and the adapter sends no cache_control, so the cache
+   * counters are always zero here and are left out rather than priced at a
+   * rate this file does not know.
+   */
+  const reportUsage = (model: string, response: unknown) =>
+    onUsage?.({
+      model,
+      usage: readUsage((response as { usage?: unknown } | null)?.usage, {
+        input: 'input_tokens',
+        output: 'output_tokens',
+      }),
+    })
 
   return {
     id: provider.id,
@@ -182,6 +202,7 @@ export async function createAnthropicProvider(provider: Provider): Promise<AiPro
             ),
         )
 
+        reportUsage(generateModel, response)
         return parseJsonResponse<GenerationResult>(response)
       } catch (error) {
         throw toProviderError(error, { model: generateModel, label: provider.label })
@@ -266,6 +287,7 @@ export async function createAnthropicProvider(provider: Provider): Promise<AiPro
           },
         )
 
+        reportUsage(generateModel, final)
         return parseJsonResponse<GenerationResult>(final)
       } catch (error) {
         throw toProviderError(error, { model: generateModel, label: provider.label })
@@ -296,6 +318,7 @@ export async function createAnthropicProvider(provider: Provider): Promise<AiPro
             ),
         )
 
+        reportUsage(reviewModel, response)
         return parseJsonResponse<ModelReview>(response)
       } catch (error) {
         throw toProviderError(error, { model: reviewModel, label: provider.label })

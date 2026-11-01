@@ -6,16 +6,21 @@
     type CredentialStatus,
     type HealthCheckMode,
     type Settings,
+    type Transform,
+    type UsageStore,
   } from '@shared/types'
   import { ACCENT_COLOURS } from '@shared/accents'
   import Toggle from '@sidebar/components/Toggle.svelte'
   import ProviderSettings from './ProviderSettings.svelte'
+  import UsageSettings from './UsageSettings.svelte'
   import VaultSettings from './VaultSettings.svelte'
   import { loadVaultAndStatuses } from './vault-load'
 
   let settings = $state<Settings | null>(null)
   let statuses = $state<CredentialStatus[]>([])
   let vault = $state({ sealed: false, unlocked: true })
+  let usage = $state<UsageStore>({ months: {}, transforms: {} })
+  let transformNames = $state<Record<string, string>>({})
 
   const HEALTH_MODES: { value: HealthCheckMode; label: string; note: string }[] = [
     { value: 'every-load', label: 'Every page load', note: 'Default' },
@@ -43,6 +48,19 @@
     const loaded = await loadVaultAndStatuses(call)
     vault = loaded.vault
     statuses = loaded.statuses
+    // Usage is not secret and does not depend on the vault. A failure to read
+    // it leaves the section empty and does not stop the page from loading.
+    try {
+      usage = await call<UsageStore>({ type: 'get-usage' })
+      const names: Record<string, string> = {}
+      for (const id of Object.keys(usage.transforms)) {
+        const found = await call<Transform | null>({ type: 'get-transform', id })
+        if (found) names[id] = found.name
+      }
+      transformNames = names
+    } catch {
+      // Left as it was.
+    }
     // Assigned last, so the page never renders with the initial vault value
     // below, which describes an unsealed vault, before the real one is known.
     settings = loadedSettings
@@ -107,6 +125,8 @@
       onclearkey={clearKey}
       onconnectoauth={connectOAuth}
     />
+
+    <UsageSettings {usage} providers={settings.providers} {transformNames} />
 
     <VaultSettings
       {vault}

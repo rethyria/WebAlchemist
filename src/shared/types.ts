@@ -304,6 +304,60 @@ export interface Provider {
    * OpenAI-compatible endpoints there is no equivalent, so it is set by hand.
    */
   supportsVision: boolean
+  /**
+   * Optional price the user entered, in US dollars per million tokens. Used for
+   * OpenAI-compatible providers only, because they have no price list the
+   * extension could read. Anthropic prices come from ANTHROPIC_MODELS.
+   */
+  price?: TokenPrice
+}
+
+/** US dollars per million tokens. */
+export interface TokenPrice {
+  input: number
+  output: number
+}
+
+/** Token counts a provider reported for one call. */
+export interface TokenUsage {
+  inputTokens: number
+  outputTokens: number
+}
+
+/**
+ * What one model call used, for showing in the panel.
+ *
+ * `usage` is null when the response carried no usable usage block, which the
+ * panel shows as "not reported" and which is not the same as zero tokens.
+ * `costUsd` is null when no price is known for the model.
+ */
+export interface UsageReport {
+  model: string
+  usage: TokenUsage | null
+  costUsd: number | null
+}
+
+/** Running totals for one provider in one month, or for one transform. */
+export interface UsageTotals {
+  /** Every call made, including those whose response had no usage block. */
+  calls: number
+  /** Calls whose response reported usage. The token sums cover these only. */
+  reportedCalls: number
+  inputTokens: number
+  outputTokens: number
+  /** Cost of the calls that had a price. Summed when each call was made. */
+  costUsd: number
+  /** Calls that were priced; may be fewer than reportedCalls. */
+  pricedCalls: number
+}
+
+/**
+ * Everything recorded. Months are UTC calendar months written "2026-11",
+ * since providers bill and reset limits on UTC.
+ */
+export interface UsageStore {
+  months: Record<string, Record<string, UsageTotals>>
+  transforms: Record<string, UsageTotals>
 }
 
 /** What the sidebar is allowed to know about a credential. Never the value. */
@@ -420,6 +474,8 @@ export interface ReviewResult {
   model?: ModelReview
   /** False when anything blocking is outstanding. */
   passed: boolean
+  /** Present when a model call was made for this result. */
+  usage?: UsageReport
 }
 
 /* ------------------------------------------------------------------ */

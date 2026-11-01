@@ -34,10 +34,13 @@ import {
   REVIEW_SCHEMA,
   type AiProvider,
   type GenerateRequest,
+  type UsageListener,
 } from './types'
+import { readUsage } from '@shared/usage'
 
 export async function createOpenAiCompatibleProvider(
   provider: Provider,
+  onUsage?: UsageListener,
 ): Promise<AiProvider> {
   if (!provider.baseUrl) {
     throw new ProviderError(
@@ -160,7 +163,10 @@ export async function createOpenAiCompatibleProvider(
      * browser's own parser message, which says nothing about what went wrong
      * or whose fault it is.
      */
-    let payload: { choices?: { message?: { content?: string }; finish_reason?: string }[] }
+    let payload: {
+      choices?: { message?: { content?: string }; finish_reason?: string }[]
+      usage?: unknown
+    }
     try {
       payload = (await response.json()) as typeof payload
     } catch (error) {
@@ -171,6 +177,15 @@ export async function createOpenAiCompatibleProvider(
         { cause: error },
       )
     }
+    /*
+     * Reported before the content is checked, because a response that is empty
+     * or cannot be parsed was still generated and billed. Many local servers
+     * and some gateways omit `usage`; that is reported as null, not zero.
+     */
+    onUsage?.({
+      model: args.model,
+      usage: readUsage(payload?.usage, { input: 'prompt_tokens', output: 'completion_tokens' }),
+    })
     const text = payload.choices?.[0]?.message?.content
     if (!text) {
       throw new ProviderError(

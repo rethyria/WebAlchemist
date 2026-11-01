@@ -16,6 +16,8 @@ import type {
 import { matchesUrl } from '@shared/match'
 import type {
   Accent,
+  GenerationResult,
+  ModelReview,
   PageContext,
   Rect,
   ReviewResult,
@@ -50,6 +52,7 @@ import { withKeepalive } from './keepalive'
 import { isContentEvent as isContentEventType, isExtensionPage } from './sender'
 import { connect as connectOAuth } from './oauth'
 import { resolveActiveProvider, ProviderError } from './providers'
+import { createUsageRecorder } from './usage'
 import {
   hasUserScriptsPermission,
   registerPreview,
@@ -70,6 +73,7 @@ import {
   getAllTransforms,
   getCredentialStatus,
   getSettings,
+  getUsage,
   handleVaultIdleAlarm,
   importTransforms,
   lockVault,
@@ -386,14 +390,19 @@ async function handle(
     }
 
     case 'generate': {
-      const provider = await resolveActiveProvider()
-      return withKeepalive(() =>
-        provider.generate({
-          context: message.context,
-          instruction: message.instruction,
-          history: message.history,
-        }),
-      )
+      const usage = createUsageRecorder(message.transformId)
+      try {
+        const provider = await resolveActiveProvider(usage.listener)
+        return await withKeepalive(() =>
+          provider.generate({
+            context: message.context,
+            instruction: message.instruction,
+            history: message.history,
+          }),
+        )
+      } finally {
+        await usage.settled()
+      }
     }
 
     case 'repair': {
@@ -401,24 +410,40 @@ async function handle(
       const existing = transforms.find((t) => t.id === message.transformId)
       if (!existing) throw new Error('That transform no longer exists.')
 
-      const provider = await resolveActiveProvider()
-      return withKeepalive(() =>
-        provider.generate({
-          context: message.context,
-          instruction: existing.intent,
-          history: [],
-          repair: {
-            intent: existing.intent,
-            previousCode: existing.code,
-            previousRationale: existing.rationale,
-            brokenReason: message.brokenReason,
-          },
-        }),
-      )
+      const usage = createUsageRecorder(existing.id)
+      let result: GenerationResult
+      try {
+        const provider = await resolveActiveProvider(usage.listener)
+        result = await withKeepalive(() =>
+          provider.generate({
+            context: message.context,
+            instruction: existing.intent,
+            history: [],
+            repair: {
+              intent: existing.intent,
+              previousCode: existing.code,
+              previousRationale: existing.rationale,
+              brokenReason: message.brokenReason,
+            },
+          }),
+        )
+      } finally {
+        // In `finally` so a billed call that then failed to parse is counted.
+        await usage.settled()
+      }
+      return { result, usage: await usage.settled() }
     }
 
     case 'review':
-      return runReview(message.code, message.intent, message.declaredCapabilities)
+      return runReview(
+        message.code,
+        message.intent,
+        message.declaredCapabilities,
+        message.transformId,
+      )
+
+    case 'get-usage':
+      return getUsage()
 
     case 'analyse':
       return runStaticAnalysis(message.code, message.declaredCapabilities)
@@ -931,6 +956,8 @@ interface GenerateOverPort {
    * valid without a badge to update.
    */
   tabId?: number
+  /** The transform being authored or repaired, for attributing cost. */
+  transformId?: string
 }
 
 /**
@@ -956,9 +983,10 @@ async function runGeneration(
     await restoreBadgeFacts(tabId, accent)
     await badge.generationStarted(tabId, accent)
   }
+  const usage = createUsageRecorder(request.transformId)
 
   try {
-    const provider = await resolveActiveProvider()
+    const provider = await resolveActiveProvider(usage.listener)
     port.postMessage({ type: 'sent' })
 
     const result = await withKeepalive(() =>
@@ -975,7 +1003,7 @@ async function runGeneration(
         : provider.generate(request),
     )
 
-    port.postMessage({ type: 'done', result })
+    port.postMessage({ type: 'done', result, usage: await usage.settled() })
   } catch (error) {
     port.postMessage({
       type: 'error',
@@ -992,6 +1020,9 @@ async function runGeneration(
           : { message: error instanceof Error ? error.message : String(error) },
     })
   } finally {
+    // A call that was billed and then failed to parse is still counted. After
+    // `done` this has nothing left to wait for.
+    await usage.settled()
     // In `finally` so a failed generation does not leave the tab showing `··`
     // for as long as the tab is open.
     if (tabId !== undefined) {
@@ -1072,11 +1103,13 @@ async function runReview(
   code: string,
   intent: string,
   declared: Transform['capabilities'],
+  transformId?: string,
 ): Promise<ReviewResult> {
   const analysis = runStaticAnalysis(code, declared)
   if (!analysis.passed) return analysis
 
-  const provider = await resolveActiveProvider()
+  const usage = createUsageRecorder(transformId)
+  const provider = await resolveActiveProvider(usage.listener)
   // No page content crosses into this call. That is the entire basis of the
   // reviewer's independence — see REVIEW_SYSTEM_PROMPT.
   //
@@ -1084,9 +1117,21 @@ async function runReview(
   // arrives over sendMessage rather than a port — a pending listener promise
   // resets the idle timer exactly once, giving it 60 seconds before the page
   // is suspended and the caller is told the receiving end does not exist.
-  const model = await withKeepalive(() => provider.review({ code, intent }))
+  let model: ModelReview
+  try {
+    model = await withKeepalive(() => provider.review({ code, intent }))
+  } finally {
+    // In `finally` so a billed response that failed to parse is still counted.
+    await usage.settled()
+  }
 
-  return { ...analysis, model, passed: model.verdict === 'match' }
+  const report = await usage.settled()
+  return {
+    ...analysis,
+    model,
+    passed: model.verdict === 'match',
+    ...(report ? { usage: report } : {}),
+  }
 }
 
 /* ------------------------------------------------------------------ */

@@ -23,6 +23,7 @@
   import Picking from './components/Picking.svelte'
   import Refining from './components/Refining.svelte'
   import Reviewing from './components/Reviewing.svelte'
+  import UsageLine from './components/UsageLine.svelte'
   import Saving from './components/Saving.svelte'
   import SettingsPanel from './components/Settings.svelte'
   import type { VaultView } from '@shared/vault-disclosure'
@@ -610,6 +611,7 @@
       ondiscard={() => void flow.discard()}
       onkeep={() => flow.toSaving()}
     />
+    <UsageLine report={flow.lastUsage} />
   {:else if flow.step === 'saving' && flow.result}
     <Saving
       result={flow.result}
@@ -632,6 +634,7 @@
       onsave={() => void flow.save()}
       onback={() => flow.toSaving()}
     />
+    <UsageLine report={flow.lastUsage} />
   {:else if transforms.length === 0}
     <div class="empty">
       <div class="diagram" aria-hidden="true">

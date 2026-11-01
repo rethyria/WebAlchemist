@@ -43,8 +43,11 @@ import {
   type Credential,
   type CredentialStatus,
   type Settings,
+  type TokenUsage,
   type Transform,
+  type UsageStore,
 } from '@shared/types'
+import { addCall, monthOf } from '@shared/usage'
 import {
   LockedError,
   deriveKey,
@@ -66,6 +69,7 @@ import type { Provider } from '@shared/types'
 const KEY_SETTINGS = 'settings'
 const KEY_TRANSFORMS = 'transforms'
 const KEY_CREDENTIALS = 'credentials'
+const KEY_USAGE = 'usage'
 
 type CredentialMap = Record<string, Credential>
 
@@ -93,6 +97,14 @@ export async function saveSettings(settings: Settings): Promise<void> {
   for (const provider of settings.providers) {
     for (const [what, url] of endpointsOf(provider)) {
       assertEndpoint(url, `${what} of ${provider.label}`)
+    }
+  }
+  for (const provider of settings.providers) {
+    const price = provider.price
+    if (price === undefined) continue
+    const valid = (n: unknown) => typeof n === 'number' && Number.isFinite(n) && n >= 0
+    if (!valid(price.input) || !valid(price.output)) {
+      throw new Error(`The price for ${provider.label} must be two numbers of 0 or more.`)
     }
   }
   await browser.storage.local.set({ [KEY_SETTINGS]: settings })
@@ -765,6 +777,57 @@ export async function getAllCredentialStatuses(): Promise<CredentialStatus[]> {
   const map = await readCredentialMap()
   const settings = await getSettings()
   return settings.providers.map((provider) => statusFor(provider.id, provider, map[provider.id]))
+}
+
+/* ------------------------------------------------------------------ */
+/* Usage                                                               */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Calls to recordUsage run one after another. Each is a read, an add and a
+ * write of the whole store, and a review that finishes while a generation is
+ * being recorded would otherwise read the same starting value and one of the
+ * two additions would be lost.
+ */
+let usageQueue: Promise<unknown> = Promise.resolve()
+
+export async function getUsage(): Promise<UsageStore> {
+  const stored = (await browser.storage.local.get(KEY_USAGE))[KEY_USAGE] as
+    | Partial<UsageStore>
+    | undefined
+  return { months: stored?.months ?? {}, transforms: stored?.transforms ?? {} }
+}
+
+/**
+ * Adds one call to the provider's total for the month and, when the call
+ * belongs to a transform, to that transform's total. A call whose response had
+ * no usage block still counts as a call, so "not reported" is visible in the
+ * totals and is not turned into zero tokens.
+ */
+export function recordUsage(call: {
+  providerId: string
+  transformId?: string
+  usage: TokenUsage | null
+  costUsd: number | null
+  at?: number
+}): Promise<void> {
+  const run = async () => {
+    const store = await getUsage()
+    const month = monthOf(call.at ?? Date.now())
+    const byProvider = (store.months[month] ??= {})
+    byProvider[call.providerId] = addCall(byProvider[call.providerId], call.usage, call.costUsd)
+    if (call.transformId) {
+      store.transforms[call.transformId] = addCall(
+        store.transforms[call.transformId],
+        call.usage,
+        call.costUsd,
+      )
+    }
+    await browser.storage.local.set({ [KEY_USAGE]: store })
+  }
+  const next = usageQueue.then(run, run)
+  usageQueue = next.catch(() => undefined)
+  return next
 }
 
 /* ------------------------------------------------------------------ */

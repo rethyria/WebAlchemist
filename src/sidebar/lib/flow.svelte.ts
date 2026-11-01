@@ -41,6 +41,7 @@ import type {
   TransformKind,
   TreePath,
   TreeRow,
+  UsageReport,
 } from '@shared/types'
 import { extractPartialString } from '@shared/partial-json'
 import { BackgroundError, generateOverPort, send } from './messaging.svelte'
@@ -209,6 +210,21 @@ export class Flow {
    * same path as saving is what makes the preview trustworthy.
    */
   draft = $state<Transform | null>(null)
+  /**
+   * What the last model call used, kept for the panel. Undefined until a call
+   * returns a response; a report whose `usage` is null means the provider sent
+   * no usage block, which the panel shows as "not reported".
+   */
+  lastUsage = $state<UsageReport | undefined>(undefined)
+  /**
+   * The id a new transform will be saved under, chosen before the first
+   * request so that the cost of generating and reviewing it is attributed to
+   * it. An existing transform keeps its own id through `draft`.
+   */
+  private pendingId: string | null = null
+  private transformKey(): string {
+    return this.draft?.id ?? (this.pendingId ??= crypto.randomUUID())
+  }
   /** Exactly what was injected, so removal takes the same string back out. */
   previewedCss = $state<string | null>(null)
   /** Set once the draft has been registered and the page reloaded. */
@@ -821,13 +837,15 @@ export class Flow {
       this.streamed = ''
       this.thinkingChars = 0
       this.streamedKind = transform.kind
-      const result = await send<GenerationResult>({
+      const repaired = await send<{ result: GenerationResult; usage?: UsageReport }>({
         type: 'repair',
         transformId: transform.id,
         context: found.context,
         brokenReason,
       })
       if (!current()) return
+      const result = repaired.result
+      if (repaired.usage) this.lastUsage = repaired.usage
 
       this.result = result
       // Not result.intent: the destination was never what broke.
@@ -1112,6 +1130,7 @@ export class Flow {
           scopeDepth: this.scopeDepth,
           scopeContainer: this.scopeContainer,
           tabId: this.tabId ?? undefined,
+          transformId: this.transformKey(),
         },
         {
           onSent: () => {
@@ -1121,6 +1140,9 @@ export class Flow {
             if (!current()) return
             this.stage = 'thinking'
             this.thinkingChars = characters
+          },
+          onUsage: (usage) => {
+            if (current() && usage) this.lastUsage = usage
           },
           onChunk: (accumulated) => {
             if (!current()) return
@@ -1352,7 +1374,7 @@ export class Flow {
   private buildDraft(result: GenerationResult, anchor: Anchor): Transform {
     const now = Date.now()
     return {
-      id: this.draft?.id ?? crypto.randomUUID(),
+      id: this.transformKey(),
       name: result.name,
       // A repair of a disabled transform must not switch it back on, and a
       // regeneration must not either.
@@ -1588,7 +1610,9 @@ export class Flow {
         // the code matches what the user says they wanted.
         intent: this.intent,
         declaredCapabilities: result.capabilities,
+        transformId: this.transformKey(),
       })
+      if (this.review.usage) this.lastUsage = this.review.usage
     } catch (cause) {
       this.step = 'saving'
       this.fail(cause, () => this.toReview())
@@ -1923,6 +1947,8 @@ export class Flow {
     this.followUp = ''
     this.result = null
     this.draft = null
+    this.pendingId = null
+    this.lastUsage = undefined
     this.previewedCss = null
     this.jsRan = false
     this.analysis = null

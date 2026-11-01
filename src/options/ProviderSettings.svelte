@@ -254,6 +254,29 @@
     })
   }
 
+  /**
+   * Saves the optional price of an OpenAI-compatible provider. Both fields
+   * empty removes it. One field filled and the other empty is not saved,
+   * because a half price would give a cost that counts one direction only.
+   */
+  async function setPrice(provider: Provider, input: string, output: string) {
+    let price: Provider['price']
+    if (input.trim() === '' && output.trim() === '') {
+      price = undefined
+    } else {
+      const parsed = { input: Number(input), output: Number(output) }
+      const valid = (n: number) => input.trim() !== '' && output.trim() !== '' && Number.isFinite(n) && n >= 0
+      if (!valid(parsed.input) || !valid(parsed.output)) return
+      price = parsed
+    }
+    const { price: _old, ...rest } = provider
+    const next: Provider = price ? { ...rest, price } : rest
+    await onsave({
+      ...settings,
+      providers: settings.providers.map((p) => (p.id === provider.id ? next : p)),
+    })
+  }
+
   async function removeProvider(provider: Provider) {
     if (busy) return
     busy = true
@@ -389,6 +412,44 @@
               onchange={(model) => void setModel(provider, 'reviewModel', model)}
             />
           </div>
+
+          {#if provider.type !== 'anthropic'}
+            <!--
+              Optional. These endpoints have no price list the extension could
+              read, so the totals show tokens only until a price is entered.
+            -->
+            <div class="price">
+              <span class="price-label">Price, US dollars per million tokens (optional)</span>
+              <label>
+                Input
+                <input
+                  type="number"
+                  min="0"
+                  step="any"
+                  value={provider.price?.input ?? ''}
+                  onchange={(event) => {
+                    const row = event.currentTarget.closest('.price')
+                    const fields = row?.querySelectorAll('input')
+                    void setPrice(provider, event.currentTarget.value, fields?.[1]?.value ?? '')
+                  }}
+                />
+              </label>
+              <label>
+                Output
+                <input
+                  type="number"
+                  min="0"
+                  step="any"
+                  value={provider.price?.output ?? ''}
+                  onchange={(event) => {
+                    const row = event.currentTarget.closest('.price')
+                    const fields = row?.querySelectorAll('input')
+                    void setPrice(provider, fields?.[0]?.value ?? '', event.currentTarget.value)
+                  }}
+                />
+              </label>
+            </div>
+          {/if}
 
           {#if editingKeyFor === provider.id}
             <div class="key-field">
@@ -659,6 +720,25 @@
     display: flex;
     flex-wrap: wrap;
     gap: var(--sp-6);
+  }
+
+  .price {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--sp-9);
+    font: 11px var(--font-ui);
+    color: var(--text-faint);
+  }
+
+  .price input {
+    width: 90px;
+    padding: 4px 8px;
+    border: 1px solid var(--border);
+    border-radius: var(--r-button);
+    background: var(--surface-sunken);
+    font: 11.5px var(--font-mono);
+    color: var(--text);
   }
 
   .models {
