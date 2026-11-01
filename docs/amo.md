@@ -35,7 +35,7 @@ The static analysis refuses dynamic `import()` with or without the network capab
 
 An earlier version of the design relied on a content security policy set per user script world (`connect-src 'none'`) to stop an undeclared network request. A measurement in Firefox showed that this does not work. With `connect-src 'none'` in force, `fetch`, `XMLHttpRequest`, `sendBeacon`, `WebSocket` and `EventSource` all reached a listening server from a user script world. Only an image request was stopped, by `img-src`. The test page and results are in `test/csp/`.
 
-The extension therefore does not treat the world's content security policy as a security boundary. The policy is still set, because it closes the image channel and costs nothing. The control that the extension relies on is the refusal to save code: the static analysis blocks every use of the network that the transform did not declare, and the user sees each declared capability before approving. The README and the comments in `src/background/registry.ts` describe this. Before submission, confirm that no remaining text calls the world policy a boundary (issue 61).
+The extension therefore does not treat the world's content security policy as a security boundary. The policy is still set, because it closes the image channel and costs nothing. The control that the extension relies on is the refusal to save code: the static analysis blocks every use of the network that the transform did not declare, and the user sees each declared capability before approving. The README and the comments in `src/background/registry.ts` describe this. Issue 61 rewrote the texts that called the world policy a boundary.
 
 ### Execution worlds
 
@@ -43,7 +43,7 @@ By default a script runs in the isolated user script world. The model may ask fo
 
 ### Build probes
 
-A build made with the environment variable `VITE_CSP_PROBE=1` adds a test handler and a sidebar button that send requests to `localhost:8787`. The release package is built without it. As of this writing, the names of the two probe message types still appear in the release build behind a check that rejects them; issue 60 tracks their removal. The packaging script reports them and fails on any mention of `localhost:8787`.
+A build made with the environment variable `VITE_CSP_PROBE=1` adds a test handler and a sidebar button that send requests to `localhost:8787`. The release package is built without it. The probe's message names and code are compiled only into a probe build (issue 60), and the packaging script fails when the release build contains `localhost:8787` or any of the probe's names.
 
 ## Permissions
 
@@ -186,7 +186,7 @@ The contact address is to be added by the owner before submission.
 
 These steps can be done only by the owner of the AMO account.
 
-1. Confirm the open items named above: issues 53, 60, 61 and 137, and the decision about `identity` and `tabs`.
+1. Confirm the open items named above: issues 53 and 137, and the decision about `identity` and `tabs`.
 2. Ask Mozilla, before preparing the listing, whether a user-approved script written by a remote model and registered through `userScripts` is acceptable. The review in issue 41 recommends doing so first.
 3. Check Mozilla's current data collection categories and adjust the manifest and this document if they differ from those named here.
 4. Raise the version in `package.json` and `src/manifest.json` together if this is not the first upload.

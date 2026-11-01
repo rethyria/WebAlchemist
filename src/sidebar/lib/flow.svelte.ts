@@ -2167,8 +2167,10 @@ export class Flow {
 
   /**
    * Drops every declared capability, per "Refuse storage". The code is saved
-   * unchanged — the transform's world CSP is built from this list, so removing
-   * an entry is what actually stops the call at runtime.
+   * unchanged. The capabilities are what the approval covers and what the user
+   * is shown. Firefox does not enforce them at runtime (see registry.ts), so
+   * removing an entry means that the static analysis refuses code that uses it
+   * when the code is saved or registered.
    *
    * Only static analysis is re-run. The model was asked whether the code
    * matches the intent; neither has changed, so asking again would be a second

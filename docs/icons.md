@@ -6,9 +6,9 @@ satisfy. Drawing the assets is not part of this; specifying them is.
 Everything below about Firefox's behaviour was measured against the running
 browser, not read from documentation. The method is at the end.
 
-## What exists now
+## State before the produced assets
 
-One file, `public/icons/icon.svg`, declared at every size for both the toolbar
+Before the assets in the next section were produced, there was one file, `public/icons/icon.svg`, declared at every size for both the toolbar
 and the sidebar. It is a dark rounded square holding a header bar, a light
 content block, and an accent block outlined with a dashed stroke.
 

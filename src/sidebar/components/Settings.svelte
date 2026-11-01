@@ -172,7 +172,7 @@
     <button type="button" class="link" onclick={onfullpage}>
       Open the full settings page →
     </button>
-    <span class="note">Adding providers, and export / import, live there.</span>
+    <span class="note">Adding providers lives there.</span>
   </footer>
 </div>
 

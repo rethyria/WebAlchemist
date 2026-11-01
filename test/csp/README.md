@@ -113,8 +113,9 @@ terminal 1. Exit code is 0 if everything was contained, 1 if anything escaped,
 
 ## If something escapes
 
-Do not leave the claim as written. Either tighten the directives in
-`cspForCapabilities` until the method is contained, or move that capability
-from `csp` to `disclosure` in `CAPABILITY_ENFORCEMENT` and let the review UI
-tell the user the truth — that refusing it means refusing the code, because
-the browser will not stop it.
+This happened on 2026-08-07. The changes that followed were to move `network`
+from `csp` to `disclosure` in `CAPABILITY_ENFORCEMENT`, to say in the review
+interface that refusing a capability means refusing the code, and to remove the
+statements that the browser stops an undeclared request. If a later Firefox
+release makes the probe report `blocked` for a method, the same map is where
+that capability would move back.
