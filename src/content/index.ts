@@ -9,6 +9,7 @@
  * sensitive content.
  */
 
+import { errorAttributeName, withScriptErrors } from '@shared/script-errors'
 import type { ConflictSpec, ContentEvent, ContentMessage, PickMode } from '@shared/messages'
 import type { OverlayPalette } from '@shared/accents'
 import type {
@@ -1469,8 +1470,21 @@ async function runHealthCheck(transforms: Transform[]): Promise<TransformRuntime
     }
   }
 
+  // Read last, once per check: see script-errors.ts for why this is not trusted.
+  const withErrors = (found: TransformRuntimeState[]) =>
+    withScriptErrors(
+      found,
+      (id) => transforms.find((t) => t.id === id)?.kind,
+      (id) => {
+        const name = errorAttributeName(id)
+        const text = document.documentElement.getAttribute(name)
+        if (text !== null) document.documentElement.removeAttribute(name)
+        return text
+      },
+    )
+
   settle()
-  if (pending.size === 0) return states
+  if (pending.size === 0) return withErrors(states)
 
   await new Promise<void>((resolve) => {
     const observer = new MutationObserver(() => {
@@ -1498,7 +1512,7 @@ async function runHealthCheck(transforms: Transform[]): Promise<TransformRuntime
     })
   }
 
-  return states
+  return withErrors(states)
 }
 
 /* ------------------------------------------------------------------ */

@@ -13,6 +13,7 @@
  */
 
 import type { Transform } from '@shared/types'
+import { errorAttributeName } from '@shared/script-errors'
 
 function jsString(value: string): string {
   return JSON.stringify(value)
@@ -29,12 +30,22 @@ export function wrapTransform(transform: Transform): string {
   'use strict';
   const NAME = ${jsString(transform.name)};
   const SCOPES = [${scopeCandidates.join(', ')}];
+  // Where the last error is recorded for the content script to read. The page
+  // can read and forge it, so it is for diagnostics only (see script-errors.ts).
+  const ERROR_ATTRIBUTE = ${jsString(errorAttributeName(transform.id))};
 
   const apply = () => {
     try {
       ${transform.code}
+      // A run that finishes clears an earlier error, so a failure that a later
+      // run fixes is not reported.
+      try { document.documentElement.removeAttribute(ERROR_ATTRIBUTE); } catch (_) {}
     } catch (error) {
       console.error('[Web Alchemist] transform failed:', NAME, error);
+      try {
+        const text = String((error && error.message) || error);
+        document.documentElement.setAttribute(ERROR_ATTRIBUTE, text.slice(0, 500));
+      } catch (_) { /* the document cannot be written; the console line remains */ }
     }
   };
 
