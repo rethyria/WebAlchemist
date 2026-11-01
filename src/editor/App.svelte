@@ -4,6 +4,7 @@
   import { matchPresetsFor, matchesUrl, originPermissionFor } from '@shared/match'
   import { send } from '@shared/messaging.svelte'
   import CodeArea from './CodeArea.svelte'
+  import { shouldConfirmLeaving } from './unload'
 
   /**
    * A page rather than a panel.
@@ -235,6 +236,7 @@
          */
         await browser.storage.session.remove(`wa-draft-${draftKey}`)
         history.replaceState(null, '', `?id=${encodeURIComponent(next.id)}`)
+        reloadingAfterCreate = true
         location.reload()
       }
     } catch (cause) {
@@ -251,8 +253,10 @@
   }
 
   /* Closing a tab is not undoable, and neither is losing what is in it. */
+  let reloadingAfterCreate = false
+
   function guard(event: BeforeUnloadEvent) {
-    if (!dirty) return
+    if (!shouldConfirmLeaving(dirty, reloadingAfterCreate)) return
     event.preventDefault()
   }
 
