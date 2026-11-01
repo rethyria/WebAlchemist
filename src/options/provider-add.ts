@@ -1,4 +1,4 @@
-import type { CredentialStatus, Provider, Settings } from '@shared/types'
+import type { CredentialStatus, Provider, SettingsChange } from '@shared/types'
 
 type Call = <T>(message: { type: string; [field: string]: unknown }) => Promise<T>
 
@@ -28,50 +28,31 @@ export async function storeKey(
   }
 }
 
-/** The settings with one provider removed and the active choice repaired. */
-export function withoutProvider(settings: Settings, providerId: string): Settings {
-  const remaining = settings.providers.filter((p) => p.id !== providerId)
-  return {
-    ...settings,
-    providers: remaining,
-    activeProviderId:
-      settings.activeProviderId === providerId
-        ? (remaining[0]?.id ?? null)
-        : settings.activeProviderId,
-  }
-}
-
 /**
  * Saves a new provider and then its key, and takes the provider back out if
  * the key cannot be stored.
  *
  * The provider goes first because the background binds a key to the saved
- * provider's address and refuses a key for one it does not know. The rollback
- * removes only this provider from the settings as they are now, read again,
- * and does not write back the snapshot from before the add. Another page may
- * have saved a change in between, such as the switch that stops AI-written
- * JavaScript, and writing the old snapshot would undo it.
+ * provider's address and refuses a key for one it does not know. Both the add
+ * and the rollback are changes that the background applies to the settings as
+ * they are stored at that moment. The page does not write back the settings it
+ * loaded, because another page may have saved a change since then, such as the
+ * switch that stops AI-written JavaScript, and writing the loaded copy would
+ * undo it.
  */
 export async function addProviderWithKey(
   deps: {
-    current: () => Settings
-    readSettings: () => Promise<Settings>
-    save: (settings: Settings) => Promise<void>
+    change: (change: SettingsChange) => Promise<void>
     setKey: (providerId: string, key: string) => Promise<void>
   },
   provider: Provider,
   key: string,
 ): Promise<void> {
-  const settings = deps.current()
-  await deps.save({
-    ...settings,
-    providers: [...settings.providers, provider],
-    activeProviderId: settings.activeProviderId ?? provider.id,
-  })
+  await deps.change({ kind: 'add-provider', provider })
   try {
     await deps.setKey(provider.id, key)
   } catch (error) {
-    await deps.save(withoutProvider(await deps.readSettings(), provider.id))
+    await deps.change({ kind: 'remove-provider', providerId: provider.id })
     throw error
   }
 }

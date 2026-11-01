@@ -1,5 +1,6 @@
 <script lang="ts">
   import { highlight } from '@shared/highlight'
+  import { indentEdit } from './indent'
 
   interface Props {
     value: string
@@ -59,13 +60,22 @@
     event.preventDefault()
 
     const target = event.currentTarget as HTMLTextAreaElement
-    const { selectionStart, selectionEnd } = target
-    const next = `${value.slice(0, selectionStart)}  ${value.slice(selectionEnd)}`
-    onchange(next)
-    // Restored after Svelte writes the new value back into the field.
-    requestAnimationFrame(() => {
-      target.selectionStart = target.selectionEnd = selectionStart + 2
-    })
+    const edit = indentEdit(value, target.selectionStart, target.selectionEnd, event.shiftKey)
+
+    /*
+     * Applied as an edit of the textarea itself, so the browser records it in
+     * the undo history. The previous code computed a whole new value and set
+     * it from script, which replaced the selection and, in Firefox, probably
+     * cleared the undo history (not measured). setRangeText is the fallback for
+     * a browser where the editing command is refused; it does not record an
+     * undo step, so it raises the input event itself.
+     */
+    target.setSelectionRange(edit.from, edit.to)
+    if (!document.execCommand('insertText', false, edit.text)) {
+      target.setRangeText(edit.text, edit.from, edit.to, 'end')
+      target.dispatchEvent(new Event('input', { bubbles: true }))
+    }
+    target.setSelectionRange(edit.selectionStart, edit.selectionEnd)
   }
 </script>
 

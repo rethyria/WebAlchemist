@@ -10,6 +10,7 @@
    * The field is therefore always empty on open. Typing into it replaces
    * whatever is stored; leaving it alone changes nothing.
    */
+  import { REVOKE_KEY_NOTICE } from '@shared/disclosure'
   import {
     ANTHROPIC_MODELS,
     DEFAULT_GENERATE_MODEL,
@@ -18,6 +19,7 @@
     type Provider,
     type ProviderType,
     type Settings,
+    type SettingsChange,
   } from '@shared/types'
   import { endpointProblem } from '@shared/endpoint-policy'
   import ModelPicker from './ModelPicker.svelte'
@@ -27,15 +29,13 @@
   interface Props {
     settings: Settings
     statuses: CredentialStatus[]
-    onsave: (settings: Settings) => Promise<void>
+    onchange: (change: SettingsChange) => Promise<void>
     onsetkey: (providerId: string, key: string) => Promise<void>
-    /** The settings as stored now, for the rollback of a failed add. */
-    onreadsettings: () => Promise<Settings>
     onclearkey: (providerId: string) => Promise<void>
     onconnectoauth: (providerId: string) => Promise<void>
   }
 
-  let { settings, statuses, onsave, onsetkey, onreadsettings, onclearkey, onconnectoauth }: Props = $props()
+  let { settings, statuses, onchange, onsetkey, onclearkey, onconnectoauth }: Props = $props()
 
   /*
    * The sidebar links here with #models after a model error. A browser scrolls
@@ -127,10 +127,7 @@
         clientId: oauthDraft.clientId.trim(),
         scopes: oauthDraft.scopes.split(/\s+/).filter(Boolean),
       }
-      await onsave({
-        ...settings,
-        providers: settings.providers.map((p) => (p.id === provider.id ? { ...p, oauth } : p)),
-      })
+      await onchange({ kind: 'update-provider', providerId: provider.id, set: { oauth } })
 
       await onconnectoauth(provider.id)
       editingOAuthFor = null
@@ -205,9 +202,7 @@
       // does to the provider.
       await addProviderWithKey(
         {
-          current: () => settings,
-          readSettings: onreadsettings,
-          save: onsave,
+          change: onchange,
           setKey: onsetkey,
         },
         provider,
@@ -236,7 +231,9 @@
     field: 'generateModel' | 'reviewModel',
     model: string,
   ) {
-    const next = { ...provider, [field]: model }
+    const set: Partial<Pick<Provider, 'generateModel' | 'reviewModel' | 'supportsVision'>> = {
+      [field]: model,
+    }
 
     // Vision support gates the screenshot toggle, so it has to follow the
     // generation model. For Anthropic the list knows; for an arbitrary
@@ -244,13 +241,10 @@
     // was set rather than being silently turned off.
     if (field === 'generateModel') {
       const known = ANTHROPIC_MODELS.find((m) => m.id === model)
-      if (known) next.supportsVision = known.vision
+      if (known) set.supportsVision = known.vision
     }
 
-    await onsave({
-      ...settings,
-      providers: settings.providers.map((p) => (p.id === provider.id ? next : p)),
-    })
+    await onchange({ kind: 'update-provider', providerId: provider.id, set })
   }
 
   /**
@@ -268,12 +262,11 @@
       if (!valid(parsed.input) || !valid(parsed.output)) return
       price = parsed
     }
-    const { price: _old, ...rest } = provider
-    const next: Provider = price ? { ...rest, price } : rest
-    await onsave({
-      ...settings,
-      providers: settings.providers.map((p) => (p.id === provider.id ? next : p)),
-    })
+    await onchange(
+      price
+        ? { kind: 'update-provider', providerId: provider.id, set: { price } }
+        : { kind: 'update-provider', providerId: provider.id, unset: ['price'] },
+    )
   }
 
   async function removeProvider(provider: Provider) {
@@ -281,15 +274,7 @@
     busy = true
     try {
       await onclearkey(provider.id)
-      const remaining = settings.providers.filter((p) => p.id !== provider.id)
-      await onsave({
-        ...settings,
-        providers: remaining,
-        activeProviderId:
-          settings.activeProviderId === provider.id
-            ? (remaining[0]?.id ?? null)
-            : settings.activeProviderId,
-      })
+      await onchange({ kind: 'remove-provider', providerId: provider.id })
     } finally {
       busy = false
     }
@@ -366,7 +351,7 @@
               <Button
                 small
                 onclick={() =>
-                  void onsave({ ...settings, activeProviderId: provider.id })}
+                  void onchange({ kind: 'fields', fields: { activeProviderId: provider.id } })}
               >
                 Make active
               </Button>
@@ -611,6 +596,8 @@
       </div>
     </div>
   {/if}
+
+  <p class="revoke">{REVOKE_KEY_NOTICE}</p>
 </section>
 
 <style>
@@ -633,6 +620,13 @@
     padding: var(--sp-13);
     border: 1px solid var(--border);
     border-radius: var(--r-card);
+  }
+
+  .revoke {
+    margin: var(--sp-11) 0 0;
+    max-width: 60ch;
+    font: 11.5px/1.5 var(--font-ui);
+    color: var(--text-faint);
   }
 
   .none p {

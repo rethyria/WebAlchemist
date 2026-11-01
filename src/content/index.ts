@@ -631,6 +631,8 @@ function onKeyDown(event: KeyboardEvent): void {
     case 'Escape':
       handled()
       stopPicking()
+      // The outline came down when a target pick started; put it back.
+      updateLock()
       void send({ type: 'picking-cancelled' })
       return
     case 'Enter':
@@ -1007,6 +1009,8 @@ function emitPicked(element: Element, region: Rect, drawn = false): void {
     target: describeTarget(element),
     tree: buildTree(element),
     viewportWidth: window.innerWidth,
+    devicePixelRatio: window.devicePixelRatio,
+    scrolledTo: { x: window.scrollX, y: window.scrollY },
   })
 }
 
@@ -1545,8 +1549,15 @@ async function handleMessage(message: ContentMessage) {
        * had thrown the first one away.
        */
       if (pickMode === 'target') {
+        /*
+         * Only the outline comes down. describedElement is kept until a new
+         * target is confirmed (emitPicked replaces it), because a cancelled
+         * "Change" returns to the element that was selected and needs the page
+         * to still hold it. Clearing it here left the page with no selection
+         * after a cancel: the scope request answered 0, expanding a node
+         * answered null, and the panel had no tree to show.
+         */
         lock.hide()
-        describedElement = null
       }
       startPicking(message.palette)
       return true
@@ -1568,6 +1579,20 @@ async function handleMessage(message: ContentMessage) {
 
       const element = resolution.element
       describedElement = element
+      /*
+       * What a pick sets, set here too. Tree paths are measured from
+       * pickedRoot, and without it every row of the tree had a null path, so
+       * none could be clicked, and an older pick's root would have been used
+       * if there was one. The scope starts at 0 and the flow then sets the
+       * saved depth; the outline is drawn because nothing else would draw it.
+       */
+      pickedRoot = element
+      expanded.clear()
+      lockDepth = 0
+      // updateLock draws nothing without a palette, and the palette is only
+      // otherwise set by start-picking, which a page may never have received.
+      palette = message.palette
+      updateLock()
       const anchor = captureAnchor(element)
       const region = boundingRectWithPadding(element)
       return {
@@ -1577,6 +1602,8 @@ async function handleMessage(message: ContentMessage) {
         cropClipped: exceedsViewport(region),
         target: describeTarget(element),
         viewportWidth: window.innerWidth,
+        devicePixelRatio: window.devicePixelRatio,
+        scrolledTo: { x: window.scrollX, y: window.scrollY },
         // For editing an intent, which re-enters the describing step and needs
         // the same list a pick would have produced. A repair ignores it.
         tree: buildTree(element),
@@ -1584,6 +1611,8 @@ async function handleMessage(message: ContentMessage) {
     }
     case 'cancel-picking':
       stopPicking()
+      // As with Escape: a cancelled target pick returns to the held element.
+      updateLock()
       return true
     case 'retarget':
       preview.unmount()
@@ -1638,6 +1667,14 @@ async function handleMessage(message: ContentMessage) {
       return { type: 'health-check-result', states: await runHealthCheck(message.transforms) }
     case 'ping':
       return true
+    case 'get-viewport':
+      return {
+        x: window.scrollX,
+        y: window.scrollY,
+        width: window.innerWidth,
+        height: window.innerHeight,
+        devicePixelRatio: window.devicePixelRatio,
+      }
     case 'url-changed':
       // Re-evaluation is driven from the background script, which owns the
       // record set; nothing to do here beyond dropping picker state.

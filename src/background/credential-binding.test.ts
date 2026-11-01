@@ -291,3 +291,154 @@ describe('binding keys stored before bindings existed, in one pass', () => {
     })
   })
 })
+
+describe('after the binding pass has run', () => {
+  async function withProvider(provider: Provider | null) {
+    const settings = await storage.getSettings()
+    await storage.saveSettings({
+      ...settings,
+      providers: provider ? [provider] : [],
+      activeProviderId: provider?.id ?? null,
+    })
+  }
+
+  // The pass skips a key whose provider is gone. Before the change, a provider
+  // with that id added later got the key bound to its address on first read.
+  it('refuses a key the pass skipped instead of binding it to a provider added later', async () => {
+    await storage.setCredential('p1', KEY)
+    await storage.bindStoredCredentials()
+    await withProvider(remote({ baseUrl: 'https://later.example.net/v1' }))
+
+    const error = await storage
+      .readCredentialForRequest(remote({ baseUrl: 'https://later.example.net/v1' }))
+      .catch((e: unknown) => e)
+
+    expect(error).toBeInstanceOf(storage.CredentialOriginError)
+    expect((error as Error).message).toMatch(/no recorded address/)
+    expect((await storage.readStoredCredential('p1'))?.boundTo).toBeUndefined()
+  })
+
+  // Control: with no pass recorded the same read binds, which is the legacy
+  // behaviour that is kept until the pass has run.
+  it('still binds on first read while no pass has run', async () => {
+    await storage.setCredential('p1', KEY)
+    const found = await storage.readCredentialForRequest(remote())
+    expect(found?.boundTo?.origin).toBe('https://api.example.com')
+  })
+
+  // Control: a bound key is not affected by the record.
+  it('still returns a bound key', async () => {
+    await storage.saveCredentialFor(remote(), KEY)
+    await storage.bindStoredCredentials()
+    expect(await storage.readCredentialForRequest(remote())).toMatchObject({ value: 'sk-secret' })
+  })
+
+  it('refuses the key in a request through the adapter and sends nothing', async () => {
+    await storage.setCredential('p1', KEY)
+    await storage.bindStoredCredentials()
+    const spy = stubFetch()
+
+    const adapter = await createOpenAiCompatibleProvider(remote())
+    const error = await adapter.review({ code: 'x', intent: 'y' }).catch((e: unknown) => e)
+
+    expect((error as ProviderError).kind).toBe('no-credential')
+    expect(spy).not.toHaveBeenCalled()
+  })
+
+  it('reports an unbound key as needing to be entered again, and not before the pass', async () => {
+    await withProvider(remote())
+    await storage.setCredential('p1', KEY)
+    expect((await storage.getAllCredentialStatuses())[0]!.needsReentry).toBeUndefined()
+
+    // A key whose provider was not configured when the pass ran stays unbound.
+    await withProvider(null)
+    await storage.bindStoredCredentials()
+    await withProvider(remote())
+
+    expect((await storage.getAllCredentialStatuses())[0]!).toMatchObject({ needsReentry: true })
+    expect(await storage.getCredentialStatus('p1')).toMatchObject({ needsReentry: true })
+  })
+
+  it('records the pass even when there is nothing to bind', async () => {
+    await storage.bindStoredCredentials()
+    expect(localArea.raw()['credentialBindingPassDone']).toBe(true)
+  })
+
+  // Control for the two tests above: a pass that throws records nothing, so it
+  // runs again at the next unlock.
+  it('does not record a pass that failed on a locked vault', async () => {
+    await withProvider(remote())
+    await storage.setCredential('p1', KEY)
+    await storage.enableVault('correct horse battery')
+    await storage.lockVault()
+    await expect(storage.bindStoredCredentials()).rejects.toThrow()
+    expect(localArea.raw()['credentialBindingPassDone']).toBeUndefined()
+
+    await storage.unlockVault('correct horse battery')
+    expect(localArea.raw()['credentialBindingPassDone']).toBe(true)
+  })
+})
+
+describe('unlocking when the binding pass fails', () => {
+  async function sealedWithKey() {
+    const settings = await storage.getSettings()
+    await storage.saveSettings({ ...settings, providers: [remote()], activeProviderId: 'p1' })
+    await storage.setCredential('p1', KEY)
+    await storage.enableVault('correct horse battery')
+    await storage.lockVault()
+  }
+
+  // Makes only the pass fail: the write of the credentials after unlock, which
+  // is the first write the pass makes, is refused.
+  function failTheBindingWrite() {
+    const original = localArea.set.bind(localArea)
+    localArea.set = (async (values: Record<string, unknown>) => {
+      if ('credentials' in values) throw new Error('storage write failed')
+      return original(values)
+    }) as typeof localArea.set
+    return () => (localArea.set = original as typeof localArea.set)
+  }
+
+  it('reports the failure separately and leaves the vault unlocked', async () => {
+    await sealedWithKey()
+    const restore = failTheBindingWrite()
+    const quiet = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      const result = await storage.unlockVault('correct horse battery')
+      expect(result.bindingError).toBe('storage write failed')
+    } finally {
+      restore()
+      quiet.mockRestore()
+    }
+    expect(await storage.vaultState()).toEqual({ sealed: true, unlocked: true })
+    expect(localArea.raw()['credentialBindingPassDone']).toBeUndefined()
+  })
+
+  it('logs the message and not the key', async () => {
+    await sealedWithKey()
+    const restore = failTheBindingWrite()
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      await storage.unlockVault('correct horse battery')
+    } finally {
+      restore()
+    }
+    expect(JSON.stringify(logged.mock.calls)).toContain('storage write failed')
+    expect(JSON.stringify(logged.mock.calls)).not.toContain('sk-secret')
+    logged.mockRestore()
+  })
+
+  // Controls: a pass that succeeds reports no error, and a wrong passphrase is
+  // still an error of the unlock itself.
+  it('reports no error when the pass succeeds', async () => {
+    await sealedWithKey()
+    expect(await storage.unlockVault('correct horse battery')).toEqual({ bindingError: null })
+    expect(localArea.raw()['credentialBindingPassDone']).toBe(true)
+  })
+
+  it('still fails the unlock for a wrong passphrase, and the vault stays locked', async () => {
+    await sealedWithKey()
+    await expect(storage.unlockVault('not the passphrase')).rejects.toThrow()
+    expect((await storage.vaultState()).unlocked).toBe(false)
+  })
+})

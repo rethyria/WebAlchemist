@@ -22,6 +22,7 @@ import type {
   Rect,
   ReviewResult,
   Settings,
+  SettingsChange,
   UsageReport,
   UsageStore,
   Conflict,
@@ -31,6 +32,7 @@ import type {
   TreeRow,
 } from './types'
 import type { Rule } from './css'
+import type { ScrollOffset } from './region'
 import type { OverlayPalette } from './accents'
 import type { RefinementTurn } from '@background/providers/types'
 
@@ -51,6 +53,8 @@ export type Message =
   | { type: 'get-transforms-for-url'; url: string }
   /** One record by id, for the editor page, which has no page URL of its own. */
   | { type: 'get-transform'; id: string }
+  /** Every saved transform, for the settings page's site access list. */
+  | { type: 'get-all-transforms' }
   | { type: 'get-credential-statuses' }
   | { type: 'get-vision-support' }
 
@@ -144,6 +148,8 @@ export type Message =
 
   /* --- settings and credentials ------------------------------------- */
   | { type: 'save-settings'; settings: Settings }
+  /** Applies one change to the stored settings and returns the settings as saved. */
+  | { type: 'patch-settings'; change: SettingsChange }
   | { type: 'set-credential'; providerId: string; credential: Credential }
   | { type: 'clear-credential'; providerId: string }
   /*
@@ -204,7 +210,26 @@ export type Message =
    * So the panel asks for it once, from the click that turns screenshots on,
    * and after that this simply works.
    */
-  | { type: 'capture-region'; tabId: number; rect: Rect; viewportWidth: number }
+  | {
+      type: 'capture-region'
+      tabId: number
+      rect: Rect
+      viewportWidth: number
+      /** The pixel ratio when `rect` was drawn; a change since then refuses the capture. */
+      devicePixelRatio?: number
+      /**
+       * The address of the page the run is about. The capture is refused when
+       * the run's tab is not the active tab or no longer shows this address,
+       * because captureVisibleTab photographs whichever tab is active.
+       */
+      url: string
+      /**
+       * How far the page was scrolled when `rect` was drawn. Present for a
+       * rectangle stored from a pick, which may be captured after the page has
+       * scrolled; absent for a region that is captured as soon as it is drawn.
+       */
+      scrolledTo?: ScrollOffset
+    }
   /**
    * `mode` decides what a confirmed pick means. 'target' replaces what the
    * transform acts on; 'reference' adds an element the follow-up can talk
@@ -276,7 +301,12 @@ export type ContentMessage =
   | { type: 'start-picking'; palette: OverlayPalette; mode: PickMode }
   | { type: 'cancel-picking' }
   | { type: 'recapture' }
-  | { type: 'context-for-anchor'; anchor: Anchor }
+  /**
+   * The palette travels with this request as it does with start-picking. A
+   * page that has had no pick has no palette, and the outline cannot be drawn
+   * without one.
+   */
+  | { type: 'context-for-anchor'; anchor: Anchor; palette: OverlayPalette }
   | { type: 'find-conflicts'; specs: ConflictSpec[] }
   /**
    * Takes the target outline down, and puts it back.
@@ -299,6 +329,8 @@ export type ContentMessage =
   | { type: 'url-changed'; url: string }
   /** Answered only by a live instance; the background uses it to avoid reinjecting. */
   | { type: 'ping' }
+  /** Answers the current scroll offset and viewport size. */
+  | { type: 'get-viewport' }
 
 /**
  * Sent from content script to sidebar, via the background script.
@@ -342,6 +374,9 @@ export type ContentEvent =
       tree: TreeRow[]
       /** CSS pixels, for scaling the crop against a device-pixel capture. */
       viewportWidth: number
+      devicePixelRatio: number
+      /** The scroll offset the crop was measured at. */
+      scrolledTo: ScrollOffset
     }
   | { type: 'picking-cancelled' }
   | {
@@ -377,6 +412,9 @@ export interface AnchoredElement {
   cropClipped: boolean
   target: HoverTarget
   viewportWidth: number
+  devicePixelRatio: number
+  /** The scroll offset the crop was measured at. */
+  scrolledTo: ScrollOffset
   /**
    * The subtree around the element, as a pick would have produced.
    *
@@ -405,6 +443,7 @@ export interface Responses {
   'get-settings': Settings
   'get-transforms-for-url': Transform[]
   'get-transform': Transform | null
+  'get-all-transforms': Transform[]
   'reapply-everywhere': boolean
   'get-credential-statuses': CredentialStatus[]
   /** The status after signing in, so settings can redraw without a re-fetch. */
@@ -426,7 +465,13 @@ export interface Responses {
   'clear-preview-js': boolean
   'export-transforms': { schemaVersion: number; exportedAt: number; transforms: Transform[] }
   'import-transforms': { imported: number; skipped: number; needsRegeneration: string[] }
-  'capture-region': { dataUrl: string; rect: Rect; clipped: boolean }
+  'capture-region': {
+    dataUrl: string
+    rect: Rect
+    clipped: boolean
+    /** True when the area was moved because the page scrolled after it was drawn. */
+    moved?: boolean
+  }
   'start-picking': boolean
   'stop-picking': boolean
   retarget: boolean

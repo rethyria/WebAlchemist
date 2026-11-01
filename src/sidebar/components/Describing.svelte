@@ -16,6 +16,7 @@
     /** The captured image, once there is one. */
     shotPreview: string | null
     shotClipped: boolean
+    shotMoved: boolean
     visionSupported: boolean
     onchange: (instruction: string) => void
     onscreenshot: (send: boolean) => void
@@ -43,6 +44,7 @@
     choosingRegion,
     shotPreview,
     shotClipped,
+    shotMoved,
     visionSupported,
     onchange,
     onscreenshot,
@@ -430,6 +432,11 @@
         {#if shotClipped}
           <p class="note">
             Clipped at the viewport — only the visible part was captured.
+          </p>
+        {/if}
+        {#if shotMoved}
+          <p class="note">
+            The area was moved because the page scrolled after it was drawn.
           </p>
         {/if}
         <button type="button" class="shot-action" onclick={() => onscreenshot(false)}>

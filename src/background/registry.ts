@@ -222,8 +222,40 @@ export function previewIdFor(id: string): string {
  * (a new transform) does nothing.
  */
 export async function registerPreview(transform: Transform): Promise<void> {
+  // The kill switch wins over a preview. A preview of model-written code is
+  // still model-written code running on a real page, and the switch exists to
+  // stop that. The alternative, running it because the user asked, was
+  // rejected: a setting that a button next to the code can bypass is not a
+  // kill switch. The refusal is thrown, and not returned silently, because
+  // registerTransform returns without registering in this case and the caller
+  // would then report a run that never happened. It is checked before the saved
+  // registration is paused, so a refused preview changes nothing.
+  const settings = await getSettings()
+  if (settings.aiJsKillSwitch && transform.origin === 'ai') {
+    throw new Error(
+      'JavaScript written by the model is switched off in the settings, so it was not run. Turn that setting off to run it.',
+    )
+  }
   await unregisterTransform(transform.id)
-  await registerTransform({ ...transform, id: previewIdFor(transform.id) })
+  try {
+    await registerPreviewScript(transform)
+  } catch (cause) {
+    // The saved script was paused above. A preview that fails to register
+    // would otherwise leave it paused with nothing running in its place, and
+    // the caller, which only records the preview after this returns, would
+    // not know to restore it.
+    await unregisterPreview(transform.id).catch(() => {})
+    throw cause
+  }
+}
+
+async function registerPreviewScript(transform: Transform): Promise<void> {
+  // `enabled` is forced on because the saved record's flag describes the saved
+  // script, not the question being asked, which is whether to run this draft
+  // now. The draft copies the saved flag, and registerTransform returns
+  // without registering a disabled transform, so a preview of a disabled
+  // script reloaded the page and ran nothing. The saved record is not changed.
+  await registerTransform({ ...transform, enabled: true, id: previewIdFor(transform.id) })
 }
 
 /**

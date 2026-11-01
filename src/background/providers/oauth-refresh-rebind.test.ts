@@ -4,7 +4,7 @@
  * storage and adapter code with `fetch` replaced; no network call is made.
  */
 
-import { resetBrowserMock } from '../test-support/browser-mock'
+import { localArea, resetBrowserMock } from '../test-support/browser-mock'
 import { beforeEach, describe, expect, it } from 'vitest'
 import type { Provider } from '@shared/types'
 import * as storage from '../storage'
@@ -83,10 +83,15 @@ async function run() {
   const newRequest = (await createOpenAiCompatibleProvider(NEW)).review(ARGS).catch((e: unknown) => e)
   await new Promise((resolve) => setTimeout(resolve, 20))
 
+  let oldSettled = false
+  void oldRequest.then(() => (oldSettled = true))
   oldAnswers.open()
   await new Promise((resolve) => setTimeout(resolve, 20))
+  // Read before the refresh is let go. A request that waited for the refresh
+  // would still be pending here.
+  const oldSettledBeforeRefreshEnded = oldSettled
   refreshAnswers.open()
-  return { sent, oldResult: await oldRequest, newResult: await newRequest }
+  return { sent, oldResult: await oldRequest, newResult: await newRequest, oldSettledBeforeRefreshEnded }
 }
 
 beforeEach(() => {
@@ -107,5 +112,91 @@ describe('a refresh for a re-bound credential', () => {
     // so the sequence did run a refresh and the old request could have joined it.
     expect(newResult).toEqual({ verdict: 'match', explanation: '' })
     expect(sent.some((s) => s.url.startsWith('https://b.example') && s.bearer === 'newB')).toBe(true)
+  })
+
+  // Fails on its own when the refresh key is changed back to the provider id
+  // alone: the old request then waits for the refresh of the new address, and
+  // is refused only after it ends. The re-read after a join would still refuse
+  // it, which is why the test above does not catch that change.
+  it('is not waited for by a request going to the old address', async () => {
+    const { oldSettledBeforeRefreshEnded, oldResult } = await run()
+    expect(oldSettledBeforeRefreshEnded).toBe(true)
+    expect(oldResult).toMatchObject({ kind: 'no-credential' })
+  })
+})
+
+describe('a request that joins a refresh for the same address', () => {
+  const EXPIRED = {
+    kind: 'oauth' as const,
+    accessToken: 'stale',
+    refreshToken: 'r1',
+    expiresAt: Date.now() - 1000,
+    tokenEndpoint: TOKEN_ENDPOINT,
+    clientId: 'c',
+  }
+
+  /**
+   * Two requests find the token expired. The first starts the refresh and the
+   * second joins it. When the refresh has stored its token, and before the
+   * joiner reads, the stored credential is replaced by an API key, which stands
+   * for the sign-in being removed or replaced in that gap.
+   */
+  async function joinWithReplacement(replace: boolean) {
+    await storage.saveCredentialFor(OLD, EXPIRED)
+    const refreshAnswers = gate()
+    const bearers: string[] = []
+    let refreshReturned = false
+    let replaced = false
+    let refreshes = 0
+    ;(globalThis as unknown as { fetch: unknown }).fetch = async (url: string, init: RequestInit) => {
+      if (url === TOKEN_ENDPOINT) {
+        refreshes += 1
+        await refreshAnswers.promise
+        refreshReturned = true
+        return new Response(JSON.stringify({ access_token: 'fresh', refresh_token: 'r2', expires_in: 3600 }))
+      }
+      bearers.push(((init.headers as Record<string, string>)['Authorization'] ?? '').replace('Bearer ', ''))
+      return new Response(OK)
+    }
+    // The first read of the credentials after the refresh has been stored.
+    const originalGet = localArea.get.bind(localArea)
+    localArea.get = (async (keys?: string | string[]) => {
+      const stored = (localArea.raw()['credentials'] as Record<string, { accessToken?: string }> | undefined)?.['p1']
+      if (replace && refreshReturned && !replaced && stored?.accessToken === 'fresh') {
+        replaced = true
+        localArea.raw()['credentials'] = {
+          p1: { kind: 'api_key', value: 'replacement-key', boundTo: { type: 'openai-compatible', origin: 'https://a.example' } },
+        }
+      }
+      return originalGet(keys)
+    }) as typeof localArea.get
+
+    try {
+      const first = (await createOpenAiCompatibleProvider(OLD)).review(ARGS)
+      const second = (await createOpenAiCompatibleProvider(OLD)).review(ARGS)
+      await new Promise((resolve) => setTimeout(resolve, 20))
+      refreshAnswers.open()
+      await Promise.all([first, second])
+    } finally {
+      localArea.get = originalGet as typeof localArea.get
+    }
+    return { bearers, replaced, refreshes }
+  }
+
+  it('sends what is stored when it continues, not the token the refresh returned', async () => {
+    const { bearers, replaced } = await joinWithReplacement(true)
+    expect(replaced).toBe(true)
+    // The first request used the token it refreshed; the second read the
+    // credential again and found the replacement.
+    expect([...bearers].sort()).toEqual(['fresh', 'replacement-key'])
+  })
+
+  // Control: without the replacement both requests send the refreshed token,
+  // and a single refresh served both, so the second did join.
+  it('sends the refreshed token on both requests when nothing was replaced', async () => {
+    const { bearers, replaced, refreshes } = await joinWithReplacement(false)
+    expect(replaced).toBe(false)
+    expect(refreshes).toBe(1)
+    expect(bearers).toEqual(['fresh', 'fresh'])
   })
 })

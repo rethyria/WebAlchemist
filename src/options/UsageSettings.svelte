@@ -9,7 +9,7 @@
    * them would understate the total.
    */
   import type { Provider, UsageStore, UsageTotals } from '@shared/types'
-  import { formatCost, formatTokens } from '@shared/usage'
+  import { NOT_SAVED_USAGE_ID, formatCost, formatTokens } from '@shared/usage'
 
   interface Props {
     usage: UsageStore
@@ -77,7 +77,7 @@
     <ul>
       {#each transformIds as id}
         <li>
-          <span class="name">{transformNames[id] ?? 'Transform not saved or deleted'}</span>
+          <span class="name">{id === NOT_SAVED_USAGE_ID ? 'Drafts that were not saved' : (transformNames[id] ?? 'Transform not saved or deleted')}</span>
           <span class="figures">{summary(usage.transforms[id] as UsageTotals)}</span>
         </li>
       {/each}

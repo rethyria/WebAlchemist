@@ -13,6 +13,7 @@ import type {
   MessageResponse,
 } from '@shared/messages'
 import { matchesUrl } from '@shared/match'
+import { regionAtScroll, viewportChanged, type ScrollOffset, type Viewport } from '@shared/region'
 import type {
   Accent,
   GenerationResult,
@@ -93,6 +94,8 @@ import {
   lockVault,
   reorderTransforms,
   saveSettings,
+  changeSettings,
+  foldUnsavedUsage,
   saveTransform,
   saveCredentialFor,
   unlockVault,
@@ -110,6 +113,21 @@ async function reregister(): Promise<void> {
 /* ------------------------------------------------------------------ */
 
 browser.runtime.onInstalled.addListener(async (details) => {
+  // First, before anything that reads settings or credentials. Keys stored
+  // before bindings existed are bound now, while the settings are still the
+  // ones they were entered under. A sealed vault is locked after a restart; its
+  // keys are bound when it is unlocked. A failure is logged and does not stop
+  // the registrations below; the pass runs again at the next unlock or update.
+  // Only the message is logged, never a credential.
+  if (details.reason === 'update' || details.reason === 'install') {
+    await bindStoredCredentials().catch((error: unknown) => {
+      console.error(
+        'Binding stored credentials failed:',
+        error instanceof Error ? error.message : 'unknown error',
+      )
+    })
+  }
+  await foldUnsavedUsage().catch(() => undefined)
   // The platform wipes every userScripts registration on update, and drops
   // dynamic content scripts too. Without this, transforms silently stop
   // working after an extension update — with no error, which is the worst
@@ -118,11 +136,10 @@ browser.runtime.onInstalled.addListener(async (details) => {
     await reregister()
     await reconcileContentScripts()
   }
-  // Keys stored before bindings existed are bound now, while the settings are
-  // still the ones they were entered under. A sealed vault is locked after a
-  // restart; its keys are bound when it is unlocked.
-  if (details.reason === 'update') await bindStoredCredentials().catch(() => {})
 })
+
+// Folds the usage of discarded drafts. See foldUnsavedUsage for why only here.
+browser.runtime.onStartup.addListener(() => void foldUnsavedUsage().catch(() => undefined))
 
 /*
  * Both directions matter. Firefox drops user script registrations when the
@@ -137,7 +154,13 @@ browser.alarms.onAlarm.addListener((alarm) => void handleVaultIdleAlarm(alarm))
 
 browser.permissions.onAdded.addListener(async (permissions) => {
   const granted = permissions.permissions as string[] | undefined
-  if (granted?.includes('userScripts')) await reregister()
+  // A JavaScript transform whose origin was revoked is not registered, and
+  // granting the origin again (from the sidebar's "Grant access") is not a
+  // userScripts grant, so it has to trigger registration too. reregister
+  // is idempotent, so running it for an origin that changes nothing is safe.
+  if (granted?.includes('userScripts') || (permissions.origins?.length ?? 0) > 0) {
+    await reregister()
+  }
   await reconcileContentScripts()
 })
 
@@ -360,6 +383,9 @@ async function handle(
     case 'get-transforms-for-url':
       return matchingTransforms(message.url)
 
+    case 'get-all-transforms':
+      return getAllTransforms()
+
     case 'get-transform': {
       const all = await getAllTransforms()
       return all.find((t) => t.id === message.id) ?? null
@@ -529,6 +555,13 @@ async function handle(
         reapplyAllTabs,
       })
 
+    case 'patch-settings': {
+      const saved = await changeSettings(message.change)
+      // The kill switch changes which scripts may run.
+      if (message.change.kind === 'fields') await reregister()
+      return saved
+    }
+
     case 'set-credential': {
       // The destination the key is bound to comes from the saved provider, not
       // from the message.
@@ -581,8 +614,7 @@ async function handle(
       return true
 
     case 'unlock-vault':
-      await unlockVault(message.passphrase)
-      return true
+      return unlockVault(message.passphrase)
 
     case 'lock-vault':
       await lockVault()
@@ -614,9 +646,27 @@ async function handle(
       if (!analysis.passed) {
         throw new Error('Static analysis rejected this code, so it was not run.')
       }
-      await registerPreview(message.transform)
-      await addPreviewedScript(message.transform.id, await windowOfTab(message.tabId))
-      await browser.tabs.reload(message.tabId)
+      // Recorded before registering: registerPreview pauses the saved script
+      // first, so a close of the sidebar during or after a failed registration
+      // has to find the id in storage to restore it.
+      const windowId = await windowOfTab(message.tabId)
+      await addPreviewedScript(message.transform.id, windowId)
+      try {
+        await registerPreview(message.transform)
+      } catch (cause) {
+        await removePreviewedScript(message.transform.id)
+        throw cause
+      }
+      try {
+        await browser.tabs.reload(message.tabId)
+      } catch (cause) {
+        // The preview is registered and the saved script paused, but the
+        // sidebar treats a rejected request as "nothing ran" and never sends a
+        // clear, so the registration is removed here.
+        await unregisterPreview(message.transform.id).catch(() => {})
+        await removePreviewedScript(message.transform.id)
+        throw cause
+      }
       return true
     }
 
@@ -658,8 +708,17 @@ async function handle(
     case 'recapture':
       return askContent(message.tabId, { type: 'recapture' })
 
-    case 'context-for-anchor':
-      return askContent(message.tabId, { type: 'context-for-anchor', anchor: message.anchor })
+    case 'context-for-anchor': {
+      // The page keeps the palette from the last start-picking, and a page
+      // that has had no pick has none, so Edit description drew no outline.
+      const settings = await getSettings()
+      const dark = matchMedia('(prefers-color-scheme: dark)').matches
+      return askContent(message.tabId, {
+        type: 'context-for-anchor',
+        anchor: message.anchor,
+        palette: overlayPaletteFor(settings.accent, dark),
+      })
+    }
 
     case 'suspend-transform': {
       const tab = await browser.tabs.get(message.tabId).catch(() => undefined)
@@ -749,7 +808,14 @@ async function handle(
     }
 
     case 'capture-region':
-      return captureWithLockDown(message.tabId, message.rect, message.viewportWidth)
+      return captureWithLockDown(
+        message.tabId,
+        message.rect,
+        message.viewportWidth,
+        message.url,
+        message.scrolledTo,
+        message.devicePixelRatio,
+      )
 
 
     case 'export-transforms':
@@ -1293,21 +1359,75 @@ async function captureWithLockDown(
   tabId: number,
   rect: Rect,
   viewportWidth: number,
-): Promise<{ dataUrl: string; rect: Rect; clipped: boolean }> {
+  url: string,
+  scrolledTo?: ScrollOffset,
+  devicePixelRatio?: number,
+): Promise<{ dataUrl: string; rect: Rect; clipped: boolean; moved: boolean }> {
+  /*
+   * A rectangle stored from a pick is in viewport coordinates, so it is moved
+   * by however far the page has scrolled since. Asked of the page, because
+   * the background cannot read it. Without a reply the rectangle is used as
+   * it is, which is what happened before and is right when nothing scrolled.
+   */
+  let target = rect
+  let moveClipped = false
+  let pageScrolled = false
+  // The width the rectangle is scaled by when the capture is cropped.
+  let width = viewportWidth
+  if (scrolledTo) {
+    const now = (await askContent(tabId, { type: 'get-viewport' })) as Viewport | undefined
+    if (now) {
+      if (viewportChanged({ width: viewportWidth, devicePixelRatio }, now)) {
+        throw new Error(
+          'The window size or zoom changed after you drew the area, so it no longer matches the page. Draw the area again.',
+        )
+      }
+      width = now.width
+      const moved = regionAtScroll(rect, scrolledTo, now)
+      if (!moved) {
+        throw new Error(
+          'The area you drew is no longer on screen. Scroll it back into view, or draw it again.',
+        )
+      }
+      target = moved.rect
+      moveClipped = moved.clipped
+      pageScrolled = now.x !== scrolledTo.x || now.y !== scrolledTo.y
+    }
+  }
   await sendToContent(tabId, { type: 'set-lock-visible', visible: false })
   try {
-    const shot = await captureRegion(rect, viewportWidth)
-    return { ...shot, rect }
+    const shot = await captureRegion(tabId, url, target, width)
+    return { ...shot, clipped: shot.clipped || moveClipped, rect: target, moved: pageScrolled }
   } finally {
     await sendToContent(tabId, { type: 'set-lock-visible', visible: true })
   }
 }
 
 async function captureRegion(
+  tabId: number,
+  url: string,
   rect: Rect,
   viewportWidth: number,
 ): Promise<{ dataUrl: string; clipped: boolean }> {
-  const full = await browser.tabs.captureVisibleTab({ format: 'png' })
+  // captureVisibleTab photographs whichever tab is active in a window, which
+  // after the user switches tabs is not the run's tab, and can be a different
+  // site they are signed in to. It is read again here, just before the call,
+  // rather than once when the request arrived.
+  const tab = await browser.tabs.get(tabId).catch(() => undefined)
+  if (!tab || tab.windowId === undefined) {
+    throw new Error('The page this run is about is no longer open, so nothing was captured.')
+  }
+  if (!tab.active) {
+    throw new Error(
+      'The page this run is about is not the tab in front, so nothing was captured. Switch back to it and try again.',
+    )
+  }
+  if (tab.url !== url) {
+    throw new Error(
+      'The page this run is about has moved to another address, so nothing was captured.',
+    )
+  }
+  const full = await browser.tabs.captureVisibleTab(tab.windowId, { format: 'png' })
 
   // Cropping happens here so the full-viewport capture never leaves this scope.
   const blob = await (await fetch(full)).blob()
