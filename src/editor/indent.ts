@@ -41,7 +41,10 @@ export function indentEdit(
   // A selection that ends at the start of a line does not include that line.
   const lastChar =
     selectionEnd > selectionStart && value[selectionEnd - 1] === "\n" ? 1 : 0;
-  const from = value.lastIndexOf("\n", selectionStart - 1) + 1;
+  // lastIndexOf treats a negative start as 0, so with the caret at 0 it would
+  // match a newline at index 0 and begin the edit on the second line.
+  const from =
+    selectionStart === 0 ? 0 : value.lastIndexOf("\n", selectionStart - 1) + 1;
   const lineEnd = value.indexOf("\n", selectionEnd - lastChar);
   const to = lineEnd === -1 ? value.length : lineEnd;
 

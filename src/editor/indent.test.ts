@@ -49,4 +49,17 @@ describe('indentEdit', () => {
   it('outdents the current line for Shift+Tab with a caret', () => {
     expect(apply('  ab', 3, 3, true)).toEqual({ value: 'ab', selection: [1, 1] })
   })
+
+  it('starts at the first line when the text begins with an empty line and the selection starts at 0', () => {
+    const result = apply('\na\nb', 0, 4)
+    expect(result.value).toBe('\n  a\n  b')
+    // Control: starting the edit on the second line moved the start of the
+    // selection to 2.
+    expect(result.selection).toEqual([0, 8])
+    expect(indentEdit('\na\nb', 0, 4, false).from).toBe(0)
+  })
+
+  it('still finds the start of the line for a selection that does not start at 0 (control)', () => {
+    expect(indentEdit('\naa\nb', 2, 5, false).from).toBe(1)
+  })
 })
