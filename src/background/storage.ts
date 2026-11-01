@@ -57,6 +57,7 @@ import {
   seal,
   unseal,
 } from './vault'
+import { MIN_PASSPHRASE_LENGTH } from '@shared/vault-policy'
 
 const KEY_SETTINGS = 'settings'
 const KEY_TRANSFORMS = 'transforms'
@@ -338,6 +339,34 @@ async function writeCredentialMap(map: CredentialMap): Promise<void> {
   })
 }
 
+/**
+ * Runs credential read-modify-write steps one at a time.
+ *
+ * Every change to the credential map reads it, edits it and writes it back, and
+ * each of those is an await. Two changes that overlap both read the same
+ * starting map and the later write discards the earlier one. That is how a
+ * rotated OAuth refresh token was lost when the vault was being enabled, and it
+ * also happens between two plain writes, such as two providers refreshing at
+ * once.
+ *
+ * Local to the credential map on purpose. Transform writes have the same
+ * problem and get their own queue; sharing one would make a credential write
+ * wait behind an unrelated transform write for no reason.
+ *
+ * A failed step must not stop the queue, so the chain continues from the
+ * settled result and the caller still receives its own rejection.
+ */
+let credentialQueue: Promise<unknown> = Promise.resolve()
+
+function withCredentialLock<T>(step: () => Promise<T>): Promise<T> {
+  const run = credentialQueue.then(step, step)
+  credentialQueue = run.then(
+    () => undefined,
+    () => undefined,
+  )
+  return run
+}
+
 /** Whether credentials are stored sealed, and whether they can be read now. */
 export async function vaultState(): Promise<{ sealed: boolean; unlocked: boolean }> {
   const stored = await browser.storage.local.get(KEY_CREDENTIALS)
@@ -352,15 +381,45 @@ export async function vaultState(): Promise<{ sealed: boolean; unlocked: boolean
  * The key is remembered for this session immediately, so enabling does not
  * lock the user out of the thing they just set up.
  */
-export async function enableVault(passphrase: string): Promise<void> {
-  const stored = await browser.storage.local.get(KEY_CREDENTIALS)
-  if (isSealed(stored[KEY_CREDENTIALS])) return
+const ALREADY_SEALED =
+  'The credentials are already protected by a passphrase. Remove that passphrase first to set a different one.'
 
-  const map = (stored[KEY_CREDENTIALS] as CredentialMap | undefined) ?? {}
+export async function enableVault(passphrase: string): Promise<void> {
+  // Checked here as well as in the settings page: this function is reached by
+  // a message that any extension context can send, and the page's check is
+  // only a convenience for the person typing.
+  if (passphrase.length < MIN_PASSPHRASE_LENGTH) {
+    throw new Error(`The passphrase must be at least ${MIN_PASSPHRASE_LENGTH} characters.`)
+  }
+
+  // Refused rather than ignored. Returning silently here let the settings page
+  // show a sealed vault as unencrypted, accept a new passphrase, and discard
+  // it, so the person believed a passphrase was in force that had never been
+  // applied. Checked before deriving so the refusal is immediate.
+  if (isSealed((await browser.storage.local.get(KEY_CREDENTIALS))[KEY_CREDENTIALS])) {
+    throw new Error(ALREADY_SEALED)
+  }
+
+  // The key is derived before the credential map is read, and the read, seal
+  // and write then happen inside the lock. Derivation takes several hundred
+  // milliseconds, and reading the map first meant sealing a copy that was
+  // already out of date by the time it was written.
   const salt = randomSalt()
   const key = await deriveKey(passphrase, salt)
-  await browser.storage.local.set({ [KEY_CREDENTIALS]: await seal(key, salt, JSON.stringify(map)) })
-  await rememberKey(key)
+
+  await withCredentialLock(async () => {
+    const stored = await browser.storage.local.get(KEY_CREDENTIALS)
+    // Checked again: another enable may have finished during the derivation.
+    if (isSealed(stored[KEY_CREDENTIALS])) throw new Error(ALREADY_SEALED)
+
+    const map = (stored[KEY_CREDENTIALS] as CredentialMap | undefined) ?? {}
+    await browser.storage.local.set({
+      [KEY_CREDENTIALS]: await seal(key, salt, JSON.stringify(map)),
+    })
+    // Still inside the lock: a write queued behind this one must find the key
+    // in the session, or it would fail as locked.
+    await rememberKey(key)
+  })
 }
 
 /**
@@ -377,9 +436,17 @@ export async function disableVault(passphrase: string): Promise<void> {
   if (!isSealed(existing)) return
 
   const key = await deriveKey(passphrase, saltOf(existing))
-  const map = JSON.parse(await unseal(key, existing)) as CredentialMap
-  await browser.storage.local.set({ [KEY_CREDENTIALS]: map })
-  await forgetKey()
+  await unseal(key, existing)
+
+  // The map is read again inside the lock, because a write may have landed
+  // during the derivation and the copy decrypted above would not include it.
+  await withCredentialLock(async () => {
+    const latest = (await browser.storage.local.get(KEY_CREDENTIALS))[KEY_CREDENTIALS]
+    if (!isSealed(latest)) return
+    const map = JSON.parse(await unseal(key, latest)) as CredentialMap
+    await browser.storage.local.set({ [KEY_CREDENTIALS]: map })
+    await forgetKey()
+  })
 }
 
 /** Derives and remembers the key for this browser session. */
@@ -405,10 +472,22 @@ export async function lockVault(): Promise<void> {
  * There is no recovery — that is the property being bought. Discarding the
  * credentials and starting over is the honest alternative to pretending
  * otherwise, and it is destructive enough that the UI asks twice.
+ *
+ * Allowed only when the credentials are sealed and locked, the one state a
+ * forgotten passphrase produces. Without this check the message deleted
+ * plaintext keys when the page's view of the vault was wrong, and deleted
+ * readable keys from an unlocked vault, where "Remove the passphrase" is the
+ * path that keeps them.
  */
 export async function discardVault(): Promise<void> {
-  await browser.storage.local.remove(KEY_CREDENTIALS)
-  await forgetKey()
+  await withCredentialLock(async () => {
+    const state = await vaultState()
+    if (!state.sealed || state.unlocked) {
+      throw new Error('Stored credentials can be discarded only while they are sealed and locked.')
+    }
+    await browser.storage.local.remove(KEY_CREDENTIALS)
+    await forgetKey()
+  })
 }
 
 /**
@@ -427,15 +506,19 @@ export async function setCredential(
   providerId: string,
   credential: Credential,
 ): Promise<void> {
-  const map = await readCredentialMap()
-  map[providerId] = credential
-  await writeCredentialMap(map)
+  await withCredentialLock(async () => {
+    const map = await readCredentialMap()
+    map[providerId] = credential
+    await writeCredentialMap(map)
+  })
 }
 
 export async function clearCredential(providerId: string): Promise<void> {
-  const map = await readCredentialMap()
-  delete map[providerId]
-  await writeCredentialMap(map)
+  await withCredentialLock(async () => {
+    const map = await readCredentialMap()
+    delete map[providerId]
+    await writeCredentialMap(map)
+  })
 }
 
 /** The only credential shape any other context is allowed to see. */

@@ -78,9 +78,40 @@ describe('user scripts at start-up', () => {
       tabId: 5,
       transform: { ...js({ id: 'draft' }), world: 'USER_SCRIPT' },
     })
-    expect(h.userScriptsHeld.has('draft')).toBe(true)
+    expect(h.userScriptsHeld.has('preview-draft')).toBe(true)
     await h.boot()
-    expect(h.userScriptsHeld.has('draft')).toBe(true)
+    expect(h.userScriptsHeld.has('preview-draft')).toBe(true)
+  })
+})
+
+describe('a saved script whose edit is being previewed, at start-up', () => {
+  it('stays paused while the preview stays registered', async () => {
+    h.local.set('transforms', [js()])
+    await h.boot()
+    expect(h.userScriptsHeld.has('script-1')).toBe(true)
+    await h.onMessage({
+      type: 'preview-js',
+      tabId: 5,
+      transform: { ...js({ code: 'document.title = "draft"' }), world: 'USER_SCRIPT' },
+    })
+    expect(h.userScriptsHeld.has('script-1')).toBe(false)
+    await h.boot()
+    expect(h.userScriptsHeld.has('script-1')).toBe(false)
+    expect(h.userScriptsHeld.has('preview-script-1')).toBe(true)
+  })
+
+  it('is registered again when the preview is cleared after the start-up', async () => {
+    h.local.set('transforms', [js()])
+    await h.boot()
+    await h.onMessage({
+      type: 'preview-js',
+      tabId: 5,
+      transform: { ...js({ code: 'document.title = "draft"' }), world: 'USER_SCRIPT' },
+    })
+    await h.boot()
+    await h.onMessage({ type: 'clear-preview-js', id: 'script-1' })
+    expect(h.userScriptsHeld.has('preview-script-1')).toBe(false)
+    expect(h.userScriptsHeld.has('script-1')).toBe(true)
   })
 })
 

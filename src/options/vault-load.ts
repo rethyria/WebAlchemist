@@ -1,0 +1,29 @@
+import type { CredentialStatus } from '@shared/types'
+
+export interface VaultState {
+  sealed: boolean
+  unlocked: boolean
+}
+
+type Call = <T>(message: { type: string }) => Promise<T>
+
+/**
+ * Reads the vault state and, only when the credentials can be read, their
+ * statuses.
+ *
+ * The vault state is requested first because the statuses request fails with a
+ * locked-vault error while the vault is sealed and locked, which is the state
+ * after every browser start. When that rejection was left uncaught, the vault
+ * state was never read, and the page described a sealed vault as unencrypted.
+ * Asking for the state first and skipping the statuses call while locked means
+ * the page always has the state, and never makes a request that is certain to
+ * fail.
+ */
+export async function loadVaultAndStatuses(
+  call: Call,
+): Promise<{ vault: VaultState; statuses: CredentialStatus[] }> {
+  const vault = await call<VaultState>({ type: 'vault-state' })
+  const locked = vault.sealed && !vault.unlocked
+  const statuses = locked ? [] : await call<CredentialStatus[]>({ type: 'get-credential-statuses' })
+  return { vault, statuses }
+}

@@ -9,7 +9,8 @@
    */
   interface Props {
     error: FlowError
-    onretry: () => void
+    /** Null when there is no request to repeat; the retry buttons are then not shown. */
+    onretry: (() => void) | null
     onsettings: () => void
     ondismiss: () => void
   }
@@ -39,12 +40,14 @@
       <span class="dot block" aria-hidden="true"></span>
       <span class="title">The request failed</span>
     </div>
-    <p>{error.message} Your description is kept.</p>
+    <p>{error.message}{error.descriptionKept ? ' Your description is kept.' : ''}</p>
     {#if detailOpen && error.detail}
       <pre>{error.detail}</pre>
     {/if}
     <div class="actions">
-      <Button variant="primary" small onclick={onretry}>Try again</Button>
+      {#if onretry}
+        <Button variant="primary" small onclick={onretry}>Try again</Button>
+      {/if}
       {#if error.detail}
         <Button small onclick={() => (detailOpen = !detailOpen)}>
           {detailOpen ? 'Hide response' : 'Show response'}
@@ -72,14 +75,18 @@
         {error.retryInSeconds === 1 ? 'second' : 'seconds'}
       </p>
       <div class="actions">
-        <Button small onclick={onretry}>Try now</Button>
+        {#if onretry}
+          <Button small onclick={onretry}>Try now</Button>
+        {/if}
         <Button small onclick={ondismiss}>Cancel</Button>
       </div>
     {:else}
       <!-- No guidance from the provider, so nothing to count down from. -->
       <div class="actions">
-        <Button variant="primary" small onclick={onretry}>Try again</Button>
-        <Button small onclick={ondismiss}>Cancel</Button>
+        {#if onretry}
+          <Button variant="primary" small onclick={onretry}>Try again</Button>
+        {/if}
+        <Button small onclick={ondismiss}>{onretry ? 'Cancel' : 'Dismiss'}</Button>
       </div>
     {/if}
   {:else}

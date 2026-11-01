@@ -70,14 +70,24 @@ export async function createOpenAiCompatibleProvider(
     schemaName: string
     maxTokens: number
   }): Promise<T> => {
+    /*
+     * Built before the `try` below, not inside it. The `catch` turns every
+     * error into "could not reach", which is right for `fetch` and wrong for
+     * the credential: a locked vault, an expired sign-in and a missing key each
+     * carry their own kind, and the sidebar picks its state from it. Wrapping
+     * them as retryable network errors let a user retry forever without being
+     * told to unlock or reconnect.
+     */
+    const headers = {
+      'Content-Type': 'application/json',
+      ...(await authHeader()),
+    }
+
     let response: Response
     try {
       response = await fetch(`${baseUrl}/chat/completions`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(await authHeader()),
-        },
+        headers,
         body: JSON.stringify({
           model: args.model,
           max_tokens: args.maxTokens,
@@ -102,8 +112,22 @@ export async function createOpenAiCompatibleProvider(
 
     if (!response.ok) throw httpToProviderError(response.status, provider.label, response.headers)
 
-    const payload = (await response.json()) as {
-      choices?: { message?: { content?: string }; finish_reason?: string }[]
+    /*
+     * A proxy, captive portal or misconfigured local server can answer with an
+     * HTML page and status 200. `response.json()` would then raise the
+     * browser's own parser message, which says nothing about what went wrong
+     * or whose fault it is.
+     */
+    let payload: { choices?: { message?: { content?: string }; finish_reason?: string }[] }
+    try {
+      payload = (await response.json()) as typeof payload
+    } catch (error) {
+      throw new ProviderError(
+        `${provider.label} returned a response that is not JSON. Check the base URL in settings.`,
+        'bad-response',
+        true,
+        { cause: error },
+      )
     }
     const text = payload.choices?.[0]?.message?.content
     if (!text) {
@@ -198,27 +222,76 @@ function isLoopback(baseUrl: string): boolean {
   }
 }
 
-/** Refreshes an OAuth token a minute ahead of expiry and persists the result. */
-async function ensureFreshToken(
-  providerId: string,
-  credential: Extract<
-    NonNullable<Awaited<ReturnType<typeof readCredentialForRequest>>>,
-    { kind: 'oauth' }
-  >,
-): Promise<string> {
-  if (!needsRefresh(credential.expiresAt, Date.now())) {
-    return credential.accessToken
-  }
+/**
+ * Refreshes that are running now, one per provider.
+ *
+ * Providers rotate refresh tokens, so a second request with the token the first
+ * one used is rejected, and a provider that follows RFC 9700 section 4.14.2
+ * answers reuse by revoking the whole grant. Callers that arrive while a
+ * refresh is running wait for it instead of sending their own.
+ */
+const refreshesInFlight = new Map<string, Promise<string>>()
 
-  const response = await fetch(credential.tokenEndpoint, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
-      grant_type: 'refresh_token',
-      refresh_token: credential.refreshToken,
-      client_id: credential.clientId,
-    }),
+type OAuthCredential = Extract<
+  NonNullable<Awaited<ReturnType<typeof readCredentialForRequest>>>,
+  { kind: 'oauth' }
+>
+
+function ensureFreshToken(providerId: string, credential: OAuthCredential): Promise<string> {
+  if (!needsRefresh(credential.expiresAt, Date.now())) {
+    return Promise.resolve(credential.accessToken)
+  }
+  const running = refreshesInFlight.get(providerId)
+  if (running) return running
+
+  const started = (async () => {
+    /*
+     * The credential is read again, because the caller's copy may be older than
+     * a refresh that finished between its read and this point. Without this, a
+     * caller that missed the in-flight window would refresh with a token that
+     * has already been spent.
+     */
+    const latest = await readCredentialForRequest(providerId)
+    // Removed or replaced while this call was starting. Refreshing the old
+    // copy would store it again and undo the removal.
+    if (latest?.kind !== 'oauth') {
+      throw new ProviderError('The sign-in for this provider was removed. Reconnect it in settings.', 'no-credential', false)
+    }
+    if (!needsRefresh(latest.expiresAt, Date.now())) return latest.accessToken
+    return refreshToken(providerId, latest)
+  })().finally(() => {
+    refreshesInFlight.delete(providerId)
   })
+  refreshesInFlight.set(providerId, started)
+  return started
+}
+
+/** Refreshes an OAuth token a minute ahead of expiry and persists the result. */
+async function refreshToken(
+  providerId: string,
+  credential: OAuthCredential,
+): Promise<string> {
+  /*
+   * The header call no longer sits inside the chat request's `try`, so a
+   * transport failure here has to be classified on its own. It used to be
+   * reported as a network failure by that outer `catch`, and still is.
+   */
+  let response: Response
+  try {
+    response = await fetch(credential.tokenEndpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type: 'refresh_token',
+        refresh_token: credential.refreshToken,
+        client_id: credential.clientId,
+      }),
+    })
+  } catch (error) {
+    throw new ProviderError('Could not reach the sign-in server.', 'network', true, {
+      cause: error,
+    })
+  }
 
   if (!response.ok) {
     throw new ProviderError(
@@ -234,8 +307,19 @@ async function ensureFreshToken(
    * `refresh_token` means "keep the one you have" rather than "you no longer
    * have one".
    */
+  let tokens: TokenPayload
+  try {
+    tokens = (await response.json()) as TokenPayload
+  } catch (error) {
+    throw new ProviderError(
+      'The sign-in server returned a response that is not JSON. Reconnect this provider in settings.',
+      'auth',
+      false,
+      { cause: error },
+    )
+  }
   const refreshed = credentialFrom(
-    (await response.json()) as TokenPayload,
+    tokens,
     { authorizationEndpoint: '', tokenEndpoint: credential.tokenEndpoint, clientId: credential.clientId, scopes: [] },
     Date.now(),
     credential.refreshToken,

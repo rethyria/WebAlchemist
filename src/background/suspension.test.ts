@@ -134,6 +134,9 @@ describe('previews after the sidebar closed during a suspension (#81)', () => {
       },
     })
     expect(r.ok).toBe(true)
+    // Registering a preview first unregisters the saved id it edits (pausing
+    // it); only the calls made after that belong to the tests below.
+    h.calls.unregister.length = 0
   })
   afterEach(() => vi.useRealTimers())
 
@@ -141,7 +144,7 @@ describe('previews after the sidebar closed during a suspension (#81)', () => {
     await h.boot() // suspension, then a wake for some other reason
     await afterGrace()
     expect(h.calls.removeCSS).toEqual([{ tabId: TAB, css: 'a { color: red }' }])
-    expect(h.calls.unregister).toContain('draft')
+    expect(h.calls.unregister).toContain('preview-draft')
     expect(h.session.get(`wa-css-preview-${TAB}`)).toBeUndefined()
   })
 
@@ -163,7 +166,7 @@ describe('previews after the sidebar closed during a suspension (#81)', () => {
     port.drop()
     await vi.advanceTimersByTimeAsync(0)
     expect(h.calls.removeCSS).toEqual([{ tabId: TAB, css: 'a { color: red }' }])
-    expect(h.calls.unregister).toContain('draft')
+    expect(h.calls.unregister).toContain('preview-draft')
   })
 
   it('are kept while another sidebar window is still connected', async () => {
@@ -261,6 +264,7 @@ describe('previews with two windows open (#81)', () => {
     await h.onMessage({ type: 'preview-css', tabId: TAB_B, css: 'a { color: blue }' })
     await jsPreview('draft-1', TAB)
     await jsPreview('draft-2', TAB_B)
+    h.calls.unregister.length = 0
   })
   afterEach(() => vi.useRealTimers())
 
@@ -270,7 +274,7 @@ describe('previews with two windows open (#81)', () => {
     first.drop()
     await vi.advanceTimersByTimeAsync(50)
     expect(removed()).toEqual([TAB])
-    expect(h.calls.unregister).toEqual(['draft-1'])
+    expect(h.calls.unregister).toEqual(['preview-draft-1'])
     expect(h.session.get(`wa-css-preview-${TAB_B}`)).toBe('a { color: blue }')
   })
 
@@ -281,7 +285,7 @@ describe('previews with two windows open (#81)', () => {
     second.drop()
     await vi.advanceTimersByTimeAsync(50)
     expect(removed()).toEqual([TAB, TAB_B])
-    expect(h.calls.unregister.sort()).toEqual(['draft-1', 'draft-2'])
+    expect(h.calls.unregister.sort()).toEqual(['preview-draft-1', 'preview-draft-2'])
   })
 
   it('control: a port that names no window, closing last, removes every preview', async () => {
@@ -293,7 +297,7 @@ describe('previews with two windows open (#81)', () => {
     only.drop()
     await vi.advanceTimersByTimeAsync(50)
     expect(removed()).toEqual([TAB, TAB_B])
-    expect(h.calls.unregister.sort()).toEqual(['draft-1', 'draft-2'])
+    expect(h.calls.unregister.sort()).toEqual(['preview-draft-1', 'preview-draft-2'])
   })
 
   it('at start-up removes previews whose window has no sidebar and keeps the rest', async () => {
@@ -301,7 +305,7 @@ describe('previews with two windows open (#81)', () => {
     connect(2)
     await afterGrace()
     expect(removed()).toEqual([TAB])
-    expect(h.calls.unregister).toEqual(['draft-1'])
+    expect(h.calls.unregister).toEqual(['preview-draft-1'])
     expect(h.session.get(`wa-css-preview-${TAB_B}`)).toBe('a { color: blue }')
   })
 

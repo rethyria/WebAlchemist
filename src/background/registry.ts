@@ -157,6 +157,51 @@ export async function registerTransform(transform: Transform): Promise<void> {
   }
 }
 
+/**
+ * The registration id a preview of the transform `id` uses.
+ *
+ * "Change with AI", "Edit description" and "Repair" keep the saved id on the
+ * draft, so a preview registered under that id replaced the saved transform's
+ * own registration, and clearing the preview then unregistered it. Discarding
+ * an edit therefore switched off code the user had approved. A separate id
+ * means clearing a preview removes only the preview's own registration.
+ *
+ * The saved registration is paused while a preview runs and registered again
+ * from storage when the preview is cleared (see registerPreview and
+ * unregisterPreview). Leaving it registered would run the saved script and the
+ * preview on the same reload, so the page would show the combined effect of
+ * both rather than the effect of the edit being judged.
+ *
+ * Pausing is safe if the background is suspended before the preview is
+ * cleared: the background registers every saved transform from storage each
+ * time it starts (reregisterAll), which also removes the leftover preview.
+ */
+export function previewIdFor(id: string): string {
+  return `preview-${id}`
+}
+
+/**
+ * Registers a draft under its preview id and pauses the saved registration it
+ * edits, so only one of the two runs. Pausing an id that is not registered
+ * (a new transform) does nothing.
+ */
+export async function registerPreview(transform: Transform): Promise<void> {
+  await unregisterTransform(transform.id)
+  await registerTransform({ ...transform, id: previewIdFor(transform.id) })
+}
+
+/**
+ * Removes the preview registration of `id`, then registers the saved
+ * transform again from storage if it is stored and enabled. The stored record
+ * is read here, not kept from when the preview started, so a save made while
+ * the preview was running is the version that comes back.
+ */
+export async function unregisterPreview(id: string): Promise<void> {
+  await unregisterTransform(previewIdFor(id))
+  const saved = (await getAllTransforms()).find((t) => t.id === id)
+  if (saved) await registerTransform(saved)
+}
+
 export async function unregisterTransform(id: string): Promise<void> {
   if (!(await hasUserScriptsPermission())) return
   try {
@@ -191,11 +236,12 @@ function sameRegistration(held: Mv3RegisteredUserScript, wanted: Mv3RegisteredUs
  * removed the registration of a script that was being previewed. Now a
  * registration that already matches is left alone, one that differs is updated,
  * a missing one is added, and one for a transform that is deleted, disabled or
- * blocked is removed. `keep` lists ids that have no stored transform but must
- * stay registered, namely preview scripts.
+ * blocked is removed. `previewed` lists the saved ids that have a preview
+ * running: the preview registration (`previewIdFor(id)`) stays registered, and
+ * the saved registration stays paused, as registerPreview left them.
  */
 export async function reregisterAll(
-  keep: string[] = [],
+  previewed: string[] = [],
 ): Promise<{ registered: number; skipped: number }> {
   if (!(await hasUserScriptsPermission())) {
     return { registered: 0, skipped: 0 }
@@ -209,12 +255,14 @@ export async function reregisterAll(
   }
 
   const transforms = await getAllTransforms()
+  const keep = previewed.map(previewIdFor)
   const wanted = new Set<string>()
   let registered = 0
   let skipped = 0
 
   for (const transform of transforms) {
     if (transform.kind !== 'js') continue
+    if (previewed.includes(transform.id)) continue
     try {
       const registration = await registrationFor(transform)
       if (!registration) continue

@@ -52,8 +52,10 @@ import { connect as connectOAuth } from './oauth'
 import { resolveActiveProvider, ProviderError } from './providers'
 import {
   hasUserScriptsPermission,
+  registerPreview,
   registerTransform,
   reregisterAll,
+  unregisterPreview,
   unregisterTransform,
 } from './registry'
 import {
@@ -568,14 +570,14 @@ async function handle(
       if (!analysis.passed) {
         throw new Error('Static analysis rejected this code, so it was not run.')
       }
-      await registerTransform(message.transform)
+      await registerPreview(message.transform)
       await addPreviewedScript(message.transform.id, await windowOfTab(message.tabId))
       await browser.tabs.reload(message.tabId)
       return true
     }
 
     case 'clear-preview-js':
-      await unregisterTransform(message.id)
+      await unregisterPreview(message.id)
       await removePreviewedScript(message.id)
       return true
 
@@ -809,7 +811,7 @@ async function clearPreviewsWhere(
   }
   for (const id of await previewedScriptIds()) {
     if (!ownerIsGone(await previewScriptWindow(id))) continue
-    await unregisterTransform(id)
+    await unregisterPreview(id)
     await removePreviewedScript(id)
   }
   // A pause belongs to the window the tab is in: the sidebar that paused it is

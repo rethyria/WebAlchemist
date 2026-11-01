@@ -209,7 +209,7 @@
       try {
         granted = await flow.requestFor('js', transform.match)
       } catch (cause) {
-        flow.error = { kind: 'request-failed', message: String(cause) }
+        flow.fail(cause)
         return
       }
       if (!granted) return
@@ -365,7 +365,7 @@
         ...(tab?.id === undefined ? {} : { tabId: tab.id }),
       })
     } catch (cause) {
-      flow.error = { kind: 'request-failed', message: String(cause) }
+      flow.fail(cause, () => removeTransform(transform))
       return
     }
     if (expandedId === transform.id) expandedId = null
@@ -386,11 +386,11 @@
   $effect(() => {
     void load()
 
-    const onMessage = (message: ContentEvent) => {
+    const onMessage = (message: ContentEvent, sender: browser.runtime.MessageSender) => {
       // Health results are the one content event the list owns rather than
       // the flow — they describe saved transforms, not the draft.
       if (message.type === 'health-check-result') void showHealthResult(message)
-      else flow.receive(message)
+      else flow.receive(message, sender)
     }
     browser.runtime.onMessage.addListener(onMessage)
 
@@ -482,7 +482,7 @@
   {#if flow.error}
     <ErrorCard
       error={flow.error}
-      onretry={() => void flow.retry()}
+      onretry={flow.canRetry ? () => void flow.retry() : null}
       onsettings={openSettingsPage}
       ondismiss={() => flow.dismissError()}
     />
