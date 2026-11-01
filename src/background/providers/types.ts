@@ -97,6 +97,14 @@ export class ProviderError extends Error {
       | 'rate-limit'
       | 'network'
       | 'refusal'
+      /**
+       * The provider does not know the model, or no longer serves it. The fix
+       * is choosing another model in settings, which is different from every
+       * other failure here, so it has its own kind.
+       */
+      | 'model-unavailable'
+      /** The account has no credit or a billing problem. Retrying cannot help. */
+      | 'billing'
       | 'bad-response'
       | 'unknown',
     readonly retryable: boolean,

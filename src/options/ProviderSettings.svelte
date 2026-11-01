@@ -34,6 +34,16 @@
 
   let { settings, statuses, onsave, onsetkey, onclearkey, onconnectoauth }: Props = $props()
 
+  /*
+   * The sidebar links here with #models after a model error. A browser scrolls
+   * to a fragment only when the element exists at load, and this list renders
+   * after settings are fetched, so the scroll is done once it is on the page.
+   */
+  $effect(() => {
+    if (location.hash !== '#models') return
+    document.getElementById('models')?.scrollIntoView({ block: 'center' })
+  })
+
   let adding = $state(false)
   let draftType = $state<ProviderType>('anthropic')
   let draftLabel = $state('')
@@ -366,7 +376,7 @@
             <Button small onclick={() => void removeProvider(provider)}>Remove</Button>
           </div>
 
-          <div class="models">
+          <div class="models" id={active ? 'models' : undefined}>
             <ModelPicker
               label="Writes the code"
               value={provider.generateModel}

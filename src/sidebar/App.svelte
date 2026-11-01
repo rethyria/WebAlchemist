@@ -395,6 +395,14 @@
     if (isForTab(message, tab?.id)) runtimeStates = message.states
   }
 
+  /*
+   * openOptionsPage takes no fragment, so the page is opened as a tab to land
+   * on the model pickers. The options page scrolls to the element with this id.
+   */
+  function openModelSettings() {
+    void browser.tabs.create({ url: `${browser.runtime.getURL('src/options/index.html')}#models` })
+  }
+
   $effect(() => {
     void load()
 
@@ -499,6 +507,7 @@
       error={flow.error}
       onretry={flow.canRetry ? () => void flow.retry() : null}
       onsettings={openSettingsPage}
+      onmodelsettings={openModelSettings}
       ondismiss={() => flow.dismissError()}
     />
   {/if}

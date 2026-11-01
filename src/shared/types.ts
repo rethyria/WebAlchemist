@@ -257,6 +257,16 @@ export const ANTHROPIC_MODELS: ModelOption[] = [
 ]
 
 /**
+ * How a model is named in messages: "Opus 5 (claude-opus-5)" for a listed
+ * model, and the id alone for any other, since an id typed by hand has no
+ * label to show.
+ */
+export function modelDisplayName(id: string): string {
+  const known = ANTHROPIC_MODELS.find((m) => m.id === id)
+  return known ? `${known.label} (${id})` : id
+}
+
+/**
  * What an OpenAI-compatible provider needs before it can be signed into.
  *
  * Typed in by hand rather than discovered. There is no registry of these, and

@@ -10,7 +10,13 @@
  * support cannot be queried and is set by hand on the Provider record.
  */
 
-import type { Credential, GenerationResult, ModelReview, Provider } from '@shared/types'
+import {
+  modelDisplayName,
+  type Credential,
+  type GenerationResult,
+  type ModelReview,
+  type Provider,
+} from '@shared/types'
 import {
   GENERATE_SYSTEM_PROMPT,
   REVIEW_SYSTEM_PROMPT,
@@ -144,7 +150,9 @@ export async function createOpenAiCompatibleProvider(
       response = await send({ Authorization: `Bearer ${token}` })
     }
 
-    if (!response.ok) throw httpToProviderError(response.status, provider.label, response.headers)
+    if (!response.ok) {
+      throw await httpToProviderError(response, provider.label, args.model)
+    }
 
     /*
      * A proxy, captive portal or misconfigured local server can answer with an
@@ -441,11 +449,91 @@ async function requestRefresh(
   }
 }
 
-function httpToProviderError(
-  status: number,
+/** The fields of an error body that the checks below read. */
+interface ErrorFields {
+  message: string
+  code: string
+  type: string
+}
+
+/**
+ * Reads the error body without letting a missing or non-JSON body raise.
+ * Servers in this ecosystem differ in shape: OpenAI nests the fields under
+ * `error`, and some local servers send `error` as a plain string.
+ */
+async function readErrorFields(response: Response): Promise<ErrorFields> {
+  const fields: ErrorFields = { message: '', code: '', type: '' }
+  try {
+    const body = (await response.json()) as { error?: unknown; message?: unknown }
+    const error = body?.error
+    if (typeof error === 'string') fields.message = error
+    else if (error && typeof error === 'object') {
+      const e = error as { message?: unknown; code?: unknown; type?: unknown }
+      fields.message = typeof e.message === 'string' ? e.message : ''
+      fields.code = typeof e.code === 'string' ? e.code : ''
+      fields.type = typeof e.type === 'string' ? e.type : ''
+    } else if (typeof body?.message === 'string') fields.message = body.message
+  } catch {
+    // No usable body; the status alone decides.
+  }
+  return fields
+}
+
+/**
+ * A 404 on the chat endpoint is a missing model only when the server says so.
+ * The same status answers a wrong base URL, which the user fixes in a different
+ * place, so a 404 with no model wording stays a generic error rather than
+ * sending the user to the model setting. OpenAI sends code model_not_found,
+ * Ollama words it "model 'x' not found", and OpenRouter says "No endpoints
+ * found for x".
+ */
+function isModelNotFound(fields: ErrorFields): boolean {
+  return (
+    fields.code === 'model_not_found' ||
+    /\bmodel\b/i.test(fields.message) ||
+    /no endpoints found/i.test(fields.message)
+  )
+}
+
+/**
+ * A billing problem is 402 (OpenRouter and others) or OpenAI's
+ * insufficient_quota, which arrives with status 429. The second is checked
+ * before the rate-limit branch, or an empty balance is reported as a wait
+ * that never ends.
+ */
+function isBillingProblem(status: number, fields: ErrorFields): boolean {
+  return (
+    status === 402 || fields.code === 'insufficient_quota' || fields.type === 'insufficient_quota'
+  )
+}
+
+async function httpToProviderError(
+  response: Response,
   label: string,
-  headers?: Headers,
-): ProviderError {
+  model: string,
+): Promise<ProviderError> {
+  const { status, headers } = response
+  // Only the statuses that can carry these cases have their body read.
+  const fields: ErrorFields =
+    status === 404 || status === 402 || status === 429
+      ? await readErrorFields(response)
+      : { message: '', code: '', type: '' }
+
+  if (status === 404 && isModelNotFound(fields)) {
+    return new ProviderError(
+      `The model ${modelDisplayName(model)} is not available from ${label}. Choose another model in settings.`,
+      'model-unavailable',
+      false,
+    )
+  }
+  if (isBillingProblem(status, fields)) {
+    return new ProviderError(
+      `${label} reports a billing problem, such as no remaining credit. Add credit or fix billing with the provider, then try again.`,
+      'billing',
+      false,
+    )
+  }
+
   if (status === 401 || status === 403) {
     return new ProviderError(
       `${label} rejected the credential. Check it in settings.`,

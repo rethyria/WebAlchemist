@@ -84,6 +84,10 @@ export type FlowError =
    */
   | { kind: 'rate-limited'; message: string; retryInSeconds: number | null }
   | { kind: 'credential-expired'; message: string }
+  /** The configured model is unknown or retired. The way out is the model setting. */
+  | { kind: 'model-unavailable'; message: string; descriptionKept?: boolean }
+  /** No credit or a billing problem. Retrying cannot help until the user fixes it. */
+  | { kind: 'billing'; message: string; descriptionKept?: boolean }
 
 interface Picked {
   context: PageContext
@@ -1741,7 +1745,10 @@ export class Flow {
   /** Records an error that has no request to repeat. */
   show(error: FlowError, retry: (() => Promise<void>) | null = null): void {
     this.error =
-      error.kind === 'request-failed' && error.descriptionKept === undefined
+      (error.kind === 'request-failed' ||
+        error.kind === 'model-unavailable' ||
+        error.kind === 'billing') &&
+      error.descriptionKept === undefined
         ? { ...error, descriptionKept: DESCRIPTION_STEPS.includes(this.step) }
         : error
     /*
@@ -1772,6 +1779,14 @@ export class Flow {
         return
       case 'auth':
         this.show({ kind: 'credential-expired', message: cause.message })
+        return
+      case 'model-unavailable':
+        // Only the error is set. The description, scope and picked element stay
+        // as they are, so choosing another model and retrying needs no retyping.
+        this.error = { kind: 'model-unavailable', message: cause.message }
+        return
+      case 'billing':
+        this.error = { kind: 'billing', message: cause.message }
         return
       case 'rate-limit':
         this.show(
