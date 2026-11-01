@@ -710,6 +710,18 @@ export class Flow {
   }
 
   /**
+   * Applies a saved transform's scope depth through the page, as the slider
+   * does, so the count and the container name come from the live DOM.
+   *
+   * Assigning only the number left the count at 1 and the container null while
+   * the depth was not 0: the panel read "Every element like this one" and the
+   * request carried a depth with no container to go with it.
+   */
+  private async restoreScopeDepth(transform: Transform): Promise<void> {
+    await this.setScopeDepth(transform.scopeDepth ?? 0)
+  }
+
+  /**
    * Asks for one node's children in full.
    *
    * Nothing about the target changes, so this replaces the tree and leaves
@@ -807,11 +819,12 @@ export class Flow {
       // What a regeneration from the refining panel will build on.
       this.matchPattern = transform.match
       this.intent = transform.intent
-      this.scopeDepth = transform.scopeDepth ?? 0
       this.instruction = transform.intent
       this.history = []
       this.references = []
       this.draft = transform
+      await this.restoreScopeDepth(transform)
+      if (!current()) return
 
       this.stage = 'sent'
       this.streamed = ''
@@ -933,7 +946,8 @@ export class Flow {
       this.enterDescribing()
       this.instruction = transform.intent
       this.intent = transform.intent
-      this.scopeDepth = transform.scopeDepth ?? 0
+      await this.restoreScopeDepth(transform)
+      if (!current()) return
 
       /*
        * The saved copy comes off the page while this is open, for the reason
@@ -988,11 +1002,12 @@ export class Flow {
       this.picked = { ...found, cropDrawn: false }
       this.matchPattern = transform.match
       this.intent = transform.intent
-      this.scopeDepth = transform.scopeDepth ?? 0
       this.instruction = transform.intent
       this.references = []
       this.followUp = ''
       this.draft = transform
+      await this.restoreScopeDepth(transform)
+      if (!current()) return
 
       this.result = {
         name: transform.name,

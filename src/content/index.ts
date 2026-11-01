@@ -1568,6 +1568,17 @@ async function handleMessage(message: ContentMessage) {
 
       const element = resolution.element
       describedElement = element
+      /*
+       * What a pick sets, set here too. Tree paths are measured from
+       * pickedRoot, and without it every row of the tree had a null path, so
+       * none could be clicked, and an older pick's root would have been used
+       * if there was one. The scope starts at 0 and the flow then sets the
+       * saved depth; the outline is drawn because nothing else would draw it.
+       */
+      pickedRoot = element
+      expanded.clear()
+      lockDepth = 0
+      updateLock()
       const anchor = captureAnchor(element)
       const region = boundingRectWithPadding(element)
       return {

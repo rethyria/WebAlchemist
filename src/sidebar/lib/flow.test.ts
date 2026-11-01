@@ -895,3 +895,37 @@ describe('events from the page', () => {
     expect(refining.picked?.anchor.selector).toBe('div.x')
   })
 })
+
+describe('restoring the saved scope depth', () => {
+  const deep = { ...saved, scopeDepth: 2 }
+  const handlerWithScope = (m: any) => {
+    if (m.type === 'context-for-anchor') return { ok: true, data: found }
+    if (m.type === 'set-lock-scope') return { ok: true, data: { count: 4, container: 'ul.list' } }
+    return { ok: true, data: null }
+  }
+
+  it.each([
+    ['editIntent', (f: InstanceType<typeof Flow>) => f.editIntent(deep)],
+    ['editWithAi', (f: InstanceType<typeof Flow>) => f.editWithAi(deep)],
+  ])('%s takes the count and the container from the page', async (_name, run) => {
+    const flow = newFlow()
+    handler = handlerWithScope
+    await run(flow)
+    // The page was asked to apply the depth, so the lock outline matches it.
+    expect(calls.filter((c) => c.type === 'set-lock-scope').map((c) => c.depth)).toEqual([2])
+    expect(flow.scopeDepth).toBe(2)
+    expect(flow.scopeCount).toBe(4)
+    expect(flow.scopeContainer).toBe('ul.list')
+  })
+
+  it('repair asks the page to apply the depth before it generates', async () => {
+    const flow = newFlow()
+    // The repair call fails, which resets the flow, so only the messages sent
+    // are checked here.
+    handler = (m) => (m.type === 'repair' ? failure('network') : handlerWithScope(m))
+    await flow.repair(deep, 'broken')
+    const types = calls.map((c) => c.type)
+    expect(calls.filter((c) => c.type === 'set-lock-scope').map((c) => c.depth)).toEqual([2])
+    expect(types.indexOf('set-lock-scope')).toBeLessThan(types.indexOf('repair'))
+  })
+})
