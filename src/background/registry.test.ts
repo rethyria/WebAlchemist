@@ -12,11 +12,15 @@ import type { Transform } from '@shared/types'
 
 const store = new Map<string, unknown>()
 let stored: unknown[] = []
+let killSwitch = false
 ;(globalThis as unknown as { browser: unknown }).browser = {
   permissions: { contains: async () => true },
   // `stored` is what getAllTransforms reads, so a test can say what is saved.
   storage: {
-    local: { get: async () => ({ transforms: stored }), set: async () => {} },
+    local: {
+      get: async () => ({ transforms: stored, settings: { aiJsKillSwitch: killSwitch } }),
+      set: async () => {},
+    },
   },
   userScripts: {
     configureWorld: async () => {},
@@ -57,6 +61,29 @@ describe('previewing a saved JavaScript transform', () => {
   beforeEach(() => {
     store.clear()
     stored = [saved]
+    killSwitch = false
+  })
+
+  it('runs a preview of a script that is disabled in storage', async () => {
+    await registerPreview({ ...saved, enabled: false, code: 'draftCode()' })
+    expect(code('preview-SAVED')).toContain('draftCode()')
+  })
+
+  it('refuses a preview of model-written code while the kill switch is on', async () => {
+    killSwitch = true
+    await registerTransform(saved)
+    await expect(
+      registerPreview({ ...saved, origin: 'ai', code: 'draftCode()' }),
+    ).rejects.toThrow(/switched off/)
+    expect(store.has('preview-SAVED')).toBe(false)
+    // The refused preview did not pause the saved registration.
+    expect(store.has('SAVED')).toBe(true)
+  })
+
+  it('still previews user-written code while the kill switch is on', async () => {
+    killSwitch = true
+    await registerPreview({ ...saved, code: 'draftCode()' })
+    expect(code('preview-SAVED')).toContain('draftCode()')
   })
 
   it('pauses the saved registration while the preview runs', async () => {
