@@ -17,6 +17,51 @@
  * unlike the model review nothing written on a webpage can talk it out of its
  * answer.
  *
+ * HOW IT DECIDES: AN ALLOWLIST, NOT A DENY-LIST
+ * ----------------------------------------------
+ * The first version matched a list of dangerous dotted paths such as
+ * `navigator.sendBeacon`. That matched only the literal text, so
+ * `const n = navigator; n.sendBeacon(...)`, `Reflect.get(globalThis, 'fetch')`,
+ * `[].constructor.constructor('...')()` and a created `<script>` element all
+ * passed (#48). A deny-list cannot be completed, because the page's global
+ * object has hundreds of members and any of them can be reached by a name the
+ * analyser has not listed.
+ *
+ * This version inverts the question. Code passes only when everything it
+ * touches is on a list of ordinary DOM reading and writing:
+ *
+ *  - A free identifier (one the code does not declare itself) must be a known
+ *    harmless global such as `Math` or `MutationObserver`. `document`,
+ *    `window` and `navigator` are accepted only as the object of a member
+ *    access to an allowed member, never as a value, because an alias such as
+ *    `const d = document` would carry them past every later check.
+ *  - `globalThis`, `self`, `top`, `parent`, `frames`, `Reflect`, `Proxy` and a
+ *    top-level `this` are refused, because each yields the global object or
+ *    lets code look up a member by a computed name.
+ *  - Property names that lead to the global object, to a new execution
+ *    context, to a prototype or to an HTML-string sink are refused on any
+ *    object. The check is on the name rather than the object because the
+ *    analyser cannot know what an arbitrary value holds.
+ *  - Computed access is accepted only when the key is a literal or provably a
+ *    number.
+ *  - Elements that load or run things cannot be created, and attributes and
+ *    properties that carry a URL cannot be set, unless the transform declares
+ *    the network capability.
+ *
+ * The capability model is unchanged: use of `fetch`, `document.cookie`,
+ * `localStorage` and the like is a finding that carries a capability, and
+ * applyCapabilityPolicy raises it to a block when the transform did not
+ * declare it. Aliasing and reflection stay blocked even when the capability is
+ * declared, because they hide which capability is in use.
+ *
+ * WHAT THIS CANNOT DO
+ * -------------------
+ * It does not follow data across calls, so it cannot prove that an element
+ * handed in from elsewhere is not a script element. It treats a selector that
+ * names `script` as refused for that reason, and a few comparable gaps remain
+ * (see the final comment on DENIED_NAMES). It also cannot judge intent: code
+ * that only reads page text and writes it into a permitted element passes.
+ *
  * WHAT HAPPENS WHEN THE ANALYSIS CANNOT TELL
  * ------------------------------------------
  * Fully dynamic access (`window[a + b]()`) cannot be resolved without running
@@ -28,148 +73,398 @@ import { parse } from 'acorn'
 import type { Node } from 'acorn'
 import type { Capability, StaticFinding } from '@shared/types'
 
+/* eslint-disable @typescript-eslint/no-explicit-any */
+/** An acorn node. The tree is walked generically, so fields are read by name. */
+interface N {
+  type: string
+  start: number
+  end: number
+  loc?: { start: { line: number; column: number } }
+  [key: string]: any
+}
+
 interface Rule {
-  /** Dotted path as written in source, e.g. "navigator.sendBeacon". */
-  path: string
+  /** Shown to the user as the matched API, e.g. "navigator.sendBeacon". */
+  api: string
   capability: Capability | null
   severity: 'block' | 'warn'
   explanation: string
 }
 
+const NETWORK_SEND = 'Sends a network request.'
+const NETWORK_OPEN = 'Opens a persistent network connection.'
+const STORAGE_RW = "Reads or writes this site's stored data."
+
 /**
- * Code-from-string constructs are always blocking: they have no legitimate use
- * in a page transform, and they defeat the rest of this analysis by moving the
- * real behaviour into a string this pass cannot see.
+ * Names that always belong to a capability, whether reached as a free
+ * identifier, as `window.name`, or as a property of any object. Matching the
+ * name on any object is what catches `x.fetch` and `Reflect`-free aliases such
+ * as `top.navigator.sendBeacon`.
  */
-const CODE_FROM_STRING: Rule[] = [
-  {
-    path: 'eval',
-    capability: null,
-    severity: 'block',
-    explanation: 'Runs code built at runtime, which cannot be reviewed before it executes.',
-  },
-  {
-    path: 'Function',
-    capability: null,
-    severity: 'block',
-    explanation: 'Builds a new function from text, which cannot be reviewed before it executes.',
-  },
-]
+const CAPABILITY_NAMES = new Map<string, Rule>([
+  ['fetch', { api: 'fetch', capability: 'network', severity: 'warn', explanation: NETWORK_SEND }],
+  ['XMLHttpRequest', { api: 'XMLHttpRequest', capability: 'network', severity: 'warn', explanation: NETWORK_SEND }],
+  ['WebSocket', { api: 'WebSocket', capability: 'network', severity: 'warn', explanation: NETWORK_OPEN }],
+  ['EventSource', { api: 'EventSource', capability: 'network', severity: 'warn', explanation: NETWORK_OPEN }],
+  ['WebTransport', { api: 'WebTransport', capability: 'network', severity: 'warn', explanation: NETWORK_OPEN }],
+  ['RTCPeerConnection', { api: 'RTCPeerConnection', capability: 'network', severity: 'warn', explanation: NETWORK_OPEN }],
+  ['webkitRTCPeerConnection', { api: 'RTCPeerConnection', capability: 'network', severity: 'warn', explanation: NETWORK_OPEN }],
+  ['Image', { api: 'Image', capability: 'network', severity: 'warn', explanation: 'Creates an image element, which requests the address it is given.' }],
+  ['Audio', { api: 'Audio', capability: 'network', severity: 'warn', explanation: 'Creates an audio element, which requests the address it is given.' }],
+  ['sendBeacon', { api: 'navigator.sendBeacon', capability: 'network', severity: 'warn', explanation: 'Sends data to a server in the background.' }],
+  ['cookie', { api: 'document.cookie', capability: 'cookies', severity: 'warn', explanation: "Reads or writes this site's cookies, which can include your session." }],
+  ['cookieStore', { api: 'cookieStore', capability: 'cookies', severity: 'warn', explanation: "Reads or writes this site's cookies, which can include your session." }],
+  ['localStorage', { api: 'localStorage', capability: 'storage', severity: 'warn', explanation: STORAGE_RW }],
+  ['sessionStorage', { api: 'sessionStorage', capability: 'storage', severity: 'warn', explanation: STORAGE_RW }],
+  ['indexedDB', { api: 'indexedDB', capability: 'storage', severity: 'warn', explanation: "Reads or writes this site's stored database." }],
+  ['caches', { api: 'caches', capability: 'storage', severity: 'warn', explanation: "Reads or writes this site's cached responses." }],
+])
 
-const CAPABILITY_RULES: Rule[] = [
-  {
-    path: 'fetch',
-    capability: 'network',
-    severity: 'warn',
-    explanation: 'Sends a network request.',
-  },
-  {
-    path: 'XMLHttpRequest',
-    capability: 'network',
-    severity: 'warn',
-    explanation: 'Sends a network request.',
-  },
-  {
-    path: 'WebSocket',
-    capability: 'network',
-    severity: 'warn',
-    explanation: 'Opens a persistent network connection.',
-  },
-  {
-    path: 'EventSource',
-    capability: 'network',
-    severity: 'warn',
-    explanation: 'Opens a persistent network connection.',
-  },
-  {
-    path: 'navigator.sendBeacon',
-    capability: 'network',
-    severity: 'warn',
-    explanation: 'Sends data to a server in the background.',
-  },
-  {
-    path: 'document.cookie',
-    capability: 'cookies',
-    severity: 'warn',
-    explanation: "Reads or writes this site's cookies, which can include your session.",
-  },
-  {
-    path: 'localStorage',
-    capability: 'storage',
-    severity: 'warn',
-    explanation: "Reads or writes this site's stored data.",
-  },
-  {
-    path: 'sessionStorage',
-    capability: 'storage',
-    severity: 'warn',
-    explanation: "Reads or writes this site's stored data.",
-  },
-  {
-    path: 'indexedDB',
-    capability: 'storage',
-    severity: 'warn',
-    explanation: "Reads or writes this site's stored database.",
-  },
-]
+/** Code-from-string constructs. They hide the real behaviour in text. */
+const CODE_FROM_STRING = new Map<string, string>([
+  ['eval', 'Runs code built at runtime, which cannot be reviewed before it executes.'],
+  ['Function', 'Builds a new function from text, which cannot be reviewed before it executes.'],
+])
 
-const RULES_BY_PATH = new Map<string, Rule>(
-  [...CODE_FROM_STRING, ...CAPABILITY_RULES].map((r) => [r.path, r]),
+/**
+ * Free identifiers that are never allowed, with the reason shown to the user.
+ * Each either is the global object, reaches it, or gives code a way to look up
+ * or intercept members by a computed name.
+ */
+const REFUSED_GLOBALS = new Map<string, string>([
+  ['globalThis', 'Refers to the page global object, which can reach any browser feature under a name this check cannot see.'],
+  ['self', 'Refers to the page global object, which can reach any browser feature under a name this check cannot see.'],
+  ['top', 'Refers to the top-level window of the page, which can reach any browser feature.'],
+  ['parent', 'Refers to the parent window of the page, which can reach any browser feature.'],
+  ['frames', 'Refers to the page windows, which can reach any browser feature.'],
+  ['window', 'Uses the window as a value. Only direct reads such as window.innerWidth are allowed, because a copy of the window hides what is later done with it.'],
+  ['document', 'Uses the document as a value. Only direct calls and reads such as document.querySelector are allowed, because a copy of the document hides what is later done with it.'],
+  ['navigator', 'Uses navigator as a value. Only direct reads such as navigator.language are allowed, because a copy hides what is later done with it.'],
+  ['Reflect', 'Looks up and calls members by a computed name, which this check cannot follow.'],
+  ['Proxy', 'Intercepts property access, which this check cannot follow.'],
+  ['location', 'Navigates the page, which can send page data to another site in the address.'],
+  ['open', 'Opens a new window or document, which can send page data to another site.'],
+  ['postMessage', 'Sends data to another window.'],
+  ['history', 'Changes the address of the page.'],
+  ['Worker', 'Starts a separate script that this check cannot see.'],
+  ['SharedWorker', 'Starts a separate script that this check cannot see.'],
+  ['BroadcastChannel', 'Sends data to other tabs.'],
+  ['MessageChannel', 'Sends data to other windows.'],
+  ['Blob', 'Builds data that can be loaded as a script or a page.'],
+  ['DOMParser', 'Builds elements from a text string, which can load or run content.'],
+  ['WebAssembly', 'Runs compiled code that cannot be reviewed.'],
+  ['importScripts', 'Loads and runs code from another location.'],
+])
+
+/**
+ * Free identifiers a page transform may use. Chosen as the browser features
+ * that read or build values and elements without sending anything anywhere or
+ * running text as code. Timers are listed separately because they are allowed
+ * only when called with a function.
+ */
+const ALLOWED_GLOBALS = new Set([
+  'undefined', 'NaN', 'Infinity', 'arguments',
+  'console', 'Math', 'JSON', 'Date', 'Intl', 'RegExp', 'Symbol', 'BigInt',
+  'Object', 'Array', 'String', 'Number', 'Boolean',
+  'Map', 'Set', 'WeakMap', 'WeakSet', 'WeakRef', 'Promise',
+  'Error', 'TypeError', 'RangeError', 'SyntaxError',
+  'Uint8Array', 'Int32Array', 'Float64Array', 'TextEncoder', 'TextDecoder',
+  'parseInt', 'parseFloat', 'isNaN', 'isFinite', 'atob', 'btoa',
+  'encodeURIComponent', 'decodeURIComponent', 'encodeURI', 'decodeURI',
+  'structuredClone', 'queueMicrotask', 'URL', 'URLSearchParams', 'AbortController',
+  'performance',
+  'MutationObserver', 'IntersectionObserver', 'ResizeObserver',
+  'requestAnimationFrame', 'cancelAnimationFrame', 'requestIdleCallback', 'cancelIdleCallback',
+  'getComputedStyle', 'matchMedia', 'getSelection', 'CSS',
+  'innerWidth', 'innerHeight', 'scrollX', 'scrollY', 'scrollTo', 'scrollBy', 'devicePixelRatio',
+  'Node', 'Element', 'NodeFilter', 'NodeList', 'HTMLCollection', 'DocumentFragment', 'Text', 'DOMRect',
+  'Event', 'CustomEvent', 'KeyboardEvent', 'MouseEvent', 'FocusEvent', 'InputEvent', 'PointerEvent', 'WheelEvent',
+  'clearTimeout', 'clearInterval',
+])
+const ELEMENT_CLASS = /^(HTML|SVG)[A-Za-z]*Element$/
+
+/** Timers: run text as code when given a string, so the first argument is checked. */
+const TIMERS = new Set(['setTimeout', 'setInterval'])
+
+/**
+ * Members of `document`, `window` and `navigator` that a transform may read or
+ * call. Anything else on these objects is refused, which is the allowlist for
+ * the three objects through which most of the dangerous features are reached.
+ */
+const DOCUMENT_MEMBERS = new Set([
+  'querySelector', 'querySelectorAll', 'getElementById', 'getElementsByClassName',
+  'getElementsByTagName', 'getElementsByName', 'createElement', 'createTextNode',
+  'createDocumentFragment', 'createComment', 'createTreeWalker', 'createNodeIterator',
+  'body', 'head', 'documentElement', 'title', 'activeElement', 'scrollingElement',
+  'readyState', 'hidden', 'visibilityState', 'hasFocus', 'contains', 'links', 'images',
+  'elementFromPoint', 'elementsFromPoint', 'getSelection',
+  'addEventListener', 'removeEventListener', 'dispatchEvent',
+])
+const WINDOW_MEMBERS = new Set([
+  'innerWidth', 'innerHeight', 'outerWidth', 'outerHeight', 'scrollX', 'scrollY',
+  'pageXOffset', 'pageYOffset', 'scrollTo', 'scrollBy', 'scroll', 'devicePixelRatio',
+  'getComputedStyle', 'matchMedia', 'getSelection', 'visualViewport',
+  'requestAnimationFrame', 'cancelAnimationFrame', 'requestIdleCallback', 'cancelIdleCallback',
+  'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval',
+  'addEventListener', 'removeEventListener', 'dispatchEvent',
+  'MutationObserver', 'IntersectionObserver', 'ResizeObserver', 'CSS', 'console',
+])
+const NAVIGATOR_MEMBERS = new Set([
+  'language', 'languages', 'userAgent', 'platform', 'onLine', 'hardwareConcurrency', 'maxTouchPoints',
+])
+
+/**
+ * Property names refused on any object, with the reason. They are matched by
+ * name because the analyser cannot know what an arbitrary value holds; a
+ * name that never appears cannot be reached except through computed access,
+ * which is refused separately.
+ *
+ * Gaps that remain: this does not stop code from copying an existing element
+ * it found by a means other than a selector naming `script`, and it does not
+ * stop navigation through a link the page already has, such as calling
+ * `click()` on an existing anchor. Both need data-flow tracking across calls.
+ */
+const DENIED_NAMES = new Map<string, string>()
+function deny(reason: string, ...names: string[]) {
+  for (const name of names) DENIED_NAMES.set(name, reason)
+}
+deny(
+  'Reaches the prototype chain, which can produce the Function constructor and run code built from text.',
+  'constructor', 'prototype', '__proto__', 'caller', 'callee',
 )
+deny(
+  'Reads or changes how a property behaves, which can reach members that are otherwise refused.',
+  'getOwnPropertyDescriptor', 'getOwnPropertyDescriptors', 'defineProperty', 'defineProperties',
+  'getPrototypeOf', 'setPrototypeOf', 'lookupGetter', 'lookupSetter',
+)
+deny(
+  'Reaches the page global object or another document, which can reach any browser feature.',
+  'defaultView', 'contentWindow', 'contentDocument', 'ownerDocument', 'view', 'composedPath',
+  'window', 'globalThis', 'document', 'frames', 'self', 'parent', 'opener',
+  'scripts', 'currentScript',
+)
+deny(
+  'Navigates the page or opens a window, which can send page data to another site.',
+  'location', 'history', 'postMessage', 'navigation',
+)
+deny(
+  'Builds elements from a text string, which can load or run content.',
+  'insertAdjacentHTML', 'setHTMLUnsafe', 'setHTML', 'parseHTMLUnsafe', 'createContextualFragment',
+  'write', 'writeln', 'execCommand',
+)
+deny(
+  'Creates elements or attributes in a way this check cannot inspect.',
+  'createElementNS', 'setAttributeNS', 'setAttributeNode', 'setAttributeNodeNS',
+  'createAttribute', 'createAttributeNS', 'attributes', 'importNode', 'adoptNode',
+)
+deny(
+  'Submits a form, which sends its contents to the form address.',
+  'submit', 'requestSubmit',
+)
+deny(
+  'Starts a separate script or builds a loadable address, which this check cannot see.',
+  'createObjectURL', 'Worker', 'SharedWorker', 'importScripts', 'serviceWorker', 'Blob',
+  'Function', 'eval', 'Reflect', 'Proxy', 'DOMParser', 'BroadcastChannel',
+)
+deny(
+  'Reaches a style sheet, where text such as an import rule makes the browser request an address.',
+  'sheet', 'styleSheets', 'adoptedStyleSheets', 'insertRule', 'addRule', 'replaceSync',
+)
+deny('Sets the page inside a frame from a text string, which can run content.', 'srcdoc')
+deny('Redirects the page from a meta element.', 'httpEquiv', 'http-equiv')
 
-/** Timer functions that execute a string argument as code. */
-const STRING_EXECUTING_TIMERS = new Set(['setTimeout', 'setInterval'])
+/**
+ * Methods that must be called directly. Reading one without calling it, as in
+ * `const c = document.createElement; c.call(document, 'script')`, would let
+ * the call-site checks below be skipped.
+ */
+const CALL_ONLY = new Set(['createElement', 'setAttribute', 'setProperty', 'assign', 'setTimeout', 'setInterval'])
 
-interface Positioned {
-  type: string
-  start: number
-  end: number
-  loc?: { start: { line: number; column: number } }
-  [key: string]: unknown
+/** Properties that run or build HTML when assigned. Reading them is harmless. */
+const WRITE_REFUSED = new Map<string, string>([
+  ['innerHTML', 'Replaces content by parsing a text string as HTML, which can load or run content.'],
+  ['outerHTML', 'Replaces content by parsing a text string as HTML, which can load or run content.'],
+  ['srcdoc', 'Sets the page inside a frame from a text string, which can run content.'],
+  ['text', 'Sets the source text of an element that may be a script.'],
+])
+/** Properties that carry a URL. Setting one makes the browser request it. */
+const WRITE_URL = new Set([
+  'src', 'href', 'srcset', 'action', 'formAction', 'poster', 'ping', 'background', 'codebase', 'lowsrc',
+])
+/** Attribute names that carry a URL, or run code, when set with setAttribute. */
+const ATTRIBUTE_URL = new Set([
+  'src', 'href', 'srcset', 'action', 'formaction', 'poster', 'ping', 'background',
+  'codebase', 'lowsrc', 'xlink:href', 'data', 'manifest',
+])
+
+/** Elements that are inert when created: they request nothing and run nothing. */
+const INERT_TAGS = new Set((
+  'div span p a button ul ol li section article header footer nav aside main ' +
+  'h1 h2 h3 h4 h5 h6 strong em b i u s small label input textarea select option optgroup ' +
+  'table thead tbody tfoot tr td th caption colgroup col hr br pre code blockquote details ' +
+  'summary dialog figure figcaption dl dt dd time mark kbd samp var sub sup abbr cite q ' +
+  'address fieldset legend menu wbr picture progress meter output data bdi bdo ruby rt rp ' +
+  'del ins canvas'
+).split(' '))
+/** Elements that request the address they are given. Allowed only with network. */
+const LOADING_TAGS = new Set(['img', 'link', 'audio', 'video', 'source', 'track'])
+
+/** Methods whose first argument is a selector or tag name, checked for `script`. */
+const SELECTOR_METHODS = new Set(['querySelector', 'querySelectorAll', 'getElementsByTagName', 'closest', 'matches'])
+
+/** Functions that resolve to another value later, so a literal using one proves nothing. */
+const CSS_INDIRECT = /\b(var|env|attr)\s*\(/i
+const CSS_LOADING_TEXT = /@import|\burl\s*\(|\bimage-set\s*\(|\bsrc\s*\(/i
+const JAVASCRIPT_URL = /^\s*javascript:/i
+
+/**
+ * Style properties whose value can load a resource, compared after lowercasing
+ * and removing dashes and vendor prefixes, so `backgroundImage`,
+ * `background-image` and `-webkit-mask-image` all match. The list is exact
+ * rather than a prefix match so that `backgroundColor` and `backgroundSize`,
+ * which cannot load anything and are common, are not treated as URL-bearing.
+ */
+const URL_STYLE_NAMES = new Set([
+  'background', 'backgroundimage', 'borderimage', 'borderimagesource', 'content', 'cursor',
+  'filter', 'backdropfilter', 'liststyle', 'liststyleimage', 'mask', 'maskimage',
+  'maskborder', 'maskbordersource', 'shapeoutside', 'clippath', 'offsetpath',
+  'csstext', 'style',
+])
+function isUrlBearingStyleName(name: string): boolean {
+  return URL_STYLE_NAMES.has(name.toLowerCase().replace(/^-?(webkit|moz)-?/, '').replace(/-/g, ''))
 }
 
-function lineCol(node: Positioned): { line: number; column: number } {
-  return node.loc
-    ? { line: node.loc.start.line, column: node.loc.start.column + 1 }
-    : { line: 0, column: 0 }
+// ---------------------------------------------------------------------------
+// Scopes
+// ---------------------------------------------------------------------------
+
+/**
+ * A name the code declares. `sources` lists every value written to it, which
+ * is what the numeric and function proofs below inspect. `opaque` is set when
+ * the value cannot be traced (a parameter, a destructured name, a loop
+ * variable over keys).
+ */
+interface Binding {
+  sources: { value: N | null; op: string; scope: Scope }[]
+  opaque: boolean
+  functionDeclaration: boolean
+}
+
+class Scope {
+  readonly vars = new Map<string, Binding>()
+  constructor(readonly parent: Scope | null) {}
+  lookup(name: string): Binding | null {
+    for (let s: Scope | null = this; s; s = s.parent) {
+      const found = s.vars.get(name)
+      if (found) return found
+    }
+    return null
+  }
+  declare(name: string, opaque: boolean, functionDeclaration = false): Binding {
+    let binding = this.vars.get(name)
+    if (!binding) {
+      binding = { sources: [], opaque, functionDeclaration }
+      this.vars.set(name, binding)
+    } else {
+      binding.opaque ||= opaque
+      binding.functionDeclaration ||= functionDeclaration
+    }
+    return binding
+  }
 }
 
 /**
- * Renders a MemberExpression chain back to dotted source form, but only when
- * every link is statically known. Returns null for anything computed, which
- * the caller reports as unanalysable rather than clean.
+ * Declares every name in a binding pattern. A name bound directly by
+ * `const x = value` is traceable; one bound through destructuring, a
+ * parameter or a loop is not.
  */
-function staticPath(node: Positioned): string | null {
-  if (node.type === 'Identifier') return node['name'] as string
-  if (node.type === 'ThisExpression') return null
-  if (node.type !== 'MemberExpression') return null
-
-  if (node['computed'] === true) return null
-  const object = staticPath(node['object'] as Positioned)
-  const property = node['property'] as Positioned
-  if (object === null || property.type !== 'Identifier') return null
-
-  const name = property['name'] as string
-  // `window.fetch` and `globalThis.fetch` are the same thing as bare `fetch`.
-  if (object === 'window' || object === 'globalThis' || object === 'self') return name
-  return `${object}.${name}`
+function declarePattern(pattern: N | null, scope: Scope, traceable: boolean): void {
+  if (!pattern) return
+  switch (pattern.type) {
+    case 'Identifier':
+      scope.declare(pattern['name'], !traceable)
+      return
+    case 'ObjectPattern':
+      for (const prop of pattern['properties'] as N[]) {
+        declarePattern(prop.type === 'RestElement' ? prop['argument'] : prop['value'], scope, false)
+      }
+      return
+    case 'ArrayPattern':
+      for (const el of pattern['elements'] as (N | null)[]) declarePattern(el, scope, false)
+      return
+    case 'AssignmentPattern':
+      declarePattern(pattern['left'], scope, false)
+      return
+    case 'RestElement':
+      declarePattern(pattern['argument'], scope, false)
+      return
+  }
 }
 
-function walk(node: unknown, visit: (n: Positioned) => void): void {
-  if (node === null || typeof node !== 'object') return
-  const candidate = node as Positioned
-  if (typeof candidate.type === 'string') visit(candidate)
+/** The names a binding pattern introduces. */
+function patternNames(pattern: N | null, into: string[] = []): string[] {
+  if (!pattern) return into
+  switch (pattern.type) {
+    case 'Identifier':
+      into.push(pattern['name'])
+      break
+    case 'ObjectPattern':
+      for (const prop of pattern['properties'] as N[]) {
+        patternNames(prop.type === 'RestElement' ? prop['argument'] : prop['value'], into)
+      }
+      break
+    case 'ArrayPattern':
+      for (const el of pattern['elements'] as (N | null)[]) patternNames(el, into)
+      break
+    case 'AssignmentPattern':
+      patternNames(pattern['left'], into)
+      break
+    case 'RestElement':
+      patternNames(pattern['argument'], into)
+      break
+  }
+  return into
+}
 
-  for (const key of Object.keys(node as object)) {
-    if (key === 'loc' || key === 'range' || key === 'parent') continue
-    const value = (node as Record<string, unknown>)[key]
-    if (Array.isArray(value)) {
-      for (const item of value) walk(item, visit)
-    } else if (value && typeof value === 'object') {
-      walk(value, visit)
+/** Declares `var` names and function-scope function declarations, without entering nested functions. */
+function hoistVars(node: N | null | undefined, scope: Scope): void {
+  if (!node || typeof node !== 'object') return
+  switch (node.type) {
+    case 'VariableDeclaration':
+      if (node['kind'] === 'var') {
+        for (const d of node['declarations'] as N[]) declarePattern(d['id'], scope, d['id'].type === 'Identifier')
+      }
+      return
+    case 'FunctionDeclaration':
+    case 'FunctionExpression':
+    case 'ArrowFunctionExpression':
+    case 'ClassDeclaration':
+    case 'ClassExpression':
+      return
+  }
+  for (const key of ['body', 'consequent', 'alternate', 'block', 'handler', 'finalizer', 'init', 'left', 'cases', 'test']) {
+    const child = node[key]
+    if (Array.isArray(child)) child.forEach((c) => hoistVars(c, scope))
+    else if (child && typeof child === 'object' && typeof child.type === 'string') hoistVars(child, scope)
+  }
+}
+
+/** Declares `let`, `const`, class and function names that belong directly to a block. */
+function declareLexical(statements: N[], scope: Scope): void {
+  for (const stmt of statements) {
+    if (stmt.type === 'VariableDeclaration' && stmt['kind'] !== 'var') {
+      for (const d of stmt['declarations'] as N[]) declarePattern(d['id'], scope, d['id'].type === 'Identifier')
+    } else if (stmt.type === 'ClassDeclaration' && stmt['id']) {
+      scope.declare(stmt['id'].name, true)
+    } else if (stmt.type === 'FunctionDeclaration' && stmt['id']) {
+      scope.declare(stmt['id'].name, false, true)
     }
   }
 }
+
+// ---------------------------------------------------------------------------
+// Analysis
+// ---------------------------------------------------------------------------
 
 export interface AnalysisOutcome {
   findings: StaticFinding[]
@@ -209,92 +504,710 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
 
   const findings: StaticFinding[] = []
   const seen = new Set<string>()
+  /** Checks that need every assignment to a name, so they run after the walk. */
+  const deferred: (() => void)[] = []
+  /** Identifier nodes already accepted as the object of an allowed member access. */
+  const acceptedObjects = new Set<N>()
+  /** Functions passed directly to `new Promise`, whose first parameter is a function. */
+  const promiseExecutors = new Set<N>()
 
-  const record = (node: Positioned, rule: Rule) => {
-    const { line, column } = lineCol(node)
-    const key = `${line}:${column}:${rule.path}`
+  const record = (node: N, rule: Rule) => {
+    const line = node.loc ? node.loc.start.line : 0
+    const column = node.loc ? node.loc.start.column + 1 : 0
+    const key = `${line}:${column}:${rule.api}`
     if (seen.has(key)) return
     seen.add(key)
     findings.push({
       line,
       column,
-      api: rule.path,
+      api: rule.api,
       capability: rule.capability,
       severity: rule.severity,
       explanation: rule.explanation,
     })
   }
+  const block = (node: N, api: string, explanation: string) =>
+    record(node, { api, capability: null, severity: 'block', explanation })
+  const needsNetwork = (node: N, api: string, explanation: string) =>
+    record(node, { api, capability: 'network', severity: 'warn', explanation })
 
-  walk(ast, (node) => {
-    // Dynamic import is its own node type, not a call to an identifier.
-    if (node.type === 'ImportExpression') {
-      // Not tied to the network capability. A capability that is only a
-      // warning when declared would let `network` unlock running code that
-      // nobody reviewed, and whose content the server can change after
-      // approval. Declaring network allows requests, not remote code (#137).
-      record(node, {
-        path: 'import()',
-        capability: null,
-        severity: 'block',
-        explanation: 'Loads and runs code from another location, which is never allowed.',
-      })
-      return
+  // ----- Proofs about values ------------------------------------------------
+
+  /** True when the expression can only evaluate to a number (or bigint). */
+  function isNumeric(expr: N | null, scope: Scope, visiting = new Set<Binding>()): boolean {
+    if (!expr) return true
+    switch (expr.type) {
+      case 'Literal':
+        return typeof expr['value'] === 'number' || typeof expr['value'] === 'bigint'
+      case 'UnaryExpression':
+        return ['+', '-', '~'].includes(expr['operator'])
+      case 'UpdateExpression':
+        return true
+      case 'BinaryExpression': {
+        const op = expr['operator'] as string
+        if (['-', '*', '/', '%', '**', '&', '|', '^', '<<', '>>', '>>>'].includes(op)) return true
+        if (op === '+') {
+          return isNumeric(expr['left'], scope, visiting) && isNumeric(expr['right'], scope, visiting)
+        }
+        return false
+      }
+      case 'ConditionalExpression':
+        return (
+          isNumeric(expr['consequent'], scope, visiting) && isNumeric(expr['alternate'], scope, visiting)
+        )
+      case 'SequenceExpression':
+        return isNumeric((expr['expressions'] as N[]).at(-1) ?? null, scope, visiting)
+      case 'CallExpression': {
+        const callee = expr['callee'] as N
+        if (callee.type === 'Identifier') {
+          return (
+            !scope.lookup(callee['name']) && ['Number', 'parseInt', 'parseFloat'].includes(callee['name'])
+          )
+        }
+        return (
+          callee.type === 'MemberExpression' &&
+          callee['computed'] !== true &&
+          callee['object'].type === 'Identifier' &&
+          callee['object'].name === 'Math' &&
+          !scope.lookup('Math')
+        )
+      }
+      case 'Identifier': {
+        const binding = scope.lookup(expr['name'])
+        if (!binding || binding.opaque) return false
+        // A name whose value depends on itself, as in `i = i + 1`, is numeric
+        // if every other write to it is, so the cycle is not a reason to refuse.
+        if (visiting.has(binding)) return true
+        visiting.add(binding)
+        const ok = binding.sources.every((src) => {
+          if (src.op === '=') return isNumeric(src.value, src.scope, visiting)
+          if (src.op === '+=') return isNumeric(src.value, src.scope, visiting)
+          return true
+        })
+        visiting.delete(binding)
+        return ok
+      }
     }
+    return false
+  }
 
-    // setTimeout("...") / setInterval("...") execute their string argument.
-    if (node.type === 'CallExpression') {
-      const callee = staticPath(node['callee'] as Positioned)
-      const args = node['arguments'] as Positioned[] | undefined
-      const first = args?.[0]
-      if (
-        callee !== null &&
-        STRING_EXECUTING_TIMERS.has(callee) &&
-        first &&
-        (first.type === 'Literal' || first.type === 'TemplateLiteral')
-      ) {
-        const isString = first.type === 'TemplateLiteral' || typeof first['value'] === 'string'
-        if (isString) {
-          record(node, {
-            path: `${callee}(string)`,
-            capability: null,
-            severity: 'block',
-            explanation:
-              'Runs code supplied as text, which cannot be reviewed before it executes.',
-          })
+  /** True when the expression is a function that is defined in this code. */
+  function isFunctionValue(expr: N | null, scope: Scope, visiting = new Set<Binding>()): boolean {
+    if (!expr) return false
+    if (expr.type === 'ArrowFunctionExpression' || expr.type === 'FunctionExpression') return true
+    if (expr.type !== 'Identifier') return false
+    const binding = scope.lookup(expr['name'])
+    if (!binding || binding.opaque || visiting.has(binding)) return false
+    if (!binding.functionDeclaration && binding.sources.length === 0) return false
+    visiting.add(binding)
+    const ok = binding.sources.every(
+      (src) => src.op === '=' && isFunctionValue(src.value, src.scope, visiting),
+    )
+    visiting.delete(binding)
+    return ok
+  }
+
+  /**
+   * Every text a string expression can have when it is made only of literals,
+   * conditionals between literals and `+` between them, or null when any part
+   * is not written out.
+   */
+  function literalTexts(expr: N | null): string[] | null {
+    if (!expr) return null
+    if (expr.type === 'Literal') return typeof expr['value'] === 'string' ? [expr['value']] : null
+    if (expr.type === 'TemplateLiteral' && (expr['expressions'] as N[]).length === 0) {
+      return [(expr['quasis'] as N[]).map((q) => q['value'].cooked ?? '').join('')]
+    }
+    if (expr.type === 'ConditionalExpression') {
+      const yes = literalTexts(expr['consequent'])
+      const no = literalTexts(expr['alternate'])
+      return yes && no ? [...yes, ...no] : null
+    }
+    if (expr.type === 'BinaryExpression' && expr['operator'] === '+') {
+      const left = literalTexts(expr['left'])
+      const right = literalTexts(expr['right'])
+      return left && right ? left.flatMap((l) => right.map((r) => l + r)) : null
+    }
+    return null
+  }
+
+  /** The text of a string expression with exactly one possible value, or null. */
+  function literalText(expr: N | null): string | null {
+    const all = literalTexts(expr)
+    return all && all.length === 1 ? all[0]! : null
+  }
+
+  /**
+   * The property name of a member access when it is written out, as in
+   * `a.b`, `a['b']` or a template with no substitutions. Null when computed.
+   */
+  function staticName(member: N): string | null {
+    if (member['computed'] !== true) {
+      return member['property'].type === 'Identifier' ? member['property'].name : null
+    }
+    const prop = member['property'] as N
+    if (prop.type === 'Literal' && (typeof prop['value'] === 'string' || typeof prop['value'] === 'number')) {
+      return String(prop['value'])
+    }
+    return literalText(prop)
+  }
+
+  // ----- Rules on names -----------------------------------------------------
+
+  /** Rules that depend only on a property name, whatever object it is read from. */
+  function checkName(name: string, node: N, callee: boolean): void {
+    const capability = CAPABILITY_NAMES.get(name)
+    if (capability) record(node, capability)
+    const code = CODE_FROM_STRING.get(name)
+    if (code) block(node, name, code)
+    const reason = DENIED_NAMES.get(name)
+    if (reason) block(node, name, reason)
+    else if (/^__.*__$/.test(name)) {
+      block(node, name, 'Reaches the prototype chain, which can produce the Function constructor and run code built from text.')
+    }
+    if (CALL_ONLY.has(name) && !callee) {
+      block(
+        node,
+        name,
+        `Uses ${name} without calling it directly, so this check cannot see the arguments it is given.`,
+      )
+    }
+  }
+
+  /** Checks a string that appears in the code, wherever it is used. */
+  function checkText(node: N, text: string): void {
+    if (CSS_LOADING_TEXT.test(text)) {
+      needsNetwork(node, 'url()', 'Contains style text that makes the browser request an address.')
+    }
+    if (JAVASCRIPT_URL.test(text)) {
+      block(node, 'javascript:', 'Contains an address that runs code when it is followed.')
+    }
+  }
+
+  /**
+   * Checks the value written to a property or style. A property that carries a
+   * URL requests it; a style property that can carry a URL is accepted only
+   * with a literal value that does not contain one.
+   */
+  function checkWrite(target: N, name: string, value: N | null, scope: Scope): void {
+    const refused = WRITE_REFUSED.get(name)
+    if (refused) block(target, name, refused)
+    if (WRITE_URL.has(name)) {
+      needsNetwork(target, name, 'Sets an address on an element, which makes the browser request it or follow it.')
+    }
+    // Text written out is checked whatever the property, because a custom
+    // property or a text node can carry CSS that another rule then applies.
+    const texts = literalTexts(value)
+    if (texts) for (const text of texts) checkText(target, text)
+
+    if (isUrlBearingStyleName(name)) {
+      if (texts === null) {
+        needsNetwork(target, name, 'Sets a style that can load an address, and the value is not written out, so this check cannot tell.')
+      } else if (texts.some((text) => CSS_INDIRECT.test(text))) {
+        needsNetwork(target, name, 'Sets a style from a variable that can hold an address, so this check cannot tell what it loads.')
+      }
+    } else if (name.startsWith('--') && texts === null) {
+      // A custom property can hold an address that a later rule uses. A number
+      // cannot, so a computed number is accepted and anything else is not.
+      deferred.push(() => {
+        if (!isNumeric(value, scope)) {
+          needsNetwork(target, name, 'Sets a custom style property to a value that is not written out, so this check cannot tell whether it holds an address.')
+        }
+      })
+    }
+  }
+
+  // ----- The walk -----------------------------------------------------------
+
+  type Context = { scope: Scope; thisOk: boolean }
+
+  function visitAll(nodes: (N | null | undefined)[], ctx: Context, parent: N | null): void {
+    for (const n of nodes) if (n) visit(n, ctx, parent)
+  }
+
+  function visitFunction(fn: N, ctx: Context): void {
+    const scope = new Scope(ctx.scope)
+    if (fn.type === 'FunctionExpression' && fn['id']) scope.declare(fn['id'].name, true)
+    const inner: Context = { scope, thisOk: fn.type === 'ArrowFunctionExpression' ? ctx.thisOk : true }
+    for (const param of fn['params'] as N[]) declarePattern(param, scope, false)
+    if (promiseExecutors.has(fn)) {
+      // `new Promise((resolve) => setTimeout(resolve, 100))` is the usual way to
+      // wait, and `resolve` is always a function there.
+      const first = (fn['params'] as N[])[0]
+      const binding = first?.type === 'Identifier' ? scope.vars.get(first['name']) : undefined
+      if (binding) {
+        binding.opaque = false
+        binding.sources.push({ value: fn, op: '=', scope: ctx.scope })
+      }
+    }
+    for (const param of fn['params'] as N[]) visitPattern(param, inner, 'binding')
+    const body = fn['body'] as N
+    if (body.type === 'BlockStatement') {
+      hoistVars(body, scope)
+      declareLexical(body['body'], scope)
+      visitAll(body['body'], inner, body)
+    } else {
+      visit(body, inner, fn)
+    }
+  }
+
+  /** Visits a destructuring or assignment target. */
+  function visitPattern(pattern: N | null, ctx: Context, mode: 'binding' | 'assign'): void {
+    if (!pattern) return
+    switch (pattern.type) {
+      case 'Identifier':
+        if (mode === 'assign') {
+          const binding = ctx.scope.lookup(pattern['name'])
+          if (binding) binding.opaque = true
+          else visit(pattern, ctx, pattern)
+        }
+        return
+      case 'MemberExpression':
+        visit(pattern, ctx, pattern)
+        {
+          const name = staticName(pattern)
+          if (name !== null) checkWrite(pattern, name, null, ctx.scope)
+        }
+        return
+      case 'ObjectPattern':
+        for (const prop of pattern['properties'] as N[]) {
+          if (prop.type === 'RestElement') {
+            visitPattern(prop['argument'], ctx, mode)
+            continue
+          }
+          if (prop['computed'] === true) {
+            const key = literalText(prop['key']) ?? (prop['key'].type === 'Literal' ? String(prop['key'].value) : null)
+            if (key === null) {
+              block(prop, '(dynamic property access)', 'Reads a property whose name is decided while running, so this check cannot tell what it accesses.')
+              visit(prop['key'], ctx, prop)
+            } else checkName(key, prop, false)
+          } else {
+            const key = prop['key'] as N
+            const name = key.type === 'Identifier' ? key['name'] : String(key['value'])
+            checkName(name, key, false)
+          }
+          visitPattern(prop['value'], ctx, mode)
+        }
+        return
+      case 'ArrayPattern':
+        for (const el of pattern['elements'] as (N | null)[]) visitPattern(el, ctx, mode)
+        return
+      case 'AssignmentPattern':
+        visitPattern(pattern['left'], ctx, mode)
+        visit(pattern['right'], ctx, pattern)
+        return
+      case 'RestElement':
+        visitPattern(pattern['argument'], ctx, mode)
+        return
+    }
+    visit(pattern, ctx, pattern)
+  }
+
+  function visitMember(node: N, ctx: Context, parent: N | null): void {
+    const object = node['object'] as N
+    const property = node['property'] as N
+    const isCallee = parent?.type === 'CallExpression' && parent['callee'] === node
+    const name = staticName(node)
+
+    // `document`, `window` and `navigator` are accepted only here, as the
+    // object of a member access to a member on their list.
+    if (object.type === 'Identifier' && !ctx.scope.lookup(object['name'])) {
+      const members =
+        object['name'] === 'document' ? DOCUMENT_MEMBERS
+        : object['name'] === 'window' ? WINDOW_MEMBERS
+        : object['name'] === 'navigator' ? NAVIGATOR_MEMBERS
+        : null
+      if (members) {
+        acceptedObjects.add(object)
+        if (name === null) {
+          block(node, '(dynamic property access)', 'Reads a property whose name is decided while running, so this check cannot tell what it accesses.')
+        } else if (!members.has(name) && !CAPABILITY_NAMES.has(name)) {
+          block(
+            node,
+            `${object['name']}.${name}`,
+            `Uses ${object['name']}.${name}, which is not on the list of things a page transform may use.`,
+          )
         }
       }
     }
 
-    if (node.type === 'Identifier' || node.type === 'MemberExpression') {
-      // Skip identifiers that are property names or declarations rather than reads.
-      const path = staticPath(node)
-      if (path !== null) {
-        const rule = RULES_BY_PATH.get(path)
-        if (rule) record(node, rule)
+    if (object.type !== 'Super') visit(object, ctx, node)
+
+    if (node['computed'] === true) {
+      visit(property, ctx, node)
+      if (name === null) {
+        deferred.push(() => {
+          if (!isNumeric(property, ctx.scope)) {
+            block(
+              node,
+              '(dynamic property access)',
+              'Reads a property whose name is decided while running, so this check cannot tell what it accesses.',
+            )
+          }
+        })
+      }
+    }
+    if (name !== null) checkName(name, node, isCallee)
+  }
+
+  function visitCall(node: N, ctx: Context): void {
+    const callee = node['callee'] as N
+    const args = node['arguments'] as N[]
+
+    let calleeName: string | null = null
+    if (callee.type === 'Identifier' && !ctx.scope.lookup(callee['name'])) calleeName = callee['name']
+    else if (callee.type === 'MemberExpression') calleeName = staticName(callee)
+
+    if (calleeName !== null && TIMERS.has(calleeName)) {
+      const first = args[0] ?? null
+      deferred.push(() => {
+        if (!isFunctionValue(first, ctx.scope)) {
+          block(
+            node,
+            `${calleeName}(string)`,
+            'Passes something other than a function written in this code to a timer. A text argument runs as code, which cannot be reviewed before it executes.',
+          )
+        }
+      })
+    }
+
+    if (callee.type === 'MemberExpression' && calleeName !== null) {
+      checkMethodCall(node, callee, calleeName, args, ctx)
+    }
+    if (calleeName === 'open') {
+      block(node, 'open', 'Opens a new window or document, which can send page data to another site.')
+    }
+
+    visit(callee, ctx, node)
+    visitAll(args, ctx, node)
+  }
+
+  /** Checks calls to the methods that create elements or set attributes and styles. */
+  function checkMethodCall(node: N, callee: N, name: string, args: N[], ctx: Context): void {
+    if (name === 'createElement') {
+      const tag = literalText(args[0] ?? null)
+      if (tag === null) {
+        block(node, 'createElement', 'Creates an element whose type is decided while running, so this check cannot tell whether it loads or runs anything.')
+      } else {
+        const lower = tag.toLowerCase()
+        if (LOADING_TAGS.has(lower)) {
+          needsNetwork(node, `createElement(${lower})`, 'Creates an element that requests an address.')
+        } else if (!INERT_TAGS.has(lower)) {
+          block(node, `createElement(${lower})`, `Creates a ${lower} element, which can load or run content or send data.`)
+        }
+      }
+    } else if (name === 'setAttribute') {
+      const attr = literalText(args[0] ?? null)
+      if (attr === null) {
+        block(node, 'setAttribute', 'Sets an attribute whose name is decided while running, so this check cannot tell whether it carries an address or code.')
+      } else {
+        const lower = attr.toLowerCase()
+        if (lower.startsWith('on')) {
+          block(node, `setAttribute(${lower})`, 'Sets an event handler attribute, which runs text as code.')
+        } else if (lower === 'srcdoc') {
+          block(node, 'setAttribute(srcdoc)', 'Sets the page inside a frame from a text string, which can run content.')
+        } else if (ATTRIBUTE_URL.has(lower)) {
+          needsNetwork(node, `setAttribute(${lower})`, 'Sets an address on an element, which makes the browser request it or follow it.')
+        } else if (lower === 'http-equiv') {
+          block(node, 'setAttribute(http-equiv)', 'Redirects the page from a meta element.')
+        } else if (isUrlBearingStyleName(lower)) {
+          checkWrite(node, lower, args[1] ?? null, ctx.scope)
+        }
+      }
+    } else if (name === 'setProperty') {
+      const prop = literalText(args[0] ?? null)
+      if (prop === null) {
+        block(node, 'setProperty', 'Sets a style whose name is decided while running, so this check cannot tell whether it can load an address.')
+      } else {
+        checkWrite(node, prop, args[1] ?? null, ctx.scope)
+      }
+    } else if (
+      name === 'assign' &&
+      callee['object'].type === 'Identifier' &&
+      callee['object'].name === 'Object'
+    ) {
+      // Object.assign(el, { src }) is an assignment written as a call, so the
+      // keys of each source are checked like assignments. A fresh `{}` target
+      // is plain data and needs no check.
+      const target = args[0]
+      const fresh = target?.type === 'ObjectExpression' && (target['properties'] as N[]).length === 0
+      if (!fresh) {
+        for (const source of args.slice(1)) {
+          if (source.type !== 'ObjectExpression') {
+            block(node, 'Object.assign', 'Copies properties from a value whose names are not written out, so this check cannot tell which properties it sets.')
+            continue
+          }
+          for (const prop of source['properties'] as N[]) {
+            const key = prop.type === 'Property' && prop['computed'] !== true
+              ? prop['key'].type === 'Identifier' ? prop['key'].name : String(prop['key'].value)
+              : null
+            if (key === null) {
+              block(prop, 'Object.assign', 'Copies properties whose names are not written out, so this check cannot tell which properties it sets.')
+            } else {
+              checkName(key, prop, false)
+              checkWrite(prop, key, prop['value'], ctx.scope)
+            }
+          }
+        }
+      }
+    }
+
+    if (SELECTOR_METHODS.has(name)) {
+      const selector = literalText(args[0] ?? null)
+      // The tag name is matched in the position where a type selector can
+      // stand, so `[style*="width"]` and `.script` do not match.
+      const tag = selector === null ? null : /(?:^|[\s,>+~(])(script|style)(?![\w-])(?!\s*[*^$~|]?=)/i.exec(selector)
+      if (tag) {
+        block(
+          node,
+          `${name}(${tag[1]!.toLowerCase()})`,
+          'Selects a script or style element. Their text can be rewritten to run code or to load an address, and this check cannot see what is written, so they are not available to a page transform.',
+        )
+      }
+    }
+  }
+
+  function visitIdentifier(node: N, ctx: Context, parent: N | null): void {
+    const name = node['name'] as string
+    if (ctx.scope.lookup(name) || acceptedObjects.has(node)) return
+
+    const capability = CAPABILITY_NAMES.get(name)
+    if (capability) return record(node, capability)
+    const code = CODE_FROM_STRING.get(name)
+    if (code) return block(node, name, code)
+    const refused = REFUSED_GLOBALS.get(name)
+    if (refused) return block(node, name, refused)
+    if (TIMERS.has(name)) {
+      if (!(parent?.type === 'CallExpression' && parent['callee'] === node)) {
+        block(node, name, `Uses ${name} without calling it directly, so this check cannot see the arguments it is given.`)
+      }
+      return
+    }
+    if (ALLOWED_GLOBALS.has(name) || ELEMENT_CLASS.test(name)) return
+    block(
+      node,
+      name,
+      `Uses ${name}, which is not on the list of browser features a page transform may use, so this check cannot tell what it does.`,
+    )
+  }
+
+  function visit(node: N, ctx: Context, parent: N | null): void {
+    switch (node.type) {
+      case 'Identifier':
+        return visitIdentifier(node, ctx, parent)
+
+      case 'ThisExpression':
+        if (!ctx.thisOk) {
+          block(node, 'this', 'Uses `this` outside a function, where it is the page global object, which can reach any browser feature.')
+        }
+        return
+
+      case 'MemberExpression':
+        return visitMember(node, ctx, parent)
+
+      case 'CallExpression':
+        return visitCall(node, ctx)
+
+      case 'NewExpression': {
+        const callee = node['callee'] as N
+        const first = (node['arguments'] as N[])[0]
+        if (
+          callee.type === 'Identifier' &&
+          callee['name'] === 'Promise' &&
+          !ctx.scope.lookup('Promise') &&
+          first &&
+          (first.type === 'ArrowFunctionExpression' || first.type === 'FunctionExpression')
+        ) {
+          promiseExecutors.add(first)
+        }
+        visit(callee, ctx, node)
+        visitAll(node['arguments'], ctx, node)
         return
       }
 
-      // Computed access we cannot resolve. This blocks rather than warns: a
-      // warning with no capability attached is never raised by
-      // applyCapabilityPolicy, and no runtime control exists to catch what this
-      // pass cannot read (#21, #49).
-      if (node.type === 'MemberExpression' && node['computed'] === true) {
-        const property = node['property'] as Positioned
-        // `arr[0]` and `arr[i]` are ordinary indexing, not obfuscation.
-        const looksLikeIndexing =
-          property.type === 'Literal' && typeof property['value'] === 'number'
-        if (!looksLikeIndexing) {
-          record(node, {
-            path: '(dynamic property access)',
-            capability: null,
-            severity: 'block',
-            explanation:
-              'Reads a property whose name is decided while running, so this check cannot tell what it accesses.',
-          })
+      case 'ImportExpression':
+        block(node, 'import()', 'Loads and runs code from another location, which is never allowed.')
+        return
+
+      case 'WithStatement':
+        block(node, 'with', 'Makes names resolve against an object chosen while running, so this check cannot tell what they refer to.')
+        return
+
+      case 'Literal':
+        if (typeof node['value'] === 'string') checkText(node, node['value'])
+        return
+
+      case 'TemplateLiteral':
+        for (const q of node['quasis'] as N[]) checkText(q, q['value'].cooked ?? q['value'].raw)
+        visitAll(node['expressions'], ctx, node)
+        return
+
+      case 'FunctionDeclaration':
+      case 'FunctionExpression':
+      case 'ArrowFunctionExpression':
+        return visitFunction(node, ctx)
+
+      case 'Program':
+      case 'BlockStatement':
+      case 'StaticBlock': {
+        const scope = node.type === 'Program' ? ctx.scope : new Scope(ctx.scope)
+        const inner: Context = { scope, thisOk: node.type === 'StaticBlock' ? true : ctx.thisOk }
+        if (node.type === 'Program' || node.type === 'StaticBlock') hoistVars(node, scope)
+        declareLexical(node['body'], scope)
+        return visitAll(node['body'], inner, node)
+      }
+
+      case 'SwitchStatement': {
+        visit(node['discriminant'], ctx, node)
+        const scope = new Scope(ctx.scope)
+        const inner: Context = { scope, thisOk: ctx.thisOk }
+        declareLexical((node['cases'] as N[]).flatMap((c) => c['consequent'] as N[]), scope)
+        for (const c of node['cases'] as N[]) {
+          if (c['test']) visit(c['test'], inner, c)
+          visitAll(c['consequent'], inner, c)
         }
+        return
+      }
+
+      case 'ForStatement':
+      case 'ForInStatement':
+      case 'ForOfStatement': {
+        const scope = new Scope(ctx.scope)
+        const inner: Context = { scope, thisOk: ctx.thisOk }
+        const head = (node['init'] ?? node['left']) as N | null
+        const isLoopOverValues = node.type !== 'ForStatement'
+        if (head?.type === 'VariableDeclaration') {
+          if (head['kind'] !== 'var') {
+            for (const d of head['declarations'] as N[]) {
+              declarePattern(d['id'], scope, !isLoopOverValues && d['id'].type === 'Identifier')
+            }
+          } else if (isLoopOverValues) {
+            // `var` was hoisted to the function scope as traceable; a loop over
+            // values or keys assigns something this check cannot trace.
+            for (const d of head['declarations'] as N[]) {
+              for (const n of patternNames(d['id'])) {
+                const found = ctx.scope.lookup(n)
+                if (found) found.opaque = true
+              }
+            }
+          }
+          visit(head, inner, node)
+        } else if (head) {
+          if (isLoopOverValues) visitPattern(head, inner, 'assign')
+          else visit(head, inner, node)
+        }
+        if (node['right']) visit(node['right'], inner, node)
+        if (node['test']) visit(node['test'], inner, node)
+        if (node['update']) visit(node['update'], inner, node)
+        return visit(node['body'], inner, node)
+      }
+
+      case 'CatchClause': {
+        const scope = new Scope(ctx.scope)
+        const inner: Context = { scope, thisOk: ctx.thisOk }
+        declarePattern(node['param'], scope, false)
+        if (node['param']) visitPattern(node['param'], inner, 'binding')
+        return visit(node['body'], inner, node)
+      }
+
+      case 'ClassDeclaration':
+      case 'ClassExpression': {
+        const scope = new Scope(ctx.scope)
+        if (node['id'] && node.type === 'ClassExpression') scope.declare(node['id'].name, true)
+        const inner: Context = { scope, thisOk: ctx.thisOk }
+        if (node['superClass']) visit(node['superClass'], inner, node)
+        return visitAll(node['body'].body, inner, node)
+      }
+
+      case 'MethodDefinition':
+      case 'PropertyDefinition': {
+        if (node['computed'] === true) visit(node['key'], ctx, node)
+        else if (node['key'].type === 'Identifier') checkName(node['key'].name, node['key'], false)
+        if (node['value']) {
+          // A field initialiser runs with `this` set to the instance.
+          const inner: Context = { scope: ctx.scope, thisOk: true }
+          return visit(node['value'], inner, node)
+        }
+        return
+      }
+
+      case 'Property':
+        if (node['computed'] === true) visit(node['key'], ctx, node)
+        return visit(node['value'], ctx, node)
+
+      case 'VariableDeclaration':
+        for (const d of node['declarations'] as N[]) {
+          if (d['id'].type === 'Identifier') {
+            const binding = ctx.scope.lookup(d['id'].name)
+            if (binding && d['init']) binding.sources.push({ value: d['init'], op: '=', scope: ctx.scope })
+          } else {
+            visitPattern(d['id'], ctx, 'binding')
+          }
+          if (d['init']) visit(d['init'], ctx, d)
+        }
+        return
+
+      case 'AssignmentExpression': {
+        const left = node['left'] as N
+        if (left.type === 'Identifier') {
+          const binding = ctx.scope.lookup(left['name'])
+          if (binding) binding.sources.push({ value: node['right'], op: node['operator'], scope: ctx.scope })
+          else visit(left, ctx, node)
+        } else if (left.type === 'MemberExpression') {
+          visit(left, ctx, node)
+          const name = staticName(left)
+          if (name !== null) checkWrite(left, name, node['operator'] === '=' ? node['right'] : null, ctx.scope)
+        } else {
+          visitPattern(left, ctx, 'assign')
+        }
+        return visit(node['right'], ctx, node)
+      }
+
+      case 'UpdateExpression': {
+        const arg = node['argument'] as N
+        if (arg.type === 'Identifier') {
+          const binding = ctx.scope.lookup(arg['name'])
+          if (binding) binding.sources.push({ value: null, op: node['operator'], scope: ctx.scope })
+          else visit(arg, ctx, node)
+        } else {
+          visit(arg, ctx, node)
+          if (arg.type === 'MemberExpression') {
+            const name = staticName(arg)
+            if (name !== null) checkWrite(arg, name, null, ctx.scope)
+          }
+        }
+        return
+      }
+
+      case 'LabeledStatement':
+        return visit(node['body'], ctx, node)
+      case 'BreakStatement':
+      case 'ContinueStatement':
+      case 'MetaProperty':
+        return
+    }
+
+    // Statements and expressions with no rule of their own.
+    for (const key of Object.keys(node)) {
+      if (key === 'loc' || key === 'type' || key === 'start' || key === 'end') continue
+      const value = node[key]
+      if (Array.isArray(value)) {
+        for (const item of value) {
+          if (item && typeof item === 'object' && typeof item.type === 'string') visit(item, ctx, node)
+        }
+      } else if (value && typeof value === 'object' && typeof value.type === 'string') {
+        visit(value, ctx, node)
       }
     }
-  })
+  }
+
+  const root = ast as unknown as N
+  const programScope = new Scope(null)
+  // `this` at the top of the program is the page global object. The harness
+  // wraps code in an arrow function inside a strict-mode IIFE, which keeps
+  // that meaning, so it is refused rather than assumed to be undefined.
+  visit(root, { scope: programScope, thisOk: false }, null)
+  for (const check of deferred) check()
 
   const usedCapabilities = [
     ...new Set(

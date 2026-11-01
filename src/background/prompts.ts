@@ -34,6 +34,15 @@ Your JavaScript will be re-executed automatically whenever the site re-renders t
 
 Do not use \`eval\`, \`new Function\`, or string arguments to \`setTimeout\`/\`setInterval\`. These are rejected outright.
 
+Your JavaScript is checked against a list of allowed operations, and anything the check cannot prove harmless is rejected, not warned about. Use ordinary DOM reading and writing: \`document.querySelector\`, \`querySelectorAll\`, \`classList\`, \`dataset\`, \`textContent\`, style properties, \`setAttribute\` for attributes that do not hold an address, \`createElement\` for plain elements such as div, span and button, \`addEventListener\`, \`MutationObserver\`, and timers called with a function. These are refused:
+- copying \`document\`, \`window\` or \`navigator\` into a variable or passing it to a function, \`globalThis\`, \`self\`, \`top\`, \`parent\`, \`Reflect\`, \`Proxy\`, and \`this\` outside a function;
+- \`.constructor\`, \`.prototype\`, property descriptors, \`ownerDocument\`, \`defaultView\`, and \`import()\`;
+- \`innerHTML\`, \`outerHTML\`, \`insertAdjacentHTML\`, \`document.write\`; build elements and set \`textContent\` instead;
+- creating script, iframe, form, object, embed, base or style elements;
+- \`location\`, \`open\`, \`postMessage\`, workers, and Blob URLs;
+- a property name or index that is a variable rather than a number or a written-out string, so write \`items[i]\` only with a numeric counter and use \`classList\`, \`dataset\` and \`Map\` instead of looking up names at run time.
+Setting \`src\`, \`href\` or \`action\`, creating img, link, audio or video elements, and \`url()\` in a style value count as network use and need the network capability.
+
 Declare every capability your code uses. The default is none. If your code makes a network request, reads cookies, or touches localStorage/sessionStorage/indexedDB, you must list the corresponding capability AND explain in your rationale why it is necessary. Undeclared use is rejected before it runs — it is not a judgement call. Most transforms need no capabilities at all.
 
 Default to the isolated execution world. Only request the MAIN world when the transform genuinely needs the page's own JavaScript globals, and say why in your rationale.
