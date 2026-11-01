@@ -7,7 +7,7 @@
  * not what the background or the page does with the messages.
  */
 
-import { beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 type Handler = (message: any) => any
 let handler: Handler = () => ({ ok: true, data: null })
@@ -30,6 +30,7 @@ const calls: any[] = []
 }
 
 const { Flow } = await import('./flow.svelte')
+const { BackgroundError } = await import('./messaging.svelte')
 
 const URL_ = 'https://www.example.com/'
 const anchor = { tag: 'div', classes: [], path: 'html>body>div', landmarks: [], selector: 'div.x' }
@@ -187,5 +188,122 @@ describe('leaving a run that started from a saved transform', () => {
     expect(flow.matchPattern).toBe('')
     expect(flow.suspendedId).toBeNull()
     expect(suspendCalls().map((c) => c.id)).toEqual([null])
+  })
+})
+
+const jsResult = {
+  name: 'n',
+  kind: 'js',
+  world: 'USER_SCRIPT',
+  capabilities: [],
+  code: 'x',
+  rationale: { targets: '', approach: '', assumptions: [] },
+  intent: 'model intent',
+} as any
+
+function flowAtApprove() {
+  const flow = newFlow()
+  flow.picked = { ...found, cropDrawn: false } as any
+  flow.instruction = 'x'
+  flow.result = jsResult
+  flow.intent = 'edited intent'
+  flow.step = 'saving'
+  return flow
+}
+
+describe('repeating a failed request', () => {
+  afterEach(() => vi.useRealTimers())
+
+  it('repeats the review, not a generation, when the countdown ends', async () => {
+    vi.useFakeTimers()
+    const flow = flowAtApprove()
+    let reviews = 0
+    handler = (m) => {
+      if (m.type !== 'review') return { ok: true, data: null }
+      reviews += 1
+      return reviews === 1
+        ? failure('rate-limit', { retryInSeconds: 2 })
+        : { ok: true, data: { static: [], undeclaredCapabilities: [], passed: true } }
+    }
+    await flow.toReview()
+    expect(flow.error?.kind).toBe('rate-limited')
+
+    const generate = vi.spyOn(flow, 'generate').mockResolvedValue(undefined)
+    await vi.advanceTimersByTimeAsync(2100)
+
+    expect(generate).not.toHaveBeenCalled()
+    expect(reviews).toBe(2)
+    expect(flow.error).toBeNull()
+    expect(flow.review?.passed).toBe(true)
+    // The text the user edited on the Confirm step is not replaced.
+    expect(flow.intent).toBe('edited intent')
+  })
+
+  it('repeats the review when "Try again" is used after a plain failure', async () => {
+    const flow = flowAtApprove()
+    let reviews = 0
+    handler = (m) => {
+      if (m.type !== 'review') return { ok: true, data: null }
+      reviews += 1
+      return reviews === 1
+        ? failure('network')
+        : { ok: true, data: { static: [], undeclaredCapabilities: [], passed: true } }
+    }
+    await flow.toReview()
+    const generate = vi.spyOn(flow, 'generate').mockResolvedValue(undefined)
+    expect(flow.canRetry).toBe(true)
+    await flow.retry()
+    expect(generate).not.toHaveBeenCalled()
+    expect(reviews).toBe(2)
+  })
+
+  it('repeats a failed repair as a repair', async () => {
+    const flow = newFlow()
+    let repairs = 0
+    handler = (m) => {
+      if (m.type === 'context-for-anchor') return { ok: true, data: found }
+      if (m.type === 'repair') {
+        repairs += 1
+        return failure('network')
+      }
+      return { ok: true, data: null }
+    }
+    await flow.repair(saved, 'broken')
+    await flow.retry()
+    expect(repairs).toBe(2)
+  })
+
+  it('offers no retry for an error that has nothing to repeat', async () => {
+    const flow = newFlow()
+    flow.draft = { ...saved, kind: 'js' }
+    flow.analysis = { static: [], undeclaredCapabilities: [], passed: true } as any
+    ;(globalThis as any).browser.permissions.request = async () => false
+    await flow.runJs()
+    ;(globalThis as any).browser.permissions.request = async () => true
+    expect(flow.error?.kind).toBe('request-failed')
+    expect(flow.canRetry).toBe(false)
+
+    const generate = vi.spyOn(flow, 'generate').mockResolvedValue(undefined)
+    await flow.retry()
+    expect(generate).not.toHaveBeenCalled()
+  })
+
+  it('does not count down when there is nothing to repeat', async () => {
+    vi.useFakeTimers()
+    const flow = newFlow()
+    flow.fail(new BackgroundError('slow down', 'rate-limit', true, 3))
+    expect(flow.error?.kind).toBe('rate-limited')
+    expect((flow.error as any).retryInSeconds).toBeNull()
+    expect(flow.canRetry).toBe(false)
+  })
+
+  it('repeats a failed list action given to fail()', async () => {
+    const flow = newFlow()
+    const again = vi.fn(async () => {})
+    flow.fail(new Error('delete failed'), again)
+    expect(flow.canRetry).toBe(true)
+    await flow.retry()
+    expect(again).toHaveBeenCalledTimes(1)
+    expect(flow.canRetry).toBe(false)
   })
 })

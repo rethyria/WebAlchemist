@@ -399,10 +399,10 @@ export class Flow {
       // runJs for why the request is inside the try rather than before it.
       const granted = await browser.permissions.request({ origins: [origin] })
       if (!granted) {
-        this.error = {
+        this.show({
           kind: 'request-failed',
           message: `Web Alchemist needs permission to read ${this.hostname()} before it can point at anything on it.`,
-        }
+        })
         return
       }
 
@@ -413,7 +413,7 @@ export class Flow {
       await send({ type: 'start-picking', tabId: this.tabId })
     } catch (cause) {
       this.step = 'list'
-      this.fail(cause)
+      this.fail(cause, () => this.startPicking(purpose))
     }
   }
 
@@ -741,7 +741,7 @@ export class Flow {
        * so that it is still on screen once the list is shown.
        */
       await this.discard()
-      this.fail(cause)
+      this.fail(cause, () => this.repair(transform, brokenReason))
     } finally {
       this.stopClock()
     }
@@ -833,7 +833,7 @@ export class Flow {
       }
     } catch (cause) {
       this.stopClock()
-      this.fail(cause)
+      this.fail(cause, () => this.editIntent(transform))
     }
   }
 
@@ -914,7 +914,7 @@ export class Flow {
       // As in repair: the draft carries the saved id, and the transform was
       // suspended above, so both have to be undone before the list is shown.
       await this.discard()
-      this.fail(cause)
+      this.fail(cause, () => this.editWithAi(transform))
     } finally {
       this.stopClock()
     }
@@ -1022,7 +1022,7 @@ export class Flow {
       // Back where they started, with what they typed intact — a failed
       // request should not cost the user their description.
       this.step = from === 'refining' ? 'refining' : 'describing'
-      this.fail(cause)
+      this.fail(cause, () => this.generate())
     } finally {
       this.stopClock()
       /*
@@ -1076,11 +1076,11 @@ export class Flow {
     const granted = await browser.permissions.request({ origins: ['<all_urls>'] })
     if (!granted) {
       this.sendScreenshot = false
-      this.error = {
+      this.show({
         kind: 'request-failed',
         message:
           'Firefox only lets an extension capture a page with access to all sites. Without it, screenshots cannot be taken; everything else still works.',
-      }
+      })
     }
     return granted
   }
@@ -1097,7 +1097,7 @@ export class Flow {
       await send({ type: 'start-picking', tabId: this.tabId, mode: 'region' })
     } catch (cause) {
       this.choosingRegion = false
-      this.fail(cause)
+      this.fail(cause, () => this.chooseScreenshotRegion())
     }
   }
 
@@ -1121,7 +1121,7 @@ export class Flow {
         }),
       )
     } catch (cause) {
-      this.fail(cause)
+      this.fail(cause, () => this.captureRegion(rect, viewportWidth))
     }
   }
 
@@ -1174,7 +1174,7 @@ export class Flow {
       await send({ type: 'start-picking', tabId: this.tabId, mode: 'reference' })
     } catch (cause) {
       this.awaitingReference = false
-      this.fail(cause)
+      this.fail(cause, () => this.addReference())
     }
   }
 
@@ -1260,11 +1260,11 @@ export class Flow {
        */
       const granted = await this.requestFor('js', '')
       if (!granted) {
-        this.error = {
+        this.show({
           kind: 'request-failed',
           message:
             'Running a script needs Firefox’s user scripts permission. Nothing was run, and your description is kept.',
-        }
+        })
         return
       }
 
@@ -1276,7 +1276,7 @@ export class Flow {
       // Otherwise a reload that never came leaves us armed, and the next
       // genuine refresh is swallowed instead of resetting the panel.
       this.ourReload = 'none'
-      this.fail(cause)
+      this.fail(cause, () => this.runJs())
     }
   }
 
@@ -1403,7 +1403,7 @@ export class Flow {
       })
     } catch (cause) {
       this.step = 'saving'
-      this.fail(cause)
+      this.fail(cause, () => this.toReview())
     }
   }
 
@@ -1531,7 +1531,7 @@ export class Flow {
       this.reset()
       this.onSaved()
     } catch (cause) {
-      this.fail(cause)
+      this.fail(cause, () => this.save())
     }
   }
 
@@ -1539,41 +1539,74 @@ export class Flow {
   /* Errors and lifecycle                                              */
   /* ---------------------------------------------------------------- */
 
-  private fail(cause: unknown): void {
+  /**
+   * What "Try again" and the rate-limit countdown repeat.
+   *
+   * Recorded together with the error. Both used to call generate() whatever
+   * had failed, so a rate-limited review or a failed save started a new paid
+   * generation, and a failed delete did nothing. `null` means there is nothing
+   * to repeat, and the card then offers no retry.
+   */
+  private retryAction = $state<(() => Promise<void>) | null>(null)
+
+  /** Whether the current error has a request that can be repeated. */
+  get canRetry(): boolean {
+    return this.retryAction !== null
+  }
+
+  /** Records an error that has no request to repeat. */
+  show(error: FlowError, retry: (() => Promise<void>) | null = null): void {
+    this.error = error
+    this.retryAction = retry
+  }
+
+  /**
+   * Records the failure of a request, and `retry`, the call that repeats it.
+   * Public so the list view can report a failed delete the same way.
+   */
+  fail(cause: unknown, retry: (() => Promise<void>) | null = null): void {
     if (!(cause instanceof BackgroundError)) {
-      this.error = { kind: 'request-failed', message: String(cause) }
+      this.show({ kind: 'request-failed', message: String(cause) }, retry)
       return
     }
 
     switch (cause.kind) {
       case 'no-credential':
-        this.error = { kind: 'no-provider', message: cause.message }
+        this.show({ kind: 'no-provider', message: cause.message })
         return
       case 'auth':
-        this.error = { kind: 'credential-expired', message: cause.message }
+        this.show({ kind: 'credential-expired', message: cause.message })
         return
       case 'rate-limit':
-        this.error = {
-          kind: 'rate-limited',
-          message: cause.message,
-          retryInSeconds: cause.retryInSeconds ?? null,
-        }
-        if (cause.retryInSeconds !== undefined) this.startRetryCountdown()
+        this.show(
+          {
+            kind: 'rate-limited',
+            message: cause.message,
+            // A countdown to a retry that has no action would end by silently
+            // removing the card, so only a repeatable request gets one.
+            retryInSeconds: retry === null ? null : (cause.retryInSeconds ?? null),
+          },
+          retry,
+        )
+        if (cause.retryInSeconds !== undefined && retry !== null) this.startRetryCountdown()
         return
       default:
-        this.error = { kind: 'request-failed', message: cause.message }
+        this.show({ kind: 'request-failed', message: cause.message }, retry)
     }
   }
 
   dismissError(): void {
     this.cancelRetryCountdown()
     this.error = null
+    this.retryAction = null
   }
 
   async retry(): Promise<void> {
+    const action = this.retryAction
     this.cancelRetryCountdown()
     this.error = null
-    await this.generate()
+    this.retryAction = null
+    await action?.()
   }
 
   /* ---------------------------------------------------------------- */

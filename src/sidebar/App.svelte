@@ -207,7 +207,7 @@
       try {
         granted = await flow.requestFor('js', transform.match)
       } catch (cause) {
-        flow.error = { kind: 'request-failed', message: String(cause) }
+        flow.fail(cause)
         return
       }
       if (!granted) return
@@ -363,7 +363,7 @@
         ...(tab?.id === undefined ? {} : { tabId: tab.id }),
       })
     } catch (cause) {
-      flow.error = { kind: 'request-failed', message: String(cause) }
+      flow.fail(cause, () => removeTransform(transform))
       return
     }
     if (expandedId === transform.id) expandedId = null
@@ -469,7 +469,7 @@
   {#if flow.error}
     <ErrorCard
       error={flow.error}
-      onretry={() => void flow.retry()}
+      onretry={flow.canRetry ? () => void flow.retry() : null}
       onsettings={openSettingsPage}
       ondismiss={() => flow.dismissError()}
     />
