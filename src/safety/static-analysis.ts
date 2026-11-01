@@ -4,20 +4,24 @@
  *
  * WHAT THIS IS FOR
  * ----------------
- * This is a *detection* aid, not the enforcement boundary. Enforcement is the
- * per-world Content Security Policy set via userScripts.configureWorld(),
- * which blocks external connections at runtime no matter what the code says or
- * what any analysis concluded.
+ * This is, together with the capability gate (applyCapabilityPolicy), the only
+ * automatic control that runs before the user approves model-written
+ * JavaScript. It is not backed by a runtime control. The per-world Content
+ * Security Policy was expected to block external connections, but Firefox does
+ * not apply `connect-src` in a USER_SCRIPT world: fetch, XMLHttpRequest,
+ * sendBeacon and WebSocket all reached a server that was watching (measured in
+ * test/csp/README.md). Anything this pass lets through therefore runs with the
+ * page's cookies and the user's session.
  *
- * Static analysis exists because it is free, it always runs, and — unlike the
- * model review — nothing written on a webpage can talk it out of its answer.
+ * Static analysis is still useful because it is free, it always runs, and
+ * unlike the model review nothing written on a webpage can talk it out of its
+ * answer.
  *
- * KNOWN LIMITATION, STATED PLAINLY
- * --------------------------------
+ * WHAT HAPPENS WHEN THE ANALYSIS CANNOT TELL
+ * ------------------------------------------
  * Fully dynamic access (`window[a + b]()`) cannot be resolved without running
- * the code. We detect and flag *that we could not analyse it* rather than
- * pretending the code is clean. Combined with the CSP, an unanalysable call is
- * still unable to reach the network.
+ * the code. Because nothing downstream catches it, "cannot tell" is a block,
+ * not a warning.
  */
 
 import { parse } from 'acorn'
@@ -266,8 +270,10 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
         return
       }
 
-      // Computed access we cannot resolve. Report the gap honestly instead of
-      // reporting clean. The world CSP still constrains what it can reach.
+      // Computed access we cannot resolve. This blocks rather than warns: a
+      // warning with no capability attached is never raised by
+      // applyCapabilityPolicy, and no runtime control exists to catch what this
+      // pass cannot read (#21, #49).
       if (node.type === 'MemberExpression' && node['computed'] === true) {
         const property = node['property'] as Positioned
         // `arr[0]` and `arr[i]` are ordinary indexing, not obfuscation.
@@ -277,7 +283,7 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
           record(node, {
             path: '(dynamic property access)',
             capability: null,
-            severity: 'warn',
+            severity: 'block',
             explanation:
               'Reads a property whose name is decided while running, so this check cannot tell what it accesses.',
           })

