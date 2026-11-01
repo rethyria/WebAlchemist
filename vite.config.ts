@@ -3,7 +3,7 @@ import { svelte } from '@sveltejs/vite-plugin-svelte'
 import webExtension from 'vite-plugin-web-extension'
 import { resolve } from 'node:path'
 
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
   resolve: {
     alias: {
       '@shared': resolve(__dirname, 'src/shared'),
@@ -41,7 +41,13 @@ export default defineConfig({
     // Extension review requires readable sources; keep output unminified.
     outDir: process.env['WA_OUT_DIR'] ?? 'dist',
     minify: false,
-    sourcemap: true,
-    target: 'firefox115',
+    // Source maps are written only by the development build (`npm run dev`,
+    // which passes `--mode development`). A release build ships none: the
+    // maps embed the sources of every dependency, they are large, and a
+    // reviewer receives the readable output together with the full source.
+    sourcemap: mode === 'development',
+    // Matches `strict_min_version` in src/manifest.json. The Android minimum
+    // (142) is higher, so code built for Firefox 140 also runs there.
+    target: 'firefox140',
   },
-})
+}))
