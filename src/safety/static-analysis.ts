@@ -391,7 +391,7 @@ const WRITE_REFUSED = new Map<string, string>([
  * an object, so `el.href.baseVal = '...'` sets the address.
  */
 const WRITE_URL = new Set([
-  'src', 'href', 'srcset', 'action', 'formAction', 'poster', 'ping', 'background', 'codebase', 'lowsrc',
+  'src', 'href', 'srcset', 'imageSrcset', 'action', 'formAction', 'poster', 'ping', 'background', 'codebase', 'lowsrc',
   'baseVal', 'animVal',
 ])
 /**
@@ -413,7 +413,7 @@ const DATA_PROPERTY = 'data'
 const SAFE_URL_START = /^(https?:\/\/|\/|#|\?|\.\.?\/)/i
 /** Attribute names that carry a URL, or run code, when set with setAttribute. */
 const ATTRIBUTE_URL = new Set([
-  'src', 'href', 'srcset', 'action', 'formaction', 'poster', 'ping', 'background',
+  'src', 'href', 'srcset', 'imagesrcset', 'action', 'formaction', 'poster', 'ping', 'background',
   'codebase', 'lowsrc', 'xlink:href', 'data', 'manifest',
 ])
 

