@@ -284,3 +284,14 @@ body {
   outline: 2px solid var(--accent-fg);
   outline-offset: 1px;
 }
+
+/* Text for assistive technology only. Used for live regions whose wording
+   differs from what is drawn, so a screen reader hears a change once. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}

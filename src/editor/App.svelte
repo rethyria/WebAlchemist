@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { radioGroup } from '@shared/radio-group'
+  import { focusOnMount } from '@sidebar/lib/focus'
   import '@shared/tokens.css'
   import type { ReviewResult, Settings, Transform, TransformVersion } from '@shared/types'
   import { compareWithCurrent, sourceLabel } from '@shared/versions'
@@ -420,6 +422,7 @@ import { excludedAccessMessage, excludedHostForPattern } from '@shared/excluded-
         {#if creating}
           <input
             class="name-field"
+            use:focusOnMount
             bind:value={name}
             placeholder="Name this transform"
             spellcheck="false"
@@ -430,7 +433,7 @@ import { excludedAccessMessage, excludedHostForPattern } from '@shared/excluded-
             browser.
           </p>
         {:else}
-          <h1>{transform.name}</h1>
+          <h1 use:focusOnMount>{transform.name}</h1>
           <p class="intent">{transform.intent}</p>
         {/if}
         <div class="facts">
@@ -439,7 +442,7 @@ import { excludedAccessMessage, excludedHostForPattern } from '@shared/excluded-
               Only choosable now. Changing the kind of an existing transform
               would leave code that cannot mean anything in its new form.
             -->
-            <div class="kinds" role="radiogroup" aria-label="Transform kind">
+            <div class="kinds" role="radiogroup" aria-label="Transform kind" use:radioGroup>
               {#each ['css', 'js'] as const as option}
                 <button
                   type="button"
@@ -469,6 +472,8 @@ import { excludedAccessMessage, excludedHostForPattern } from '@shared/excluded-
       </div>
 
       <div class="actions">
+        <!-- Persistent, so the confirmation is a change that is read out. -->
+        <span class="sr-only" role="status">{justSaved ? 'Saved.' : ''}</span>
         {#if justSaved}
           <span class="note">Saved</span>
         {:else if dirty}
@@ -522,7 +527,8 @@ import { excludedAccessMessage, excludedHostForPattern } from '@shared/excluded-
     </section>
 
     {#if findings.length > 0}
-      <div class="findings">
+      <!-- An alert, so a save that fails is read out when the message appears. -->
+      <div class="findings" role="alert">
         <strong>Not saved.</strong>
         {#each findings as finding}
           <p>{finding}</p>
@@ -555,7 +561,7 @@ import { excludedAccessMessage, excludedHostForPattern } from '@shared/excluded-
         {#if reviewing && transform}
           {@const differences = compareWithCurrent(transform, reviewing)}
           <section class="review" aria-labelledby="review-title">
-            <h2 id="review-title">Version from {new Date(reviewing.savedAt).toLocaleString()}</h2>
+            <h2 id="review-title" use:focusOnMount>Version from {new Date(reviewing.savedAt).toLocaleString()}</h2>
             <p class="hint">
               Restoring replaces the code, match pattern, capabilities and world of this transform
               with the values of this version. The current state is kept as a version, so a restore

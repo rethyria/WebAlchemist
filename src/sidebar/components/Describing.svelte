@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { HoverTarget, Rect, TreePath, TreeRow } from '@shared/types'
   import { autogrow } from '../lib/autogrow'
+  import { focusOnMount } from '../lib/focus'
   import Button from './Button.svelte'
   import Toggle from './Toggle.svelte'
   import Label from './Label.svelte'
@@ -365,6 +366,7 @@
     <Label>What should change?</Label>
     <textarea
       use:autogrow={instruction}
+      use:focusOnMount
       value={instruction}
       placeholder="Give the comment tree a dark background"
       oninput={(event) => onchange(event.currentTarget.value)}

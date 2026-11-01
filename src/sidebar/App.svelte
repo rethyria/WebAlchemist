@@ -20,6 +20,9 @@
   import { activeTab, BackgroundError, send } from './lib/messaging.svelte'
   import { isForTab, type HealthCheckResult } from './lib/health-result'
   import { Flow } from './lib/flow.svelte'
+  import { returnedToList } from './lib/focus'
+  import { brokenAnnouncement } from './lib/announce'
+  import { tick } from 'svelte'
   import { holdSidebarPortForWindow } from './lib/sidebar-port'
   import Describing from './components/Describing.svelte'
   import ErrorCard from './components/ErrorCard.svelte'
@@ -52,6 +55,21 @@
   let showSettings = $state(false)
 
   const flow = new Flow(() => void afterSave())
+
+  /*
+   * When a run ends and the list comes back, the panel that had the focus has
+   * been removed. The list takes the focus so that a keyboard user does not
+   * start again from the top of the document. Not reactive on purpose: it is
+   * only the previous value of the step.
+   */
+  let previousStep: string | null = null
+  $effect(() => {
+    const step = flow.step
+    if (returnedToList(previousStep, step)) {
+      void tick().then(() => document.querySelector<HTMLElement>('[data-list-focus]')?.focus())
+    }
+    previousStep = step
+  })
 
   /*
    * A repaired transform is listed as broken until something looks again, and
@@ -744,7 +762,7 @@
         <span class="bar mid"></span>
         <span class="bar target"></span>
       </div>
-      <h1>Point at something on this page and say what you want changed.</h1>
+      <h1 data-list-focus tabindex="-1">Point at something on this page and say what you want changed.</h1>
       <p>
         An AI writes the CSS or JavaScript. It is saved for {host || 'this site'} and
         applied on every visit. You approve the code before it runs.
@@ -780,7 +798,7 @@
   {:else}
     <header class="site">
       <span class="site-dot" aria-hidden="true"></span>
-      <span class="host">{host}</span>
+      <span class="host" role="heading" aria-level="1" data-list-focus tabindex="-1">{host}</span>
       <button
         type="button"
         class="check"
@@ -796,6 +814,9 @@
     {#if siteOff}
       <p class="hint off-note" role="status">Everything is turned off on this site.</p>
     {/if}
+
+    <!-- Persistent, so a health check that finds a broken transform is read out once. -->
+    <p class="sr-only" role="status">{brokenAnnouncement(brokenCount)}</p>
 
     {#if brokenCount > 0}
       <p class="broken-banner">

@@ -2,6 +2,8 @@
   import { CAPABILITY_ENFORCEMENT } from '@shared/types'
   import type { GenerationResult, ReviewResult } from '@shared/types'
   import Button from './Button.svelte'
+  import { focusOnMount } from '../lib/focus'
+  import { reviewAnnouncement } from '../lib/announce'
   import CodeBlock from './CodeBlock.svelte'
   import Label from './Label.svelte'
 
@@ -70,8 +72,11 @@
 <div class="panel">
   <header>
     <Label>Step 3 of 3 · Approve</Label>
-    <h1>{result.name}</h1>
+    <h1 use:focusOnMount>{result.name}</h1>
   </header>
+
+  <!-- Persistent, so the arrival of the review is a change that is read out once. -->
+  <p class="sr-only" role="status">{reviewAnnouncement(review, result.kind)}</p>
 
   {#if review === null}
     <p class="waiting">Reading the code…</p>

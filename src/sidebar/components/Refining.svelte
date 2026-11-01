@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { focusOnMount } from '../lib/focus'
   import type { RefinementTurn } from '@background/providers/types'
   import type { GenerationResult, ReviewResult } from '@shared/types'
   import type { ElementContext } from '@shared/types'
@@ -95,7 +96,8 @@
 <div class="panel">
   <header>
     <span class="live" class:idle={isJs && !jsRan} aria-hidden="true"></span>
-    <span class="status">
+    <span class="status" role="heading" aria-level="1" use:focusOnMount>
+      <span class="sr-only">Code ready. </span>
       {#if !isJs}
         Live on the page
       {:else if jsRan}

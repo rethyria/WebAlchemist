@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { radioGroup } from '@shared/radio-group'
+  import { focusOnMount } from '@sidebar/lib/focus'
   /**
    * Provider and credential management.
    *
@@ -525,7 +527,7 @@
 
   {#if adding}
     <div class="add">
-      <div class="types">
+      <div class="types" role="radiogroup" aria-label="Provider type" use:radioGroup>
         {#each TYPES as type}
           <button
             type="button"
@@ -546,6 +548,7 @@
         <input
           type="text"
           bind:value={draftLabel}
+          use:focusOnMount
           placeholder={draftType === 'anthropic' ? 'Anthropic' : 'Local llama.cpp'}
           autocomplete="off"
         />

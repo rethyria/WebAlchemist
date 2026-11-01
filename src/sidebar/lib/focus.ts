@@ -27,3 +27,12 @@ export function focusOnMount(node: HTMLElement): void {
   // header the user has just been looking at.
   node.focus({ preventScroll: true })
 }
+
+/**
+ * Whether the flow has just returned to the transform list from another
+ * step, which is when the list needs to take the focus. At start-up there is
+ * no previous step and the focus is left where the browser put it.
+ */
+export function returnedToList(previous: string | null, step: string): boolean {
+  return previous !== null && previous !== 'list' && step === 'list'
+}

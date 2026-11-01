@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { radioGroup } from '@shared/radio-group'
   import '@shared/tokens.css'
   import {
     ACCENTS,
@@ -200,7 +201,7 @@
 
     <section>
       <h2>Accent</h2>
-      <div class="swatches" role="radiogroup" aria-label="Accent colour">
+      <div class="swatches" role="radiogroup" aria-label="Accent colour" use:radioGroup>
         {#each ACCENTS as accent}
           <button
             type="button"
@@ -218,7 +219,7 @@
 
     <section>
       <h2>Health check</h2>
-      <div class="radios">
+      <div class="radios" role="radiogroup" aria-label="Health check" use:radioGroup>
         {#each HEALTH_MODES as mode}
           <button
             type="button"
