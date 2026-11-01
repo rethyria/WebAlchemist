@@ -32,8 +32,10 @@ import { connect as connectOAuth } from './oauth'
 import { resolveActiveProvider, ProviderError } from './providers'
 import {
   hasUserScriptsPermission,
+  registerPreview,
   registerTransform,
   reregisterAll,
+  unregisterPreview,
   unregisterTransform,
 } from './registry'
 import {
@@ -432,14 +434,14 @@ async function handle(
       if (!analysis.passed) {
         throw new Error('Static analysis rejected this code, so it was not run.')
       }
-      await registerTransform(message.transform)
+      await registerPreview(message.transform)
       previewedScripts.add(message.transform.id)
       await browser.tabs.reload(message.tabId)
       return true
     }
 
     case 'clear-preview-js':
-      await unregisterTransform(message.id)
+      await unregisterPreview(message.id)
       previewedScripts.delete(message.id)
       return true
 
@@ -606,6 +608,7 @@ async function checkAndPublish(tabId: number, transforms: Transform[]): Promise<
  * the only way to take a preview back out is to have kept what went in.
  */
 const previewedCss = new Map<number, string>()
+/** Saved transform ids whose preview is registered, under `previewIdFor(id)`. */
 const previewedScripts = new Set<string>()
 
 async function setPreviewCss(tabId: number, css: string | null): Promise<void> {
@@ -627,7 +630,7 @@ async function clearAllPreviews(): Promise<void> {
     await setPreviewCss(tabId, null)
   }
   for (const id of [...previewedScripts]) {
-    await unregisterTransform(id)
+    await unregisterPreview(id)
     previewedScripts.delete(id)
   }
 }

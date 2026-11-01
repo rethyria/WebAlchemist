@@ -144,6 +144,33 @@ export async function registerTransform(transform: Transform): Promise<void> {
   }
 }
 
+/**
+ * The registration id a preview of the transform `id` uses.
+ *
+ * "Change with AI", "Edit description" and "Repair" keep the saved id on the
+ * draft, so a preview registered under that id replaced the saved transform's
+ * own registration, and clearing the preview then unregistered it. Discarding
+ * an edit therefore switched off code the user had approved. A separate id
+ * means a preview can only ever add and remove its own registration.
+ *
+ * Not chosen: re-registering the stored record after clearing. That leaves a
+ * window where the saved script is off, and nothing runs it again if the
+ * background page ends before the clear.
+ */
+export function previewIdFor(id: string): string {
+  return `preview-${id}`
+}
+
+/** Registers a draft under its preview id, leaving any saved registration alone. */
+export async function registerPreview(transform: Transform): Promise<void> {
+  await registerTransform({ ...transform, id: previewIdFor(transform.id) })
+}
+
+/** Removes the preview registration of `id` and nothing else. */
+export async function unregisterPreview(id: string): Promise<void> {
+  await unregisterTransform(previewIdFor(id))
+}
+
 export async function unregisterTransform(id: string): Promise<void> {
   if (!(await hasUserScriptsPermission())) return
   try {
