@@ -43,6 +43,7 @@ import {
   type Credential,
   type CredentialStatus,
   type Settings,
+  type ProviderEditableField,
   type SettingsChange,
   type TokenUsage,
   type Transform,
@@ -153,6 +154,23 @@ export function saveSettings(settings: Settings): Promise<void> {
   return mutateSettings(() => writeSettings(settings))
 }
 
+const SETTINGS_FIELDS = [
+  'activeProviderId',
+  'healthCheckMode',
+  'accent',
+  'keepScreenshotPermission',
+  'aiJsKillSwitch',
+  'vaultIdleLockMinutes',
+] as const satisfies readonly (keyof Settings)[]
+
+const PROVIDER_FIELDS = [
+  'generateModel',
+  'reviewModel',
+  'supportsVision',
+  'price',
+  'oauth',
+] as const satisfies readonly ProviderEditableField[]
+
 /**
  * Applies one change to the settings as they are stored now, inside the
  * settings queue, and returns what was saved. Throws when the change is
@@ -182,6 +200,38 @@ export function changeSettings(change: SettingsChange): Promise<Settings> {
             current.activeProviderId === change.providerId
               ? (remaining[0]?.id ?? null)
               : current.activeProviderId,
+        }
+        break
+      }
+      case 'fields': {
+        const fields: Record<string, unknown> = {}
+        for (const key of SETTINGS_FIELDS) {
+          if (key in change.fields) fields[key] = (change.fields as Record<string, unknown>)[key]
+        }
+        next = { ...current, ...fields }
+        if (
+          next.activeProviderId !== null &&
+          !next.providers.some((p) => p.id === next.activeProviderId)
+        ) {
+          throw new Error('The active provider must be one that is configured.')
+        }
+        break
+      }
+      case 'update-provider': {
+        const found = current.providers.find((p) => p.id === change.providerId)
+        if (!found) throw new Error('That provider is no longer configured.')
+        // Only the listed fields are taken from the message, so a change cannot
+        // alter the id, the type or the address of a provider.
+        const updated: Provider = { ...found }
+        for (const key of PROVIDER_FIELDS) {
+          if (change.set && key in change.set) {
+            ;(updated as unknown as Record<string, unknown>)[key] = (change.set as Record<string, unknown>)[key]
+          }
+        }
+        for (const key of change.unset ?? []) delete updated[key]
+        next = {
+          ...current,
+          providers: current.providers.map((p) => (p.id === found.id ? updated : p)),
         }
         break
       }

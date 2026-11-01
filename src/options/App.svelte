@@ -85,12 +85,6 @@
     loadError = loaded.error ?? null
   }
 
-  async function save(next: Settings) {
-    settings = next
-    document.documentElement.dataset['accent'] = next.accent
-    await call({ type: 'save-settings', settings: next })
-  }
-
   /**
    * Sends one change for the background to apply to the stored settings. The
    * page then shows what was stored, so it does not keep a copy that other
@@ -141,7 +135,6 @@
     <ProviderSettings
       {settings}
       {statuses}
-      onsave={save}
       onchange={change}
       onsetkey={setKey}
       onclearkey={clearKey}
@@ -154,7 +147,7 @@
       {vault}
       idleMinutes={settings.vaultIdleLockMinutes}
       onidlechange={async (vaultIdleLockMinutes) => {
-        if (settings) await save({ ...settings, vaultIdleLockMinutes })
+        await change({ kind: 'fields', fields: { vaultIdleLockMinutes } })
       }}
       onenable={async (passphrase) => {
         await call({ type: 'enable-vault', passphrase })
@@ -192,7 +185,7 @@
             class="swatch"
             class:selected={settings.accent === accent}
             style="--swatch: {ACCENT_COLOURS[accent].swatch}"
-            onclick={() => settings && save({ ...settings, accent })}
+            onclick={() => change({ kind: 'fields', fields: { accent } })}
           ></button>
         {/each}
       </div>
@@ -209,7 +202,7 @@
             class="radio-card"
             class:selected={settings.healthCheckMode === mode.value}
             onclick={() =>
-              settings && save({ ...settings, healthCheckMode: mode.value })}
+              change({ kind: 'fields', fields: { healthCheckMode: mode.value } })}
           >
             <span class="radio-dot"></span>
             <span class="radio-label">{mode.label}</span>
@@ -231,7 +224,7 @@
           checked={settings.aiJsKillSwitch}
           label="Stop running AI-written JavaScript"
           large
-          onchange={(checked) => settings && save({ ...settings, aiJsKillSwitch: checked })}
+          onchange={(checked) => change({ kind: 'fields', fields: { aiJsKillSwitch: checked } })}
         />
       </div>
     </section>

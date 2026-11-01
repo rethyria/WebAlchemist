@@ -6,7 +6,7 @@
 
 import { beforeEach, describe, expect, it } from 'vitest'
 import { DEFAULT_SETTINGS, type Provider, type Settings } from '@shared/types'
-import { createHarness, type Harness } from './test-browser'
+import { createHarness, cssTransform, type Harness } from './test-browser'
 
 let h: Harness
 const stored = () => h.local.get('settings') as Settings
@@ -104,5 +104,139 @@ describe('removing a provider', () => {
     h.local.set('settings', { ...DEFAULT_SETTINGS, providers: [provider('a'), provider('b')], activeProviderId: 'a' })
     await h.onMessage({ type: 'patch-settings', change: { kind: 'remove-provider', providerId: 'b' } })
     expect(stored().activeProviderId).toBe('a')
+  })
+})
+
+describe('setting top-level fields', () => {
+  it('changes only the fields sent and keeps a setting changed elsewhere', async () => {
+    h.local.set('settings', { ...DEFAULT_SETTINGS, aiJsKillSwitch: true })
+    await h.onMessage({ type: 'patch-settings', change: { kind: 'fields', fields: { accent: 'green' } } })
+    expect(stored().accent).toBe('green')
+    expect(stored().aiJsKillSwitch).toBe(true)
+  })
+
+  // Control: a second page's change to a different field is kept when the
+  // first page sends its own. Whole-object saves of the two loaded copies lose one.
+  it('keeps two changes to different fields sent in the same moment, in 20 of 20 runs', async () => {
+    for (let run = 0; run < 20; run += 1) {
+      h.local.set('settings', { ...DEFAULT_SETTINGS })
+      await Promise.all([
+        h.onMessage({ type: 'patch-settings', change: { kind: 'fields', fields: { accent: 'green' } } }),
+        h.onMessage({ type: 'patch-settings', change: { kind: 'fields', fields: { aiJsKillSwitch: true } } }),
+      ])
+      expect([stored().accent, stored().aiJsKillSwitch]).toEqual(['green', true])
+    }
+  })
+
+  it('removes the registered AI scripts when the kill switch is turned on', async () => {
+    h.hasUserScripts = true
+    h.local.set('transforms', [
+      {
+        ...cssTransform({ id: 'script-1', kind: 'js', code: 'document.title = "x"', origin: 'ai' }),
+        world: 'USER_SCRIPT',
+      },
+    ])
+    await h.boot()
+    // Control: the script is registered before the switch is turned on.
+    expect([...h.userScriptsHeld.keys()]).toEqual(['script-1'])
+    await h.onMessage({ type: 'patch-settings', change: { kind: 'fields', fields: { aiJsKillSwitch: true } } })
+    expect(h.userScriptsHeld.size).toBe(0)
+  })
+
+  it('does not take providers from the message', async () => {
+    h.local.set('settings', { ...DEFAULT_SETTINGS, providers: [provider('a')], activeProviderId: 'a' })
+    await h.onMessage({
+      type: 'patch-settings',
+      change: { kind: 'fields', fields: { providers: [], accent: 'green' } as never },
+    })
+    expect(stored().providers.map((p) => p.id)).toEqual(['a'])
+    expect(stored().accent).toBe('green')
+  })
+
+  it('refuses an active provider that does not exist', async () => {
+    h.local.set('settings', { ...DEFAULT_SETTINGS, providers: [provider('a')], activeProviderId: 'a' })
+    const reply = await h.onMessage({
+      type: 'patch-settings',
+      change: { kind: 'fields', fields: { activeProviderId: 'gone' } },
+    })
+    expect(reply.ok).toBe(false)
+    expect(stored().activeProviderId).toBe('a')
+  })
+
+  it('refuses a vault lock period that is not a whole number of minutes', async () => {
+    const reply = await h.onMessage({
+      type: 'patch-settings',
+      change: { kind: 'fields', fields: { vaultIdleLockMinutes: 1.5 } },
+    })
+    expect(reply.ok).toBe(false)
+  })
+})
+
+describe('changing one provider', () => {
+  const two = () => ({
+    ...DEFAULT_SETTINGS,
+    providers: [{ ...provider('a'), price: { input: 1, output: 2 } }, provider('b')],
+    activeProviderId: 'a',
+  })
+
+  it('sets models and keeps the other provider and a setting changed elsewhere', async () => {
+    h.local.set('settings', { ...two(), aiJsKillSwitch: true })
+    await h.onMessage({
+      type: 'patch-settings',
+      change: { kind: 'update-provider', providerId: 'b', set: { generateModel: 'big', supportsVision: true } },
+    })
+    expect(stored().providers[1]).toMatchObject({ generateModel: 'big', supportsVision: true, reviewModel: 'm' })
+    expect(stored().providers[0]).toEqual(two().providers[0])
+    expect(stored().aiJsKillSwitch).toBe(true)
+  })
+
+  it('removes the price with unset, and the control keeps it when nothing is unset', async () => {
+    h.local.set('settings', two())
+    await h.onMessage({
+      type: 'patch-settings',
+      change: { kind: 'update-provider', providerId: 'a', set: { reviewModel: 'r' } },
+    })
+    expect(stored().providers[0]?.price).toEqual({ input: 1, output: 2 })
+    await h.onMessage({
+      type: 'patch-settings',
+      change: { kind: 'update-provider', providerId: 'a', unset: ['price'] },
+    })
+    expect('price' in stored().providers[0]!).toBe(false)
+  })
+
+  it('cannot change the id, type or address of a provider', async () => {
+    h.local.set('settings', two())
+    await h.onMessage({
+      type: 'patch-settings',
+      change: {
+        kind: 'update-provider',
+        providerId: 'a',
+        set: { id: 'z', type: 'openai-compatible', baseUrl: 'https://evil.example/v1', label: 'x' } as never,
+      },
+    })
+    expect(stored().providers[0]).toEqual(two().providers[0])
+  })
+
+  it('checks a changed OAuth endpoint with the endpoint rules', async () => {
+    h.local.set('settings', two())
+    const reply = await h.onMessage({
+      type: 'patch-settings',
+      change: {
+        kind: 'update-provider',
+        providerId: 'b',
+        set: { oauth: { authorizationEndpoint: 'http://a.example/auth', tokenEndpoint: 'https://a.example/t', clientId: 'c', scopes: [] } },
+      },
+    })
+    expect(reply.ok).toBe(false)
+    expect(stored().providers[1]?.oauth).toBeUndefined()
+  })
+
+  it('fails for a provider that was removed meanwhile', async () => {
+    h.local.set('settings', two())
+    const reply = await h.onMessage({
+      type: 'patch-settings',
+      change: { kind: 'update-provider', providerId: 'gone', set: { generateModel: 'x' } },
+    })
+    expect(reply.ok).toBe(false)
   })
 })

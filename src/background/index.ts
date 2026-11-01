@@ -539,8 +539,12 @@ async function handle(
       await reregister()
       return true
 
-    case 'patch-settings':
-      return changeSettings(message.change)
+    case 'patch-settings': {
+      const saved = await changeSettings(message.change)
+      // The kill switch changes which scripts may run.
+      if (message.change.kind === 'fields') await reregister()
+      return saved
+    }
 
     case 'set-credential': {
       // The destination the key is bound to comes from the saved provider, not

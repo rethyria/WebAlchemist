@@ -442,6 +442,39 @@ export type SettingsChange =
   | { kind: 'add-provider'; provider: Provider }
   /** Removes a provider and repairs the active choice. A missing id is not an error. */
   | { kind: 'remove-provider'; providerId: string }
+  /** Sets some of the top-level settings. The active provider must exist, or be null. */
+  | { kind: 'fields'; fields: SettingsFields }
+  /**
+   * Changes some fields of one provider. `unset` removes optional fields, which
+   * a message cannot express by setting them to undefined. Fails when the
+   * provider no longer exists.
+   */
+  | {
+      kind: 'update-provider'
+      providerId: string
+      set?: Partial<Pick<Provider, ProviderEditableField>>
+      unset?: ('price' | 'oauth')[]
+    }
+
+/** The top-level settings that a page may set one at a time. */
+export type SettingsFields = Partial<
+  Pick<
+    Settings,
+    | 'activeProviderId'
+    | 'healthCheckMode'
+    | 'accent'
+    | 'keepScreenshotPermission'
+    | 'aiJsKillSwitch'
+    | 'vaultIdleLockMinutes'
+  >
+>
+
+export type ProviderEditableField =
+  | 'generateModel'
+  | 'reviewModel'
+  | 'supportsVision'
+  | 'price'
+  | 'oauth'
 
 export const DEFAULT_SETTINGS: Settings = {
   schemaVersion: SCHEMA_VERSION,
