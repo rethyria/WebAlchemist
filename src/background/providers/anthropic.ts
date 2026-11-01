@@ -13,7 +13,13 @@
  */
 
 import Anthropic from '@anthropic-ai/sdk'
-import type { GenerationResult, ModelReview, PageContext, Provider } from '@shared/types'
+import {
+  modelDisplayName,
+  type GenerationResult,
+  type ModelReview,
+  type PageContext,
+  type Provider,
+} from '@shared/types'
 import {
   GENERATE_SYSTEM_PROMPT,
   REVIEW_SYSTEM_PROMPT,
@@ -31,7 +37,9 @@ import {
   type GenerateRequest,
   type StreamListener,
   type ThinkingListener,
+  type UsageListener,
 } from './types'
+import { readUsage } from '@shared/usage'
 
 /**
  * Anthropic's guidance is that model downgrades are the caller's decision, not
@@ -103,7 +111,10 @@ async function withoutUnsupportedFields<T>(
   }
 }
 
-export async function createAnthropicProvider(provider: Provider): Promise<AiProvider> {
+export async function createAnthropicProvider(
+  provider: Provider,
+  onUsage?: UsageListener,
+): Promise<AiProvider> {
   const credential = await readCredentialOrProviderError(provider)
   if (!credential) {
     throw new ProviderError(
@@ -129,6 +140,21 @@ export async function createAnthropicProvider(provider: Provider): Promise<AiPro
 
   const generateModel = provider.generateModel || DEFAULT_GENERATE_MODEL
   const reviewModel = provider.reviewModel || DEFAULT_REVIEW_MODEL
+
+  /*
+   * Only input_tokens and output_tokens are read. Thinking tokens are already
+   * inside output_tokens, and the adapter sends no cache_control, so the cache
+   * counters are always zero here and are left out rather than priced at a
+   * rate this file does not know.
+   */
+  const reportUsage = (model: string, response: unknown) =>
+    onUsage?.({
+      model,
+      usage: readUsage((response as { usage?: unknown } | null)?.usage, {
+        input: 'input_tokens',
+        output: 'output_tokens',
+      }),
+    })
 
   return {
     id: provider.id,
@@ -176,9 +202,10 @@ export async function createAnthropicProvider(provider: Provider): Promise<AiPro
             ),
         )
 
+        reportUsage(generateModel, response)
         return parseJsonResponse<GenerationResult>(response)
       } catch (error) {
-        throw toProviderError(error)
+        throw toProviderError(error, { model: generateModel, label: provider.label })
       }
     },
 
@@ -260,9 +287,10 @@ export async function createAnthropicProvider(provider: Provider): Promise<AiPro
           },
         )
 
+        reportUsage(generateModel, final)
         return parseJsonResponse<GenerationResult>(final)
       } catch (error) {
-        throw toProviderError(error)
+        throw toProviderError(error, { model: generateModel, label: provider.label })
       }
     },
 
@@ -290,9 +318,10 @@ export async function createAnthropicProvider(provider: Provider): Promise<AiPro
             ),
         )
 
+        reportUsage(reviewModel, response)
         return parseJsonResponse<ModelReview>(response)
       } catch (error) {
-        throw toProviderError(error)
+        throw toProviderError(error, { model: reviewModel, label: provider.label })
       }
     },
   }
@@ -446,8 +475,55 @@ function parseJsonResponse<T>(response: unknown): T {
   }
 }
 
-function toProviderError(error: unknown): ProviderError {
+/**
+ * Whether an API error means the account cannot pay for requests.
+ *
+ * Anthropic reports an empty balance as HTTP 400 with the error type
+ * invalid_request_error and the text "Your credit balance is too low", so the
+ * documented billing_error type and status 402 are not enough on their own;
+ * the wording is the only signal for that case.
+ */
+function isBillingError(error: InstanceType<typeof Anthropic.APIError>): boolean {
+  return (
+    error.type === 'billing_error' ||
+    error.status === 402 ||
+    /credit balance is too low/i.test(String(error.message ?? ''))
+  )
+}
+
+function toProviderError(
+  error: unknown,
+  context: { model: string; label: string },
+): ProviderError {
   if (error instanceof ProviderError) return error
+
+  /*
+   * Checked before the generic API branch below, which would report both as
+   * "Provider returned an error" with no way out. A 404 alone is not enough:
+   * the type has to be not_found_error and the text has to name the model,
+   * because the same status answers a wrong path. Anthropic words it
+   * "model: <id>".
+   */
+  if (
+    error instanceof Anthropic.NotFoundError &&
+    error.type === 'not_found_error' &&
+    /\bmodel\b/i.test(String(error.message ?? ''))
+  ) {
+    return new ProviderError(
+      `The model ${modelDisplayName(context.model)} is not available from ${context.label}. Choose another model in settings.`,
+      'model-unavailable',
+      false,
+      { cause: error },
+    )
+  }
+  if (error instanceof Anthropic.APIError && isBillingError(error)) {
+    return new ProviderError(
+      `${context.label} reports a billing problem, such as no remaining credit. Add credit or fix billing with the provider, then try again.`,
+      'billing',
+      false,
+      { cause: error },
+    )
+  }
 
   if (error instanceof Anthropic.AuthenticationError) {
     return new ProviderError(

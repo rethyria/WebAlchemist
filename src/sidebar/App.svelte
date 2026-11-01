@@ -25,6 +25,7 @@
   import Picking from './components/Picking.svelte'
   import Refining from './components/Refining.svelte'
   import Reviewing from './components/Reviewing.svelte'
+  import UsageLine from './components/UsageLine.svelte'
   import Saving from './components/Saving.svelte'
   import SettingsPanel from './components/Settings.svelte'
   import type { VaultView } from '@shared/vault-disclosure'
@@ -428,6 +429,14 @@
     if (isForTab(message, tab?.id)) runtimeStates = message.states
   }
 
+  /*
+   * openOptionsPage takes no fragment, so the page is opened as a tab to land
+   * on the model pickers. The options page scrolls to the element with this id.
+   */
+  function openModelSettings() {
+    void browser.tabs.create({ url: `${browser.runtime.getURL('src/options/index.html')}#models` })
+  }
+
   $effect(() => {
     void load()
 
@@ -540,6 +549,7 @@
       error={flow.error}
       onretry={flow.canRetry ? () => void flow.retry() : null}
       onsettings={openSettingsPage}
+      onmodelsettings={openModelSettings}
       ondismiss={() => flow.dismissError()}
     />
   {/if}
@@ -644,6 +654,7 @@
       ondiscard={() => void flow.discard()}
       onkeep={() => flow.toSaving()}
     />
+    <UsageLine report={flow.lastUsage} />
   {:else if flow.step === 'saving' && flow.result}
     <Saving
       result={flow.result}
@@ -666,6 +677,7 @@
       onsave={() => void flow.save()}
       onback={() => flow.toSaving()}
     />
+    <UsageLine report={flow.lastUsage} />
   {:else if transforms.length === 0}
     <div class="empty">
       <div class="diagram" aria-hidden="true">
