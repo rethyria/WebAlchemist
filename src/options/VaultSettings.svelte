@@ -7,6 +7,7 @@
    * true statements, and the one shown follows the stored data rather than a
    * setting — see `vaultState` in storage.ts.
    */
+  import { MIN_PASSPHRASE_LENGTH } from '@shared/vault-policy'
   import Button from '@sidebar/components/Button.svelte'
 
   interface Props {
@@ -32,12 +33,8 @@
   let busy = $state(false)
   let discardArmed = $state(false)
 
-  /*
-   * Long rather than complex. A passphrase protecting a file at rest is only
-   * ever attacked offline, where character-class rules buy far less than
-   * length — and 600,000 PBKDF2 iterations is doing the rest of the work.
-   */
-  const MINIMUM = 12
+  // The background enforces the same limit; see vault-policy.ts for why.
+  const MINIMUM = MIN_PASSPHRASE_LENGTH
 
   let canSubmit = $derived.by(() => {
     if (busy || passphrase.length === 0) return false

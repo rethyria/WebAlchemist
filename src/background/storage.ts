@@ -57,6 +57,7 @@ import {
   seal,
   unseal,
 } from './vault'
+import { MIN_PASSPHRASE_LENGTH } from '@shared/vault-policy'
 
 const KEY_SETTINGS = 'settings'
 const KEY_TRANSFORMS = 'transforms'
@@ -332,6 +333,13 @@ export async function vaultState(): Promise<{ sealed: boolean; unlocked: boolean
  * lock the user out of the thing they just set up.
  */
 export async function enableVault(passphrase: string): Promise<void> {
+  // Checked here as well as in the settings page: this function is reached by
+  // a message that any extension context can send, and the page's check is
+  // only a convenience for the person typing.
+  if (passphrase.length < MIN_PASSPHRASE_LENGTH) {
+    throw new Error(`The passphrase must be at least ${MIN_PASSPHRASE_LENGTH} characters.`)
+  }
+
   const stored = await browser.storage.local.get(KEY_CREDENTIALS)
   if (isSealed(stored[KEY_CREDENTIALS])) return
 
