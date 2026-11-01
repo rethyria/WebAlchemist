@@ -56,6 +56,8 @@ export interface Harness {
   tabWindows: Map<number, number>
   /** Tabs that `tabs.get` reports as being in a private window. */
   privateTabs: Set<number>
+  /** Tabs that `tabs.get` rejects for, as it does for a tab that has closed. */
+  closedTabs: Set<number>
   /** The container of each tab; a tab not listed is in 'firefox-default'. */
   tabContainers: Map<number, string>
   calls: {
@@ -90,6 +92,7 @@ export function createHarness(): Harness {
     origins: [],
     tabWindows: new Map(),
     privateTabs: new Set(),
+    closedTabs: new Set(),
     tabContainers: new Map(),
     calls: { insertCSS: [], removeCSS: [], unregister: [], registry: [], setBadgeText: [], sendMessage: [], runtimeMessages: [] },
     listeners: new Map(),
@@ -139,13 +142,16 @@ export function createHarness(): Harness {
     'browser.runtime.sendMessage': async (message: unknown) => {
       h.calls.runtimeMessages.push(message)
     },
-    'browser.tabs.get': async (id: number) => ({
-      id,
-      url: h.tabUrls.get(id),
-      windowId: h.tabWindows.get(id) ?? 1,
-      incognito: h.privateTabs.has(id),
-      cookieStoreId: h.tabContainers.get(id) ?? 'firefox-default',
-    }),
+    'browser.tabs.get': async (id: number) => {
+      if (h.closedTabs.has(id)) throw new Error(`Invalid tab ID: ${id}`)
+      return {
+        id,
+        url: h.tabUrls.get(id),
+        windowId: h.tabWindows.get(id) ?? 1,
+        incognito: h.privateTabs.has(id),
+        cookieStoreId: h.tabContainers.get(id) ?? 'firefox-default',
+      }
+    },
     'browser.tabs.query': async () => [...h.tabUrls].map(([id, url]) => ({ id, url })),
     'browser.tabs.sendMessage': async (tabId: number, message: unknown) => {
       h.calls.sendMessage.push({ tabId, message })

@@ -15,7 +15,7 @@ import type {
 } from '@shared/messages'
 import { matchesUrl } from '@shared/match'
 import { appliesInContainer } from '@shared/container'
-import { refuseInPrivateWindow } from './private-window'
+import { refuseInPrivateWindow, requireNormalWindow } from './private-window'
 import { regionAtScroll, viewportChanged, type ScrollOffset, type Viewport } from '@shared/region'
 import type {
   Accent,
@@ -423,7 +423,7 @@ async function handle(
     }
 
     case 'generate': {
-      await refuseInPrivateWindow(message.tabId)
+      await requireNormalWindow(message.tabId)
       const usage = createUsageRecorder(message.transformId)
       try {
         const provider = await resolveActiveProvider(usage.listener)
@@ -440,7 +440,7 @@ async function handle(
     }
 
     case 'repair': {
-      await refuseInPrivateWindow(message.tabId)
+      await requireNormalWindow(message.tabId)
       const transforms = await getAllTransforms()
       const existing = transforms.find((t) => t.id === message.transformId)
       if (!existing) throw new Error('That transform no longer exists.')
@@ -1061,7 +1061,7 @@ async function runGeneration(
   const { tabId } = request
   // Before the badge changes and before anything is sent to a provider.
   try {
-    await refuseInPrivateWindow(tabId)
+    await requireNormalWindow(tabId)
   } catch (error) {
     port.postMessage({ type: 'error', error: { message: (error as Error).message } })
     return

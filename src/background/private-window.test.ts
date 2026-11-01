@@ -3,7 +3,7 @@
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { PRIVATE_WINDOW_MESSAGE } from './private-window'
+import { PRIVATE_WINDOW_MESSAGE, TAB_UNKNOWN_MESSAGE } from './private-window'
 import { createHarness, cssTransform, extensionPage, type Harness } from './test-browser'
 
 const TAB = 3
@@ -65,7 +65,7 @@ describe('a private window', () => {
   })
 
   describe('generation over the port', () => {
-    function generate() {
+    function generate(tabId: number | null = TAB) {
       const posted: any[] = []
       let onMessage: (message: unknown) => void = () => {}
       const port = {
@@ -77,7 +77,7 @@ describe('a private window', () => {
         onDisconnect: { addListener: () => {} },
       }
       h.listeners.get('browser.runtime.onConnect')!(port)
-      onMessage({ context: {}, instruction: 'x', history: [], tabId: TAB })
+      onMessage({ context: {}, instruction: 'x', history: [], ...(tabId === null ? {} : { tabId }) })
       return posted
     }
 
@@ -88,6 +88,15 @@ describe('a private window', () => {
       expect(posted).toEqual([{ type: 'error', error: { message: PRIVATE_WINDOW_MESSAGE } }])
     })
 
+    it('is refused when no tab id is given, or the tab cannot be read (#127)', async () => {
+      const without = generate(null)
+      h.closedTabs.add(9)
+      const closed = generate(9)
+      await settle()
+      expect(without).toEqual([{ type: 'error', error: { message: TAB_UNKNOWN_MESSAGE } }])
+      expect(closed).toEqual([{ type: 'error', error: { message: TAB_UNKNOWN_MESSAGE } }])
+    })
+
     // Control: with no provider configured a normal window also ends in an
     // error, but not this one, and the request got as far as the provider.
     it('control: a normal window is not refused for the window', async () => {
@@ -95,6 +104,41 @@ describe('a private window', () => {
       await settle()
       expect(posted.at(-1)?.type).toBe('error')
       expect(posted.at(-1)?.error.message).not.toBe(PRIVATE_WINDOW_MESSAGE)
+    })
+  })
+
+  describe('the handlers that send the page to a model refuse when the tab is unknown (#127)', () => {
+    const sends: [string, (tabId?: number) => Record<string, unknown>][] = [
+      [
+        'generate',
+        (tabId) => ({ type: 'generate', context: {}, instruction: 'x', history: [], ...(tabId === undefined ? {} : { tabId }) }),
+      ],
+      [
+        'repair',
+        (tabId) => ({ type: 'repair', transformId: 't1', context: {}, brokenReason: 'x', ...(tabId === undefined ? {} : { tabId }) }),
+      ],
+    ]
+
+    it.each(sends)('%s with no tab id', async (_name, message) => {
+      h.local.set('transforms', [cssTransform()])
+      const reply = await h.onMessage(message())
+      expect(reply.ok).toBe(false)
+      expect(reply.error.message).toBe(TAB_UNKNOWN_MESSAGE)
+    })
+
+    it.each(sends)('%s with a tab that cannot be read', async (_name, message) => {
+      h.local.set('transforms', [cssTransform()])
+      h.closedTabs.add(TAB)
+      const reply = await h.onMessage(message(TAB))
+      expect(reply.error.message).toBe(TAB_UNKNOWN_MESSAGE)
+    })
+
+    // Control: the same messages for a readable tab are not refused for this
+    // reason, so the refusals above come from the missing tab.
+    it.each(sends)('control: %s with a readable tab', async (_name, message) => {
+      h.local.set('transforms', [cssTransform()])
+      const reply = await h.onMessage(message(TAB))
+      expect(reply.error?.message).not.toBe(TAB_UNKNOWN_MESSAGE)
     })
   })
 

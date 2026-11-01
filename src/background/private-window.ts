@@ -9,6 +9,9 @@
  * after the window closes.
  */
 
+export const TAB_UNKNOWN_MESSAGE =
+  'Web Alchemist could not tell which tab this request is for, or could not read that tab, so it did not send the page to a model. Close the sidebar, open it again from the tab you want to change, and try again.'
+
 export const PRIVATE_WINDOW_MESSAGE =
   'Web Alchemist does not pick, generate, capture or save in a private window, because a saved transform keeps text from the page after the window closes. Use a normal window to make a transform. Transforms you already saved still apply here.'
 
@@ -23,4 +26,21 @@ export async function refuseInPrivateWindow(tabId: number | undefined): Promise<
   if (tabId === undefined) return
   const tab = await browser.tabs.get(tabId).catch(() => undefined)
   if (tab?.incognito) throw new Error(PRIVATE_WINDOW_MESSAGE)
+}
+
+/**
+ * Like refuseInPrivateWindow, for the handlers that forward a page's context
+ * to a model (generate, repair and the generation port).
+ *
+ * These fail closed. Without a tab id, or with a tab that cannot be read, the
+ * window is unknown, and sending the page text to a provider from what might
+ * be a private window is the harm this module exists to prevent. The other
+ * handlers read the page from the tab themselves and fail when it is missing,
+ * so they keep the lenient check.
+ */
+export async function requireNormalWindow(tabId: number | undefined): Promise<void> {
+  if (tabId === undefined) throw new Error(TAB_UNKNOWN_MESSAGE)
+  const tab = await browser.tabs.get(tabId).catch(() => undefined)
+  if (!tab) throw new Error(TAB_UNKNOWN_MESSAGE)
+  if (tab.incognito) throw new Error(PRIVATE_WINDOW_MESSAGE)
 }
