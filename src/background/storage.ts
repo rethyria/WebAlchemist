@@ -410,8 +410,15 @@ function mutateTransforms<T>(work: () => Promise<T>): Promise<T> {
  * and the old enabled flag after a toggle, and undid both (#85). Only
  * `reorderTransforms` and `updateTransform` change those fields. Returns the
  * record as stored, which is what callers should register or apply.
+ *
+ * `cookieStoreId` is kept the same way when the incoming record omits it, so
+ * that a sender that does not know about the container restriction cannot
+ * remove it (#127). A sender that means to remove it passes `clearContainer`.
  */
-export function saveTransform(transform: Transform): Promise<Transform> {
+export function saveTransform(
+  transform: Transform,
+  options: { clearContainer?: boolean } = {},
+): Promise<Transform> {
   return mutateTransforms(async () => {
     const { valid: all, invalid } = await readStored()
     const index = all.findIndex((t) => t.id === transform.id)
@@ -422,6 +429,9 @@ export function saveTransform(transform: Transform): Promise<Transform> {
         order: existing.order,
         enabled: existing.enabled,
         createdAt: existing.createdAt,
+        ...(transform.cookieStoreId === undefined &&
+          !options.clearContainer &&
+          existing.cookieStoreId !== undefined && { cookieStoreId: existing.cookieStoreId }),
       }),
       updatedAt: Date.now(),
     }

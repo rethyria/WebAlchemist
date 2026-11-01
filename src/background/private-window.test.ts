@@ -145,6 +145,22 @@ describe('a transform restricted to a container', () => {
     expect((h.local.get('transforms') as any[])[0].cookieStoreId).toBe('firefox-container-2')
   })
 
+  it('keeps the stored restriction when a save omits the field (#127)', async () => {
+    h.local.set('transforms', [restricted()])
+    const withoutField = cssTransform()
+    await h.onMessage({ type: 'save-transform', transform: { ...withoutField, code: 'a { color: blue }' } })
+    const [stored] = h.local.get('transforms') as any[]
+    expect(stored.code).toBe('a { color: blue }')
+    expect(stored.cookieStoreId).toBe('firefox-container-2')
+  })
+
+  it('removes the stored restriction when the save asks for it', async () => {
+    h.local.set('transforms', [restricted()])
+    const withoutField = cssTransform()
+    await h.onMessage({ type: 'save-transform', transform: withoutField, clearContainer: true })
+    expect((h.local.get('transforms') as any[])[0].cookieStoreId).toBeUndefined()
+  })
+
   it('refuses a stored value that is not a string, and the control accepts one that is', async () => {
     const bad = await h.onMessage({
       type: 'save-transform',

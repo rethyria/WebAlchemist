@@ -1493,6 +1493,10 @@ export class Flow {
       kind: result.kind,
       origin: 'ai',
       ...(result.kind === 'js' ? { world: result.world } : {}),
+      // A repair or a regeneration keeps the container restriction. The
+      // generation result knows nothing about it, and the record is replaced
+      // on save, so a field left out here would be removed (#127).
+      ...(this.draft?.cookieStoreId === undefined ? {} : { cookieStoreId: this.draft.cookieStoreId }),
       capabilities: result.capabilities,
       intent: this.intent,
       scopeDepth: this.scopeDepth,

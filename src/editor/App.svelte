@@ -265,7 +265,13 @@ import { editorOriginToRequest, permissionRequestsFor, requestAll } from '@share
       // Every tab the transform matches, not just one: this page is not on any
       // of them, and a save that only reached the last-focused tab would look
       // like it had not worked.
-      await send({ type: 'save-transform', transform: next })
+      // A record without a container restriction asks for the stored one to be
+      // removed, because the background keeps it when the field is missing.
+      await send({
+        type: 'save-transform',
+        transform: next,
+        clearContainer: next.cookieStoreId === undefined,
+      })
       await send({ type: 'reapply-everywhere', id: current.id })
 
       transform = next
