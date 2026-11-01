@@ -162,6 +162,16 @@ describe('expiry arithmetic', () => {
     expect(needsRefresh(now - 1, now)).toBe(true)
   })
 
+  it('does not apply the margin when there is no refresh token to renew with', () => {
+    expect(needsRefresh(now + REFRESH_MARGIN_MS - 1000, now, false)).toBe(false)
+    expect(needsRefresh(now + 1, now, false)).toBe(false)
+    // Control: the token still counts as ended at and after its expiry.
+    expect(needsRefresh(now, now, false)).toBe(true)
+    expect(needsRefresh(now - 1, now, false)).toBe(true)
+    // Control: with a refresh token the margin still applies.
+    expect(needsRefresh(now + REFRESH_MARGIN_MS - 1000, now, true)).toBe(true)
+  })
+
   /* The control: a margin of zero would pass the two tests above by accident. */
   it('uses a margin that is actually non-zero', () => {
     expect(REFRESH_MARGIN_MS).toBeGreaterThan(0)

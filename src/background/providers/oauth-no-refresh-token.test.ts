@@ -99,6 +99,32 @@ describe('a sign-in with no refresh token', () => {
   })
 })
 
+describe('a token with no refresh token that ends within the refresh margin', () => {
+  it('is still used, because it has not ended', async () => {
+    await storage.saveCredentialFor(provider, { ...base, expiresAt: Date.now() + 30_000 })
+    const spy = stubFetch()
+    const adapter = await createOpenAiCompatibleProvider(provider)
+
+    await expect(adapter.review(ARGS)).resolves.toBeDefined()
+
+    expect(spy).toHaveBeenCalledTimes(1)
+  })
+
+  // Control: the same expiry with a refresh token is renewed ahead of time.
+  it('control: the same expiry with a refresh token is refreshed first', async () => {
+    await storage.saveCredentialFor(provider, { ...base, refreshToken: 'r', expiresAt: Date.now() + 30_000 })
+    const spy = vi.fn(async (url: string) =>
+      url.includes('/token')
+        ? new Response(JSON.stringify({ access_token: 'new', expires_in: 3600 }))
+        : new Response(OK),
+    )
+    ;(globalThis as unknown as { fetch: unknown }).fetch = spy
+    await (await createOpenAiCompatibleProvider(provider)).review(ARGS)
+
+    expect(spy.mock.calls.filter(([url]) => url.includes('/token'))).toHaveLength(1)
+  })
+})
+
 describe('controls', () => {
   it('an expired token that has a refresh token is still refreshed', async () => {
     await storage.saveCredentialFor(provider, { ...base, refreshToken: 'r', expiresAt: Date.now() - 1000 })

@@ -162,9 +162,17 @@ export const TOKEN_REQUEST_TIMEOUT_MS = 15_000
 /** Refresh this far ahead of expiry, so a request in flight does not expire. */
 export const REFRESH_MARGIN_MS = 60_000
 
-export function needsRefresh(expiresAt: number | undefined, now: number): boolean {
+export function needsRefresh(
+  expiresAt: number | undefined,
+  now: number,
+  hasRefreshToken = true,
+): boolean {
   // An unknown expiry is not treated as an expired one; a 401 settles it.
   if (expiresAt === undefined) return false
+  // The margin exists so that a refresh finishes before the token ends. With no
+  // refresh token there is nothing to start, so applying it only reported the
+  // sign-in as ended a minute early while the token still worked.
+  if (!hasRefreshToken) return expiresAt <= now
   return expiresAt - REFRESH_MARGIN_MS <= now
 }
 

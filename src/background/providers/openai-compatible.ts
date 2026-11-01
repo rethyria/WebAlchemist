@@ -329,7 +329,7 @@ function ensureFreshToken(
   // After a 401 the clock is not consulted: the server has said this token is
   // no good, whatever its recorded expiry.
   const stale = (c: OAuthCredential) =>
-    rejected !== undefined ? c.accessToken === rejected : needsRefresh(c.expiresAt, Date.now())
+    rejected !== undefined ? c.accessToken === rejected : needsRefresh(c.expiresAt, Date.now(), Boolean(c.refreshToken))
   if (!stale(credential)) return Promise.resolve(credential.accessToken)
   const key = refreshKey(provider)
   const running = refreshesInFlight.get(key)
