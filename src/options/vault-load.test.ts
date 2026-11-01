@@ -98,3 +98,41 @@ describe('the vault locking between the two requests', () => {
     expect(requested.filter((type) => type === 'vault-state')).toHaveLength(1)
   })
 })
+
+describe('the statuses request failing while the vault is not locked', () => {
+  /*
+   * Corrupt sealed data: the vault state says unlocked, and reading the map
+   * fails when it is decrypted. Showing no keys and no message made this look
+   * like a vault with nothing stored.
+   */
+  function failing(second: { sealed: boolean; unlocked: boolean }) {
+    let reads = 0
+    return (async (message: { type: string }) => {
+      if (message.type === 'vault-state') {
+        reads += 1
+        return reads === 1 ? { sealed: true, unlocked: true } : second
+      }
+      throw new Error('The stored credentials could not be decrypted.')
+    }) as Parameters<typeof loadVaultAndStatuses>[0]
+  }
+
+  it('returns the error when the state read again still says unlocked', async () => {
+    const loaded = await loadVaultAndStatuses(failing({ sealed: true, unlocked: true }))
+
+    expect(loaded.error).toBe('The stored credentials could not be decrypted.')
+    expect(loaded.statuses).toEqual([])
+  })
+
+  // Control: the same failure with a state that now says locked has an
+  // explanation, so no error is returned. This is the existing lock case.
+  it('control: returns no error when the state read again says locked', async () => {
+    const loaded = await loadVaultAndStatuses(failing({ sealed: true, unlocked: false }))
+
+    expect(loaded.error).toBeUndefined()
+  })
+
+  it('control: a successful load has no error', async () => {
+    const { call } = fakeCall({ sealed: true, unlocked: true })
+    expect((await loadVaultAndStatuses(call)).error).toBeUndefined()
+  })
+})

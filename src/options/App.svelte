@@ -20,6 +20,8 @@
   let settings = $state<Settings | null>(null)
   let statuses = $state<CredentialStatus[]>([])
   let vault = $state({ sealed: false, unlocked: true })
+  /** Set when the credentials could not be read and the vault is not locked. */
+  let loadError = $state<string | null>(null)
   let usage = $state<UsageStore>({ months: {}, transforms: {} })
   let transformNames = $state<Record<string, string>>({})
 
@@ -49,6 +51,7 @@
     const loaded = await loadVaultAndStatuses(call)
     vault = loaded.vault
     statuses = loaded.statuses
+    loadError = loaded.error ?? null
     // Usage is not secret and does not depend on the vault. A failure to read
     // it leaves the section empty and does not stop the page from loading.
     try {
@@ -77,6 +80,7 @@
     const loaded = await loadVaultAndStatuses(call)
     vault = loaded.vault
     statuses = loaded.statuses
+    loadError = loaded.error ?? null
   }
 
   async function save(next: Settings) {
@@ -112,6 +116,13 @@
 
 <main>
   <h1>Web Alchemist settings</h1>
+
+  {#if loadError}
+    <p class="load-error" role="alert">
+      The stored credentials could not be read: {loadError} The credential status below is not
+      known.
+    </p>
+  {/if}
 
   {#if settings}
     <ProviderSettings
@@ -214,6 +225,12 @@
 </main>
 
 <style>
+  .load-error {
+    margin: 0;
+    font: 12px/1.6 var(--font-ui);
+    color: var(--block);
+  }
+
   main {
     max-width: 760px;
     margin: 0 auto;

@@ -21,20 +21,33 @@ type Call = <T>(message: { type: string }) => Promise<T>
  */
 export async function loadVaultAndStatuses(
   call: Call,
-): Promise<{ vault: VaultState; statuses: CredentialStatus[] }> {
+): Promise<{ vault: VaultState; statuses: CredentialStatus[]; error?: string }> {
   const vault = await call<VaultState>({ type: 'vault-state' })
   const locked = vault.sealed && !vault.unlocked
   if (locked) return { vault, statuses: [] }
   try {
     return { vault, statuses: await call<CredentialStatus[]>({ type: 'get-credential-statuses' }) }
-  } catch {
+  } catch (error) {
     /*
      * The state said the credentials were readable, and the request failed
      * anyway. The usual cause is another tab locking the vault in between, and
      * the state read at the start is then out of date. It is read again so the
-     * page shows the state that is true now, and no statuses are shown. The
-     * error itself is not shown: it carries no information the state does not.
+     * page shows the state that is true now, and no statuses are shown.
+     *
+     * The error is dropped only when the state now says locked, because the
+     * lock explains it. When the state still says the credentials are
+     * readable, nothing explains the failure; the stored data may be corrupt.
+     * Dropping the error then showed an unlocked vault with no keys and no
+     * message, so the error is returned for the page to show.
      */
-    return { vault: await call<VaultState>({ type: 'vault-state' }), statuses: [] }
+    const again = await call<VaultState>({ type: 'vault-state' })
+    const explainedByLock = again.sealed && !again.unlocked
+    return {
+      vault: again,
+      statuses: [],
+      ...(explainedByLock
+        ? {}
+        : { error: error instanceof Error ? error.message : String(error) }),
+    }
   }
 }
