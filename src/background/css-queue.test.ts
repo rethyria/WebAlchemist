@@ -44,6 +44,9 @@ const stored = () => h.session.get(`wa-css-applied-${TAB}`)
 
 describe('two route changes that overlap', () => {
   it('leave only the last stylesheet, and it is the stored one', async () => {
+    // Both events arrive after the tab is already on its last URL, as the
+    // browser reports it by then.
+    h.tabUrls.set(TAB, 'https://example.com/b1')
     await Promise.all([route('https://example.com/a1'), route('https://example.com/b1')])
     expect(live()).toEqual([stamped(b)])
     expect(stored()).toBe(stamped(b))
@@ -52,7 +55,9 @@ describe('two route changes that overlap', () => {
   it('control: the same two changes one after the other end the same way', async () => {
     // Shows the stub tracks stylesheets correctly and that the overlap, not the
     // counting helper, is what the test above depends on.
+    h.tabUrls.set(TAB, 'https://example.com/a1')
     await route('https://example.com/a1')
+    h.tabUrls.set(TAB, 'https://example.com/b1')
     await route('https://example.com/b1')
     expect(live()).toEqual([stamped(b)])
     expect(stored()).toBe(stamped(b))
@@ -138,5 +143,47 @@ describe('an apply queued for a document that is replaced before it runs (#83)',
     await Promise.all([preview, reapplied])
     // Shows the stale-task test counts a task that would otherwise run.
     expect(h.calls.insertCSS.filter((c) => c.css === stamped(a))).toHaveLength(1)
+  })
+})
+
+describe('CSS chosen for one page when the tab has moved to another (#57)', () => {
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 20))
+
+  it('is not inserted when the tab reports a different URL than the one it was chosen for', async () => {
+    // The tab is already on B when A's commit event is handled, as when two
+    // navigations follow each other quickly and the events arrive late.
+    h.tabUrls.set(TAB, 'https://example.com/b1')
+    await commit('https://example.com/a1')
+    await settle()
+    expect(h.calls.insertCSS.filter((c) => c.css === stamped(a))).toEqual([])
+    expect(stored()).toBeUndefined()
+  })
+
+  it('control: the same commit while the tab is still on A inserts it', async () => {
+    h.tabUrls.set(TAB, 'https://example.com/a1')
+    await commit('https://example.com/a1')
+    await settle()
+    expect(h.calls.insertCSS.filter((c) => c.css === stamped(a))).toHaveLength(1)
+  })
+
+  it('is not inserted when a new document committed while the previous stylesheet was removed', async () => {
+    // A route change from A to B is removing A's stylesheet when the tab loads
+    // a new document. The route change's insert of B's CSS must not reach it.
+    h.tabUrls.set(TAB, 'https://example.com/a1')
+    await commit('https://example.com/a1')
+    await settle()
+    h.tabUrls.set(TAB, 'https://example.com/b1')
+    const release = h.hold('browser.scripting.removeCSS')
+    const routed = route('https://example.com/b1')
+    await settle()
+    // The page is reloaded while the removal waits: the URL is unchanged and
+    // the document is new, so only the document counter can tell.
+    const committed = commit('https://example.com/b1')
+    await settle()
+    release()
+    await Promise.all([routed, committed])
+    await settle()
+    // One insert of B's CSS, made by the new document's own evaluation.
+    expect(h.calls.insertCSS.filter((c) => c.css === stamped(b))).toHaveLength(1)
   })
 })

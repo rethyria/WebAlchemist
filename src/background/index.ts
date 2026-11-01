@@ -297,7 +297,7 @@ async function evaluateTab(
   // A route change may leave nothing to apply, and the previous route's CSS
   // has to come out. On a new document nothing was applied, so this is a no-op.
   if (!navigated || transforms.length > 0) {
-    await applyCssTransforms(tabId, () => cssTransformsFor(tabId, url))
+    await applyCssTransforms(tabId, () => cssTransformsFor(tabId, url), url)
   }
 
   if (transforms.length === 0) return
@@ -706,7 +706,7 @@ async function handle(
       // record, so a route change cannot bring the paused version back.
       if (message.id === null) await forgetSuspended(message.tabId)
       else await writeSuspended(message.tabId, message.id, tab?.windowId)
-      await applyCssTransforms(message.tabId, () => cssTransformsFor(message.tabId, url))
+      await applyCssTransforms(message.tabId, () => cssTransformsFor(message.tabId, url), url)
       return true
     }
 
@@ -1277,6 +1277,8 @@ async function cssTransformsFor(tabId: number, url: string): Promise<Transform[]
 function applyCssTransforms(
   tabId: number,
   load: () => Promise<Transform[]>,
+  /** The URL the transforms are being chosen for. */
+  url: string,
 ): Promise<void> {
   // Taken now, not when the task runs: a document that commits while this is
   // queued makes it out of date.
@@ -1285,11 +1287,40 @@ function applyCssTransforms(
     if (documentOf(tabId) !== document) return
     // Read inside the queue. A list read before waiting would be older than the
     // task ahead of this one, and a save finishing in between would be undone.
-    await applyCss(tabId, await load())
+    await applyCss(tabId, await load(), { document, url })
   })
 }
 
-async function applyCss(tabId: number, transforms: Transform[]): Promise<void> {
+/**
+ * Whether the tab still shows the document and URL the CSS was chosen for.
+ *
+ * The task checks the document when it starts, and then waits on storage and
+ * on removing the previous stylesheet. A tab that navigates during those waits
+ * would receive the stylesheet chosen for the page it left, because insertCSS
+ * targets the whole tab. Checked again immediately before the insert, by the
+ * counter that moves when a document commits and by the URL the browser reports
+ * for the tab, which also catches a navigation whose commit event has not
+ * reached this page yet. insertCSS in Firefox accepts no document id, so this
+ * narrows the window and does not close it: one await remains between this
+ * check and the insert.
+ */
+async function tabStillShows(
+  tabId: number,
+  expected: { document: number; url: string },
+): Promise<boolean> {
+  if (documentOf(tabId) !== expected.document) return false
+  const current = (await browser.tabs.get(tabId).catch(() => undefined))?.url
+  // A tab whose URL cannot be read is one the extension has no access to, and
+  // the insert fails there anyway.
+  if (current !== undefined && current !== expected.url) return false
+  return documentOf(tabId) === expected.document
+}
+
+async function applyCss(
+  tabId: number,
+  transforms: Transform[],
+  expected: { document: number; url: string },
+): Promise<void> {
   const css = transforms
     .filter((t) => t.kind === 'css' && t.enabled)
     .sort((a, b) => a.order - b.order)
@@ -1306,6 +1337,7 @@ async function applyCss(tabId: number, transforms: Transform[]): Promise<void> {
   }
 
   if (!css || previous === css) return
+  if (!(await tabStillShows(tabId, expected))) return
 
   try {
     await browser.scripting.insertCSS({ target: { tabId }, css, origin: 'USER' })
@@ -1322,7 +1354,7 @@ async function reapply(tabId: number | undefined): Promise<void> {
   const tab = await browser.tabs.get(tabId).catch(() => undefined)
   if (!tab?.url) return
   const url = tab.url
-  await applyCssTransforms(tabId, () => cssTransformsFor(tabId, url))
+  await applyCssTransforms(tabId, () => cssTransformsFor(tabId, url), url)
   const transforms = await transformsForUrl(url)
 
   // Every mutation that changes what runs — save, delete, reorder, toggle —
