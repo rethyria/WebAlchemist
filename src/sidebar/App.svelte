@@ -233,6 +233,7 @@
     try {
       applySettings(await send<Settings>({ type: 'get-settings' }))
       flow.excludedSites = await send<string[]>({ type: 'get-excluded-sites' })
+      await flow.loadCaptureGrantRecord()
       await refreshVault()
       statuses = await send<CredentialStatus[]>({ type: 'get-credential-statuses' })
 

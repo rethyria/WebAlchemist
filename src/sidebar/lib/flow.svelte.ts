@@ -47,7 +47,7 @@ import type {
 } from '@shared/types'
 import { extractPartialString } from '@shared/partial-json'
 import { excludedHostFor, excludedSiteMessage, SENSITIVE_PAGE_MESSAGE } from '@shared/excluded-sites'
-import { recordCaptureGrant } from '@shared/capture-grant'
+import { readCaptureGrant, recordCaptureGrant } from '@shared/capture-grant'
 import { BackgroundError, generateOverPort, send } from './messaging.svelte'
 
 /** An address without its fragment, so that scrolling to an anchor is not a new page. */
@@ -213,6 +213,14 @@ export class Flow {
   visionSupported = $state(false)
   /** Mirrors the setting; decides whether the all-sites grant is handed back. */
   keepScreenshotPermission = $state(false)
+  /**
+   * Whether the panel took the all-sites grant for a run, as recorded in
+   * storage.local (see capture-grant.ts). Kept in memory as well because the
+   * save has to decide synchronously: an await before the permission request
+   * would end the user gesture. A save removes the all-sites grant only when
+   * this is true, so a grant the user gave outside the panel is left alone (#134).
+   */
+  captureGrantTaken = false
 
   history = $state<RefinementTurn[]>([])
   followUp = $state('')
@@ -1452,10 +1460,12 @@ export class Flow {
     // Recorded in the same tick as the request and not awaited before it, which
     // would end the gesture. If the panel closes before the user answers, the
     // background script finds the record and hands the grant back.
+    this.captureGrantTaken = true
     const recorded = recordCaptureGrant(true).catch(() => {})
     const granted = await browser.permissions.request({ origins: ['<all_urls>'] })
     await recorded
     if (!granted) {
+      this.captureGrantTaken = false
       void recordCaptureGrant(false).catch(() => {})
       this.sendScreenshot = false
       this.show({
@@ -1465,6 +1475,11 @@ export class Flow {
       })
     }
     return granted
+  }
+
+  /** Reads the record at start-up, so a panel opened after a grant was taken still knows it. */
+  async loadCaptureGrantRecord(): Promise<void> {
+    this.captureGrantTaken = await readCaptureGrant().catch(() => false)
   }
 
   async chooseScreenshotRegion(): Promise<void> {
@@ -1544,6 +1559,7 @@ export class Flow {
    */
   cancelScreenshot(): void {
     this.clearShot()
+    this.captureGrantTaken = false
     void recordCaptureGrant(false).catch(() => {})
     // Held deliberately when the user has said so in settings; the point of
     // that setting is not being asked again.
@@ -1953,6 +1969,12 @@ export class Flow {
       ? browser.permissions.request({ origins: [origin] })
       : Promise.resolve(true)
 
+    // The grant is gone after the removal above, so the record no longer applies.
+    if (releaseAllSites) {
+      this.captureGrantTaken = false
+      void recordCaptureGrant(false).catch(() => {})
+    }
+
     // 'userScripts' is absent from the OptionalPermission union in
     // @types/firefox-webext-browser, and a union cannot be widened by
     // declaration merging. Same cast as registry.ts, for the same reason.
@@ -1992,7 +2014,7 @@ export class Flow {
       const granted = await this.requestFor(
         draft.kind,
         this.matchPattern,
-        !this.keepScreenshotPermission,
+        !this.keepScreenshotPermission && this.captureGrantTaken,
       )
       if (!granted) {
         this.permissionDenied = true

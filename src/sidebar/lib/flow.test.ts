@@ -15,6 +15,8 @@ const calls: any[] = []
 
 /** Every object passed to `storage.local.set`. */
 const localWrites: Record<string, unknown>[] = []
+/** What `storage.local.get` returns. */
+const localStored: Record<string, unknown> = {}
 ;(globalThis as any).browser = {
   runtime: {
     sendMessage: async (message: any) => {
@@ -30,6 +32,7 @@ const localWrites: Record<string, unknown>[] = []
   tabs: { update: async () => {}, reload: async () => {}, create: async () => {} },
   storage: {
     local: {
+      get: async (key: string) => (key in localStored ? { [key]: localStored[key] } : {}),
       set: async (items: Record<string, unknown>) => {
         localWrites.push(items)
       },
@@ -1674,8 +1677,9 @@ describe('saving while the all-sites screenshot grant is held (#134)', () => {
   })
   afterEach(() => Object.assign(api, real))
 
-  function flowAtSave(keep: boolean) {
+  function flowAtSave(keep: boolean, grantTaken = true) {
     const flow = newFlow()
+    flow.captureGrantTaken = grantTaken
     flow.draft = { ...saved, kind: 'css', id: 'NEW' }
     flow.matchPattern = '*.example.com/*'
     flow.keepScreenshotPermission = keep
@@ -1688,6 +1692,31 @@ describe('saving while the all-sites screenshot grant is held (#134)', () => {
     // Read with no await since save() was called: the gesture is still live only
     // if both calls were already made.
     expect(order).toEqual(['remove:<all_urls>', 'request:*://*.example.com/*'])
+  })
+
+  it('removes nothing when the panel did not record taking the grant (#134)', () => {
+    // A grant the user gave outside the panel has no record, and a save must
+    // not take it away. The site request is still made.
+    const flow = flowAtSave(false, false)
+    void flow.save()
+    expect(order).toEqual(['request:*://*.example.com/*'])
+  })
+
+  it('reads the record from storage.local when the panel starts (#134)', async () => {
+    const flow = newFlow()
+    localStored['wa-capture-grant-held'] = true
+    await flow.loadCaptureGrantRecord()
+    expect(flow.captureGrantTaken).toBe(true)
+    delete localStored['wa-capture-grant-held']
+    await flow.loadCaptureGrantRecord()
+    expect(flow.captureGrantTaken).toBe(false)
+  })
+
+  it('clears the record after the save removed the grant (#134)', async () => {
+    const flow = flowAtSave(false)
+    await flow.save()
+    expect(flow.captureGrantTaken).toBe(false)
+    expect(localWrites.at(-1)).toEqual({ 'wa-capture-grant-held': false })
   })
 
   it('checks that the site was recorded and saves when it was', async () => {
