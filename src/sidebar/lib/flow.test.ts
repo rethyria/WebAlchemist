@@ -1056,6 +1056,9 @@ describe('including the drawn region', () => {
     // The background needs this to move the rectangle by the distance the page
     // has scrolled since; without it the old viewport numbers are cropped.
     expect(capture?.scrolledTo).toEqual({ x: 0, y: 340 })
+    // The background refuses the capture unless the run's tab still shows this
+    // address (#135).
+    expect(capture?.url).toBe(URL_)
   })
 })
 

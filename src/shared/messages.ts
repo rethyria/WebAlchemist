@@ -155,6 +155,12 @@ export type Message =
       rect: Rect
       viewportWidth: number
       /**
+       * The address of the page the run is about. The capture is refused when
+       * the run's tab is not the active tab or no longer shows this address,
+       * because captureVisibleTab photographs whichever tab is active.
+       */
+      url: string
+      /**
        * How far the page was scrolled when `rect` was drawn. Present for a
        * rectangle stored from a pick, which may be captured after the page has
        * scrolled; absent for a region that is captured as soon as it is drawn.

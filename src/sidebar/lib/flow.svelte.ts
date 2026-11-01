@@ -1366,6 +1366,7 @@ export class Flow {
           tabId: this.tabId,
           rect,
           viewportWidth,
+          url: this.url,
           ...(scrolledTo ? { scrolledTo } : {}),
         }),
       )

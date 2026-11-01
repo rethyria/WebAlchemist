@@ -752,6 +752,7 @@ async function handle(
         message.tabId,
         message.rect,
         message.viewportWidth,
+        message.url,
         message.scrolledTo,
       )
 
@@ -1258,6 +1259,7 @@ async function captureWithLockDown(
   tabId: number,
   rect: Rect,
   viewportWidth: number,
+  url: string,
   scrolledTo?: ScrollOffset,
 ): Promise<{ dataUrl: string; rect: Rect; clipped: boolean }> {
   /*
@@ -1283,7 +1285,7 @@ async function captureWithLockDown(
   }
   await sendToContent(tabId, { type: 'set-lock-visible', visible: false })
   try {
-    const shot = await captureRegion(target, viewportWidth)
+    const shot = await captureRegion(tabId, url, target, viewportWidth)
     return { ...shot, clipped: shot.clipped || moveClipped, rect: target }
   } finally {
     await sendToContent(tabId, { type: 'set-lock-visible', visible: true })
@@ -1291,10 +1293,30 @@ async function captureWithLockDown(
 }
 
 async function captureRegion(
+  tabId: number,
+  url: string,
   rect: Rect,
   viewportWidth: number,
 ): Promise<{ dataUrl: string; clipped: boolean }> {
-  const full = await browser.tabs.captureVisibleTab({ format: 'png' })
+  // captureVisibleTab photographs whichever tab is active in a window, which
+  // after the user switches tabs is not the run's tab, and can be a different
+  // site they are signed in to. It is read again here, just before the call,
+  // rather than once when the request arrived.
+  const tab = await browser.tabs.get(tabId).catch(() => undefined)
+  if (!tab || tab.windowId === undefined) {
+    throw new Error('The page this run is about is no longer open, so nothing was captured.')
+  }
+  if (!tab.active) {
+    throw new Error(
+      'The page this run is about is not the tab in front, so nothing was captured. Switch back to it and try again.',
+    )
+  }
+  if (tab.url !== url) {
+    throw new Error(
+      'The page this run is about has moved to another address, so nothing was captured.',
+    )
+  }
+  const full = await browser.tabs.captureVisibleTab(tab.windowId, { format: 'png' })
 
   // Cropping happens here so the full-viewport capture never leaves this scope.
   const blob = await (await fetch(full)).blob()

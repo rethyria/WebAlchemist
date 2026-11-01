@@ -28,7 +28,12 @@ function stub(path: string): any {
 
 const registered = new Map<string, any>()
 /** What the stubbed tabs API does; reset before each test. */
-const tabHooks = { reload: async (_tabId: number): Promise<void> => {}, reply: undefined as unknown }
+const tabHooks = {
+  reload: async (_tabId: number): Promise<void> => {},
+  replyFor: (_message: any): unknown => undefined,
+  tab: (tabId: number): any => ({ id: tabId, active: true, windowId: 3, url: 'https://www.example.com/' }),
+}
+const captureCalls: { windowId: number; options: unknown }[] = []
 const sentToTabs: { tabId: number; message: any }[] = []
 let stored: any[] = []
 
@@ -76,7 +81,12 @@ const realApis: Record<string, object> = {
     reload: async (tabId: number) => tabHooks.reload(tabId),
     sendMessage: async (tabId: number, message: unknown) => {
       sentToTabs.push({ tabId, message })
-      return tabHooks.reply
+      return tabHooks.replyFor(message)
+    },
+    get: async (tabId: number) => tabHooks.tab(tabId),
+    captureVisibleTab: async (windowId: number, options: unknown) => {
+      captureCalls.push({ windowId, options })
+      return 'data:image/png;base64,AAAA'
     },
   },
   userScripts: {
@@ -152,7 +162,9 @@ beforeEach(async () => {
   registered.clear()
   stored = [saved]
   tabHooks.reload = async () => {}
-  tabHooks.reply = undefined
+  tabHooks.replyFor = () => undefined
+  tabHooks.tab = (tabId) => ({ id: tabId, active: true, windowId: 3, url: 'https://www.example.com/' })
+  captureCalls.length = 0
   sentToTabs.length = 0
   registered.set('SAVED', { id: 'SAVED', js: [{ code: 'savedCode()' }] })
 })
@@ -229,5 +241,79 @@ describe('context-for-anchor (#104)', () => {
     await onMessage({ type: 'recapture', tabId: 7 }, extensionPage)
     const sent = sentToTabs.find((m) => m.message.type === 'recapture')
     expect(sent?.message).toEqual({ type: 'recapture' })
+  })
+})
+
+describe('capture-region (#135)', () => {
+  const rect = { x: 10, y: 20, width: 100, height: 50 }
+  const request = (extra: object = {}) =>
+    onMessage(
+      {
+        type: 'capture-region',
+        tabId: 5,
+        rect,
+        viewportWidth: 800,
+        url: 'https://www.example.com/',
+        ...extra,
+      },
+      extensionPage,
+    )
+
+  beforeAll(() => {
+    // The crop runs in the browser's image APIs, which the test environment
+    // does not have. The stubs only have to let the code reach its end.
+    vi.stubGlobal('fetch', async () => ({ blob: async () => ({}) }))
+    vi.stubGlobal('createImageBitmap', async () => ({ width: 1600, height: 1200 }))
+    vi.stubGlobal(
+      'OffscreenCanvas',
+      class {
+        getContext() {
+          return { drawImage() {} }
+        }
+        async convertToBlob() {
+          return {}
+        }
+      },
+    )
+    vi.stubGlobal(
+      'FileReader',
+      class {
+        onload: () => void = () => {}
+        result = 'data:image/png;base64,CROP'
+        readAsDataURL() {
+          this.onload()
+        }
+      },
+    )
+  })
+
+  it('captures the window of the run tab when it is active and unchanged (control)', async () => {
+    const reply = (await request()) as any
+    expect(reply.ok).toBe(true)
+    expect(captureCalls).toEqual([{ windowId: 3, options: { format: 'png' } }])
+  })
+
+  it('refuses when the run tab is not the active tab, and captures nothing', async () => {
+    tabHooks.tab = (tabId) => ({ id: tabId, active: false, windowId: 3, url: 'https://www.example.com/' })
+    const reply = (await request()) as any
+    expect(reply.ok).toBe(false)
+    expect(reply.error.message).toMatch(/not the tab in front/)
+    expect(captureCalls).toEqual([])
+  })
+
+  it('refuses when the run tab has moved to another address, and captures nothing', async () => {
+    tabHooks.tab = (tabId) => ({ id: tabId, active: true, windowId: 3, url: 'https://other.example.org/' })
+    const reply = (await request()) as any
+    expect(reply.ok).toBe(false)
+    expect(reply.error.message).toMatch(/another address/)
+    expect(captureCalls).toEqual([])
+  })
+
+  it('refuses when the run tab is gone', async () => {
+    tabHooks.tab = () => {
+      throw new Error('no such tab')
+    }
+    expect(((await request()) as any).ok).toBe(false)
+    expect(captureCalls).toEqual([])
   })
 })
