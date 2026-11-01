@@ -591,6 +591,7 @@
       origin={originPermissionFor(flow.matchPattern)}
       permissionDenied={flow.permissionDenied}
       onrefuse={() => void flow.refuseCapabilities()}
+      onapproveurls={() => void flow.approveCssUrls()}
       onsave={() => void flow.save()}
       onback={() => flow.toSaving()}
     />

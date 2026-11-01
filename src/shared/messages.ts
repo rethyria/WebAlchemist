@@ -65,6 +65,13 @@ export type Message =
   | { type: 'review'; code: string; intent: string; declaredCapabilities: Transform['capabilities'] }
   /** Static analysis alone — no model call, so it is free to run before preview. */
   | { type: 'analyse'; code: string; declaredCapabilities: Transform['capabilities'] }
+  /**
+   * The CSS check, which loads nothing and costs nothing. `tabId` names the
+   * page the CSS would apply to; without it the page is taken from `match`
+   * (the editor has no page). `approvedUrls` are the external URLs the user
+   * approved, which only matter on a site set to list external URLs.
+   */
+  | { type: 'analyse-css'; css: string; match: string; tabId?: number; approvedUrls?: string[] }
 
   /* --- persistence -------------------------------------------------- */
   /** `tabId` lets the change take effect now instead of on the next load. */

@@ -8,9 +8,11 @@
 /**
  * Generation. Several rules here are load-bearing rather than stylistic:
  *
- *  - Prefer CSS. CSS survives framework re-renders for free and cannot
- *    exfiltrate anything, so every transform expressible as CSS avoids both the
- *    re-application problem and the entire safety pipeline.
+ *  - Prefer CSS. CSS survives framework re-renders for free and avoids the
+ *    re-application problem. It is not free of risk: a rule can make the
+ *    browser request a URL, which can leak page data, so CSS is checked for
+ *    url(), @import and the like before it is saved (src/safety/css-check.ts).
+ *    The prompt asks the model to avoid them so that the check rarely fires.
  *  - Idempotency. JS transforms are re-run by a MutationObserver whenever the
  *    site re-renders. Non-idempotent code duplicates its own effects.
  *  - Resilient selectors. Build-hashed class names change on every deploy.
@@ -23,6 +25,8 @@ export const GENERATE_SYSTEM_PROMPT = `You write small, durable modifications to
 Always choose CSS when CSS can express the change. Reach for JavaScript only when the change genuinely cannot be done in CSS — for example when it requires reading or restructuring content, responding to events, or computing values.
 
 CSS is injected into the USER cascade origin, where an \`!important\` declaration outranks the site's own \`!important\`. You do not need high-specificity selector chains to win. Prefer a short, readable selector plus \`!important\` over \`#app .wrapper div.card > span\`.
+
+CSS must not load anything. Do not use \`@import\`, and do not use \`url()\`, \`src()\`, \`image-set()\` or \`@font-face\` with an address that is not a \`data:\` URL. A transform that does is rejected and cannot be saved. Use gradients, colours, \`local()\` fonts or inline \`data:\` images instead.
 
 ## Write selectors that survive a redesign
 

@@ -23,6 +23,7 @@ import type {
 import type { RefinementTurn } from './providers/types'
 import { overlayPaletteFor } from '@shared/accents'
 import * as badge from './badge'
+import { checkCssForPage, checkCssTransform, pageUrlFor } from './css-gate'
 import { reconcile as reconcileContentScripts } from './content-scripts'
 import { buildProbeTransform } from './csp-probe'
 import { forgetSession, runHealthCheck, shouldCheck } from './health'
@@ -277,6 +278,19 @@ async function handle(
     case 'analyse':
       return runStaticAnalysis(message.code, message.declaredCapabilities)
 
+    case 'analyse-css': {
+      const tab =
+        message.tabId === undefined
+          ? undefined
+          : await browser.tabs.get(message.tabId).catch(() => undefined)
+      return checkCssForPage(
+        message.css,
+        await getSettings(),
+        pageUrlFor(message.match, tab?.url),
+        message.approvedUrls,
+      )
+    }
+
     case 'save-transform': {
       /*
        * Re-run the gate here rather than trusting that the caller did, exactly
@@ -292,6 +306,39 @@ async function handle(
         )
         if (!analysis.passed) {
           throw new Error('Static analysis rejected this code, so it was not saved.')
+        }
+      }
+
+      if (message.transform.kind === 'css') {
+        /*
+         * The same reasoning as the JavaScript gate above, and one more: the
+         * approval panel's CSS check is advisory, so the editor, a rename and
+         * any later caller all arrive here, and this is the last point before
+         * the CSS is stored and injected on every visit.
+         *
+         * A transform whose code and approvals are unchanged is let through,
+         * so renaming or reordering a stored transform is not refused because
+         * of a rule that was already there. It still does not apply: the same
+         * check runs again every time stored CSS is injected.
+         */
+        const stored = (await getAllTransforms()).find((t) => t.id === message.transform.id)
+        const unchanged =
+          stored !== undefined &&
+          stored.code === message.transform.code &&
+          JSON.stringify(stored.approvedCssUrls ?? []) ===
+            JSON.stringify(message.transform.approvedCssUrls ?? [])
+        if (!unchanged) {
+          const tab =
+            message.tabId === undefined
+              ? undefined
+              : await browser.tabs.get(message.tabId).catch(() => undefined)
+          const check = checkCssTransform(message.transform, await getSettings(), tab?.url)
+          if (!check.passed) {
+            throw new Error(
+              check.static[0]?.explanation ??
+                'This CSS loads external addresses that were not approved, so it was not saved.',
+            )
+          }
         }
       }
 
@@ -550,8 +597,17 @@ async function handle(
       return exportTransforms()
 
     case 'import-transforms': {
+      /*
+       * Shared CSS arrives with its code, so it gets the same check as CSS
+       * written here. One that fails is imported without code and disabled,
+       * the way shared JavaScript is, so the row is kept and nothing runs.
+       * The check uses the importer's own settings for the site, so a site
+       * set to allow more is not held to the default.
+       */
+      const settings = await getSettings()
       const result = await importTransforms(
         message.bundle as Awaited<ReturnType<typeof exportTransforms>>,
+        (t) => !checkCssTransform(t, settings).passed,
       )
       await reregisterAll()
       return result

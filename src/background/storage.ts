@@ -311,9 +311,15 @@ export async function exportTransforms(): Promise<ExportBundle> {
  * Imports a bundle. JS transforms arrive without code — a shared JS transform
  * carries only intent and anchor, and the importer's own model regenerates the
  * implementation locally under their own review and capability gates. CSS
- * arrives with code intact, since CSS cannot exfiltrate anything.
+ * arrives with code intact unless `rejectCss` refuses it: CSS can request
+ * outside resources, which is how it can send page data to another server, so
+ * the caller checks it for that.
  */
-export async function importTransforms(bundle: ExportBundle): Promise<{
+export async function importTransforms(
+  bundle: ExportBundle,
+  /** True for a CSS transform whose code must not be imported. */
+  rejectCss: (transform: Transform) => boolean = () => false,
+): Promise<{
   imported: number
   needsRegeneration: string[]
 }> {
@@ -338,6 +344,16 @@ export async function importTransforms(bundle: ExportBundle): Promise<{
     if (transform.kind === 'js') {
       // Never import third-party JavaScript. Strip it and mark for local
       // regeneration from the intent.
+      transform.code = ''
+      transform.enabled = false
+      needsRegeneration.push(transform.id)
+    }
+
+    // An approval in a shared file was given by the sender, not by the person
+    // importing it, so it counts for nothing here.
+    delete transform.approvedCssUrls
+
+    if (transform.kind === 'css' && rejectCss(transform)) {
       transform.code = ''
       transform.enabled = false
       needsRegeneration.push(transform.id)

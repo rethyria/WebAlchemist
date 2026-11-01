@@ -1,6 +1,7 @@
 <script lang="ts">
   import '@shared/tokens.css'
-  import type { ReviewResult, Settings, Transform } from '@shared/types'
+  import type { CssUrlMode, ReviewResult, Settings, Transform } from '@shared/types'
+  import { hostOfPattern, modeForHost } from '@safety/css-check'
   import { matchPresetsFor, matchesUrl, originPermissionFor } from '@shared/match'
   import { send } from '@shared/messaging.svelte'
   import CodeArea from './CodeArea.svelte'
@@ -35,6 +36,35 @@
   let findings = $state<string[]>([])
   let saving = $state(false)
   let justSaved = $state(false)
+
+  /*
+   * What CSS on this site may load, kept in settings per site (host name from
+   * the match pattern). Changing it takes effect at once rather than on Save:
+   * it is a property of the site, not of this transform's text.
+   */
+  let cssPolicy = $state<Record<string, CssUrlMode>>({})
+  let cssSiteHost = $derived(hostOfPattern(match.trim() || savedMatch))
+  let cssMode = $derived<CssUrlMode>(cssSiteHost ? modeForHost(cssPolicy, cssSiteHost) : 'block')
+  /* External addresses waiting for approval, and whether the user ticked the box. */
+  let pendingUrls = $state<string[]>([])
+  let approveListed = $state(false)
+
+  async function setCssMode(mode: CssUrlMode) {
+    if (!cssSiteHost) return
+    try {
+      const fresh = await send<Settings>({ type: 'get-settings' })
+      const next = { ...fresh.cssUrlPolicy }
+      if (mode === 'block') delete next[cssSiteHost]
+      else next[cssSiteHost] = mode
+      await send({ type: 'save-settings', settings: { ...fresh, cssUrlPolicy: next } })
+      cssPolicy = next
+      pendingUrls = []
+      approveListed = false
+      if (transform && !creating) await send({ type: 'reapply-everywhere', id: transform.id })
+    } catch (cause) {
+      findings = [String(cause instanceof Error ? cause.message : cause)]
+    }
+  }
 
   /*
    * Creating is dirty from the start in the sense that leaving loses work, but
@@ -196,12 +226,49 @@
         }
       }
 
+      /*
+       * The CSS check, for the same reason as the JavaScript one above. Hand-
+       * written CSS is not exempt: the person typing it may have pasted it from
+       * somewhere, and a rule that loads an address sends a request on every
+       * visit.
+       */
+      let approvedCssUrls = current.approvedCssUrls
+      if ((creating ? kind : current.kind) === 'css') {
+        const check = await send<ReviewResult>({
+          type: 'analyse-css',
+          css: code,
+          match: wanted,
+          approvedUrls: approveListed ? [...(approvedCssUrls ?? []), ...pendingUrls] : (approvedCssUrls ?? []),
+        })
+        if (check.static.length > 0) {
+          findings = check.static.map((f) => `Line ${f.line}: ${f.explanation}`)
+          return
+        }
+        if (!check.passed) {
+          pendingUrls = check.pendingUrls ?? []
+          approveListed = false
+          findings = ['This CSS loads addresses outside the site. Tick the box below to approve them, then save again.']
+          return
+        }
+        if (approveListed) approvedCssUrls = [...(approvedCssUrls ?? []), ...pendingUrls]
+        pendingUrls = []
+      }
+
       const next: Transform = creating
-        ? { ...current, code, match: wanted, kind, name: name.trim(), updatedAt: Date.now() }
+        ? {
+            ...current,
+            code,
+            match: wanted,
+            kind,
+            name: name.trim(),
+            ...(approvedCssUrls ? { approvedCssUrls } : {}),
+            updatedAt: Date.now(),
+          }
         : {
             ...current,
             code,
             match: wanted,
+            ...(approvedCssUrls ? { approvedCssUrls } : {}),
             rationale: {
               targets: current.rationale.targets,
               // The old prose described the old code. Saying so is better than
@@ -268,6 +335,7 @@
     void send<Settings>({ type: 'get-settings' })
       .then((settings) => {
         document.documentElement.dataset['accent'] = settings.accent
+        cssPolicy = settings.cssUrlPolicy ?? {}
       })
       .catch(() => {
         // The accent is decoration; failing to read it must not stop editing.
@@ -390,6 +458,42 @@
       {/if}
     </section>
 
+    {#if (creating ? kind : transform.kind) === 'css'}
+      <details class="advanced">
+        <summary>Advanced: addresses CSS may load</summary>
+        <label for="css-mode">For {cssSiteHost ?? 'this site'}</label>
+        <select
+          id="css-mode"
+          value={cssMode}
+          disabled={!cssSiteHost}
+          onchange={(event) => void setCssMode(event.currentTarget.value as CssUrlMode)}
+        >
+          <option value="block">Only data: addresses (default)</option>
+          <option value="same-origin">Data: addresses and addresses on the same site</option>
+          <option value="list-external">Same site, and other addresses that are approved one by one</option>
+        </select>
+        <p class="hint">
+          CSS that loads an address makes the browser send a request on every visit, and a
+          request can carry information about the page. @import is never allowed.
+          {#if !cssSiteHost}This pattern has no fixed host name, so the default applies.{/if}
+        </p>
+      </details>
+      {#if pendingUrls.length > 0}
+        <div class="findings">
+          <strong>Needs approval.</strong>
+          <ul>
+            {#each pendingUrls as url}
+              <li><code>{url}</code></li>
+            {/each}
+          </ul>
+          <label>
+            <input type="checkbox" bind:checked={approveListed} />
+            Approve loading {pendingUrls.length === 1 ? 'this address' : 'these addresses'}
+          </label>
+        </div>
+      {/if}
+    {/if}
+
     {#if findings.length > 0}
       <div class="findings">
         <strong>Not saved.</strong>
@@ -415,6 +519,28 @@
 </main>
 
 <style>
+  .advanced {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-5);
+    font: 12px/1.5 var(--font-ui);
+    color: var(--text-dim);
+  }
+
+  .advanced summary {
+    cursor: pointer;
+  }
+
+  .advanced select {
+    max-width: 480px;
+    padding: 4px 6px;
+    border: 1px solid var(--border);
+    border-radius: var(--r-badge);
+    background: var(--surface-raised);
+    font: 12px var(--font-ui);
+    color: var(--text);
+  }
+
   :global(body) {
     margin: 0;
     background: var(--surface);

@@ -129,6 +129,12 @@ export interface Transform {
   rationale: Rationale
   anchor: Anchor
   code: string
+  /**
+   * External URLs the user approved for this CSS, when its site is set to
+   * list external URLs. A stored URL not in this list does not load. Absent
+   * means none were approved.
+   */
+  approvedCssUrls?: string[]
   createdAt: number
   updatedAt: number
 }
@@ -283,6 +289,16 @@ export interface CredentialStatus {
 /* Settings                                                            */
 /* ------------------------------------------------------------------ */
 
+/**
+ * What generated CSS may load. `@import` is blocked in every mode.
+ *
+ *   block          only data: URLs (the default)
+ *   same-origin    also URLs on the page's own origin
+ *   list-external  also own-origin URLs, and external URLs the user approves
+ *                  one by one in the approval panel
+ */
+export type CssUrlMode = 'block' | 'same-origin' | 'list-external'
+
 export type HealthCheckMode = 'every-load' | 'once-per-session' | 'manual'
 
 /**
@@ -326,6 +342,11 @@ export interface Settings {
   keepScreenshotPermission: boolean
   /** Disables execution of every AI-authored JS transform, everywhere. */
   aiJsKillSwitch: boolean
+  /**
+   * Per-site CSS URL mode, keyed by host name without a leading `*.`. A site
+   * with no entry uses `block`. A key also covers its subdomains.
+   */
+  cssUrlPolicy: Record<string, CssUrlMode>
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -336,6 +357,7 @@ export const DEFAULT_SETTINGS: Settings = {
   accent: 'blue',
   keepScreenshotPermission: false,
   aiJsKillSwitch: false,
+  cssUrlPolicy: {},
 }
 
 /* ------------------------------------------------------------------ */
@@ -368,6 +390,11 @@ export interface ReviewResult {
   undeclaredCapabilities: Capability[]
   /** Absent for CSS transforms, which are not sent for model review. */
   model?: ModelReview
+  /**
+   * External CSS URLs waiting for the user's approval. Present only for CSS on
+   * a site set to list external URLs; `passed` is false while any remain.
+   */
+  pendingUrls?: string[]
   /** False when anything blocking is outstanding. */
   passed: boolean
 }

@@ -21,6 +21,7 @@
     origin: string
     permissionDenied: boolean
     onrefuse: () => void
+    onapproveurls: () => void
     onsave: () => void
     onback: () => void
   }
@@ -32,6 +33,7 @@
     origin,
     permissionDenied,
     onrefuse,
+    onapproveurls,
     onsave,
     onback,
   }: Props = $props()
@@ -44,6 +46,7 @@
 
   let blocking = $derived(review?.static.filter((f) => f.severity === 'block') ?? [])
   let warnings = $derived(review?.static.filter((f) => f.severity === 'warn') ?? [])
+  let pendingUrls = $derived(review?.pendingUrls ?? [])
   let capabilities = $derived(result.capabilities)
   let mismatch = $derived(review?.model && review.model.verdict !== 'match')
 
@@ -95,6 +98,29 @@
             Go back and describe what you want differently.
           {/if}
         </p>
+      </div>
+    {/if}
+
+    {#if pendingUrls.length > 0 && blocking.length === 0}
+      <div class="card attention">
+        <div class="card-head">
+          <span class="dot attention" aria-hidden="true"></span>
+          <div class="card-body">
+            <span class="card-title">This CSS loads addresses outside this site</span>
+            <p class="finding">
+              The browser requests
+              {pendingUrls.length === 1 ? 'this address' : 'these addresses'} on every
+              visit. A request can carry information about the page, and the server
+              that receives it can see it. Only the addresses listed here will be
+              allowed to load.
+            </p>
+          </div>
+        </div>
+        <ul class="urls">
+          {#each pendingUrls as url}
+            <li><code>{url}</code></li>
+          {/each}
+        </ul>
       </div>
     {/if}
 
@@ -244,6 +270,13 @@
   <div class="submit">
     {#if blocking.length > 0}
       <Button full onclick={onback}>Back</Button>
+    {:else if pendingUrls.length > 0}
+      <div class="split">
+        <Button grow={1} small onclick={onback}>Back</Button>
+        <Button variant="primary" grow={1.3} small onclick={onapproveurls}>
+          Approve {pendingUrls.length === 1 ? 'this address' : 'these addresses'}
+        </Button>
+      </div>
     {:else if capabilities.length > 0}
       <div class="split">
         <Button
@@ -475,6 +508,13 @@
 
   .submit {
     margin-top: auto;
+  }
+
+  .urls {
+    margin: 0;
+    padding-left: 16px;
+    font: 11.5px/1.6 var(--font-ui);
+    word-break: break-all;
   }
 
   .split {

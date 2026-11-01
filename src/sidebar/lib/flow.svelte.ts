@@ -195,6 +195,12 @@ export class Flow {
   previewedCss = $state<string | null>(null)
   /** Set once the draft has been registered and the page reloaded. */
   jsRan = $state(false)
+  /**
+   * External CSS URLs the user approved in the approval panel, for a site set
+   * to list them. Saved on the transform, so only these URLs may load.
+   */
+  approvedCssUrls = $state<string[]>([])
+
   /** Static analysis, run locally after every generation. Gates the preview. */
   analysis = $state<ReviewResult | null>(null)
   /** Set when the user declines the grant the transform needs to function. */
@@ -670,6 +676,7 @@ export class Flow {
       this.picked = { ...found, cropDrawn: false }
       // What a regeneration from the refining panel will build on.
       this.matchPattern = transform.match
+      this.approvedCssUrls = transform.approvedCssUrls ?? []
       this.intent = transform.intent
       this.scopeDepth = transform.scopeDepth ?? 0
       this.instruction = transform.intent
@@ -702,7 +709,7 @@ export class Flow {
               code: result.code,
               declaredCapabilities: result.capabilities,
             })
-          : { static: [], undeclaredCapabilities: [], passed: true }
+          : await this.checkCss(result.code)
       if (!current()) return
 
       this.stage = 'preview'
@@ -782,6 +789,7 @@ export class Flow {
       this.tree = found.tree ?? []
       this.draft = transform
       this.matchPattern = transform.match
+      this.approvedCssUrls = transform.approvedCssUrls ?? []
 
       /*
        * enterDescribing clears the instruction, so the pre-fill has to follow
@@ -836,6 +844,7 @@ export class Flow {
 
       this.picked = { ...found, cropDrawn: false }
       this.matchPattern = transform.match
+      this.approvedCssUrls = transform.approvedCssUrls ?? []
       this.intent = transform.intent
       this.scopeDepth = transform.scopeDepth ?? 0
       this.instruction = transform.intent
@@ -875,7 +884,7 @@ export class Flow {
               code: transform.code,
               declaredCapabilities: transform.capabilities,
             })
-          : { static: [], undeclaredCapabilities: [], passed: true }
+          : await this.checkCss(transform.code)
       if (!current()) return
 
       await this.applyPreview(this.result)
@@ -981,7 +990,7 @@ export class Flow {
               code: result.code,
               declaredCapabilities: result.capabilities,
             })
-          : { static: [], undeclaredCapabilities: [], passed: true }
+          : await this.checkCss(result.code)
       if (!current()) return
 
       this.stage = 'preview'
@@ -1184,6 +1193,31 @@ export class Flow {
   }
 
   /**
+   * The CSS check, which loads nothing and costs nothing. The background
+   * repeats it on save and before any CSS is applied, so this copy exists to
+   * show the result.
+   */
+  private async checkCss(css: string): Promise<ReviewResult> {
+    return send<ReviewResult>({
+      type: 'analyse-css',
+      css,
+      match: this.matchPattern,
+      ...(this.tabId === null ? {} : { tabId: this.tabId }),
+      approvedUrls: this.approvedCssUrls,
+    })
+  }
+
+  /** The user approved the external URLs the panel listed. */
+  async approveCssUrls(): Promise<void> {
+    const result = this.result
+    if (!result || result.kind !== 'css') return
+    this.approvedCssUrls = [
+      ...new Set([...this.approvedCssUrls, ...(this.review?.pendingUrls ?? [])]),
+    ]
+    this.review = await this.checkCss(result.code)
+  }
+
+  /**
    * CSS previews at the USER origin, the same way a saved transform applies,
    * so what is on screen during refinement is what will be stored.
    *
@@ -1355,11 +1389,17 @@ export class Flow {
     this.step = 'reviewing'
     this.review = null
 
-    // CSS is not sent for model review: it cannot make a request, read
-    // storage, or reach a cookie, so there is no behaviour for a reviewer to
-    // disagree with. Static analysis has nothing to say about it either.
+    // CSS is not sent for model review: it cannot read storage or a cookie,
+    // and what it can request is decided by the CSS check rather than by a
+    // reviewer's opinion of the intent. The check is repeated here, after the
+    // scope and any approvals were chosen.
     if (result.kind === 'css') {
-      this.review = { static: [], undeclaredCapabilities: [], passed: true }
+      try {
+        this.review = await this.checkCss(result.code)
+      } catch (cause) {
+        this.step = 'saving'
+        this.fail(cause)
+      }
       return
     }
 
@@ -1483,6 +1523,9 @@ export class Flow {
         intent: this.intent,
         match: this.matchPattern,
         capabilities: this.result?.capabilities ?? draft.capabilities,
+        ...(draft.kind === 'css' && this.approvedCssUrls.length > 0
+          ? { approvedCssUrls: this.approvedCssUrls }
+          : {}),
         updatedAt: Date.now(),
       }
 
@@ -1625,6 +1668,7 @@ export class Flow {
     this.previewedCss = null
     this.jsRan = false
     this.analysis = null
+    this.approvedCssUrls = []
     this.permissionDenied = false
     this.intent = ''
     this.matchPattern = ''
