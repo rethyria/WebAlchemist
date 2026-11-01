@@ -1978,3 +1978,52 @@ describe('running JavaScript only after the model review (issue 55)', () => {
     expect(calls.some((c) => c.type === 'review')).toBe(false)
   })
 })
+
+describe('saving from the approval panel (issue 64)', () => {
+  const review = {
+    static: [],
+    undeclaredCapabilities: [],
+    passed: true,
+    model: { verdict: 'match', explanation: '' },
+    approvalToken: 'tok',
+  }
+  const saves = () => calls.filter((c) => c.type === 'save-transform')
+
+  async function atPanel() {
+    const flow = flowAtApprove()
+    flow.draft = { ...saved, kind: 'js', id: 'OLD' }
+    handler = (m) => ({ ok: true, data: m.type === 'review' ? review : null })
+    await flow.toReview()
+    return flow
+  }
+
+  it('does not save before the panel has reported that it was shown', async () => {
+    const flow = await atPanel()
+    expect(flow.reviewShown).toBe(false)
+    await flow.save()
+    expect(saves()).toEqual([])
+  })
+
+  it('saves with the review token once the panel has been shown', async () => {
+    const flow = await atPanel()
+    flow.markReviewShown()
+    await flow.save()
+    expect(saves().map((c) => c.approvalToken)).toEqual(['tok'])
+  })
+
+  it('needs the panel shown again after a new review, such as a change of world', async () => {
+    const flow = await atPanel()
+    flow.markReviewShown()
+    await flow.setWorld('MAIN')
+    expect(flow.reviewShown).toBe(false)
+    await flow.save()
+    expect(saves()).toEqual([])
+  })
+
+  it('is not marked as shown while the review has not arrived', () => {
+    const flow = flowAtApprove()
+    flow.step = 'reviewing'
+    flow.markReviewShown()
+    expect(flow.reviewShown).toBe(false)
+  })
+})

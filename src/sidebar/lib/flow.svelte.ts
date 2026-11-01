@@ -296,6 +296,12 @@ export class Flow {
   intent = $state('')
   matchPattern = $state('')
   review = $state<ReviewResult | null>(null)
+  /**
+   * Set by the approval panel after it has rendered the review. Saving from
+   * that panel is refused until then, so an approval cannot come from a key
+   * press or a click that reached the step before the panel was on screen.
+   */
+  reviewShown = $state(false)
 
   stage = $state<ProgressStage>('context')
   elapsed = $state(0)
@@ -1990,6 +1996,7 @@ export class Flow {
 
     this.step = 'reviewing'
     this.review = null
+    this.reviewShown = false
 
     // CSS is not sent for model review: it cannot read storage or a cookie,
     // and what it can request is decided by the CSS check rather than by a
@@ -2149,9 +2156,16 @@ export class Flow {
     )
   }
 
+  /** Called by the approval panel once the review is on screen. */
+  markReviewShown(): void {
+    if (this.step === 'reviewing' && this.review !== null) this.reviewShown = true
+  }
+
   async save(): Promise<void> {
     const draft = this.draft
     if (!draft) return
+    // From the approval panel, a save needs a panel that has been shown.
+    if (this.step === 'reviewing' && !this.reviewShown) return
 
     /*
      * This must be the first thing that happens, before any await.
@@ -2434,6 +2448,7 @@ export class Flow {
     this.intent = ''
     this.matchPattern = ''
     this.review = null
+    this.reviewShown = false
     this.stage = 'context'
     this.elapsed = 0
     this.thinkingChars = 0

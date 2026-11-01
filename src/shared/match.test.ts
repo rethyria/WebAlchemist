@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { exactPagePattern, matchPresetsFor, matchesUrl, originPermissionFor, parsePattern } from './match'
+import { describeMatch, exactPagePattern, matchPresetsFor, matchesUrl, originPermissionFor, parsePattern } from './match'
 
 describe('matchesUrl', () => {
   it('matches a whole-site pattern against any path', () => {
@@ -256,5 +256,33 @@ describe('exactPagePattern', () => {
     expect(exactPagePattern('not a url')).toBeNull()
     // A `*` in the path would be read as a wildcard and widen the pattern.
     expect(exactPagePattern('https://example.com/a*b')).toBeNull()
+  })
+})
+
+describe('describeMatch', () => {
+  it('says a host with its subdomains and every page', () => {
+    expect(describeMatch('https://*.example.com/*')).toEqual({
+      schemes: 'https pages',
+      sites: 'example.com and every subdomain of example.com',
+      pages: 'every page',
+    })
+  })
+
+  it('says one host only, and a path prefix', () => {
+    expect(describeMatch('https://www.example.com/r/news*')).toEqual({
+      schemes: 'https pages',
+      sites: 'www.example.com (this host only, no subdomains)',
+      pages: 'pages whose path starts with /r/news',
+    })
+  })
+
+  it('says both schemes for a pattern with no scheme or with *, and one page for a plain path', () => {
+    expect(describeMatch('example.com/a').schemes).toBe('http and https pages')
+    expect(describeMatch('*://example.com/a').schemes).toBe('http and https pages')
+    expect(describeMatch('http://example.com/a')).toMatchObject({ schemes: 'http pages', pages: 'only the page /a' })
+  })
+
+  it('says every site for a bare wildcard host', () => {
+    expect(describeMatch('*://*/*').sites).toBe('every site')
   })
 })

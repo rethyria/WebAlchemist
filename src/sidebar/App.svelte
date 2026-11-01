@@ -775,6 +775,9 @@
       review={flow.review}
       intent={flow.intent}
       origin={originPermissionFor(flow.matchPattern)}
+      match={flow.matchPattern}
+      shown={flow.reviewShown}
+      onshown={() => flow.markReviewShown()}
       permissionDenied={flow.permissionDenied}
       onrefuse={() => void flow.refuseCapabilities()}
       onapproveurls={() => void flow.approveCssUrls()}

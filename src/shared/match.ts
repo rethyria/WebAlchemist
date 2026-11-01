@@ -114,6 +114,30 @@ export function matchPresetsFor(rawUrl: string): MatchPreset[] {
 }
 
 /**
+ * A match pattern in plain words: which schemes, which sites and which pages
+ * it covers. It describes what the registration covers, and a pattern that
+ * covers more than the page the transform was written for reads as more.
+ */
+export function describeMatch(pattern: string): { schemes: string; sites: string; pages: string } {
+  const { scheme, host, path } = parsePattern(pattern)
+  const schemes =
+    scheme === 'https' ? 'https pages' : scheme === 'http' ? 'http pages' : 'http and https pages'
+  let sites: string
+  if (host === '*' || host === '') sites = 'every site'
+  else if (host.startsWith('*.')) {
+    const domain = host.slice(2)
+    sites = `${domain} and every subdomain of ${domain}`
+  } else sites = `${host} (this host only, no subdomains)`
+  let pages: string
+  if (path === '/*' || path === '*') pages = 'every page'
+  else if (path.endsWith('*') && !path.slice(0, -1).includes('*')) {
+    pages = `pages whose path starts with ${path.slice(0, -1)}`
+  } else if (path.includes('*')) pages = `pages whose path fits ${path}`
+  else pages = `only the page ${path}`
+  return { schemes, sites, pages }
+}
+
+/**
  * The match pattern for one page: its scheme, host and path, with no query.
  * Used for a script preview, which must run on the tab being edited and on no
  * other page. Returns null for a page that cannot be written as a pattern: a
