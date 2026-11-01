@@ -70,14 +70,24 @@ export async function createOpenAiCompatibleProvider(
     schemaName: string
     maxTokens: number
   }): Promise<T> => {
+    /*
+     * Built before the `try` below, not inside it. The `catch` turns every
+     * error into "could not reach", which is right for `fetch` and wrong for
+     * the credential: a locked vault, an expired sign-in and a missing key each
+     * carry their own kind, and the sidebar picks its state from it. Wrapping
+     * them as retryable network errors let a user retry forever without being
+     * told to unlock or reconnect.
+     */
+    const headers = {
+      'Content-Type': 'application/json',
+      ...(await authHeader()),
+    }
+
     let response: Response
     try {
       response = await fetch(`${baseUrl}/chat/completions`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(await authHeader()),
-        },
+        headers,
         body: JSON.stringify({
           model: args.model,
           max_tokens: args.maxTokens,
@@ -210,15 +220,27 @@ async function ensureFreshToken(
     return credential.accessToken
   }
 
-  const response = await fetch(credential.tokenEndpoint, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
-      grant_type: 'refresh_token',
-      refresh_token: credential.refreshToken,
-      client_id: credential.clientId,
-    }),
-  })
+  /*
+   * The header call no longer sits inside the chat request's `try`, so a
+   * transport failure here has to be classified on its own. It used to be
+   * reported as a network failure by that outer `catch`, and still is.
+   */
+  let response: Response
+  try {
+    response = await fetch(credential.tokenEndpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type: 'refresh_token',
+        refresh_token: credential.refreshToken,
+        client_id: credential.clientId,
+      }),
+    })
+  } catch (error) {
+    throw new ProviderError('Could not reach the sign-in server.', 'network', true, {
+      cause: error,
+    })
+  }
 
   if (!response.ok) {
     throw new ProviderError(
