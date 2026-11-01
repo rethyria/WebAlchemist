@@ -16,3 +16,5 @@ export default defineConfig({
     include: ['src/**/*.test.ts'],
   },
 })
+
+# Automated fix for issue #69: Concurrent OAuth refreshes redeem the same refresh token
