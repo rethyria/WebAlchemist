@@ -860,6 +860,10 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
           ? null
           : prop['key'].type === 'Identifier' ? prop['key'].name : String(prop['key'].value)
       if (key === null || TREE_TRAVERSAL_NAMES.has(key)) refuseHeadTraversal(prop, init, scope)
+      if (key === 'content' || (key === null && prop.type !== 'RestElement')) {
+        // A computed key that is not a literal could be `content`.
+        refuseTemplateContent(prop, init, scope)
+      }
     }
   }
 
@@ -875,6 +879,36 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
         node,
         `${api} (existing element)`,
         'Changes what decides whether an element in the page runs or loads, on an element this code did not create. A script element that never ran (JSON data or a template, for example) can be made to run this way, and this check cannot tell which element it is.',
+      )
+    })
+  }
+
+  /**
+   * Refuses a read of `content` on anything but an element made in this code or
+   * a plain object written in it. On a template element it is a fragment whose
+   * script elements have not started, and appending the fragment to the page
+   * starts them. The check cannot tell a template from a `meta` element, whose
+   * `content` is only text, so both are refused on existing elements unless
+   * the element is looked up with a selector that can only match a `meta`
+   * element, which is how a page's theme colour is read.
+   * `importNode` and `adoptNode` are refused by name, which covers moving such
+   * a fragment into the document that way.
+   */
+  function refuseTemplateContent(node: N, object: N | null, scope: Scope): void {
+    deferred.push(() => {
+      if (
+        isPlainObject(object, scope) ||
+        holdsOnly(object, scope, isCreatedElement) ||
+        // `style.content` is the CSS property, which is checked as a style.
+        holdsOnly(object, scope, isStyleMember) ||
+        holdsOnly(object, scope, isMetaQuery)
+      ) {
+        return
+      }
+      block(
+        node,
+        'content (existing element)',
+        'Reads the content of an element the code did not create. The content of a template element holds script elements that have not started, and putting it in the page starts them, and this check cannot tell which element it is.',
       )
     })
   }
@@ -1057,6 +1091,23 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
   /** `x.style`, the object of a style write. */
   function isStyleMember(expr: N): boolean {
     return expr.type === 'MemberExpression' && staticName(expr) === 'style'
+  }
+
+  /**
+   * `querySelector('meta[name="x"]')`: a lookup whose written-out selector is a
+   * meta element with attribute tests and nothing else, so it cannot match a
+   * template. A comma is refused because it would allow a second selector.
+   */
+  function isMetaQuery(expr: N): boolean {
+    if (expr.type !== 'CallExpression' || expr['callee'].type !== 'MemberExpression') return false
+    if (staticName(expr['callee']) !== 'querySelector') return false
+    const first = (expr['arguments'] as N[])[0]
+    return (
+      first?.type === 'Literal' &&
+      typeof first['value'] === 'string' &&
+      !first['value'].includes(',') &&
+      /^meta(\[[^\]]*\])*$/i.test(first['value'])
+    )
   }
 
   /** `new URL(...)`, which loads nothing. */
@@ -1588,6 +1639,7 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
     if (name !== null) {
       checkEventName(name, node, ctx)
       if (TREE_TRAVERSAL_NAMES.has(name)) refuseHeadTraversal(node, object, ctx.scope)
+      if (name === 'content') refuseTemplateContent(node, object, ctx.scope)
       // Two names are refused wherever they are read but are ordinary when
       // used in the one way that cannot hand out the window or the document.
       // `open` is also a property of `details` and `dialog`, and writing it
