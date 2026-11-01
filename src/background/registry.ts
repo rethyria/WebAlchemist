@@ -151,24 +151,42 @@ export async function registerTransform(transform: Transform): Promise<void> {
  * draft, so a preview registered under that id replaced the saved transform's
  * own registration, and clearing the preview then unregistered it. Discarding
  * an edit therefore switched off code the user had approved. A separate id
- * means a preview can only ever add and remove its own registration.
+ * means clearing a preview removes only the preview's own registration.
  *
- * Not chosen: re-registering the stored record after clearing. That leaves a
- * window where the saved script is off, and nothing runs it again if the
- * background page ends before the clear.
+ * The saved registration is paused while a preview runs and registered again
+ * from storage when the preview is cleared (see registerPreview and
+ * unregisterPreview). Leaving it registered would run the saved script and the
+ * preview on the same reload, so the page would show the combined effect of
+ * both rather than the effect of the edit being judged.
+ *
+ * Pausing is safe if the background is suspended before the preview is
+ * cleared: the background registers every saved transform from storage each
+ * time it starts (reregisterAll), which also removes the leftover preview.
  */
 export function previewIdFor(id: string): string {
   return `preview-${id}`
 }
 
-/** Registers a draft under its preview id, leaving any saved registration alone. */
+/**
+ * Registers a draft under its preview id and pauses the saved registration it
+ * edits, so only one of the two runs. Pausing an id that is not registered
+ * (a new transform) does nothing.
+ */
 export async function registerPreview(transform: Transform): Promise<void> {
+  await unregisterTransform(transform.id)
   await registerTransform({ ...transform, id: previewIdFor(transform.id) })
 }
 
-/** Removes the preview registration of `id` and nothing else. */
+/**
+ * Removes the preview registration of `id`, then registers the saved
+ * transform again from storage if it is stored and enabled. The stored record
+ * is read here, not kept from when the preview started, so a save made while
+ * the preview was running is the version that comes back.
+ */
 export async function unregisterPreview(id: string): Promise<void> {
   await unregisterTransform(previewIdFor(id))
+  const saved = (await getAllTransforms()).find((t) => t.id === id)
+  if (saved) await registerTransform(saved)
 }
 
 export async function unregisterTransform(id: string): Promise<void> {

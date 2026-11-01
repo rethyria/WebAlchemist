@@ -1,5 +1,7 @@
 /**
- * Previews must not touch the registration of the saved transform they edit.
+ * Previews must not remove the registration of the saved transform they edit
+ * for good: the saved script is paused while the preview runs and registered
+ * again from storage when the preview is cleared.
  *
  * The userScripts API is replaced by an in-memory store, so the test reads
  * back what is registered rather than checking which calls were made.
@@ -9,9 +11,13 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import type { Transform } from '@shared/types'
 
 const store = new Map<string, unknown>()
+let stored: unknown[] = []
 ;(globalThis as unknown as { browser: unknown }).browser = {
   permissions: { contains: async () => true },
-  storage: { local: { get: async () => ({}), set: async () => {} } },
+  // `stored` is what getAllTransforms reads, so a test can say what is saved.
+  storage: {
+    local: { get: async () => ({ transforms: stored }), set: async () => {} },
+  },
   userScripts: {
     configureWorld: async () => {},
     getScripts: async (f: { ids: string[] }) =>
@@ -48,21 +54,39 @@ const saved = {
 const code = (id: string) => JSON.stringify(store.get(id))
 
 describe('previewing a saved JavaScript transform', () => {
-  beforeEach(() => store.clear())
+  beforeEach(() => {
+    store.clear()
+    stored = [saved]
+  })
 
-  it('leaves the saved registration in place while the preview runs', async () => {
+  it('pauses the saved registration while the preview runs', async () => {
     await registerTransform(saved)
     await registerPreview({ ...saved, code: 'draftCode()' })
-    expect(code('SAVED')).toContain('savedCode()')
-    expect(code('SAVED')).not.toContain('draftCode()')
+    expect(store.has('SAVED')).toBe(false)
     expect(code('preview-SAVED')).toContain('draftCode()')
   })
 
-  it('still has the saved registration after the preview is cleared', async () => {
+  it('registers the saved transform again when the preview is cleared', async () => {
     await registerTransform(saved)
     await registerPreview({ ...saved, code: 'draftCode()' })
     await unregisterPreview('SAVED')
     expect(store.has('preview-SAVED')).toBe(false)
     expect(code('SAVED')).toContain('savedCode()')
+    expect(code('SAVED')).not.toContain('draftCode()')
+  })
+
+  it('does not register a transform that is disabled in storage', async () => {
+    stored = [{ ...saved, enabled: false }]
+    await registerPreview({ ...saved, code: 'draftCode()' })
+    await unregisterPreview('SAVED')
+    expect(store.size).toBe(0)
+  })
+
+  it('registers nothing for a preview of a transform that was never saved', async () => {
+    stored = []
+    await registerPreview({ ...saved, id: 'NEW', code: 'draftCode()' })
+    expect(code('preview-NEW')).toContain('draftCode()')
+    await unregisterPreview('NEW')
+    expect(store.size).toBe(0)
   })
 })
