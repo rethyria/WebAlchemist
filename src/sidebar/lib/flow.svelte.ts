@@ -882,6 +882,7 @@ export class Flow {
         transformId: transform.id,
         context: found.context,
         brokenReason,
+        tabId: this.tabId ?? undefined,
       })
       if (!current()) return
       const result = repaired.result

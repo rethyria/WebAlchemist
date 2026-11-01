@@ -131,6 +131,13 @@ export interface Transform {
   rationale: Rationale
   anchor: Anchor
   code: string
+  /**
+   * When set, a CSS transform applies only in tabs of this container (Firefox's
+   * cookie store id, for example "firefox-container-2"; "firefox-default" is a
+   * tab outside any container). Absent means every tab. Not applied to
+   * JavaScript transforms: see src/shared/container.ts.
+   */
+  cookieStoreId?: string
   createdAt: number
   updatedAt: number
 }

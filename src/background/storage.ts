@@ -304,6 +304,9 @@ function firstProblem(value: unknown): string | null {
   if (typeof value.code !== 'string') return 'code'
   if (typeof value.intent !== 'string') return 'intent'
   if (!Array.isArray(value.capabilities)) return 'capabilities'
+  if (value.cookieStoreId !== undefined && (typeof value.cookieStoreId !== 'string' || value.cookieStoreId === '')) {
+    return 'cookieStoreId'
+  }
   if (!isObject(anchor)) return 'anchor'
   if (typeof anchor.selector !== 'string') return 'anchor.selector'
   if (typeof anchor.tag !== 'string') return 'anchor.tag'

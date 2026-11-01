@@ -24,7 +24,9 @@
     "tabs",
     "webNavigation",
     "identity",
-    "alarms"
+    "alarms",
+    "cookies",
+    "contextualIdentities"
   ],
   "optional_permissions": [
     "userScripts"

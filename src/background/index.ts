@@ -14,6 +14,8 @@ import type {
   MessageResponse,
 } from '@shared/messages'
 import { matchesUrl } from '@shared/match'
+import { appliesInContainer } from '@shared/container'
+import { refuseInPrivateWindow } from './private-window'
 import { regionAtScroll, viewportChanged, type ScrollOffset, type Viewport } from '@shared/region'
 import type {
   Accent,
@@ -252,7 +254,7 @@ async function evaluateTab(
   // evaluation of this tab is already out of date by the time this one reads
   // storage.
   const evaluation = beginEvaluation(tabId)
-  const transforms = await transformsForUrl(url)
+  const transforms = await inTabContainer(tabId, await transformsForUrl(url))
 
   /*
    * Before the early return below, not after. A tab that navigates from a site
@@ -421,6 +423,7 @@ async function handle(
     }
 
     case 'generate': {
+      await refuseInPrivateWindow(message.tabId)
       const usage = createUsageRecorder(message.transformId)
       try {
         const provider = await resolveActiveProvider(usage.listener)
@@ -437,6 +440,7 @@ async function handle(
     }
 
     case 'repair': {
+      await refuseInPrivateWindow(message.tabId)
       const transforms = await getAllTransforms()
       const existing = transforms.find((t) => t.id === message.transformId)
       if (!existing) throw new Error('That transform no longer exists.')
@@ -480,6 +484,7 @@ async function handle(
       return runStaticAnalysis(message.code, message.declaredCapabilities)
 
     case 'save-transform': {
+      await refuseInPrivateWindow(message.tabId)
       // First, so a record with a missing field is refused with a message
       // before analysis reads fields it may not have. saveTransform checks
       // again; this is only the earlier point.
@@ -671,6 +676,7 @@ async function handle(
       return true
 
     case 'start-picking': {
+      await refuseInPrivateWindow(message.tabId)
       // Inject only when nothing is answering. executeScript re-runs the file
       // unconditionally, and a second instance brings a second overlay and a
       // second set of listeners — see the guard in the content script.
@@ -701,9 +707,11 @@ async function handle(
      * keep the context it already has rather than as a failure.
      */
     case 'recapture':
+      await refuseInPrivateWindow(message.tabId)
       return askContent(message.tabId, { type: 'recapture' })
 
     case 'context-for-anchor': {
+      await refuseInPrivateWindow(message.tabId)
       // The page keeps the palette from the last start-picking, and a page
       // that has had no pick has none, so Edit description drew no outline.
       const settings = await getSettings()
@@ -785,7 +793,7 @@ async function handle(
     case 'check-now': {
       // A manual check must actually run, even under once-per-session where
       // this host has already been seen.
-      const transforms = await transformsForUrl(message.url)
+      const transforms = await inTabContainer(message.tabId, await transformsForUrl(message.url))
       await forgetSession(message.url, transforms)
       const states = await runHealthCheck(message.tabId, transforms)
       // Without this a manual check showed its result in the panel only: a
@@ -799,6 +807,7 @@ async function handle(
     }
 
     case 'capture-region':
+      await refuseInPrivateWindow(message.tabId)
       return captureWithLockDown(
         message.tabId,
         message.rect,
@@ -1048,6 +1057,13 @@ async function runGeneration(
   request: GenerateOverPort,
 ): Promise<void> {
   const { tabId } = request
+  // Before the badge changes and before anything is sent to a provider.
+  try {
+    await refuseInPrivateWindow(tabId)
+  } catch (error) {
+    port.postMessage({ type: 'error', error: { message: (error as Error).message } })
+    return
+  }
   const accent = (await getSettings()).accent
   if (tabId !== undefined) {
     await restoreBadgeFacts(tabId, accent)
@@ -1120,7 +1136,7 @@ async function runGeneration(
 async function restoreBadgeFacts(tabId: number, accent: Accent): Promise<void> {
   if (badge.hasFacts(tabId)) return
   const tab = await browser.tabs.get(tabId).catch(() => undefined)
-  const transforms = tab?.url ? await transformsForUrl(tab.url) : []
+  const transforms = tab?.url ? await inTabContainer(tabId, await transformsForUrl(tab.url)) : []
   await badge.transformCountChanged(
     tabId,
     transforms.map((t) => t.id),
@@ -1250,8 +1266,19 @@ function applyCssTransforms(
     if (documentOf(tabId) !== document) return
     // Read inside the queue. A list read before waiting would be older than the
     // task ahead of this one, and a save finishing in between would be undone.
-    await applyCss(tabId, await load())
+    await applyCss(tabId, await inTabContainer(tabId, await load()))
   })
+}
+
+/**
+ * Leaves out the CSS transforms restricted to a container other than the
+ * tab's. JavaScript transforms are kept, because a user script registration
+ * cannot be limited to a container (see shared/container.ts).
+ */
+async function inTabContainer(tabId: number, transforms: Transform[]): Promise<Transform[]> {
+  if (!transforms.some((t) => t.kind === 'css' && t.cookieStoreId !== undefined)) return transforms
+  const tab = await browser.tabs.get(tabId).catch(() => undefined)
+  return transforms.filter((t) => t.kind !== 'css' || appliesInContainer(t, tab?.cookieStoreId))
 }
 
 async function applyCss(tabId: number, transforms: Transform[]): Promise<void> {
@@ -1288,7 +1315,7 @@ async function reapply(tabId: number | undefined): Promise<void> {
   if (!tab?.url) return
   const url = tab.url
   await applyCssTransforms(tabId, () => cssTransformsFor(tabId, url))
-  const transforms = await transformsForUrl(url)
+  const transforms = await inTabContainer(tabId, await transformsForUrl(url))
 
   // Every mutation that changes what runs — save, delete, reorder, toggle —
   // reaches here, which is why the count is refreshed here rather than at each

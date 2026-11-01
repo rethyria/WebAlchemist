@@ -67,8 +67,17 @@ export type Message =
       scopeDepth?: number
       scopeContainer?: string | null
       transformId?: string
+      /** The tab the page came from, so a private window can be refused. */
+      tabId?: number
     }
-  | { type: 'repair'; transformId: string; context: PageContext; brokenReason: string }
+  | {
+      type: 'repair'
+      transformId: string
+      context: PageContext
+      brokenReason: string
+      /** The tab the page came from, so a private window can be refused. */
+      tabId?: number
+    }
   | {
       type: 'review'
       code: string

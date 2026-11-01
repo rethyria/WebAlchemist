@@ -3,6 +3,7 @@
   import type { ReviewResult, Settings, Transform } from '@shared/types'
   import { matchPresetsFor, matchesUrl, originPermissionFor } from '@shared/match'
   import { send } from '@shared/messaging.svelte'
+import { CONTAINER_SCOPE_NOTE, DEFAULT_COOKIE_STORE } from '@shared/container'
 import { editorOriginToRequest, permissionRequestsFor, requestAll } from '@shared/permissions'
   import CodeArea from './CodeArea.svelte'
   import { shouldConfirmLeaving } from './unload'
@@ -33,6 +34,11 @@ import { editorOriginToRequest, permissionRequestsFor, requestAll } from '@share
   let saved = $state('')
   let match = $state('')
   let savedMatch = $state('')
+  /* '' means every tab. Otherwise a cookie store id; see shared/container.ts. */
+  let container = $state('')
+  let savedContainer = $state('')
+  /* The containers Firefox reports, or none when containers are off. */
+  let containers = $state<{ id: string; name: string }[]>([])
   let loadError = $state<string | null>(null)
   let findings = $state<string[]>([])
   let saving = $state(false)
@@ -48,7 +54,7 @@ import { editorOriginToRequest, permissionRequestsFor, requestAll } from '@share
     transform !== null &&
       (creating
         ? code.trim().length > 0 && name.trim().length > 0
-        : code !== saved || match !== savedMatch),
+        : code !== saved || match !== savedMatch || container !== savedContainer),
   )
 
   /*
@@ -124,6 +130,8 @@ import { editorOriginToRequest, permissionRequestsFor, requestAll } from '@share
     }
     code = ''
     saved = ''
+    container = ''
+    savedContainer = ''
     match = draft.match
     savedMatch = draft.match
     name = ''
@@ -146,9 +154,31 @@ import { editorOriginToRequest, permissionRequestsFor, requestAll } from '@share
       saved = found.code
       match = found.match
       savedMatch = found.match
+      container = found.cookieStoreId ?? ''
+      savedContainer = container
       document.title = `${found.name} — Web Alchemist`
     } catch (cause) {
       loadError = String(cause instanceof Error ? cause.message : cause)
+    }
+  }
+
+  /**
+   * The record with the chosen container restriction, or with none. JavaScript
+   * transforms never carry one, because the restriction is not enforced for
+   * them and a stored value would say otherwise.
+   */
+  function withContainer(base: Transform, kind: 'css' | 'js'): Transform {
+    const { cookieStoreId: _previous, ...rest } = base
+    return container !== '' && kind === 'css' ? { ...rest, cookieStoreId: container } : rest
+  }
+
+  /** Containers exist only when the person has turned them on in Firefox. */
+  async function loadContainers() {
+    try {
+      const found = (await browser.contextualIdentities?.query({})) ?? []
+      containers = found.map((identity) => ({ id: identity.cookieStoreId, name: identity.name }))
+    } catch {
+      containers = []
     }
   }
 
@@ -209,9 +239,16 @@ import { editorOriginToRequest, permissionRequestsFor, requestAll } from '@share
       }
 
       const next: Transform = creating
-        ? { ...current, code, match: wanted, kind, name: name.trim(), updatedAt: Date.now() }
+        ? {
+            ...withContainer(current, kind),
+            code,
+            match: wanted,
+            kind,
+            name: name.trim(),
+            updatedAt: Date.now(),
+          }
         : {
-            ...current,
+            ...withContainer(current, current.kind),
             code,
             match: wanted,
             rationale: {
@@ -235,6 +272,8 @@ import { editorOriginToRequest, permissionRequestsFor, requestAll } from '@share
       saved = code
       savedMatch = wanted
       match = wanted
+      savedContainer = next.cookieStoreId ?? ''
+      container = savedContainer
       justSaved = true
       setTimeout(() => (justSaved = false), 2000)
 
@@ -280,6 +319,7 @@ import { editorOriginToRequest, permissionRequestsFor, requestAll } from '@share
 
   $effect(() => {
     void load()
+    void loadContainers()
     void send<Settings>({ type: 'get-settings' })
       .then((settings) => {
         document.documentElement.dataset['accent'] = settings.accent
@@ -404,6 +444,23 @@ import { editorOriginToRequest, permissionRequestsFor, requestAll } from '@share
         </p>
       {/if}
     </section>
+
+    {#if (creating ? kind : transform.kind) === 'css' && (containers.length > 0 || container !== '')}
+      <section class="where">
+        <label for="container">Container</label>
+        <select id="container" bind:value={container}>
+          <option value="">Every tab</option>
+          <option value={DEFAULT_COOKIE_STORE}>Tabs outside any container</option>
+          {#each containers as identity}
+            <option value={identity.id}>{identity.name}</option>
+          {/each}
+          {#if container !== '' && container !== DEFAULT_COOKIE_STORE && !containers.some((c) => c.id === container)}
+            <option value={container}>A container that no longer exists</option>
+          {/if}
+        </select>
+        <p class="hint">{CONTAINER_SCOPE_NOTE}</p>
+      </section>
+    {/if}
 
     {#if findings.length > 0}
       <div class="findings">
@@ -574,7 +631,8 @@ import { editorOriginToRequest, permissionRequestsFor, requestAll } from '@share
     color: var(--text-faint);
   }
 
-  .where input {
+  .where input,
+  .where select {
     flex: 1;
     min-width: 220px;
     padding: 6px 9px;

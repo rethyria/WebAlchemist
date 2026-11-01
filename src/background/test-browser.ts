@@ -54,6 +54,10 @@ export interface Harness {
   tabUrls: Map<number, string>
   /** The window each tab is in; a tab not listed is in window 1. */
   tabWindows: Map<number, number>
+  /** Tabs that `tabs.get` reports as being in a private window. */
+  privateTabs: Set<number>
+  /** The container of each tab; a tab not listed is in 'firefox-default'. */
+  tabContainers: Map<number, string>
   calls: {
     insertCSS: { tabId: number; css: string }[]
     removeCSS: { tabId: number; css: string }[]
@@ -85,6 +89,8 @@ export function createHarness(): Harness {
     contentScriptHeld: null,
     origins: [],
     tabWindows: new Map(),
+    privateTabs: new Set(),
+    tabContainers: new Map(),
     calls: { insertCSS: [], removeCSS: [], unregister: [], registry: [], setBadgeText: [], sendMessage: [], runtimeMessages: [] },
     listeners: new Map(),
     hasUserScripts: false,
@@ -137,6 +143,8 @@ export function createHarness(): Harness {
       id,
       url: h.tabUrls.get(id),
       windowId: h.tabWindows.get(id) ?? 1,
+      incognito: h.privateTabs.has(id),
+      cookieStoreId: h.tabContainers.get(id) ?? 'firefox-default',
     }),
     'browser.tabs.query': async () => [...h.tabUrls].map(([id, url]) => ({ id, url })),
     'browser.tabs.sendMessage': async (tabId: number, message: unknown) => {
