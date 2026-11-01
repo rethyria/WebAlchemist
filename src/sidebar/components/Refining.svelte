@@ -23,6 +23,7 @@
     choosingRegion: boolean
     shotPreview: string | null
     shotClipped: boolean
+    shotMoved: boolean
     visionSupported: boolean
     onfollowup: (text: string) => void
     onaddreference: () => void
@@ -47,6 +48,7 @@
     choosingRegion,
     shotPreview,
     shotClipped,
+    shotMoved,
     visionSupported,
     onfollowup,
     onaddreference,
@@ -230,6 +232,8 @@
             too — names, messages, account details, anything personal that
             happens to be on screen.{shotClipped
               ? ' Clipped at the viewport; only the visible part was captured.'
+              : ''}{shotMoved
+              ? ' The area was moved because the page scrolled after it was drawn.'
               : ''}
           </p>
           <button type="button" class="shot-action" onclick={() => onscreenshot(false)}>

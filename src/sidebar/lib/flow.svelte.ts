@@ -95,6 +95,7 @@ interface Picked {
   cropDrawn: boolean
   target: HoverTarget
   viewportWidth: number
+  devicePixelRatio?: number
   /** The scroll offset `crop` was measured at, for a capture made after scrolling. */
   scrolledTo?: ScrollOffset
 }
@@ -174,8 +175,10 @@ export class Flow {
   }
 
   /** The captured image, sent with the next request. */
-  shot = $state<{ dataUrl: string; rect: Rect; clipped: boolean } | null>(null)
+  shot = $state<{ dataUrl: string; rect: Rect; clipped: boolean; moved?: boolean } | null>(null)
   shotClipped = $state(false)
+  /** The area was moved to follow the page after it scrolled. The preview says so. */
+  shotMoved = $state(false)
   /**
    * The captured image itself, shown in the panel.
    *
@@ -577,6 +580,7 @@ export class Flow {
           cropDrawn: event.cropDrawn,
           target: event.target,
           viewportWidth: event.viewportWidth,
+          devicePixelRatio: event.devicePixelRatio,
           scrolledTo: event.scrolledTo,
         }
         this.tree = event.tree
@@ -1309,7 +1313,12 @@ export class Flow {
     if (!(await this.requestCaptureAccess())) return
     this.shotPreview = null
     this.shot = null
-    await this.captureRegion(picked.crop, picked.viewportWidth, picked.scrolledTo)
+    await this.captureRegion(
+      picked.crop,
+      picked.viewportWidth,
+      picked.scrolledTo,
+      picked.devicePixelRatio,
+    )
   }
 
   /**
@@ -1345,10 +1354,11 @@ export class Flow {
     }
   }
 
-  private acceptShot(shot: { dataUrl: string; rect: Rect; clipped: boolean }): void {
+  private acceptShot(shot: { dataUrl: string; rect: Rect; clipped: boolean; moved?: boolean }): void {
     this.shot = shot
     this.shotPreview = shot.dataUrl
     this.shotClipped = shot.clipped
+    this.shotMoved = shot.moved === true
     this.sendScreenshot = true
   }
 
@@ -1357,21 +1367,23 @@ export class Flow {
     rect: Rect,
     viewportWidth: number,
     scrolledTo?: ScrollOffset,
+    devicePixelRatio?: number,
   ): Promise<void> {
     if (this.tabId === null) return
     try {
       this.acceptShot(
-        await send<{ dataUrl: string; rect: Rect; clipped: boolean }>({
+        await send<{ dataUrl: string; rect: Rect; clipped: boolean; moved?: boolean }>({
           type: 'capture-region',
           tabId: this.tabId,
           rect,
           viewportWidth,
           url: this.url,
+          ...(devicePixelRatio !== undefined ? { devicePixelRatio } : {}),
           ...(scrolledTo ? { scrolledTo } : {}),
         }),
       )
     } catch (cause) {
-      this.fail(cause, () => this.captureRegion(rect, viewportWidth, scrolledTo))
+      this.fail(cause, () => this.captureRegion(rect, viewportWidth, scrolledTo, devicePixelRatio))
     }
   }
 

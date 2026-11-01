@@ -244,7 +244,7 @@ describe('context-for-anchor (#104)', () => {
   })
 })
 
-describe('capture-region (#135)', () => {
+describe('capture-region (#135, #119)', () => {
   const rect = { x: 10, y: 20, width: 100, height: 50 }
   const request = (extra: object = {}) =>
     onMessage(
@@ -315,5 +315,41 @@ describe('capture-region (#135)', () => {
     }
     expect(((await request()) as any).ok).toBe(false)
     expect(captureCalls).toEqual([])
+  })
+
+  describe('after the page scrolled', () => {
+    const drawnAt = { scrolledTo: { x: 0, y: 0 } }
+    const now = { x: 0, y: 5, width: 800, height: 600, devicePixelRatio: 2 }
+
+    it('captures when the width and pixel ratio are the same as when the area was drawn (control)', async () => {
+      tabHooks.replyFor = (m) => (m.type === 'get-viewport' ? now : undefined)
+      expect(((await request({ ...drawnAt, devicePixelRatio: 2 })) as any).ok).toBe(true)
+      expect(captureCalls).toHaveLength(1)
+    })
+
+    it('says the area was moved when the page scrolled, and not when it did not (#119)', async () => {
+      tabHooks.replyFor = (m) => (m.type === 'get-viewport' ? now : undefined)
+      const scrolled = (await request({ ...drawnAt, devicePixelRatio: 2 })) as any
+      expect(scrolled.data.moved).toBe(true)
+
+      // Control: the same request with the page at the offset it was drawn at.
+      tabHooks.replyFor = (m) => (m.type === 'get-viewport' ? { ...now, y: 0 } : undefined)
+      const unmoved = (await request({ ...drawnAt, devicePixelRatio: 2 })) as any
+      expect(unmoved.data.moved).toBe(false)
+    })
+
+    it('refuses when the viewport width changed', async () => {
+      tabHooks.replyFor = (m) => (m.type === 'get-viewport' ? { ...now, width: 600 } : undefined)
+      const reply = (await request({ ...drawnAt, devicePixelRatio: 2 })) as any
+      expect(reply.ok).toBe(false)
+      expect(reply.error.message).toMatch(/size or zoom changed/)
+      expect(captureCalls).toEqual([])
+    })
+
+    it('refuses when the pixel ratio changed', async () => {
+      tabHooks.replyFor = (m) => (m.type === 'get-viewport' ? { ...now, devicePixelRatio: 1 } : undefined)
+      expect(((await request({ ...drawnAt, devicePixelRatio: 2 })) as any).ok).toBe(false)
+      expect(captureCalls).toEqual([])
+    })
   })
 })

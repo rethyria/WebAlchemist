@@ -14,7 +14,7 @@ import type {
   MessageResponse,
 } from '@shared/messages'
 import { matchesUrl } from '@shared/match'
-import { regionAtScroll, type ScrollOffset, type Viewport } from '@shared/region'
+import { regionAtScroll, viewportChanged, type ScrollOffset, type Viewport } from '@shared/region'
 import type {
   Accent,
   PageContext,
@@ -754,6 +754,7 @@ async function handle(
         message.viewportWidth,
         message.url,
         message.scrolledTo,
+        message.devicePixelRatio,
       )
 
 
@@ -1261,7 +1262,8 @@ async function captureWithLockDown(
   viewportWidth: number,
   url: string,
   scrolledTo?: ScrollOffset,
-): Promise<{ dataUrl: string; rect: Rect; clipped: boolean }> {
+  devicePixelRatio?: number,
+): Promise<{ dataUrl: string; rect: Rect; clipped: boolean; moved: boolean }> {
   /*
    * A rectangle stored from a pick is in viewport coordinates, so it is moved
    * by however far the page has scrolled since. Asked of the page, because
@@ -1270,9 +1272,18 @@ async function captureWithLockDown(
    */
   let target = rect
   let moveClipped = false
+  let pageScrolled = false
+  // The width the rectangle is scaled by when the capture is cropped.
+  let width = viewportWidth
   if (scrolledTo) {
     const now = (await askContent(tabId, { type: 'get-viewport' })) as Viewport | undefined
     if (now) {
+      if (viewportChanged({ width: viewportWidth, devicePixelRatio }, now)) {
+        throw new Error(
+          'The window size or zoom changed after you drew the area, so it no longer matches the page. Draw the area again.',
+        )
+      }
+      width = now.width
       const moved = regionAtScroll(rect, scrolledTo, now)
       if (!moved) {
         throw new Error(
@@ -1281,12 +1292,13 @@ async function captureWithLockDown(
       }
       target = moved.rect
       moveClipped = moved.clipped
+      pageScrolled = now.x !== scrolledTo.x || now.y !== scrolledTo.y
     }
   }
   await sendToContent(tabId, { type: 'set-lock-visible', visible: false })
   try {
-    const shot = await captureRegion(tabId, url, target, viewportWidth)
-    return { ...shot, clipped: shot.clipped || moveClipped, rect: target }
+    const shot = await captureRegion(tabId, url, target, width)
+    return { ...shot, clipped: shot.clipped || moveClipped, rect: target, moved: pageScrolled }
   } finally {
     await sendToContent(tabId, { type: 'set-lock-visible', visible: true })
   }

@@ -154,6 +154,8 @@ export type Message =
       tabId: number
       rect: Rect
       viewportWidth: number
+      /** The pixel ratio when `rect` was drawn; a change since then refuses the capture. */
+      devicePixelRatio?: number
       /**
        * The address of the page the run is about. The capture is refused when
        * the run's tab is not the active tab or no longer shows this address,
@@ -311,6 +313,7 @@ export type ContentEvent =
       tree: TreeRow[]
       /** CSS pixels, for scaling the crop against a device-pixel capture. */
       viewportWidth: number
+      devicePixelRatio: number
       /** The scroll offset the crop was measured at. */
       scrolledTo: ScrollOffset
     }
@@ -348,6 +351,7 @@ export interface AnchoredElement {
   cropClipped: boolean
   target: HoverTarget
   viewportWidth: number
+  devicePixelRatio: number
   /** The scroll offset the crop was measured at. */
   scrolledTo: ScrollOffset
   /**
@@ -397,7 +401,13 @@ export interface Responses {
   'clear-preview-js': boolean
   'export-transforms': { schemaVersion: number; exportedAt: number; transforms: Transform[] }
   'import-transforms': { imported: number; skipped: number; needsRegeneration: string[] }
-  'capture-region': { dataUrl: string; rect: Rect; clipped: boolean }
+  'capture-region': {
+    dataUrl: string
+    rect: Rect
+    clipped: boolean
+    /** True when the area was moved because the page scrolled after it was drawn. */
+    moved?: boolean
+  }
   'start-picking': boolean
   'stop-picking': boolean
   retarget: boolean

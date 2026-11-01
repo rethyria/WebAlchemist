@@ -588,6 +588,7 @@
       choosingRegion={flow.choosingRegion}
       shotPreview={flow.shotPreview}
       shotClipped={flow.shotClipped}
+      shotMoved={flow.shotMoved}
       visionSupported={flow.visionSupported}
       onchange={(value) => (flow.instruction = value)}
       onscreenshot={(value) =>
@@ -630,6 +631,7 @@
       choosingRegion={flow.choosingRegion}
       shotPreview={flow.shotPreview}
       shotClipped={flow.shotClipped}
+      shotMoved={flow.shotMoved}
       visionSupported={flow.visionSupported}
       onfollowup={(value) => (flow.followUp = value)}
       onaddreference={() => void flow.addReference()}

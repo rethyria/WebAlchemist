@@ -1009,6 +1009,7 @@ function emitPicked(element: Element, region: Rect, drawn = false): void {
     target: describeTarget(element),
     tree: buildTree(element),
     viewportWidth: window.innerWidth,
+    devicePixelRatio: window.devicePixelRatio,
     scrolledTo: { x: window.scrollX, y: window.scrollY },
   })
 }
@@ -1601,6 +1602,7 @@ async function handleMessage(message: ContentMessage) {
         cropClipped: exceedsViewport(region),
         target: describeTarget(element),
         viewportWidth: window.innerWidth,
+        devicePixelRatio: window.devicePixelRatio,
         scrolledTo: { x: window.scrollX, y: window.scrollY },
         // For editing an intent, which re-enters the describing step and needs
         // the same list a pick would have produced. A repair ignores it.
@@ -1671,6 +1673,7 @@ async function handleMessage(message: ContentMessage) {
         y: window.scrollY,
         width: window.innerWidth,
         height: window.innerHeight,
+        devicePixelRatio: window.devicePixelRatio,
       }
     case 'url-changed':
       // Re-evaluation is driven from the background script, which owns the

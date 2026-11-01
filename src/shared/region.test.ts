@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { regionAtScroll } from './region'
+import { regionAtScroll, viewportChanged } from './region'
 
 const viewport = { width: 800, height: 600 }
 const rect = { x: 100, y: 300, width: 200, height: 100 }
@@ -31,5 +31,25 @@ describe('regionAtScroll', () => {
 
   it('returns null once the rectangle is scrolled off screen', () => {
     expect(regionAtScroll(rect, { x: 0, y: 0 }, { ...viewport, x: 0, y: 1000 })).toBeNull()
+  })
+})
+
+describe('viewportChanged', () => {
+  const now = { x: 0, y: 0, width: 800, height: 600, devicePixelRatio: 2 }
+
+  it('is false when the width and pixel ratio match (control)', () => {
+    expect(viewportChanged({ width: 800, devicePixelRatio: 2 }, now)).toBe(false)
+  })
+
+  it('is true when the width differs', () => {
+    expect(viewportChanged({ width: 700, devicePixelRatio: 2 }, now)).toBe(true)
+  })
+
+  it('is true when the pixel ratio differs', () => {
+    expect(viewportChanged({ width: 800, devicePixelRatio: 1 }, now)).toBe(true)
+  })
+
+  it('does not compare a pixel ratio that was not recorded', () => {
+    expect(viewportChanged({ width: 800 }, now)).toBe(false)
   })
 })

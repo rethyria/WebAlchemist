@@ -1060,6 +1060,25 @@ describe('including the drawn region', () => {
     // address (#135).
     expect(capture?.url).toBe(URL_)
   })
+
+  it('records that the area was moved so the preview can say so (#119)', async () => {
+    const flow = newFlow()
+    flow.picked = { ...found, cropDrawn: true, scrolledTo: { x: 0, y: 340 } } as any
+    handler = (m) =>
+      m.type === 'capture-region'
+        ? { ok: true, data: { dataUrl: 'data:', rect: crop, clipped: false, moved: true } }
+        : { ok: true, data: null }
+    await flow.includePickedRegion()
+    expect(flow.shotMoved).toBe(true)
+
+    // Control: a reply that is not marked as moved clears it.
+    handler = (m) =>
+      m.type === 'capture-region'
+        ? { ok: true, data: { dataUrl: 'data:', rect: crop, clipped: false } }
+        : { ok: true, data: null }
+    await flow.includePickedRegion()
+    expect(flow.shotMoved).toBe(false)
+  })
 })
 
 describe('cancelling while the preview is applied', () => {
