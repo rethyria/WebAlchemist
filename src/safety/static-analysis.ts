@@ -279,8 +279,9 @@ deny(
   'createElementNS', 'setAttributeNS', 'setAttributeNode', 'setAttributeNodeNS',
   'createAttribute', 'createAttributeNS', 'attributes', 'importNode', 'adoptNode',
   // An attribute node is written through its own `value`, which skips every
-  // check made on setAttribute.
-  'getAttributeNode', 'getAttributeNodeNS',
+  // check made on setAttribute, and these remove an attribute without naming
+  // it in a call that is checked.
+  'getAttributeNode', 'getAttributeNodeNS', 'removeAttributeNS', 'removeAttributeNode',
   // Replaces the keyframes of an animation after element.animate was checked.
   'setKeyframes',
 )
@@ -357,7 +358,20 @@ const OBJECT_ENUMERATORS = new Set(['entries', 'values', 'keys', 'getOwnProperty
  * `const c = document.createElement; c.call(document, 'script')`, would let
  * the call-site checks below be skipped.
  */
-const CALL_ONLY = new Set(['createElement', 'setAttribute', 'toggleAttribute', 'setProperty', 'assign', 'setTimeout', 'setInterval'])
+const CALL_ONLY = new Set([
+  'createElement', 'setAttribute', 'toggleAttribute', 'removeAttribute', 'cloneNode',
+  'setProperty', 'assign', 'setTimeout', 'setInterval',
+])
+
+/**
+ * Attributes and properties that decide whether a script element runs. A
+ * script element whose `type` is not JavaScript (JSON data, a template), or
+ * that has `nomodule` or an `event` attribute, is skipped when the page loads
+ * and has not started, so removing the reason and then writing its text makes
+ * it run. They are refused on any element the code did not create.
+ */
+const SCRIPT_STATE_ATTRIBUTES = new Set(['type', 'language', 'nomodule', 'event'])
+const SCRIPT_STATE_PROPERTIES = new Set(['type', 'noModule', 'event'])
 
 /** Properties that run or build HTML when assigned. Reading them is harmless. */
 const WRITE_REFUSED = new Map<string, string>([
@@ -723,6 +737,44 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
       `Assigns to ${node['name']}, a name the code does not declare. In a strict-mode script this either replaces a browser global or throws, and neither is a transform.`,
     )
     return true
+  }
+
+  /**
+   * `document.createElement(...)` or `new Image()` and `new Audio()`: an element
+   * this code made, so it is not a script element that was already in the page.
+   * A `createElement` that the code defines itself could return anything.
+   */
+  function isCreatedElement(expr: N, scope: Scope): boolean {
+    if (expr.type === 'NewExpression') {
+      return (
+        expr['callee'].type === 'Identifier' &&
+        ['Image', 'Audio'].includes(expr['callee'].name) &&
+        !scope.lookup(expr['callee'].name)
+      )
+    }
+    return (
+      expr.type === 'CallExpression' &&
+      expr['callee'].type === 'MemberExpression' &&
+      staticName(expr['callee']) === 'createElement' &&
+      !definedMembers.has('createElement') &&
+      !dynamicDefinitions
+    )
+  }
+
+  /**
+   * Refuses the write unless the object is an element made in this code or a
+   * plain object written in it. Resolved after the walk, because the object may
+   * be a name that is assigned later.
+   */
+  function requireCreatedElement(node: N, api: string, object: N | null, scope: Scope): void {
+    deferred.push(() => {
+      if (isPlainObject(object, scope) || holdsOnly(object, scope, isCreatedElement)) return
+      block(
+        node,
+        `${api} (existing element)`,
+        'Changes what decides whether an element in the page runs or loads, on an element this code did not create. A script element that never ran (JSON data or a template, for example) can be made to run this way, and this check cannot tell which element it is.',
+      )
+    })
   }
 
   // ----- Proofs about values ------------------------------------------------
@@ -1131,6 +1183,9 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
       deferred.push(() => {
         if (!isPlainObject(object, scope)) block(target, name, refused)
       })
+    }
+    if (!onStyle && (SCRIPT_STATE_PROPERTIES.has(name) || name === 'src')) {
+      requireCreatedElement(target, name, object, scope)
     }
     if (WRITE_URL.has(name)) {
       deferred.push(() => {
@@ -1578,6 +1633,9 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
         block(node, name, 'Sets an attribute whose name is decided while running, so this check cannot tell whether it carries an address or code.')
       } else {
         const lower = attr.toLowerCase()
+        if (SCRIPT_STATE_ATTRIBUTES.has(lower) || lower === 'src') {
+          requireCreatedElement(node, `${name}(${lower})`, callee['object'], ctx.scope)
+        }
         if (lower.startsWith('on')) {
           block(node, `${name}(${lower})`, 'Sets an event handler attribute, which runs text as code.')
         } else if (lower === 'srcdoc') {
@@ -1593,6 +1651,17 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
           checkWrite(node, lower, args[1] ?? null, ctx.scope, { style: true })
         }
       }
+    } else if (name === 'removeAttribute') {
+      const attr = literalText(args[0] ?? null)
+      if (attr === null) {
+        block(node, name, 'Removes an attribute whose name is decided while running, so this check cannot tell whether it is one that keeps a script element from running.')
+      } else if (SCRIPT_STATE_ATTRIBUTES.has(attr.toLowerCase())) {
+        requireCreatedElement(node, `removeAttribute(${attr.toLowerCase()})`, callee['object'], ctx.scope)
+      }
+    } else if (name === 'cloneNode') {
+      // A copy of a script element that never ran has not run either, and a
+      // copy is a new element that the checks on existing elements would miss.
+      requireCreatedElement(node, 'cloneNode', callee['object'], ctx.scope)
     } else if (name === 'setProperty') {
       const prop = literalText(args[0] ?? null)
       if (prop === null) {
