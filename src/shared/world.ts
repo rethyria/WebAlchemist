@@ -57,3 +57,10 @@ export function worldState(
 export function worldOf(transform: Pick<Transform, 'world'>): ExecutionWorld {
   return transform.world ?? 'USER_SCRIPT'
 }
+
+/**
+ * Shown on a transform that the one-time migration moved from MAIN to the
+ * isolated world, because nothing recorded that the user had chosen MAIN.
+ */
+export const WORLD_RESET_NOTICE =
+  "This transform used to run in the page's own JavaScript environment because the model chose it. It now runs in its isolated environment. Turn on the page's environment only if the change needs it."

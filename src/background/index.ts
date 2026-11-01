@@ -111,6 +111,7 @@ import {
   saveSettings,
   changeSettings,
   foldUnsavedUsage,
+  resetModelChosenMain,
   saveTransform,
   saveCredentialFor,
   unlockVault,
@@ -150,6 +151,20 @@ function endPreviewScript(id: string): Promise<void> {
   })
 }
 
+/**
+ * Moves JavaScript transforms that run in MAIN with no record of the user's
+ * approval to the isolated world, once. The caller rebuilds the registrations
+ * afterwards. A failure is logged and does not stop start-up; the flag is set
+ * only after the transforms were written, so the next start tries again.
+ */
+async function migrateModelChosenWorlds(): Promise<void> {
+  try {
+    await resetModelChosenMain()
+  } catch (error) {
+    console.error('Resetting the world of transforms failed:', error instanceof Error ? error.message : 'unknown error')
+  }
+}
+
 /** Rebuilds registrations from storage, leaving preview scripts registered. */
 function reregister(): Promise<void> {
   return inRegistryQueue(async () => {
@@ -178,6 +193,9 @@ browser.runtime.onInstalled.addListener(async (details) => {
     })
   }
   await foldUnsavedUsage().catch(() => undefined)
+  // Before the registrations below are rebuilt, so a moved transform is
+  // registered for the isolated world. Runs once; see resetModelChosenMain.
+  if (details.reason === 'update') await migrateModelChosenWorlds()
   // The platform wipes every userScripts registration on update, and drops
   // dynamic content scripts too. Without this, transforms silently stop
   // working after an extension update — with no error, which is the worst
@@ -2151,6 +2169,9 @@ export { transformsForUrl, runReview }
 // Registration state can drift if the browser restarted with stale scripts,
 // or if a permission changed while the background script was not alive.
 void (async () => {
+  // Runs once, and before the rebuild, for an install that never saw an
+  // update event with the migration in it.
+  await migrateModelChosenWorlds()
   if (await hasUserScriptsPermission()) await reregister()
   await reconcileContentScripts()
 })()

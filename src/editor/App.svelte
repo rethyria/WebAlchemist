@@ -25,7 +25,7 @@
   } from '@shared/container'
   import { editorOriginToRequest, permissionRequestsFor, requestAll } from '@shared/permissions'
   import { excludedAccessMessage, excludedHostForPattern } from '@shared/excluded-sites'
-  import { MAIN_WORLD_RISKS, WORLD_NAMES, worldOf } from '@shared/world'
+  import { MAIN_WORLD_RISKS, WORLD_NAMES, WORLD_RESET_NOTICE, worldOf } from '@shared/world'
   import CodeArea from './CodeArea.svelte'
   import { shouldConfirmLeaving } from './unload'
 
@@ -716,6 +716,9 @@
     {#if (creating ? kind : transform.kind) === 'js'}
       <section class="where">
         <span class="label">World</span>
+        {#if transform?.worldResetFromModel}
+          <p class="warn">{WORLD_RESET_NOTICE}</p>
+        {/if}
         <p class="hint">
           Now: {WORLD_NAMES[world]}.
           {#if world === 'MAIN' && savedWorld === 'MAIN'}

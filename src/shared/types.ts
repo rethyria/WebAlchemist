@@ -126,6 +126,20 @@ export interface Transform {
   origin: TransformOrigin
   /** Only meaningful when kind === 'js'. Defaults to USER_SCRIPT. */
   world?: ExecutionWorld
+  /**
+   * True when the user approved the MAIN world for this transform: the save
+   * that put it there carried an approval for code in MAIN. Set only by the
+   * background's save handler. A transform in MAIN without it was saved before
+   * the user's approval was recorded, and the one-time migration moves it to
+   * USER_SCRIPT (see resetModelChosenMain in storage.ts).
+   */
+  mainApprovedByUser?: boolean
+  /**
+   * True when the migration moved this transform from MAIN to USER_SCRIPT
+   * because no record showed that the user chose MAIN. The panel and the editor
+   * show a notice while it is set; the next save of the transform clears it.
+   */
+  worldResetFromModel?: boolean
   /** Empty by default. Anything used beyond this list is a rejection. */
   capabilities: Capability[]
   intent: string
