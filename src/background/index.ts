@@ -76,6 +76,7 @@ import {
   exportTransforms,
   getAllCredentialStatuses,
   getAllTransforms,
+  getVersions,
   getCredentialStatus,
   getSettings,
   getUsage,
@@ -466,40 +467,36 @@ async function handle(
     case 'analyse':
       return runStaticAnalysis(message.code, message.declaredCapabilities)
 
-    case 'save-transform': {
-      // First, so a record with a missing field is refused with a message
-      // before analysis reads fields it may not have. saveTransform checks
-      // again; this is only the earlier point.
-      assertValidTransform(message.transform)
+    case 'save-transform':
+      return saveAndApply(
+        message.source ? { ...message.transform, producedBy: message.source } : message.transform,
+        message.tabId,
+      )
 
-      /*
-       * Re-run the gate here rather than trusting that the caller did, exactly
-       * as preview-js does. This stopped being a formality when transform code
-       * became hand-editable: the sidebar is no longer only ever sending back
-       * something it just analysed, so the last point before code is persisted
-       * and registered has to check it for itself.
-       */
-      if (message.transform.kind === 'js') {
-        const analysis = runStaticAnalysis(
-          message.transform.code,
-          message.transform.capabilities,
-        )
-        if (!analysis.passed) {
-          throw new Error('Static analysis rejected this code, so it was not saved.')
-        }
-      }
+    case 'get-transform-versions':
+      return getVersions(message.id)
 
-      // Register what was stored, not what was sent: a save keeps the stored
-      // `enabled`, and the copy that arrived may hold an older value.
-      const saved = await saveTransform(message.transform)
-      if (saved.kind === 'js') {
-        await registerTransform(saved)
-      }
-      await badge.transformEdited(saved.id, (await getSettings()).accent)
-      // Apply it now rather than on the next navigation. The preview was just
-      // taken down, so without this the page visibly reverts on save.
-      await reapply(message.tabId)
-      return true
+    case 'restore-transform-version': {
+      const current = (await getAllTransforms()).find((t) => t.id === message.id)
+      if (!current) throw new Error('That transform no longer exists.')
+      const version = (await getVersions(message.id)).find((v) => v.id === message.versionId)
+      if (!version) throw new Error('That version is no longer kept.')
+      // The same path as any other save, so a restored script meets the static
+      // analysis as it is now: the rules may have changed since it was saved.
+      // The current state becomes a version in turn, so a restore can be undone.
+      const { world: _world, producedBy: _producedBy, ...rest } = current
+      return saveAndApply(
+        {
+          ...rest,
+          code: version.code,
+          rationale: version.rationale,
+          match: version.match,
+          capabilities: version.capabilities,
+          ...(version.world === undefined ? {} : { world: version.world }),
+          ...(version.producedBy === undefined ? {} : { producedBy: version.producedBy }),
+        },
+        message.tabId,
+      )
     }
 
     case 'delete-transform':
@@ -1340,6 +1337,43 @@ async function applyCss(tabId: number, transforms: Transform[]): Promise<void> {
     // No host permission for this origin yet, which is expected until the user
     // saves their first transform for the site.
   }
+}
+
+/**
+ * Saves a transform and puts the result on the page: the one path that a new
+ * transform, an edit, a repair and a restored version all take.
+ */
+async function saveAndApply(transform: Transform, tabId: number | undefined): Promise<true> {
+  // First, so a record with a missing field is refused with a message
+  // before analysis reads fields it may not have. saveTransform checks
+  // again; this is only the earlier point.
+  assertValidTransform(transform)
+
+  /*
+   * Re-run the gate here rather than trusting that the caller did, exactly
+   * as preview-js does. This stopped being a formality when transform code
+   * became hand-editable: the sidebar is no longer only ever sending back
+   * something it just analysed, so the last point before code is persisted
+   * and registered has to check it for itself.
+   */
+  if (transform.kind === 'js') {
+    const analysis = runStaticAnalysis(transform.code, transform.capabilities)
+    if (!analysis.passed) {
+      throw new Error('Static analysis rejected this code, so it was not saved.')
+    }
+  }
+
+  // Register what was stored, not what was sent: a save keeps the stored
+  // `enabled`, and the copy that arrived may hold an older value.
+  const saved = await saveTransform(transform)
+  if (saved.kind === 'js') {
+    await registerTransform(saved)
+  }
+  await badge.transformEdited(saved.id, (await getSettings()).accent)
+  // Apply it now rather than on the next navigation. The preview was just
+  // taken down, so without this the page visibly reverts on save.
+  await reapply(tabId)
+  return true
 }
 
 /** Recomputes and applies whatever should be running in this tab right now. */

@@ -40,6 +40,7 @@ import type {
   ReviewResult,
   Transform,
   TransformKind,
+  TransformSource,
   TreePath,
   TreeRow,
   UsageReport,
@@ -228,6 +229,11 @@ export class Flow {
    * it. An existing transform keeps its own id through `draft`.
    */
   private pendingId: string | null = null
+  /**
+   * What the code being reviewed came from, sent with the save so the version
+   * it replaces is labelled. A refinement keeps the label of the run it refines.
+   */
+  private producedBy: TransformSource = 'generation'
   private transformKey(): string {
     return this.draft?.id ?? (this.pendingId ??= crypto.randomUUID())
   }
@@ -841,6 +847,7 @@ export class Flow {
   async repair(transform: Transform, brokenReason: string): Promise<void> {
     if (this.tabId === null) return
 
+    this.producedBy = 'repair'
     const token = ++this.generation
     const current = () => token === this.generation
 
@@ -959,6 +966,7 @@ export class Flow {
   async editIntent(transform: Transform): Promise<void> {
     if (this.tabId === null) return
 
+    this.producedBy = 'ai-edit'
     const token = ++this.generation
     const current = () => token === this.generation
 
@@ -1027,6 +1035,7 @@ export class Flow {
   async editWithAi(transform: Transform): Promise<void> {
     if (this.tabId === null) return
 
+    this.producedBy = 'ai-edit'
     const token = ++this.generation
     const current = () => token === this.generation
 
@@ -1882,6 +1891,7 @@ export class Flow {
       await send({
         type: 'save-transform',
         transform,
+        source: this.producedBy,
         // So it applies to the page now, rather than on the next load.
         ...(this.tabId === null ? {} : { tabId: this.tabId }),
       })
@@ -2093,6 +2103,7 @@ export class Flow {
     this.result = null
     this.draft = null
     this.pendingId = null
+    this.producedBy = 'generation'
     this.lastUsage = undefined
     this.previewedCss = null
     this.jsRan = false

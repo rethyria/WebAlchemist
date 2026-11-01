@@ -410,6 +410,7 @@
       await send({
         type: 'save-transform',
         transform: next,
+        source: 'hand-edit',
         ...(tab?.id === undefined ? {} : { tabId: tab.id }),
       })
     } catch (cause) {

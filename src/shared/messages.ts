@@ -27,6 +27,7 @@ import type {
   Conflict,
   Transform,
   TransformRuntimeState,
+  TransformSource,
   TreePath,
   TreeRow,
 } from './types'
@@ -83,7 +84,10 @@ export type Message =
 
   /* --- persistence -------------------------------------------------- */
   /** `tabId` lets the change take effect now instead of on the next load. */
-  | { type: 'save-transform'; transform: Transform; tabId?: number }
+  /** `source` says what produced the code, and is kept with the version it replaces. */
+  | { type: 'save-transform'; transform: Transform; tabId?: number; source?: TransformSource }
+  | { type: 'get-transform-versions'; id: string }
+  | { type: 'restore-transform-version'; id: string; versionId: string; tabId?: number }
   /** `tabId` lets the change come off the page now rather than on reload. */
   | { type: 'delete-transform'; id: string; tabId?: number }
   /**

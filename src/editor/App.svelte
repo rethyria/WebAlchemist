@@ -1,6 +1,7 @@
 <script lang="ts">
   import '@shared/tokens.css'
-  import type { ReviewResult, Settings, Transform } from '@shared/types'
+  import type { ReviewResult, Settings, Transform, TransformVersion } from '@shared/types'
+  import { sourceLabel } from '@shared/versions'
   import { matchPresetsFor, matchesUrl, originPermissionFor } from '@shared/match'
   import { send } from '@shared/messaging.svelte'
 import { editorOriginToRequest, permissionRequestsFor, requestAll } from '@shared/permissions'
@@ -36,6 +37,9 @@ import { editorOriginToRequest, permissionRequestsFor, requestAll } from '@share
   let loadError = $state<string | null>(null)
   let findings = $state<string[]>([])
   let saving = $state(false)
+  /** Earlier versions of this transform, newest first. Empty while creating. */
+  let versions = $state<TransformVersion[]>([])
+  let restoring = $state(false)
   let justSaved = $state(false)
 
   /*
@@ -147,8 +151,53 @@ import { editorOriginToRequest, permissionRequestsFor, requestAll } from '@share
       match = found.match
       savedMatch = found.match
       document.title = `${found.name} — Web Alchemist`
+      await loadVersions()
     } catch (cause) {
       loadError = String(cause instanceof Error ? cause.message : cause)
+    }
+  }
+
+  async function loadVersions() {
+    versions = await send<TransformVersion[]>({ type: 'get-transform-versions', id })
+  }
+
+  /*
+   * Goes through the background's save path, which analyses restored
+   * JavaScript again and refuses it if it no longer passes. The permission
+   * requests are made first, as in save(), because a version may apply to a
+   * wider site than the current code does.
+   */
+  async function restore(version: TransformVersion) {
+    const current = transform
+    if (!current || restoring || saving) return
+    restoring = true
+    findings = []
+    try {
+      const granted = await requestAll(
+        (permissions) => browser.permissions.request(permissions),
+        permissionRequestsFor(current.kind, editorOriginToRequest(false, version.match, current.match)),
+      )
+      if (!granted) {
+        findings = ['Web Alchemist needs permission for the site this version applies to before it can restore it.']
+        return
+      }
+      await send({ type: 'restore-transform-version', id: current.id, versionId: version.id })
+      await send({ type: 'reapply-everywhere', id: current.id })
+      const found = await send<Transform | null>({ type: 'get-transform', id: current.id })
+      if (found) {
+        transform = found
+        code = found.code
+        saved = found.code
+        match = found.match
+        savedMatch = found.match
+      }
+      await loadVersions()
+      justSaved = true
+      setTimeout(() => (justSaved = false), 2000)
+    } catch (cause) {
+      findings = [String(cause instanceof Error ? cause.message : cause)]
+    } finally {
+      restoring = false
     }
   }
 
@@ -228,8 +277,9 @@ import { editorOriginToRequest, permissionRequestsFor, requestAll } from '@share
       // Every tab the transform matches, not just one: this page is not on any
       // of them, and a save that only reached the last-focused tab would look
       // like it had not worked.
-      await send({ type: 'save-transform', transform: next })
+      await send({ type: 'save-transform', transform: next, source: 'hand-edit' })
       await send({ type: 'reapply-everywhere', id: current.id })
+      if (!creating) await loadVersions()
 
       transform = next
       saved = code
@@ -415,6 +465,32 @@ import { editorOriginToRequest, permissionRequestsFor, requestAll } from '@share
     {/if}
 
     <CodeArea value={code} kind={creating ? kind : transform.kind} onchange={(next) => (code = next)} />
+
+    {#if !creating && versions.length > 0}
+      <details class="versions">
+        <summary>Earlier versions ({versions.length})</summary>
+        <ul>
+          {#each versions as version (version.id)}
+            <li>
+              <span>
+                {new Date(version.savedAt).toLocaleString()} · {sourceLabel(version.producedBy)}
+              </span>
+              <button
+                type="button"
+                class="secondary"
+                disabled={dirty || restoring || saving}
+                onclick={() => void restore(version)}
+              >
+                Restore this version
+              </button>
+            </li>
+          {/each}
+        </ul>
+        {#if dirty}
+          <p class="hint">Save or revert the changes in the editor before restoring a version.</p>
+        {/if}
+      </details>
+    {/if}
 
     <footer>
       <span>
@@ -625,6 +701,26 @@ import { editorOriginToRequest, permissionRequestsFor, requestAll } from '@share
 
   .findings p {
     margin: var(--sp-5) 0 0;
+  }
+
+  .versions ul {
+    margin: var(--sp-5) 0 0;
+    padding: 0;
+    list-style: none;
+  }
+  .versions li {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--sp-13);
+    padding: var(--sp-5) 0;
+    font: 12px var(--font-ui);
+    color: var(--text-dim);
+  }
+  .versions summary {
+    cursor: pointer;
+    font: 12px var(--font-ui);
+    color: var(--text-dim);
   }
 
   footer {
