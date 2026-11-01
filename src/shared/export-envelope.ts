@@ -35,3 +35,22 @@ export function isEncryptedExport(value: unknown): value is EncryptedExport {
     typeof sealed['data'] === 'string'
   )
 }
+
+/** The largest file an import reads, in bytes (5 MB, counted as 5 × 1,048,576). */
+export const MAX_IMPORT_BYTES = 5 * 1024 * 1024
+/** The most records one imported file may hold. */
+export const MAX_IMPORT_RECORDS = 1000
+
+/** What the settings page says about a file that is larger than the limit, or null when the size is allowed. */
+export function importSizeProblem(bytes: number): string | null {
+  return bytes > MAX_IMPORT_BYTES
+    ? 'This file is larger than 5 MB, which is more than a Web Alchemist export holds, so it was not read.'
+    : null
+}
+
+/** What the importer says about a file with too many records, or null when the count is allowed. */
+export function importCountProblem(records: number): string | null {
+  return records > MAX_IMPORT_RECORDS
+    ? `This file holds ${records} records. An import takes at most ${MAX_IMPORT_RECORDS}, so it was not read.`
+    : null
+}

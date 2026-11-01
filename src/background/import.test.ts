@@ -379,3 +379,18 @@ describe('how many sites one import asks for (#56)', () => {
     expect(origins(items).size).toBe(3)
   })
 })
+
+describe('how many records one file may hold (#31)', () => {
+  const many = (n: number) => bundle(...Array.from({ length: n }, () => ({})))
+
+  it('refuses a file of more than 1000 records before planning any of them', async () => {
+    await expect(ask({ type: 'preview-import', bundle: many(1001) })).rejects.toThrow('1001 records')
+    await expect(ask({ type: 'import-transforms', bundle: many(1001) })).rejects.toThrow('at most 1000')
+    expect(stored()).toEqual([])
+  })
+
+  it('reads a file of exactly 1000 records (control)', async () => {
+    const { items } = await ask({ type: 'preview-import', bundle: many(1000) })
+    expect(items).toHaveLength(1000)
+  })
+})

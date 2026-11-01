@@ -9,7 +9,7 @@
    * requested in one prompt from the confirm click.
    */
   import type { ExportBundle, ImportResult } from '@background/storage'
-  import { isEncryptedExport, type EncryptedExport } from '@shared/export-envelope'
+  import { importSizeProblem, isEncryptedExport, type EncryptedExport } from '@shared/export-envelope'
   import type { BackupSettings, ExportMode, PlannedTransform } from '@background/transfer'
   import Button from '@sidebar/components/Button.svelte'
   import {
@@ -98,6 +98,9 @@
     cancel()
     busy = true
     try {
+      // Before the file is read, so a very large file is never loaded.
+      const tooLarge = importSizeProblem(file.size)
+      if (tooLarge !== null) throw new Error(tooLarge)
       const parsed = parseBundleText(await file.text())
       if (isEncryptedExport(parsed)) {
         encryptedFile = { name: file.name, parsed }

@@ -67,7 +67,7 @@ import { MIN_PASSPHRASE_LENGTH } from '@shared/vault-policy'
 import { assertEndpoint, endpointsOf } from '@shared/endpoint-policy'
 import { destinationOf, sameBinding } from '@shared/credential-binding'
 import type { Provider, TransformVersion } from '@shared/types'
-import { EXPORT_FORMAT } from '@shared/export-envelope'
+import { EXPORT_FORMAT, importCountProblem } from '@shared/export-envelope'
 import { getExcludedSites } from './excluded-sites'
 import {
   backupSettingsOf,
@@ -1362,6 +1362,8 @@ function assertReadableBundle(bundle: unknown): asserts bundle is ExportBundle {
   ) {
     throw new Error('This file is not a Web Alchemist export.')
   }
+  const tooMany = importCountProblem(bundle.transforms.length)
+  if (tooMany !== null) throw new Error(tooMany)
   if (bundle.schemaVersion > SCHEMA_VERSION) {
     throw new Error(
       `This file was made by a newer version of Web Alchemist (schema ${bundle.schemaVersion}). Update the extension to import it.`,
