@@ -125,3 +125,26 @@ describe('the schemes a script is registered for (#59)', () => {
     expect(matchPatternsFor({ ...saved, match: 'https://a.test/*' })).not.toContain('http://a.test/*')
   })
 })
+
+describe('the paths a script is registered for (#95)', () => {
+  const paths = (match: string) =>
+    matchPatternsFor({ ...saved, match }).map((m) => m.replace(/^https:\/\/example\.com/, ''))
+
+  it('covers the page with and without a trailing slash, and with any query, when the pattern has no query', () => {
+    expect(paths('https://example.com/watch')).toEqual(['/watch', '/watch?*', '/watch/', '/watch/?*'])
+    expect(paths('https://example.com/watch/')).toEqual(['/watch', '/watch?*', '/watch/', '/watch/?*'])
+  })
+
+  it('keeps the query of a pattern that has one, with and without the trailing slash', () => {
+    expect(paths('https://example.com/watch?v=abc')).toEqual(['/watch?v=abc', '/watch/?v=abc'])
+  })
+
+  it('leaves a pattern that ends in a wildcard as it is', () => {
+    expect(paths('https://example.com/*')).toEqual(['/*'])
+    expect(paths('https://example.com/docs*')).toEqual(['/docs*'])
+  })
+
+  it('registers the root page without duplicating the slash', () => {
+    expect(paths('https://example.com/')).toEqual(['/', '/?*'])
+  })
+})

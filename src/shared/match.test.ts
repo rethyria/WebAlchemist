@@ -164,6 +164,58 @@ describe('the scheme in a pattern (#59)', () => {
   })
 })
 
+describe('trailing slashes and query strings (#95)', () => {
+  it('treats a trailing slash in the pattern as the page without it', () => {
+    expect(matchesUrl('example.com/watch/', 'https://example.com/watch')).toBe(true)
+    expect(matchesUrl('example.com/watch/', 'https://example.com/watch/')).toBe(true)
+    expect(matchesUrl('example.com/watch', 'https://example.com/watch/')).toBe(true)
+  })
+
+  it('matches the exact-page preset of a page with a trailing slash, with or without it', () => {
+    const exact = matchPresetsFor('https://www.example.com/watch/').find(
+      (p) => p.label === 'This exact page',
+    )!.pattern
+    expect(matchesUrl(exact, 'https://www.example.com/watch/')).toBe(true)
+    expect(matchesUrl(exact, 'https://www.example.com/watch')).toBe(true)
+  })
+
+  it('does not let a trailing slash widen a pattern', () => {
+    // Control: the slash rule joins /docs and /docs/ and nothing else.
+    expect(matchesUrl('example.com/docs/', 'https://example.com/docs/more')).toBe(false)
+    expect(matchesUrl('example.com/docs/', 'https://example.com/docsx')).toBe(false)
+  })
+
+  describe('the exact-page preset includes the query string', () => {
+    const exact = (url: string) =>
+      matchPresetsFor(url).find((p) => p.label === 'This exact page')!.pattern
+
+    it('names the video the user was on', () => {
+      expect(exact('https://www.youtube.com/watch?v=abc')).toBe('https://www.youtube.com/watch?v=abc')
+    })
+
+    it('matches that page and not another video', () => {
+      const pattern = exact('https://www.youtube.com/watch?v=abc')
+      expect(matchesUrl(pattern, 'https://www.youtube.com/watch?v=abc')).toBe(true)
+      expect(matchesUrl(pattern, 'https://www.youtube.com/watch?v=other')).toBe(false)
+      expect(matchesUrl(pattern, 'https://www.youtube.com/watch')).toBe(false)
+    })
+
+    it('matches the page with a trailing slash before the query', () => {
+      const pattern = exact('https://example.com/watch/?v=abc')
+      expect(matchesUrl(pattern, 'https://example.com/watch?v=abc')).toBe(true)
+    })
+
+    it('is unchanged for a page with no query', () => {
+      expect(exact('https://example.com/some/page')).toBe('https://example.com/some/page')
+    })
+  })
+
+  it('ignores the query when the pattern has none, so patterns saved earlier keep matching', () => {
+    expect(matchesUrl('www.youtube.com/watch', 'https://www.youtube.com/watch?v=abc')).toBe(true)
+    expect(matchesUrl('example.com/docs*', 'https://example.com/docs?page=2')).toBe(true)
+  })
+})
+
 describe('originPermissionFor', () => {
   it('derives the origin permission a pattern requires', () => {
     expect(originPermissionFor('reddit.com/r/programming/*')).toBe('*://reddit.com/*')

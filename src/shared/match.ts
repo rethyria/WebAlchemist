@@ -91,7 +91,14 @@ export function matchPresetsFor(rawUrl: string): MatchPreset[] {
     })
   }
 
-  presets.push({ label: 'This exact page', pattern: `${scheme}${host}${url.pathname}` })
+  // The query string is part of the pattern. Without it, saving on
+  // youtube.com/watch?v=abc produced a pattern for /watch, which is every
+  // video and not the page the label names. Browser match patterns compare the
+  // path together with the query, so the registered script and the CSS agree.
+  presets.push({
+    label: 'This exact page',
+    pattern: `${scheme}${host}${url.pathname}${url.search}`,
+  })
 
   return presets
 }
@@ -134,9 +141,27 @@ export function matchesUrl(pattern: string, rawUrl: string): boolean {
 
   if (!hostMatches(hostPattern, url.hostname)) return false
 
-  const regex = patternToRegExp(pathPattern)
-  // Trailing slashes are not meaningful here: /watch and /watch/ are the page.
-  return regex.test(url.pathname) || regex.test(url.pathname.replace(/\/$/, ''))
+  const hasQuery = pathPattern.includes('?')
+  // The query is compared only when the pattern has one. A pattern written
+  // without a query describes a page, and `watch?v=abc` is the page `/watch`.
+  const targets = pathForms(url.pathname).map((path) => (hasQuery ? path + url.search : path))
+  return pathForms(pathPattern).some((form) => {
+    const regex = patternToRegExp(form)
+    return targets.some((target) => regex.test(target))
+  })
+}
+
+/**
+ * A path as written and with its trailing slash removed, so `/watch` and
+ * `/watch/` are the same page whichever of them the pattern or the URL has.
+ * A query string stays attached to the end. The root path keeps its slash.
+ */
+function pathForms(path: string): string[] {
+  const query = path.indexOf('?')
+  const base = query === -1 ? path : path.slice(0, query)
+  const rest = query === -1 ? '' : path.slice(query)
+  const trimmed = base.replace(/\/+$/, '') || '/'
+  return trimmed === base ? [path] : [path, trimmed + rest]
 }
 
 /** The origin permission a pattern requires, for permissions.request(). */

@@ -94,16 +94,37 @@ export function cspForCapabilities(capabilities: Capability[]): string {
  */
 export function matchPatternsFor(transform: Transform): string[] {
   const { scheme, host, path } = parsePattern(transform.match)
-  const bare = `${host}${path}`
+  const bares = pathsFor(path).map((variant) => `${host}${variant}`)
+  const forScheme = (name: string) => bares.map((bare) => `${name}://${bare}`)
   switch (scheme) {
     case 'http':
-      return [`http://${bare}`]
+      return forScheme('http')
     case '*':
-      return [`https://${bare}`, `http://${bare}`]
+      return [...forScheme('https'), ...forScheme('http')]
     case 'https':
     case undefined:
-      return [`https://${bare}`]
+      return forScheme('https')
   }
+}
+
+/**
+ * The paths to register for one stored path, so that the script runs on the
+ * same pages the CSS does (see matchesUrl).
+ *
+ * A browser match pattern compares the path together with the query string and
+ * knows no trailing-slash rule, so the stored path is written out once per form
+ * of the page: with and without a trailing slash, and, when the stored path has
+ * no query, also with any query. A path that ends in `*` already covers all of
+ * these.
+ */
+function pathsFor(path: string): string[] {
+  if (path.endsWith('*')) return [path]
+  const query = path.indexOf('?')
+  const base = query === -1 ? path : path.slice(0, query)
+  const rest = query === -1 ? '' : path.slice(query)
+  const trimmed = base.replace(/\/+$/, '')
+  const forms = trimmed === '' ? ['/'] : [trimmed, `${trimmed}/`]
+  return rest ? forms.map((form) => form + rest) : forms.flatMap((form) => [form, `${form}?*`])
 }
 
 /**
