@@ -14,6 +14,7 @@
  */
 import { BackgroundError } from '@shared/messaging.svelte'
 import type { UsageReport } from '@shared/types'
+import { boundTab } from '@shared/panel-binding'
 export { BackgroundError, send } from '@shared/messaging.svelte'
 
 /**
@@ -123,8 +124,15 @@ export function generateOverPort(
  * per-site tool has to know which site it is on to say anything at all, and
  * deriving it from host permissions is circular: the panel cannot offer to
  * request permission for a site it cannot name.
+ *
+ * When the panel is open in a tab, this is the page tab it is bound to rather
+ * than the active tab.
  */
 export async function activeTab(): Promise<browser.tabs.Tab | null> {
+  // Open in a tab (Firefox for Android): the active tab is the panel itself,
+  // so the page is the tab the panel was bound to when it opened.
+  const bound = boundTab()
+  if (bound !== null) return (await browser.tabs.get(bound).catch(() => null)) ?? null
   const [tab] = await browser.tabs.query({ active: true, currentWindow: true })
   return tab ?? null
 }

@@ -20,6 +20,8 @@
   import { activeTab, BackgroundError, send } from './lib/messaging.svelte'
   import { isForTab, type HealthCheckResult } from './lib/health-result'
   import { Flow } from './lib/flow.svelte'
+  import { boundTab } from '@shared/panel-binding'
+  import { showPageForPick, showPanelAfterPick, type TabFocusDeps } from './lib/panel-tab'
   import { holdSidebarPortForWindow } from './lib/sidebar-port'
   import Describing from './components/Describing.svelte'
   import ErrorCard from './components/ErrorCard.svelte'
@@ -60,7 +62,13 @@
   /* Enabled transforms on any site that the safety check keeps from running. */
   let blockedCount = $state(0)
 
+  const tabFocus: TabFocusDeps = {
+    boundTab,
+    ownTab: () => browser.tabs.getCurrent(),
+    activate: (id) => browser.tabs.update(id, { active: true }),
+  }
   const flow = new Flow(() => void afterSave())
+  flow.onPickStarted = () => void showPageForPick(tabFocus)
 
   /*
    * A repaired transform is listed as broken until something looks again, and
@@ -535,6 +543,7 @@
       // the flow — they describe saved transforms, not the draft.
       if (message.type === 'health-check-result') void showHealthResult(message)
       else flow.receive(message, sender)
+      void showPanelAfterPick(message.type, tabFocus)
     }
     browser.runtime.onMessage.addListener(onMessage)
 
@@ -579,7 +588,7 @@
       // we asked for ourselves — see Flow.ourReload.
       if (change.status === 'loading') flow.pageReloading(id)
       if (change.status === 'complete') flow.pageLoaded(id)
-      if (change.url && tab.active) void load()
+      if (change.url && (boundTab() === null ? tab.active : id === boundTab())) void load()
     }
     browser.tabs.onUpdated.addListener(onTabUpdated)
 

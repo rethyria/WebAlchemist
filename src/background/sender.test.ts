@@ -112,6 +112,20 @@ describe('privileged messages', () => {
     expect(reply.ok).toBe(true)
   })
 
+  it('accepts a message from the panel open in a tab, which carries a tab (#128)', async () => {
+    const panelTab = { url: `${ORIGIN}src/sidebar/index.html?tab=7`, id: 'wa@test', tab: { id: 12 } }
+    const reply = await onMessage({ type: 'get-settings' }, panelTab)
+    expect(reply.ok).toBe(true)
+  })
+
+  it('refuses a content script that claims a panel address only in its query (#128)', async () => {
+    const reply = await onMessage(
+      { type: 'get-settings' },
+      { url: `https://example.com/?u=${ORIGIN}src/sidebar/index.html?tab=7`, tab: { id: 12 } },
+    )
+    expect(reply).toMatchObject({ ok: false })
+  })
+
   it('refuses a sender with no url', async () => {
     const reply = await onMessage({ type: 'get-settings' }, { id: 'wa@test' })
     expect(reply).toMatchObject({ ok: false })

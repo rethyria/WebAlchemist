@@ -89,7 +89,15 @@ export interface Harness {
     reload: number[]
     /** Messages the background broadcast with `runtime.sendMessage`. */
     runtimeMessages: any[]
+    /** Number of calls to `sidebarAction.open`. */
+    sidebarOpen: number
+    /** Addresses passed to `tabs.create`. */
+    tabsCreate: string[]
+    /** Ids passed to `tabs.update`. */
+    tabsUpdate: number[]
   }
+  /** The operating system `runtime.getPlatformInfo` reports. Defaults to 'linux'. */
+  os: string
   /** Listeners registered by the most recent boot, keyed by API path. */
   listeners: Map<string, Listener>
   /** Reports whether the userScripts permission is held. Defaults to false. */
@@ -130,7 +138,8 @@ export function createHarness(): Harness {
     closedTabs: new Set(),
     cookiesWithheld: false,
     tabContainers: new Map(),
-    calls: { insertCSS: [], removeCSS: [], unregister: [], registry: [], setBadgeText: [], sendMessage: [], reload: [], runtimeMessages: [] },
+    calls: { insertCSS: [], removeCSS: [], unregister: [], registry: [], setBadgeText: [], sendMessage: [], reload: [], runtimeMessages: [], sidebarOpen: 0, tabsCreate: [], tabsUpdate: [] },
+    os: 'linux',
     listeners: new Map(),
     hasUserScripts: false,
     allUrlsGranted: false,
@@ -156,6 +165,18 @@ export function createHarness(): Harness {
   const overrides: Record<string, unknown> = {
     'browser.runtime.getURL': (path: string) => ORIGIN + path,
     'browser.runtime.id': 'wa@test',
+    'browser.runtime.getPlatformInfo': async () => ({ os: h.os, arch: 'x86-64' }),
+    'browser.sidebarAction.open': async () => {
+      h.calls.sidebarOpen += 1
+    },
+    'browser.tabs.create': async (o: { url: string }) => {
+      h.calls.tabsCreate.push(o.url)
+      return { id: 500 }
+    },
+    'browser.tabs.update': async (id: number) => {
+      h.calls.tabsUpdate.push(id)
+      return { id }
+    },
     'browser.permissions.getAll': async () => ({ origins: h.origins, permissions: [] }),
     'browser.permissions.contains': async (p?: { origins?: string[] }) => {
       if (p?.origins?.includes('<all_urls>')) return h.allUrlsGranted

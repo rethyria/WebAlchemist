@@ -30,6 +30,7 @@ import type {
 import type { RefinementTurn, ReviewInstruction } from './providers/types'
 import { overlayPaletteFor } from '@shared/accents'
 import * as badge from './badge'
+import { openPanel } from './open-panel'
 import { recordRunTab, takeRunTabs, windowsWithRunTabs } from './run-tabs'
 import { isUrlOff, setHostOff } from './site-off'
 import { excludedHostOf, getExcludedSites, setExcludedSites } from './excluded-sites'
@@ -245,9 +246,32 @@ async function removeCssWithoutAccess(): Promise<void> {
   }
 }
 
-/** Clicking the toolbar button opens the sidebar rather than a popup. */
-browser.action.onClicked.addListener(() => {
-  void browser.sidebarAction.open()
+/**
+ * The operating system, read once so that the toolbar handler can decide
+ * without waiting. See open-panel.ts for why the handler must not wait.
+ */
+let platformOs: string | undefined
+void browser.runtime
+  .getPlatformInfo()
+  .then((info) => {
+    platformOs = info.os
+  })
+  .catch(() => {})
+
+/**
+ * Clicking the toolbar button opens the sidebar on desktop, and opens the panel
+ * in a tab bound to the clicked tab on Firefox for Android.
+ */
+browser.action.onClicked.addListener((tab) => {
+  void openPanel(tab, {
+    os: () => platformOs,
+    hasSidebar: () => typeof browser.sidebarAction?.open === 'function',
+    openSidebar: () => browser.sidebarAction.open(),
+    extensionBase: () => browser.runtime.getURL(''),
+    listTabs: () => browser.tabs.query({}),
+    createTab: (url) => browser.tabs.create({ url, active: true }),
+    activateTab: (id) => browser.tabs.update(id, { active: true }),
+  })
 })
 
 /* ------------------------------------------------------------------ */

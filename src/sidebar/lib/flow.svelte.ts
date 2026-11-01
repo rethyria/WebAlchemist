@@ -549,6 +549,8 @@ export class Flow {
    * await, so the list cannot be read from the background at that point.
    */
   excludedSites: string[] = []
+  /** Called once the page is running the picker; the tab panel uses it to show the page. */
+  onPickStarted: (() => void) | undefined
   /** The page, without its fragment, for which the user chose to send its content. */
   private sensitiveConfirmedFor: string | null = null
 
@@ -613,6 +615,7 @@ export class Flow {
       this.picked = null
       this.step = 'picking'
       await send({ type: 'start-picking', tabId: this.tabId })
+      this.onPickStarted?.()
     } catch (cause) {
       /*
        * A failed re-pick from the describing step goes back there, as a
@@ -1595,6 +1598,7 @@ export class Flow {
       this.shot = null
       this.sendScreenshot = false
       await send({ type: 'start-picking', tabId: this.tabId, mode: 'region' })
+      this.onPickStarted?.()
     } catch (cause) {
       this.choosingRegion = false
       this.fail(cause, () => this.chooseScreenshotRegion())
@@ -1683,6 +1687,7 @@ export class Flow {
     this.awaitingReference = true
     try {
       await send({ type: 'start-picking', tabId: this.tabId, mode: 'reference' })
+      this.onPickStarted?.()
     } catch (cause) {
       this.awaitingReference = false
       this.fail(cause, () => this.addReference())
