@@ -31,7 +31,7 @@ let stored: unknown[] = []
   },
 }
 
-const { registerTransform, registerPreview, unregisterPreview } = await import('./registry')
+const { registerTransform, registerPreview, unregisterPreview, matchPatternsFor } = await import('./registry')
 
 const saved = {
   id: 'SAVED',
@@ -88,5 +88,40 @@ describe('previewing a saved JavaScript transform', () => {
     expect(code('preview-NEW')).toContain('draftCode()')
     await unregisterPreview('NEW')
     expect(store.size).toBe(0)
+  })
+})
+
+describe('the schemes a script is registered for (#59)', () => {
+  const patternsFor = async (match: string) => {
+    store.clear()
+    await registerTransform({ ...saved, match })
+    return (store.get('SAVED') as { matches: string[] }).matches
+  }
+
+  it('is https only for a transform saved on an https page', async () => {
+    expect(await patternsFor('https://example.com/*')).toEqual(['https://example.com/*'])
+  })
+
+  it('is http only for a transform saved on an http page', async () => {
+    expect(await patternsFor('http://localhost/*')).toEqual(['http://localhost/*'])
+  })
+
+  it('is both only when the stored pattern says *:// explicitly', async () => {
+    expect(await patternsFor('*://example.com/*')).toEqual([
+      'https://example.com/*',
+      'http://example.com/*',
+    ])
+  })
+
+  it('is https only for a stored pattern with no scheme, which was saved before schemes were recorded', async () => {
+    expect(await patternsFor('example.com/docs*')).toEqual(['https://example.com/docs*'])
+  })
+
+  it('never registers a scheme other than http or https', () => {
+    for (const match of ['https://a.test/*', 'http://a.test/*', '*://a.test/*', 'a.test/*']) {
+      const all = matchPatternsFor({ ...saved, match })
+      expect(all.every((m) => /^https?:\/\//.test(m)), match).toBe(true)
+    }
+    expect(matchPatternsFor({ ...saved, match: 'https://a.test/*' })).not.toContain('http://a.test/*')
   })
 })

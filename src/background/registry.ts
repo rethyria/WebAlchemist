@@ -36,6 +36,7 @@
  */
 
 import type { Capability, Transform } from '@shared/types'
+import { parsePattern } from '@shared/match'
 import { wrapTransform } from './harness'
 import { userScripts, type ExecutionWorld, type Mv3RegisteredUserScript } from './userscripts-api'
 import { getAllTransforms, getSettings } from './storage'
@@ -74,11 +75,35 @@ export function cspForCapabilities(capabilities: Capability[]): string {
   return directives.join('; ')
 }
 
-function matchPatternsFor(transform: Transform): string[] {
-  // Stored matches omit the scheme; register for http and https explicitly
-  // rather than using *:// so that ftp: and file: are never included.
-  const bare = transform.match.replace(/^\*:\/\//, '')
-  return [`https://${bare}`, `http://${bare}`]
+/**
+ * The match patterns a script is registered with, one per scheme it may run on.
+ *
+ * A transform saved on an https page is registered for https only. It used to
+ * be registered for http as well, and on the plain-http version of a site the
+ * page is whatever a network attacker serves, so the script ran against markup
+ * the attacker chose. The scheme comes from the stored pattern: `https://` and
+ * `http://` give that scheme, and `*://` gives both because the pattern says
+ * so explicitly.
+ *
+ * A pattern with no scheme was stored before the scheme was recorded, and the
+ * page it was saved on is not known. It is registered for https only, so such a
+ * script stops running on an http site until its pattern is saved again with
+ * a scheme. Keeping both would keep the exposure for every transform that
+ * already exists. ftp: and file: are never included, which is why the pattern
+ * is not passed through as `*://`.
+ */
+export function matchPatternsFor(transform: Transform): string[] {
+  const { scheme, host, path } = parsePattern(transform.match)
+  const bare = `${host}${path}`
+  switch (scheme) {
+    case 'http':
+      return [`http://${bare}`]
+    case '*':
+      return [`https://${bare}`, `http://${bare}`]
+    case 'https':
+    case undefined:
+      return [`https://${bare}`]
+  }
 }
 
 /**

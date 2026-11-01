@@ -1,11 +1,38 @@
 /**
  * URL matching for transform records.
  *
- * Patterns are stored without a scheme and are matched against http and https
- * only. Users never write these by hand in the common case — the save flow
- * derives concrete choices from the current URL (this domain / with subdomains
- * / this path prefix / this exact page) and stores the result.
+ * Patterns are matched against http and https only. Users never write these by
+ * hand in the common case — the save flow derives concrete choices from the
+ * current URL (this host / with subdomains / this path prefix / this exact
+ * page) and stores the result.
+ *
+ * A pattern may start with a scheme: `https://example.com/*` matches only
+ * https, `http://example.com/*` only http, and `*://example.com/*` both. The
+ * save flow writes the scheme of the page the user was on. A pattern with no
+ * scheme is one saved before schemes were stored; it matches both here, and
+ * registry.ts decides separately which schemes a script is registered for.
  */
+
+export type PatternScheme = 'http' | 'https' | '*'
+
+export interface ParsedPattern {
+  /** Undefined for a pattern saved without a scheme. */
+  scheme: PatternScheme | undefined
+  host: string
+  path: string
+}
+
+/** Splits a stored pattern into its optional scheme, host and path. */
+export function parsePattern(pattern: string): ParsedPattern {
+  const found = /^(https?|\*):\/\//.exec(pattern)
+  const rest = found ? pattern.slice(found[0].length) : pattern
+  const slash = rest.indexOf('/')
+  return {
+    scheme: found ? (found[1] as PatternScheme) : undefined,
+    host: slash === -1 ? rest : rest.slice(0, slash),
+    path: slash === -1 ? '/*' : rest.slice(slash),
+  }
+}
 
 export interface MatchPreset {
   label: string
@@ -23,6 +50,9 @@ export function matchPresetsFor(rawUrl: string): MatchPreset[] {
     return []
   }
 
+  // The scheme of the page is part of every pattern, so a transform saved on an
+  // https page is not also registered for the plain-http version of the site.
+  const scheme = url.protocol === 'http:' || url.protocol === 'https:' ? `${url.protocol}//` : ''
   const host = url.hostname
   const registrable = host.replace(/^www\./, '')
   const presets: MatchPreset[] = []
@@ -36,7 +66,7 @@ export function matchPresetsFor(rawUrl: string): MatchPreset[] {
    * the pages the user was looking at; covering sibling services is a choice
    * the user makes, so it is offered below and not preselected.
    */
-  presets.push({ label: `${host} only`, pattern: `${host}/*`, recommended: true })
+  presets.push({ label: `${host} only`, pattern: `${scheme}${host}/*`, recommended: true })
 
   /*
    * `*.` covers the domain itself as well as its subdomains, so this matches
@@ -45,7 +75,7 @@ export function matchPresetsFor(rawUrl: string): MatchPreset[] {
    */
   presets.push({
     label: `${registrable} and all its subdomains`,
-    pattern: `*.${registrable}/*`,
+    pattern: `${scheme}*.${registrable}/*`,
   })
 
   // First meaningful path segment, e.g. reddit.com/r/programming*
@@ -57,11 +87,11 @@ export function matchPresetsFor(rawUrl: string): MatchPreset[] {
       // No slash before the wildcard, so this covers /watch as well as
       // /watch/anything — the prefix page itself is part of the prefix.
       label: `${host}/${prefix}`,
-      pattern: `${host}/${prefix}*`,
+      pattern: `${scheme}${host}/${prefix}*`,
     })
   }
 
-  presets.push({ label: 'This exact page', pattern: `${host}${url.pathname}` })
+  presets.push({ label: 'This exact page', pattern: `${scheme}${host}${url.pathname}` })
 
   return presets
 }
@@ -99,9 +129,8 @@ export function matchesUrl(pattern: string, rawUrl: string): boolean {
   }
   if (url.protocol !== 'http:' && url.protocol !== 'https:') return false
 
-  const slash = pattern.indexOf('/')
-  const hostPattern = slash === -1 ? pattern : pattern.slice(0, slash)
-  const pathPattern = slash === -1 ? '/*' : pattern.slice(slash)
+  const { scheme, host: hostPattern, path: pathPattern } = parsePattern(pattern)
+  if ((scheme === 'http' || scheme === 'https') && url.protocol !== `${scheme}:`) return false
 
   if (!hostMatches(hostPattern, url.hostname)) return false
 
@@ -112,8 +141,10 @@ export function matchesUrl(pattern: string, rawUrl: string): boolean {
 
 /** The origin permission a pattern requires, for permissions.request(). */
 export function originPermissionFor(pattern: string): string {
-  const host = pattern.split('/')[0] ?? pattern
-  return `*://${host}/*`
+  const { scheme, host } = parsePattern(pattern)
+  // The permission asked for covers the scheme the transform is stored for, and
+  // no more. A pattern with no scheme or `*://` keeps the both-schemes form.
+  return `${scheme === 'http' || scheme === 'https' ? scheme : '*'}://${host}/*`
 }
 
 /**

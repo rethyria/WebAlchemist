@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { matchPresetsFor, matchesUrl, originPermissionFor } from './match'
+import { matchPresetsFor, matchesUrl, originPermissionFor, parsePattern } from './match'
 
 describe('matchesUrl', () => {
   it('matches a whole-site pattern against any path', () => {
@@ -37,7 +37,7 @@ describe('matchesUrl', () => {
 describe('matchPresetsFor', () => {
   it('recommends the exact host the page is on', () => {
     const presets = matchPresetsFor('https://news.ycombinator.com/item?id=1')
-    expect(presets.find((p) => p.recommended)?.pattern).toBe('news.ycombinator.com/*')
+    expect(presets.find((p) => p.recommended)?.pattern).toBe('https://news.ycombinator.com/*')
   })
 
   describe('on a www host (#58)', () => {
@@ -45,7 +45,7 @@ describe('matchPresetsFor', () => {
     const recommended = presets.find((p) => p.recommended)!.pattern
 
     it('recommends www.google.com and no other host', () => {
-      expect(recommended).toBe('www.google.com/*')
+      expect(recommended).toBe('https://www.google.com/*')
       expect(matchesUrl(recommended, 'https://www.google.com/maps')).toBe(true)
       expect(matchesUrl(recommended, 'https://accounts.google.com/signin')).toBe(false)
       expect(matchesUrl(recommended, 'https://mail.google.com/')).toBe(false)
@@ -58,7 +58,7 @@ describe('matchPresetsFor', () => {
     it('control: the subdomain preset is still offered, is not recommended, and does cover them', () => {
       // Shows the assertions above are about which preset is recommended, since
       // the wider pattern genuinely reaches the sibling hosts.
-      const wide = presets.find((p) => p.pattern === '*.google.com/*')!
+      const wide = presets.find((p) => p.pattern === 'https://*.google.com/*')!
       expect(wide.recommended).toBeUndefined()
       expect(matchesUrl(wide.pattern, 'https://accounts.google.com/signin')).toBe(true)
     })
@@ -66,7 +66,7 @@ describe('matchPresetsFor', () => {
 
   it('offers a path-prefix option for nested URLs', () => {
     const presets = matchPresetsFor('https://reddit.com/r/programming/comments/abc')
-    expect(presets.map((p) => p.pattern)).toContain('reddit.com/r/programming*')
+    expect(presets.map((p) => p.pattern)).toContain('https://reddit.com/r/programming*')
   })
 
   /*
@@ -115,11 +115,52 @@ describe('matchPresetsFor', () => {
 
   it('offers an exact-page option', () => {
     const presets = matchPresetsFor('https://example.com/some/page')
-    expect(presets.map((p) => p.pattern)).toContain('example.com/some/page')
+    expect(presets.map((p) => p.pattern)).toContain('https://example.com/some/page')
   })
 
   it('returns nothing for an unparseable URL', () => {
     expect(matchPresetsFor('not a url')).toEqual([])
+  })
+})
+
+describe('the scheme in a pattern (#59)', () => {
+  it('is the scheme of the page the presets were made on', () => {
+    expect(matchPresetsFor('https://example.com/a').map((p) => p.pattern)).toEqual(
+      expect.arrayContaining(['https://example.com/*', 'https://*.example.com/*']),
+    )
+    expect(matchPresetsFor('http://localhost:3000/app').find((p) => p.recommended)?.pattern).toBe(
+      'http://localhost/*',
+    )
+  })
+
+  it('limits an https pattern to https pages', () => {
+    expect(matchesUrl('https://example.com/*', 'https://example.com/x')).toBe(true)
+    expect(matchesUrl('https://example.com/*', 'http://example.com/x')).toBe(false)
+  })
+
+  it('limits an http pattern to http pages', () => {
+    expect(matchesUrl('http://example.com/*', 'http://example.com/x')).toBe(true)
+    expect(matchesUrl('http://example.com/*', 'https://example.com/x')).toBe(false)
+  })
+
+  it('lets *:// and a pattern with no scheme match both', () => {
+    for (const pattern of ['*://example.com/*', 'example.com/*']) {
+      expect(matchesUrl(pattern, 'https://example.com/x'), pattern).toBe(true)
+      expect(matchesUrl(pattern, 'http://example.com/x'), pattern).toBe(true)
+    }
+  })
+
+  it('splits a pattern into scheme, host and path', () => {
+    expect(parsePattern('https://*.example.com/a*')).toEqual({ scheme: 'https', host: '*.example.com', path: '/a*' })
+    expect(parsePattern('example.com/a')).toEqual({ scheme: undefined, host: 'example.com', path: '/a' })
+    expect(parsePattern('*://example.com')).toEqual({ scheme: '*', host: 'example.com', path: '/*' })
+  })
+
+  it('asks for permission on the scheme the pattern names only', () => {
+    expect(originPermissionFor('https://example.com/a*')).toBe('https://example.com/*')
+    expect(originPermissionFor('http://*.example.com/*')).toBe('http://*.example.com/*')
+    expect(originPermissionFor('*://example.com/*')).toBe('*://example.com/*')
+    expect(originPermissionFor('example.com/*')).toBe('*://example.com/*')
   })
 })
 
