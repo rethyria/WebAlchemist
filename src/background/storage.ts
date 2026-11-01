@@ -213,7 +213,12 @@ export function changeSettings(change: SettingsChange): Promise<Settings> {
           if (key in change.fields) fields[key] = (change.fields as Record<string, unknown>)[key]
         }
         next = { ...current, ...fields }
+        // Checked only when this change sets the active provider. Checking it
+        // on every change meant a stored active provider that no longer exists
+        // blocked unrelated changes, including the one that turns off AI
+        // JavaScript.
         if (
+          'activeProviderId' in change.fields &&
           next.activeProviderId !== null &&
           !next.providers.some((p) => p.id === next.activeProviderId)
         ) {

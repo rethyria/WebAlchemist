@@ -273,3 +273,28 @@ describe('removing optional provider fields', () => {
     expect(stored().providers[0]?.id).toBe('a')
   })
 })
+
+describe('a stale active provider', () => {
+  const stale = () => ({ ...DEFAULT_SETTINGS, providers: [provider('a')], activeProviderId: 'gone' })
+
+  it('does not block an unrelated change such as the AI JavaScript kill switch', async () => {
+    h.local.set('settings', stale())
+    const reply = await h.onMessage({
+      type: 'patch-settings',
+      change: { kind: 'fields', fields: { aiJsKillSwitch: true } },
+    })
+    expect(reply.ok).toBe(true)
+    expect(stored().aiJsKillSwitch).toBe(true)
+  })
+
+  // Control: setting the active provider to one that does not exist is still refused.
+  it('control: a change that sets a missing active provider is still refused', async () => {
+    h.local.set('settings', stale())
+    const reply = await h.onMessage({
+      type: 'patch-settings',
+      change: { kind: 'fields', fields: { activeProviderId: 'also-gone' } },
+    })
+    expect(reply.ok).toBe(false)
+    expect(stored().activeProviderId).toBe('gone')
+  })
+})
