@@ -59,6 +59,8 @@ import {
 } from './vault'
 import { MIN_PASSPHRASE_LENGTH } from '@shared/vault-policy'
 import { assertEndpoint, endpointsOf } from '@shared/endpoint-policy'
+import { destinationOf, sameBinding } from '@shared/credential-binding'
+import type { Provider } from '@shared/types'
 
 const KEY_SETTINGS = 'settings'
 const KEY_TRANSFORMS = 'transforms'
@@ -498,16 +500,84 @@ export async function discardVault(): Promise<void> {
   })
 }
 
+/** A stored credential was entered for a different destination than the provider's current one. */
+export class CredentialOriginError extends Error {
+  constructor(label: string, entered: string, current: string | null) {
+    super(
+      current === null
+        ? `The key for ${label} cannot be used because the provider has no valid address. Fix the address in settings and enter the key again.`
+        : `The key for ${label} was entered for ${entered}, but the provider now sends requests to ${current}. The key was not sent. Enter it again in settings.`,
+    )
+    this.name = 'CredentialOriginError'
+  }
+}
+
 /**
- * Reads a credential for use in an outbound request. This must never be
+ * Reads a credential for use in an outbound request, and only if it was
+ * entered for the destination this provider currently has. This must never be
  * exposed over the message channel — callers outside the background script get
  * getCredentialStatus() instead.
+ *
+ * Credentials are keyed by provider id, and an id survives an edit of the base
+ * URL or the type. Without this comparison, such an edit sent the stored key to
+ * the new address. The refusal is an error rather than a null so that it cannot
+ * fall through to the unauthenticated path that loopback providers use.
+ *
+ * Migration: credentials written before binding existed carry no `boundTo`.
+ * The first read binds one to the provider's destination at that moment and
+ * saves it. That trusts the current settings, which is the only information
+ * available, and it is the same trust the old code placed in them on every
+ * request. A credential read for the first time after an unwanted edit is
+ * therefore bound to the unwanted address; the other choice was to discard
+ * every stored key on upgrade.
  */
-export async function readCredentialForRequest(
-  providerId: string,
-): Promise<Credential | null> {
-  const map = await readCredentialMap()
-  return map[providerId] ?? null
+export async function readCredentialForRequest(provider: Provider): Promise<Credential | null> {
+  const found = (await readCredentialMap())[provider.id]
+  if (!found) return null
+  const destination = destinationOf(provider)
+
+  let credential: Credential | undefined = found
+  if (!credential.boundTo && destination) {
+    credential = await withCredentialLock(async () => {
+      const map = await readCredentialMap()
+      const current = map[provider.id]
+      if (current && !current.boundTo) {
+        current.boundTo = destination
+        await writeCredentialMap(map)
+      }
+      return current
+    })
+    if (!credential) return null
+  }
+
+  if (!destination || !credential.boundTo || !sameBinding(credential.boundTo, destination)) {
+    throw new CredentialOriginError(
+      provider.label,
+      credential.boundTo?.origin ?? '(unknown)',
+      destination?.origin ?? null,
+    )
+  }
+  return credential
+}
+
+/**
+ * Reads a stored credential without checking where it would be sent. For code
+ * that needs to inspect or copy a credential, such as tests; never use the
+ * result to build a request.
+ */
+export async function readStoredCredential(providerId: string): Promise<Credential | null> {
+  return (await readCredentialMap())[providerId] ?? null
+}
+
+/**
+ * Saves a credential bound to the provider's current destination. A binding
+ * supplied by the caller is replaced, since the sender of a message is not the
+ * authority on where the key was entered.
+ */
+export async function saveCredentialFor(provider: Provider, credential: Credential): Promise<void> {
+  const boundTo = destinationOf(provider)
+  if (!boundTo) throw new Error(`${provider.label} has no valid address to bind the key to.`)
+  await setCredential(provider.id, { ...credential, boundTo })
 }
 
 export async function setCredential(

@@ -85,7 +85,7 @@ describe('saving a sign-in credential', () => {
 
   it('control: an https token endpoint is stored', async () => {
     await storage.setCredential('p1', credential('https://auth.example.com/token'))
-    expect((await storage.readCredentialForRequest('p1'))?.kind).toBe('oauth')
+    expect((await storage.readStoredCredential('p1'))?.kind).toBe('oauth')
   })
 })
 

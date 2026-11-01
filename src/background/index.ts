@@ -75,7 +75,7 @@ import {
   reorderTransforms,
   saveSettings,
   saveTransform,
-  setCredential,
+  saveCredentialFor,
   unlockVault,
   updateTransform,
   vaultState,
@@ -493,9 +493,14 @@ async function handle(
       await reregister()
       return true
 
-    case 'set-credential':
-      await setCredential(message.providerId, message.credential)
+    case 'set-credential': {
+      // The destination the key is bound to comes from the saved provider, not
+      // from the message.
+      const provider = (await getSettings()).providers.find((p) => p.id === message.providerId)
+      if (!provider) throw new Error('That provider is no longer configured.')
+      await saveCredentialFor(provider, message.credential)
       return true
+    }
 
     case 'clear-credential':
       await clearCredential(message.providerId)
@@ -524,7 +529,7 @@ async function handle(
         )
       }
 
-      await setCredential(message.providerId, await connectOAuth(provider.oauth))
+      await saveCredentialFor(provider, await connectOAuth(provider.oauth))
       return getCredentialStatus(message.providerId)
     }
 

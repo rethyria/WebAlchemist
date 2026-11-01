@@ -35,7 +35,7 @@ describe('the passphrase minimum', () => {
     await storage.enableVault('x'.repeat(MIN_PASSPHRASE_LENGTH))
 
     expect(isSealed(localArea.raw()['credentials'])).toBe(true)
-    expect((await storage.readCredentialForRequest('p1'))?.kind).toBe('api_key')
+    expect((await storage.readStoredCredential('p1'))?.kind).toBe('api_key')
   })
 })
 
@@ -51,8 +51,8 @@ describe('credential writes during enabling', () => {
     ])
 
     expect(isSealed(localArea.raw()['credentials'])).toBe(true)
-    expect(await storage.readCredentialForRequest('p1')).toMatchObject({ value: 'old' })
-    expect(await storage.readCredentialForRequest('p2')).toMatchObject({ value: 'new' })
+    expect(await storage.readStoredCredential('p1')).toMatchObject({ value: 'old' })
+    expect(await storage.readStoredCredential('p2')).toMatchObject({ value: 'new' })
   })
 
   it('keeps a rotated OAuth token written while the vault is being enabled', async () => {
@@ -69,7 +69,7 @@ describe('credential writes during enabling', () => {
 
     await Promise.all([storage.enableVault(PASSPHRASE), storage.setCredential('p1', oauth('r1'))])
 
-    expect(await storage.readCredentialForRequest('p1')).toMatchObject({ refreshToken: 'r1' })
+    expect(await storage.readStoredCredential('p1')).toMatchObject({ refreshToken: 'r1' })
   })
 
   it('keeps every write when several overlap without any vault', async () => {
@@ -78,7 +78,7 @@ describe('credential writes during enabling', () => {
     )
 
     for (const id of ['a', 'b', 'c', 'd', 'e']) {
-      expect(await storage.readCredentialForRequest(id)).toMatchObject({ value: id })
+      expect(await storage.readStoredCredential(id)).toMatchObject({ value: id })
     }
   })
 
@@ -90,8 +90,8 @@ describe('credential writes during enabling', () => {
     await storage.enableVault(PASSPHRASE)
     await storage.setCredential('p2', { kind: 'api_key', value: 'new' })
 
-    expect(await storage.readCredentialForRequest('p1')).toMatchObject({ value: 'old' })
-    expect(await storage.readCredentialForRequest('p2')).toMatchObject({ value: 'new' })
+    expect(await storage.readStoredCredential('p1')).toMatchObject({ value: 'old' })
+    expect(await storage.readStoredCredential('p2')).toMatchObject({ value: 'new' })
   })
 })
 
@@ -118,7 +118,7 @@ describe('enabling a vault that is already sealed', () => {
 
     await storage.unlockVault(FIRST)
 
-    expect(await storage.readCredentialForRequest('p1')).toMatchObject({ value: 'sk-x' })
+    expect(await storage.readStoredCredential('p1')).toMatchObject({ value: 'sk-x' })
   })
 })
 
@@ -130,7 +130,7 @@ describe('discarding the stored credentials', () => {
 
     await expect(storage.discardVault()).rejects.toThrow(/locked/i)
 
-    expect(await storage.readCredentialForRequest('p1')).toMatchObject({ value: 'sk-x' })
+    expect(await storage.readStoredCredential('p1')).toMatchObject({ value: 'sk-x' })
   })
 
   it('refuses while the vault is unlocked, because the passphrase is then known', async () => {
@@ -139,7 +139,7 @@ describe('discarding the stored credentials', () => {
 
     await expect(storage.discardVault()).rejects.toThrow(/locked/i)
 
-    expect(await storage.readCredentialForRequest('p1')).toMatchObject({ value: 'sk-x' })
+    expect(await storage.readStoredCredential('p1')).toMatchObject({ value: 'sk-x' })
   })
 
   // The control: from the one state it exists for, sealed and locked, discard
@@ -153,6 +153,6 @@ describe('discarding the stored credentials', () => {
     await storage.discardVault()
 
     expect(await storage.vaultState()).toEqual({ sealed: false, unlocked: true })
-    expect(await storage.readCredentialForRequest('p1')).toBeNull()
+    expect(await storage.readStoredCredential('p1')).toBeNull()
   })
 })

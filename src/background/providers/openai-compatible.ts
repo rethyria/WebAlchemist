@@ -10,7 +10,7 @@
  * support cannot be queried and is set by hand on the Provider record.
  */
 
-import type { GenerationResult, ModelReview, Provider } from '@shared/types'
+import type { Credential, GenerationResult, ModelReview, Provider } from '@shared/types'
 import {
   GENERATE_SYSTEM_PROMPT,
   REVIEW_SYSTEM_PROMPT,
@@ -21,7 +21,8 @@ import {
 import { credentialFrom, needsRefresh, type TokenPayload } from '../oauth'
 import { endpointProblem, isLoopbackHostname } from '@shared/endpoint-policy'
 import { retryAfterSeconds } from './retry-after'
-import { readCredentialForRequest, setCredential } from '../storage'
+import { setCredential } from '../storage'
+import { readCredentialOrProviderError } from './credential'
 import {
   GENERATION_SCHEMA,
   ProviderError,
@@ -51,7 +52,7 @@ export async function createOpenAiCompatibleProvider(
   const baseUrl = provider.baseUrl.replace(/\/+$/, '')
 
   const authHeader = async (): Promise<Record<string, string>> => {
-    const credential = await readCredentialForRequest(provider.id)
+    const credential = await readCredentialOrProviderError(provider)
     if (!credential) {
       // Local servers frequently accept unauthenticated requests.
       if (isLoopback(baseUrl)) return {}
@@ -67,7 +68,7 @@ export async function createOpenAiCompatibleProvider(
     }
 
     // OAuth: refresh ahead of expiry rather than after a 401.
-    const token = await ensureFreshToken(provider.id, credential)
+    const token = await ensureFreshToken(provider, credential)
     return { Authorization: `Bearer ${token}` }
   }
 
@@ -240,12 +241,10 @@ function isLoopback(baseUrl: string): boolean {
  */
 const refreshesInFlight = new Map<string, Promise<string>>()
 
-type OAuthCredential = Extract<
-  NonNullable<Awaited<ReturnType<typeof readCredentialForRequest>>>,
-  { kind: 'oauth' }
->
+type OAuthCredential = Extract<Credential, { kind: 'oauth' }>
 
-function ensureFreshToken(providerId: string, credential: OAuthCredential): Promise<string> {
+function ensureFreshToken(provider: Provider, credential: OAuthCredential): Promise<string> {
+  const providerId = provider.id
   if (!needsRefresh(credential.expiresAt, Date.now())) {
     return Promise.resolve(credential.accessToken)
   }
@@ -259,7 +258,7 @@ function ensureFreshToken(providerId: string, credential: OAuthCredential): Prom
      * caller that missed the in-flight window would refresh with a token that
      * has already been spent.
      */
-    const latest = await readCredentialForRequest(providerId)
+    const latest = await readCredentialOrProviderError(provider)
     // Removed or replaced while this call was starting. Refreshing the old
     // copy would store it again and undo the removal.
     if (latest?.kind !== 'oauth') {
@@ -343,7 +342,12 @@ async function refreshToken(
     Date.now(),
     credential.refreshToken,
   )
-  await setCredential(providerId, refreshed)
+  // Carried over: the refreshed token goes to the same destination as the one
+  // it replaces, and dropping the binding would send it back through migration.
+  await setCredential(providerId, {
+    ...refreshed,
+    ...(credential.boundTo ? { boundTo: credential.boundTo } : {}),
+  })
   return refreshed.accessToken
 }
 

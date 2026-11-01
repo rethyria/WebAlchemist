@@ -176,6 +176,20 @@ export interface Conflict {
 export type ProviderType = 'anthropic' | 'openai-compatible'
 
 /**
+ * What a credential was entered for: the provider type and the origin its
+ * requests go to. The background compares it with the provider's current
+ * destination before every request and refuses to send on a mismatch.
+ *
+ * Optional only because credentials stored by earlier versions have none. The
+ * first read binds such a credential to the provider's destination at that
+ * moment; see `readCredentialForRequest` in storage.ts.
+ */
+export interface CredentialBinding {
+  type: ProviderType
+  origin: string
+}
+
+/**
  * Credentials are keyed by provider *id*, not provider type, so two
  * OpenAI-compatible endpoints hold independent keys. Removing a provider
  * clears its credential.
@@ -185,9 +199,10 @@ export type ProviderType = 'anthropic' | 'openai-compatible'
  * implemented only for providers that sanction it.
  */
 export type Credential =
-  | { kind: 'api_key'; value: string }
+  | { kind: 'api_key'; value: string; boundTo?: CredentialBinding }
   | {
       kind: 'oauth'
+      boundTo?: CredentialBinding
       accessToken: string
       refreshToken: string
       /** Epoch ms. Refresh is attempted ahead of this. */

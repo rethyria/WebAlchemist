@@ -231,7 +231,7 @@ describe('concurrent OAuth refreshes', () => {
 
     expect(used).toEqual(['r0'])
     expect(results.map((r) => r.status)).toEqual(['fulfilled', 'fulfilled'])
-    expect(await storage.readCredentialForRequest('p1')).toMatchObject({ refreshToken: 'r1' })
+    expect(await storage.readStoredCredential('p1')).toMatchObject({ refreshToken: 'r1' })
   })
 
   it('shares one failed refresh between callers and then allows a new attempt', async () => {
