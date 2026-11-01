@@ -232,7 +232,12 @@ export type ContentMessage =
   | { type: 'start-picking'; palette: OverlayPalette; mode: PickMode }
   | { type: 'cancel-picking' }
   | { type: 'recapture' }
-  | { type: 'context-for-anchor'; anchor: Anchor }
+  /**
+   * The palette travels with this request as it does with start-picking. A
+   * page that has had no pick has no palette, and the outline cannot be drawn
+   * without one.
+   */
+  | { type: 'context-for-anchor'; anchor: Anchor; palette: OverlayPalette }
   | { type: 'find-conflicts'; specs: ConflictSpec[] }
   /**
    * Takes the target outline down, and puts it back.

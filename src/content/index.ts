@@ -1588,6 +1588,9 @@ async function handleMessage(message: ContentMessage) {
       pickedRoot = element
       expanded.clear()
       lockDepth = 0
+      // updateLock draws nothing without a palette, and the palette is only
+      // otherwise set by start-picking, which a page may never have received.
+      palette = message.palette
       updateLock()
       const anchor = captureAnchor(element)
       const region = boundingRectWithPadding(element)

@@ -643,8 +643,17 @@ async function handle(
     case 'recapture':
       return askContent(message.tabId, { type: 'recapture' })
 
-    case 'context-for-anchor':
-      return askContent(message.tabId, { type: 'context-for-anchor', anchor: message.anchor })
+    case 'context-for-anchor': {
+      // The page keeps the palette from the last start-picking, and a page
+      // that has had no pick has none, so Edit description drew no outline.
+      const settings = await getSettings()
+      const dark = matchMedia('(prefers-color-scheme: dark)').matches
+      return askContent(message.tabId, {
+        type: 'context-for-anchor',
+        anchor: message.anchor,
+        palette: overlayPaletteFor(settings.accent, dark),
+      })
+    }
 
     case 'suspend-transform': {
       const tab = await browser.tabs.get(message.tabId).catch(() => undefined)

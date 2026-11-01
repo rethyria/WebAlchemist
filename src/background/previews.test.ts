@@ -27,6 +27,9 @@ function stub(path: string): any {
 }
 
 const registered = new Map<string, any>()
+/** What the stubbed tabs API does; reset before each test. */
+const tabHooks = { reload: async (_tabId: number): Promise<void> => {}, reply: undefined as unknown }
+const sentToTabs: { tabId: number; message: any }[] = []
 let stored: any[] = []
 
 /**
@@ -69,7 +72,13 @@ const realApis: Record<string, object> = {
   // extension page (#68), which it decides by comparing the sender's url with
   // runtime.getURL(''), so the stub has to answer that call.
   runtime: { getURL: (path: string) => `moz-extension://abc/${path}` },
-  tabs: { reload: async () => {} },
+  tabs: {
+    reload: async (tabId: number) => tabHooks.reload(tabId),
+    sendMessage: async (tabId: number, message: unknown) => {
+      sentToTabs.push({ tabId, message })
+      return tabHooks.reply
+    },
+  },
   userScripts: {
     configureWorld: async () => {},
     getScripts: async (f: { ids: string[] }) =>
@@ -102,6 +111,9 @@ let onMessage: Listener
 let onConnect: Listener
 
 beforeAll(async () => {
+  // The palette is chosen from the colour scheme, which the background reads
+  // with matchMedia; the test environment has none.
+  vi.stubGlobal('matchMedia', () => ({ matches: false }))
   await import('./index')
   onMessage = listeners.get('browser.runtime.onMessage')!
   onConnect = listeners.get('browser.runtime.onConnect')!
@@ -139,6 +151,9 @@ beforeEach(async () => {
   session.clear()
   registered.clear()
   stored = [saved]
+  tabHooks.reload = async () => {}
+  tabHooks.reply = undefined
+  sentToTabs.length = 0
   registered.set('SAVED', { id: 'SAVED', js: [{ code: 'savedCode()' }] })
 })
 
@@ -179,5 +194,23 @@ describe('preview-js and clear-preview-js', () => {
     onConnect(port)
     await port.onDisconnect.addListener.mock.calls[0]![0]()
     expect(holds('SAVED')).toBe(JSON.stringify({ id: 'SAVED', js: [{ code: 'savedCode()' }] }))
+  })
+})
+
+describe('context-for-anchor (#104)', () => {
+  const anchor = { tag: 'div', classes: [], path: 'html>body>div', landmarks: [], selector: 'div.x' }
+
+  it('sends the overlay palette with the request, so a page with no earlier pick can draw the outline', async () => {
+    await onMessage({ type: 'context-for-anchor', tabId: 7, anchor }, extensionPage)
+    const sent = sentToTabs.find((m) => m.message.type === 'context-for-anchor')
+    expect(sent?.tabId).toBe(7)
+    expect(sent?.message.anchor).toEqual(anchor)
+    expect(sent?.message.palette).toMatchObject({ line: expect.any(String), labelText: expect.any(String) })
+  })
+
+  it('does not attach a palette to messages that never needed one (control)', async () => {
+    await onMessage({ type: 'recapture', tabId: 7 }, extensionPage)
+    const sent = sentToTabs.find((m) => m.message.type === 'recapture')
+    expect(sent?.message).toEqual({ type: 'recapture' })
   })
 })
