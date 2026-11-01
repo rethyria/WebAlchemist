@@ -28,7 +28,14 @@
   let settings = $state<Settings | null>(null)
   let statuses = $state<CredentialStatus[]>([])
   let transforms = $state<Transform[]>([])
-  let runtimeStates = $state<TransformRuntimeState[]>([])
+  let healthStates = $state<TransformRuntimeState[]>([])
+  /* Stored code that no longer passes the safety checks, so is not running. */
+  let blockedStates = $state<TransformRuntimeState[]>([])
+  /* Blocked wins: the page check can find the element and still miss that the code is refused. */
+  let runtimeStates = $derived([
+    ...healthStates.filter((s) => !blockedStates.some((b) => b.id === s.id)),
+    ...blockedStates,
+  ])
   let conflicts = $state<Conflict[]>([])
   let url = $state('')
   let expandedId = $state<string | null>(null)
@@ -119,9 +126,11 @@
     if (!transformable) {
       transforms = []
       conflicts = []
+      blockedStates = []
       return
     }
     transforms = await send<Transform[]>({ type: 'get-transforms-for-url', url })
+    blockedStates = await send<TransformRuntimeState[]>({ type: 'get-blocked-states', url })
     await findConflicts()
   }
 
@@ -179,7 +188,7 @@
     if (tab?.id === undefined || !url) return
     checking = true
     try {
-      runtimeStates = await send<TransformRuntimeState[]>({
+      healthStates = await send<TransformRuntimeState[]>({
         type: 'check-now',
         tabId: tab.id,
         url,
@@ -368,7 +377,7 @@
     }
     if (expandedId === transform.id) expandedId = null
     transforms = transforms.filter((t) => t.id !== transform.id)
-    runtimeStates = runtimeStates.filter((s) => s.id !== transform.id)
+    healthStates = healthStates.filter((s) => s.id !== transform.id)
   }
 
   function openSettingsPage() {
@@ -381,7 +390,7 @@
     const onMessage = (message: ContentEvent) => {
       // Health results are the one content event the list owns rather than
       // the flow — they describe saved transforms, not the draft.
-      if (message.type === 'health-check-result') runtimeStates = message.states
+      if (message.type === 'health-check-result') healthStates = message.states
       else flow.receive(message)
     }
     browser.runtime.onMessage.addListener(onMessage)

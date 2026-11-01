@@ -75,6 +75,11 @@ export type Message =
 
   /* --- persistence -------------------------------------------------- */
   /** `tabId` lets the change take effect now instead of on the next load. */
+  /**
+   * Stored transforms matching `url` whose code no longer passes the checks, as
+   * runtime states with status `broken`. Computed on request, never stored.
+   */
+  | { type: 'get-blocked-states'; url: string }
   | { type: 'save-transform'; transform: Transform; tabId?: number }
   /** `tabId` lets the change come off the page now rather than on reload. */
   | { type: 'delete-transform'; id: string; tabId?: number }
@@ -372,6 +377,7 @@ export interface Responses {
   'set-lock-scope': { count: number; container: string | null }
   'clear-lock': boolean
   'check-now': TransformRuntimeState[]
+  'get-blocked-states': TransformRuntimeState[]
   'run-csp-probe': boolean
   'clear-csp-probe': boolean
 }

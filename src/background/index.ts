@@ -6,7 +6,6 @@
  * script talk to this module; only this module talks to a provider.
  */
 
-import { analyseJavaScript, applyCapabilityPolicy } from '@safety/static-analysis'
 import type {
   ContentEvent,
   ContentMessage,
@@ -19,10 +18,12 @@ import type {
   Rect,
   ReviewResult,
   Transform,
+  TransformRuntimeState,
 } from '@shared/types'
 import type { RefinementTurn } from './providers/types'
 import { overlayPaletteFor } from '@shared/accents'
 import * as badge from './badge'
+import { blockedStates, problemWithStoredCode, runStaticAnalysis } from './code-gate'
 import { assertPreviewable, checkCssForPage, checkCssTransform, pageUrlFor } from './css-gate'
 import { reconcile as reconcileContentScripts } from './content-scripts'
 import { buildProbeTransform } from './csp-probe'
@@ -125,7 +126,7 @@ browser.webNavigation.onCommitted.addListener(async (details) => {
 
   if (transforms.length === 0) return
 
-  await applyCssTransforms(details.tabId, transforms)
+  await applyCssTransforms(details.tabId, transforms, details.url)
 
   if (!shouldCheck(settings, details.url)) return
 
@@ -133,7 +134,7 @@ browser.webNavigation.onCommitted.addListener(async (details) => {
   // to three seconds for a slow page to settle, and CSS must not queue behind
   // it. A visible delay before the page restyles would be a worse bug than a
   // late health result.
-  void checkAndPublish(details.tabId, transforms)
+  void checkAndPublish(details.tabId, transforms, details.url)
 })
 
 /* ------------------------------------------------------------------ */
@@ -231,6 +232,9 @@ async function handle(
       }
       return true
     }
+
+    case 'get-blocked-states':
+      return blockedStates(await matchingTransforms(message.url), await getSettings(), message.url)
 
     case 'get-credential-statuses':
       return getAllCredentialStatuses()
@@ -527,6 +531,7 @@ async function handle(
       await applyCssTransforms(
         message.tabId,
         message.id === null ? all : all.filter((t) => t.id !== message.id),
+        tab.url,
       )
       return true
     }
@@ -577,7 +582,7 @@ async function handle(
     case 'run-csp-probe': {
       // Registered, never saved. It must not appear in the user's transform
       // list, and it must come back out when the run is over.
-      await registerTransform(buildProbeTransform())
+      await registerTransform(buildProbeTransform(), { skipAnalysis: true })
       await browser.tabs.update(message.tabId, { url: 'http://localhost:8787/' })
       return true
     }
@@ -591,7 +596,8 @@ async function handle(
       // this host has already been seen.
       forgetSession(message.url)
       const transforms = await transformsForUrl(message.url)
-      return (await runHealthCheck(message.tabId, transforms)) ?? []
+      const states = (await runHealthCheck(message.tabId, transforms)) ?? []
+      return mergeBlocked(states, blockedStates(transforms, await getSettings(), message.url))
     }
 
     case 'capture-region':
@@ -621,17 +627,35 @@ async function handle(
 }
 
 /**
+ * A transform that may not run is listed as broken whatever the page check
+ * found: its anchor can resolve perfectly well while its code is the problem.
+ */
+function mergeBlocked(
+  states: TransformRuntimeState[],
+  blocked: TransformRuntimeState[],
+): TransformRuntimeState[] {
+  const ids = new Set(blocked.map((b) => b.id))
+  return [...states.filter((s) => !ids.has(s.id)), ...blocked]
+}
+
+/**
  * Runs a check and forwards the result to an open sidebar.
  *
  * Nothing is persisted. Broken-ness is a fact about the page as it is right
  * now, not a property of the transform — storing it would mean showing a stale
  * warning about a site that has since been fixed.
  */
-async function checkAndPublish(tabId: number, transforms: Transform[]): Promise<void> {
-  const states = await runHealthCheck(tabId, transforms)
-  if (!states) return
-
+async function checkAndPublish(
+  tabId: number,
+  transforms: Transform[],
+  url: string,
+): Promise<void> {
   const settings = await getSettings()
+  const blocked = blockedStates(transforms, settings, url)
+  const health = await runHealthCheck(tabId, transforms)
+  if (!health && blocked.length === 0) return
+  const states = mergeBlocked(health ?? [], blocked)
+
   await badge.healthChecked(
     tabId,
     states.filter((state) => state.status === 'broken').length,
@@ -796,24 +820,6 @@ browser.tabs.onRemoved.addListener((tabId) => {
  * something blocking — there is nothing to learn from a second opinion on code
  * that is already rejected, and the call is not free.
  */
-/**
- * The deterministic half, on its own. Separated because it is free and local,
- * which is what lets it gate the preview — the model review costs a call and
- * only happens once, at approval.
- */
-function runStaticAnalysis(
-  code: string,
-  declared: Transform['capabilities'],
-): ReviewResult {
-  const outcome = analyseJavaScript(code)
-  const { findings, undeclared } = applyCapabilityPolicy(outcome, declared)
-  return {
-    static: findings,
-    undeclaredCapabilities: undeclared,
-    passed: !findings.some((f) => f.severity === 'block'),
-  }
-}
-
 async function runReview(
   code: string,
   intent: string,
@@ -871,9 +877,22 @@ const appliedCss = new Map<number, string>()
  * insertCSS at the USER origin needs no page-side code, survives re-renders
  * without observers, and cannot be tampered with from the page.
  */
-async function applyCssTransforms(tabId: number, transforms: Transform[]): Promise<void> {
+async function applyCssTransforms(
+  tabId: number,
+  transforms: Transform[],
+  tabUrl: string,
+): Promise<void> {
+  /*
+   * Stored CSS is checked again here, against the page it is about to be
+   * injected into. It was checked when saved, but the rules and the site's
+   * setting can change afterwards, and CSS saved before the check existed was
+   * never checked at all. One that fails is left out, and the rest still apply.
+   * The panel lists it as not running (see blockedStates).
+   */
+  const settings = await getSettings()
   const css = transforms
     .filter((t) => t.kind === 'css' && t.enabled)
+    .filter((t) => problemWithStoredCode(t, settings, tabUrl) === null)
     .sort((a, b) => a.order - b.order)
     .map((t) => `/* ${t.name} */\n${t.code}`)
     .join('\n\n')
@@ -903,7 +922,7 @@ async function reapply(tabId: number | undefined): Promise<void> {
   const tab = await browser.tabs.get(tabId).catch(() => undefined)
   if (!tab?.url) return
   const transforms = await transformsForUrl(tab.url)
-  await applyCssTransforms(tabId, transforms)
+  await applyCssTransforms(tabId, transforms, tab.url)
 
   // Every mutation that changes what runs — save, delete, reorder, toggle —
   // reaches here, which is why the count is refreshed here rather than at each

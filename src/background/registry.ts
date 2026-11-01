@@ -36,6 +36,7 @@
  */
 
 import type { Capability, Transform } from '@shared/types'
+import { problemWithStoredCode } from './code-gate'
 import { wrapTransform } from './harness'
 import { userScripts, type ExecutionWorld, type Mv3RegisteredUserScript } from './userscripts-api'
 import { getAllTransforms, getSettings } from './storage'
@@ -101,11 +102,34 @@ export async function hasUserScriptsPermission(): Promise<boolean> {
  * sidebar calls permissions.request() itself, from the click handler.
  */
 
-export async function registerTransform(transform: Transform): Promise<void> {
-  if (transform.kind !== 'js' || !transform.enabled || !transform.code) return
+/**
+ * Registers a script so it runs on matching pages. Returns false when the
+ * script was left unregistered on purpose: it is not an enabled script with
+ * code, the kill switch is on, or the code no longer passes static analysis.
+ *
+ * Static analysis runs here, at registration, and not only when code is saved.
+ * Registration happens on install, update, start-up, a settings change and an
+ * import, all from stored code, and an analyser that was tightened after the
+ * code was saved would otherwise never see it again. A script that fails is
+ * unregistered rather than skipped, because a registration made earlier would
+ * still be running.
+ *
+ * `skipAnalysis` is for the CSP probe alone, whose job is to attempt network
+ * access and so cannot pass. The code it registers is fixed in this extension.
+ */
+export async function registerTransform(
+  transform: Transform,
+  options: { skipAnalysis?: boolean } = {},
+): Promise<boolean> {
+  if (transform.kind !== 'js' || !transform.enabled || !transform.code) return false
 
   const settings = await getSettings()
-  if (settings.aiJsKillSwitch && transform.origin === 'ai') return
+  if (settings.aiJsKillSwitch && transform.origin === 'ai') return false
+
+  if (!options.skipAnalysis && problemWithStoredCode(transform, settings) !== null) {
+    await unregisterTransform(transform.id)
+    return false
+  }
 
   if (!(await hasUserScriptsPermission())) {
     throw new Error(
@@ -142,6 +166,7 @@ export async function registerTransform(transform: Transform): Promise<void> {
   } else {
     await userScripts.register([registration])
   }
+  return true
 }
 
 export async function unregisterTransform(id: string): Promise<void> {
@@ -178,8 +203,8 @@ export async function reregisterAll(): Promise<{ registered: number; skipped: nu
   for (const transform of transforms) {
     if (transform.kind !== 'js') continue
     try {
-      await registerTransform(transform)
-      registered += 1
+      if (await registerTransform(transform)) registered += 1
+      else skipped += 1
     } catch {
       skipped += 1
     }
