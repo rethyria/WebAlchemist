@@ -84,6 +84,54 @@ describe('a manual check that finishes after the tab navigated (#88)', () => {
   })
 })
 
+describe('a result that becomes out of date between its steps (#86)', () => {
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 20))
+
+  it('is not written to the badge when the tab changed after the check returned', async () => {
+    await commit(OLD_PAGE)
+    await checkAsked
+    // The result has arrived and is being recorded when the tab moves on.
+    const release = h.hold('browser.storage.session.set')
+    finishCheck({ type: 'health-check-result', states: brokenState })
+    await settle()
+    h.tabUrls.set(TAB, NEW_PAGE)
+    void h.onMessage({ type: 'check-now', tabId: TAB, url: NEW_PAGE })
+    await settle()
+    release()
+    await settle()
+    expect(badgeText()).not.toBe('!')
+    expect(h.calls.runtimeMessages).toEqual([])
+  })
+
+  it('is not broadcast when the tab changed while the badge was written', async () => {
+    await commit(OLD_PAGE)
+    await checkAsked
+    const release = h.hold('browser.action.setBadgeText')
+    finishCheck({ type: 'health-check-result', states: brokenState })
+    await settle()
+    // The badge write for the old page is in flight; a new document commits.
+    void commit(NEW_PAGE)
+    await settle()
+    release()
+    await settle()
+    expect(h.calls.runtimeMessages).toEqual([])
+  })
+
+  it('control: with no change in between the result reaches the badge and the sidebar', async () => {
+    // Same sequence and the same held calls, released without a navigation, so
+    // the empty results above come from the tab moving on.
+    await commit(OLD_PAGE)
+    await checkAsked
+    const release = h.hold('browser.storage.session.set')
+    finishCheck({ type: 'health-check-result', states: brokenState })
+    await settle()
+    release()
+    await settle()
+    expect(badgeText()).toBe('!')
+    expect(h.calls.runtimeMessages).toHaveLength(1)
+  })
+})
+
 describe('the result broadcast to extension pages (#87)', () => {
   it('names the tab it was run in', async () => {
     // Several tabs finish loading while one sidebar is open; the sidebar can

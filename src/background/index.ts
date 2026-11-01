@@ -774,8 +774,13 @@ async function checkAndPublish(
   await markChecked(url, transforms)
 
   const settings = await getSettings()
+  // Checked again after each await: the tab can navigate while the settings
+  // are read or the badge is written, and a result for the old page must not
+  // reach the badge or the sidebar.
+  if (!isCurrent()) return
   await badge.healthChecked(tabId, brokenIds(states), settings.accent)
 
+  if (!isCurrent()) return
   await browser.runtime
     .sendMessage({ type: 'health-check-result', tabId, states })
     .catch(() => {})

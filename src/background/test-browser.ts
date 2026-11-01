@@ -23,7 +23,11 @@ export const ORIGIN = 'moz-extension://abc-123/'
 export const extensionPage = { url: `${ORIGIN}src/sidebar/index.html`, id: 'wa@test' }
 
 /** A storage area whose contents outlive `boot()`. */
-function area(data: Map<string, unknown>) {
+function area(data: Map<string, unknown>, path: string, gates: Map<string, Promise<void>>) {
+  /** Waits for a gate set with `hold(`${path}.set`)` or `.get`, `.remove`. */
+  const gated = async (method: string) => {
+    await gates.get(`${path}.${method}`)
+  }
   return {
     get: async (keys?: string | string[] | null) => {
       const out: Record<string, unknown> = {}
@@ -32,6 +36,7 @@ function area(data: Map<string, unknown>) {
       return out
     },
     set: async (items: Record<string, unknown>) => {
+      await gated('set')
       for (const [key, value] of Object.entries(items)) data.set(key, structuredClone(value))
     },
     remove: async (keys: string | string[]) => {
@@ -167,8 +172,8 @@ export function createHarness(): Harness {
     'browser.action.setBadgeText': async (o: { tabId?: number; text: string | null }) => {
       h.calls.setBadgeText.push({ tabId: o.tabId, text: o.text })
     },
-    'browser.storage.local': area(h.local),
-    'browser.storage.session': area(h.session),
+    'browser.storage.local': area(h.local, 'browser.storage.local', gates),
+    'browser.storage.session': area(h.session, 'browser.storage.session', gates),
   }
 
   /** Any unlisted property is another stub; `addListener` records its function. */
