@@ -325,6 +325,13 @@
           .map((f) => `Line ${f.line}: ${f.explanation}`)
           .join('\n')
       }
+      // Code the user typed was seen by the user, which is the approval here.
+      await send({
+        type: 'approve-code',
+        code,
+        declaredCapabilities: transform.capabilities,
+        ...(transform.world ? { world: transform.world } : {}),
+      })
     }
 
     const next: Transform = {

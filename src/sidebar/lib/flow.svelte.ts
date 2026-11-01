@@ -1421,6 +1421,7 @@ export class Flow {
         // the code matches what the user says they wanted.
         intent: this.intent,
         declaredCapabilities: result.capabilities,
+        world: result.world,
       })
     } catch (cause) {
       this.step = 'saving'

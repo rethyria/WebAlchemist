@@ -62,7 +62,26 @@ export type Message =
       scopeContainer?: string | null
     }
   | { type: 'repair'; transformId: string; context: PageContext; brokenReason: string }
-  | { type: 'review'; code: string; intent: string; declaredCapabilities: Transform['capabilities'] }
+  | {
+      type: 'review'
+      code: string
+      intent: string
+      declaredCapabilities: Transform['capabilities']
+      /** Part of what the approval is tied to. Absent means USER_SCRIPT. */
+      world?: Transform['world']
+    }
+  /**
+   * Records that the user wrote this code and is saving it, for JavaScript that
+   * did not go through the model review (the editor, and hand edits in the
+   * panel). Static analysis must pass. `save-transform` refuses JavaScript with
+   * no recorded approval.
+   */
+  | {
+      type: 'approve-code'
+      code: string
+      declaredCapabilities: Transform['capabilities']
+      world?: Transform['world']
+    }
   /** Static analysis alone — no model call, so it is free to run before preview. */
   | { type: 'analyse'; code: string; declaredCapabilities: Transform['capabilities'] }
   /**

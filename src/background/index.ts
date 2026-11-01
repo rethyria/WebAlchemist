@@ -24,6 +24,7 @@ import type { RefinementTurn } from './providers/types'
 import { overlayPaletteFor } from '@shared/accents'
 import * as badge from './badge'
 import { blockedStates, problemWithStoredCode, runStaticAnalysis } from './code-gate'
+import { mayBeSaved, recordApproval } from './approvals'
 import { assertPreviewable, checkCssForPage, checkCssTransform, pageUrlFor } from './css-gate'
 import { reconcile as reconcileContentScripts } from './content-scripts'
 import { buildProbeTransform } from './csp-probe'
@@ -276,8 +277,35 @@ async function handle(
       )
     }
 
-    case 'review':
-      return runReview(message.code, message.intent, message.declaredCapabilities)
+    case 'review': {
+      const result = await runReview(message.code, message.intent, message.declaredCapabilities)
+      /*
+       * The approval is recorded here, in the background, where the review
+       * happened, and not by the sidebar after the fact. Any verdict counts: a
+       * disagreement is shown to the user, who may still choose to save, so
+       * what is recorded is that this code was reviewed and shown. Nothing is
+       * recorded when static analysis rejected the code and no review ran.
+       */
+      if (result.model && fromExtensionPage(sender)) {
+        await recordApproval(
+          message.code,
+          message.world,
+          message.declaredCapabilities,
+          result.model.verdict,
+        )
+      }
+      return result
+    }
+
+    case 'approve-code': {
+      if (!fromExtensionPage(sender)) throw new Error('Only the extension can approve code.')
+      const analysis = runStaticAnalysis(message.code, message.declaredCapabilities)
+      if (!analysis.passed) {
+        throw new Error('Static analysis rejected this code, so it was not approved.')
+      }
+      await recordApproval(message.code, message.world, message.declaredCapabilities, 'user-written')
+      return true
+    }
 
     case 'analyse':
       return runStaticAnalysis(message.code, message.declaredCapabilities)
@@ -310,6 +338,22 @@ async function handle(
         )
         if (!analysis.passed) {
           throw new Error('Static analysis rejected this code, so it was not saved.')
+        }
+
+        /*
+         * The code must be the code that was approved. Static analysis alone
+         * cannot say that: it passes for any code that is not caught, and the
+         * review and the panel's approval are what the user relied on. A
+         * transform whose code is unchanged from what is stored is let
+         * through, so a rename or a toggle does not need a new review, and
+         * capabilities that were only reduced are covered by the approval for
+         * the larger set (see approvals.ts).
+         */
+        const stored = (await getAllTransforms()).find((t) => t.id === message.transform.id)
+        if (!(await mayBeSaved(stored, message.transform))) {
+          throw new Error(
+            'This code was not approved in this browser session, so it was not saved. Review it again and save.',
+          )
         }
       }
 
@@ -1031,6 +1075,15 @@ async function sendToContent(tabId: number, message: ContentMessage): Promise<vo
     // No content script in that tab, which is normal — it is only injected
     // under activeTab or on origins the user has granted.
   }
+}
+
+/**
+ * True when a message came from one of this extension's own pages (the
+ * sidebar, the editor, the options page) and not from a content script, whose
+ * sender URL is the web page it runs in.
+ */
+function fromExtensionPage(sender: browser.runtime.MessageSender): boolean {
+  return sender.url?.startsWith(browser.runtime.getURL('')) === true
 }
 
 /** Exposed for tests and for the sidebar's manual health-check action. */

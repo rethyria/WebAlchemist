@@ -224,6 +224,13 @@
           findings = blocking.map((f) => `Line ${f.line}: ${f.explanation}`)
           return
         }
+        // Code the user typed was seen by the user, which is the approval here.
+        await send({
+          type: 'approve-code',
+          code,
+          declaredCapabilities: current.capabilities,
+          ...(current.world ? { world: current.world } : {}),
+        })
       }
 
       /*
