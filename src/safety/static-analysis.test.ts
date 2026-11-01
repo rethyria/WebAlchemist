@@ -1355,3 +1355,27 @@ describe('second audit (#48): Typed OM', () => {
     expect(blocks(`getComputedStyle(document.body).getPropertyValue('color')`)).toBe(false)
   })
 })
+
+describe('second audit (#48): a class with a constructor', () => {
+  it('passes a class with a constructor, which the name check refused', () => {
+    for (const source of [
+      `class Counter { constructor() { this.count = 0 } inc() { this.count += 1 } } new Counter().inc()`,
+      `class A { constructor(el) { this.el = el } } class B extends A { constructor(el) { super(el); this.n = 1 } } new B(document.body)`,
+      `const C = class { constructor() { this.n = 1 } }; new C()`,
+    ]) {
+      expect(blocks(source), source).toBe(false)
+    }
+  })
+
+  it('still refuses reaching the constructor property by name', () => {
+    for (const source of [
+      `class A { static constructor() {} }`,
+      `class A { constructor() { this.constructor } }`,
+      `class A { constructor() {} } new A().constructor`,
+      `[].constructor`,
+      `class A { constructor = 1 }`,
+    ]) {
+      expect(blocks(source), source).toBe(true)
+    }
+  })
+})

@@ -2070,8 +2070,14 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
           if (key === null) dynamicKeys.push({ key: node['key'], scope: ctx.scope })
           else definedMembers.add(key)
         } else if (node['key'].type === 'Identifier') {
-          checkName(node['key'].name, node['key'], false)
-          definedMembers.add(node['key'].name)
+          // The `constructor` method of a class defines the class and returns
+          // no property, so it is not the name `constructor` read from a value,
+          // which is what the name check refuses. A static method or field of
+          // that name has another kind and is still checked.
+          if (!(node.type === 'MethodDefinition' && node['kind'] === 'constructor')) {
+            checkName(node['key'].name, node['key'], false)
+            definedMembers.add(node['key'].name)
+          }
         }
         if (node['value']) {
           // A field initialiser runs with `this` set to the instance.
