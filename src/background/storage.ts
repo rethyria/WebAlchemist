@@ -68,6 +68,7 @@ import { assertEndpoint, endpointsOf } from '@shared/endpoint-policy'
 import { destinationOf, sameBinding } from '@shared/credential-binding'
 import type { Provider, TransformVersion } from '@shared/types'
 import { EXPORT_FORMAT } from '@shared/export-envelope'
+import { getExcludedSites } from './excluded-sites'
 import {
   backupSettingsOf,
   planImport,
@@ -1386,7 +1387,7 @@ export async function previewImport(
   const plan = await planImport(
     bundle.transforms,
     valid,
-    { isValid: isValidTransform, ...checks },
+    { isValid: isValidTransform, excludedSites: await getExcludedSites(), ...checks },
     Date.now(),
     mode,
   )
@@ -1397,8 +1398,11 @@ export async function previewImport(
  * Imports a bundle as records this extension decides about (see
  * sanitiseIncoming): disabled, marked as imported, in the user script world,
  * with no capabilities. A share carries no JavaScript code. A backup keeps it,
- * after static analysis, and marks the record as awaiting approval, so it
- * cannot be turned on until the user has read and approved that code. CSS
+ * after static analysis, with the declared capabilities and a world of MAIN
+ * when the record says so, and marks the record as awaiting approval, so it
+ * cannot be turned on until the user has read and approved that code and
+ * world. Records for an excluded site are refused, and one import asks for at
+ * most 20 different sites. CSS
  * arrives with its code unless `cssProblem` reports that it fails the CSS
  * check, which is how CSS can send page data to another server, so the caller
  * checks it. A record whose content is already saved is skipped. With
@@ -1424,7 +1428,7 @@ async function importTransformsNow(
   const plan = await planImport(
     bundle.transforms,
     existing,
-    { isValid: isValidTransform, ...checks },
+    { isValid: isValidTransform, excludedSites: await getExcludedSites(), ...checks },
     Date.now(),
     mode,
   )

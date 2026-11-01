@@ -12,6 +12,7 @@
  * `browser` and a test can call it directly.
  */
 
+import { excludedHostForPattern } from '@shared/excluded-sites'
 import { assessMatch } from '@shared/import-match'
 import { originPermissionFor } from '@shared/match'
 import {
@@ -95,6 +96,8 @@ export interface PlanDeps {
   cssProblem: (transform: Pick<Transform, 'code' | 'match'>) => string | null
   /** The explanation when restored JavaScript fails static analysis, or null when it passes. */
   jsProblem: (transform: Pick<Transform, 'code' | 'capabilities'>) => string | null
+  /** The importer's list of excluded sites. A record whose pattern reaches one is refused. */
+  excludedSites?: readonly string[]
 }
 
 const text = (value: unknown): string => (typeof value === 'string' ? value : '')
@@ -237,6 +240,19 @@ export async function planImport(
     const assessed = assessMatch(raw.match)
     if (!assessed.ok) {
       items.push({ ...base, sites: '', origin: null, status: 'refused', reason: assessed.reason })
+      continue
+    }
+    // Before any permission is asked for: the user said never to ask for access
+    // to these sites, and a file must not be able to ask on their behalf.
+    const excluded = excludedHostForPattern(deps.excludedSites ?? [], raw.match.trim())
+    if (excluded !== null) {
+      items.push({
+        ...base,
+        sites: '',
+        origin: null,
+        status: 'refused',
+        reason: `The pattern reaches ${excluded}, which is on the list of excluded sites. Remove it from that list in the settings first if the transform should be imported.`,
+      })
       continue
     }
     // The code the record would hold if stored: none for JavaScript in a share,

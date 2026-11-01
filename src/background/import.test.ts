@@ -301,3 +301,36 @@ describe('the shared export', () => {
     expect(exported.transforms.find((t: any) => t.id === 'j').intent).toContain('Hide the banner')
   })
 })
+
+describe('sites on the excluded list (#56, #131)', () => {
+  const file = () =>
+    bundle(
+      cssTransform({ id: 'a', name: 'Bank', match: 'https://bank.example/*', code: GOOD_CSS }),
+      cssTransform({ id: 'b', name: 'Bank login', match: 'https://login.bank.example/*', code: GOOD_CSS }),
+      cssTransform({ id: 'c', name: 'Blog', match: 'https://blog.example.org/*', code: GOOD_CSS }),
+    )
+
+  it('refuses a record for an excluded host or a subdomain of one, with a reason and no origin to request', async () => {
+    await ask({ type: 'set-excluded-sites', sites: ['bank.example'] })
+    const { items } = await ask({ type: 'preview-import', bundle: file() })
+    expect(items.map((i: any) => [i.name, i.status, i.origin])).toEqual([
+      ['Bank', 'refused', null],
+      ['Bank login', 'refused', null],
+      ['Blog', 'import', 'https://blog.example.org/*'],
+    ])
+    expect(items[0].reason).toContain('bank.example')
+    expect(items[0].reason).toContain('excluded')
+  })
+
+  it('stores only the record that is not excluded', async () => {
+    await ask({ type: 'set-excluded-sites', sites: ['bank.example'] })
+    const result = await ask({ type: 'import-transforms', bundle: file() })
+    expect(result).toMatchObject({ imported: 1, skipped: 2 })
+    expect(stored().map((t) => t.name)).toEqual(['Blog'])
+  })
+
+  it('imports all three when the list is empty (control)', async () => {
+    const result = await ask({ type: 'import-transforms', bundle: file() })
+    expect(result.imported).toBe(3)
+  })
+})
