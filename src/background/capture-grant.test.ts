@@ -2,7 +2,7 @@
  * Handing back the all-sites screenshot grant when the panel closes mid-run
  * (#134).
  *
- * The panel records that it holds the grant in storage.session; the background
+ * The panel records that it holds the grant in storage.local; the background
  * script removes the grant when the last panel's port disconnects, and at
  * start-up when no panel reconnects.
  */
@@ -30,7 +30,7 @@ const afterGrace = () => vi.advanceTimersByTimeAsync(GRACE + 100)
 describe('a panel that closes during a run that holds the grant', () => {
   beforeEach(() => {
     h.allUrlsGranted = true
-    h.session.set(CAPTURE_GRANT_KEY, true)
+    h.local.set(CAPTURE_GRANT_KEY, true)
   })
 
   it('has the grant removed when its port disconnects', async () => {
@@ -39,7 +39,7 @@ describe('a panel that closes during a run that holds the grant', () => {
     port.drop()
     await settle()
     expect(h.allUrlsGranted).toBe(false)
-    expect(h.session.get(CAPTURE_GRANT_KEY)).toBe(false)
+    expect(h.local.get(CAPTURE_GRANT_KEY)).toBe(false)
   })
 
   it('keeps the grant while another panel is still connected', async () => {
@@ -91,13 +91,25 @@ describe('the background page starting with the grant held', () => {
     h.allUrlsGranted = true
   })
 
-  it('removes the grant when no panel connects, as after a browser restart', async () => {
-    await h.boot() // the session record does not exist: storage.session was emptied
+  it('control: removes nothing when the panel never recorded taking the grant', async () => {
+    // A grant the user gave outside the panel has no record.
+    await h.boot()
+    await afterGrace()
+    expect(h.allUrlsGranted).toBe(true)
+    expect(h.permissionsRemoved).toEqual([])
+  })
+
+  it('removes the grant and clears the record when the panel recorded taking it and no panel connects', async () => {
+    // The record is in storage.local, so it is still there after a browser restart.
+    h.local.set(CAPTURE_GRANT_KEY, true)
+    await h.boot()
     await afterGrace()
     expect(h.allUrlsGranted).toBe(false)
+    expect(h.local.get(CAPTURE_GRANT_KEY)).toBe(false)
   })
 
   it('keeps the grant when a panel reconnects during start-up', async () => {
+    h.local.set(CAPTURE_GRANT_KEY, true)
     await h.boot()
     connect()
     await afterGrace()
@@ -105,6 +117,7 @@ describe('the background page starting with the grant held', () => {
   })
 
   it('keeps the grant when the setting to keep it is on', async () => {
+    h.local.set(CAPTURE_GRANT_KEY, true)
     h.local.set('settings', { keepScreenshotPermission: true })
     await h.boot()
     await afterGrace()

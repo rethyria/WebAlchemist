@@ -8,15 +8,16 @@
  * asks for the grant and clears it when it gives the grant back, and the
  * background script reads it when the panel's port disconnects.
  *
- * It lives in `storage.session`, so it survives the background page being
- * suspended and does not survive a browser restart. After a restart the grant
- * is still held and the record is gone; the background script then judges the
- * grant by whether any panel reconnects (see index.ts).
+ * It lives in `storage.local`, so it survives both the background page being
+ * suspended and a browser restart, as the grant itself does. At start-up the
+ * background script removes the all-sites grant only when this record says the
+ * panel took it for a run. A grant the user gave outside the panel has no
+ * record and is never removed.
  */
 
 export const CAPTURE_GRANT_KEY = 'wa-capture-grant-held'
 
 /** Written before the permission request, so the record exists as soon as the grant can. */
 export function recordCaptureGrant(held: boolean): Promise<void> {
-  return browser.storage.session.set({ [CAPTURE_GRANT_KEY]: held })
+  return browser.storage.local.set({ [CAPTURE_GRANT_KEY]: held })
 }

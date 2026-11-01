@@ -13,8 +13,8 @@ type Handler = (message: any) => any
 let handler: Handler = () => ({ ok: true, data: null })
 const calls: any[] = []
 
-/** Every object passed to `storage.session.set`. */
-const sessionWrites: Record<string, unknown>[] = []
+/** Every object passed to `storage.local.set`. */
+const localWrites: Record<string, unknown>[] = []
 ;(globalThis as any).browser = {
   runtime: {
     sendMessage: async (message: any) => {
@@ -29,9 +29,9 @@ const sessionWrites: Record<string, unknown>[] = []
   permissions: { request: async () => true, remove: async () => true },
   tabs: { update: async () => {}, reload: async () => {}, create: async () => {} },
   storage: {
-    session: {
+    local: {
       set: async (items: Record<string, unknown>) => {
-        sessionWrites.push(items)
+        localWrites.push(items)
       },
     },
   },
@@ -733,9 +733,9 @@ describe('a reference or region pick still running in the page', () => {
 })
 
 describe('the record that the all-sites grant is held for a run (#134)', () => {
-  const grantWrites = () => sessionWrites.filter((w) => 'wa-capture-grant-held' in w).map((w) => w['wa-capture-grant-held'])
+  const grantWrites = () => localWrites.filter((w) => 'wa-capture-grant-held' in w).map((w) => w['wa-capture-grant-held'])
   beforeEach(() => {
-    sessionWrites.length = 0
+    localWrites.length = 0
   })
 
   it('is written when the grant is requested', async () => {

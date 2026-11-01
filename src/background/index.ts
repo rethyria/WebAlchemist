@@ -1048,19 +1048,26 @@ const ALL_SITES = { origins: ['<all_urls>'] }
  * without asking. The setting that keeps the grant is honoured.
  */
 async function handBackCaptureGrant(): Promise<void> {
-  await browser.storage.session.set({ [CAPTURE_GRANT_KEY]: false })
+  await browser.storage.local.set({ [CAPTURE_GRANT_KEY]: false })
   if ((await getSettings()).keepScreenshotPermission) return
   await browser.permissions.remove(ALL_SITES).catch(() => {})
 }
 
 /**
- * After a browser restart the record in storage.session is gone while the
- * grant is still held, so the record cannot be the test at start-up. If a
- * panel reconnects within the grace period a run may be in progress and the
- * grant stays; if none does, nobody is left to use it or give it back.
+ * After a browser restart the grant is still held, and so is the record that
+ * the panel took it for a run (storage.local). Only that record allows the
+ * removal: an all-sites grant the user gave outside the panel has no record
+ * and is left alone. If a panel reconnects within the grace period a run may
+ * be in progress and the grant stays; if none does, nobody is left to use it
+ * or give it back.
  */
 void (async () => {
-  if (!(await browser.permissions.contains(ALL_SITES))) return
+  const recorded = (await browser.storage.local.get(CAPTURE_GRANT_KEY))[CAPTURE_GRANT_KEY]
+  if (recorded !== true) return
+  if (!(await browser.permissions.contains(ALL_SITES))) {
+    await browser.storage.local.set({ [CAPTURE_GRANT_KEY]: false })
+    return
+  }
   if ((await getSettings()).keepScreenshotPermission) return
   await new Promise((resolve) => setTimeout(resolve, SIDEBAR_RECONNECT_GRACE_MS))
   if (sidebarPorts.size > 0) return
@@ -1089,7 +1096,7 @@ browser.runtime.onConnect.addListener((port) => {
       // panel is left that could be in the middle of a run.
       if (sidebarPorts.size === 0) {
         void (async () => {
-          const held = (await browser.storage.session.get(CAPTURE_GRANT_KEY))[CAPTURE_GRANT_KEY]
+          const held = (await browser.storage.local.get(CAPTURE_GRANT_KEY))[CAPTURE_GRANT_KEY]
           if (held === true) await handBackCaptureGrant()
         })()
       }
