@@ -140,6 +140,34 @@ describe('a transform restricted to a container', () => {
     expect(h.calls.insertCSS.filter((c) => c.css.includes('Dark'))).toHaveLength(1)
   })
 
+  // Applying after a save goes through the queue in reapply, which filters by
+  // container on its own, apart from the filter used when a page loads.
+  describe('when CSS is applied after a change in the panel (#127)', () => {
+    const inside = () => cssTransform({ id: 'in', name: 'Inside', code: 'p { color: red }', cookieStoreId: 'firefox-container-2' })
+    const outside = () => cssTransform({ id: 'out', name: 'Outside', code: 'p { color: blue }' })
+    const appliedCss = () => h.calls.insertCSS.map((c) => c.css).join('\n')
+
+    const toggle = () => h.onMessage({ type: 'set-enabled', id: 'out', enabled: true, tabId: TAB })
+
+    it('applies the unrestricted transform and not the restricted one in another container', async () => {
+      h.local.set('transforms', [inside(), outside()])
+      h.tabContainers.set(TAB, 'firefox-container-1')
+      await toggle()
+      expect(appliedCss()).toContain('Outside')
+      expect(appliedCss()).not.toContain('Inside')
+    })
+
+    // Control: in the restricted transform's own container both are applied,
+    // so the missing one above is left out by the container check.
+    it('control: applies both in the container the restriction names', async () => {
+      h.local.set('transforms', [inside(), outside()])
+      h.tabContainers.set(TAB, 'firefox-container-2')
+      await toggle()
+      expect(appliedCss()).toContain('Outside')
+      expect(appliedCss()).toContain('Inside')
+    })
+  })
+
   it('keeps the field when it is saved', async () => {
     await h.onMessage({ type: 'save-transform', transform: restricted() })
     expect((h.local.get('transforms') as any[])[0].cookieStoreId).toBe('firefox-container-2')
