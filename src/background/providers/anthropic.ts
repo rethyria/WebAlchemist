@@ -33,6 +33,8 @@ import {
   GENERATION_SCHEMA,
   ProviderError,
   REVIEW_SCHEMA,
+  isModelNotPermitted,
+  modelNotPermittedError,
   type AiProvider,
   type GenerateRequest,
   type StreamListener,
@@ -136,6 +138,10 @@ export async function createAnthropicProvider(
     dangerouslyAllowBrowser: true,
     defaultHeaders: { 'anthropic-dangerous-direct-browser-access': 'true' },
     maxRetries: 2,
+    // A redirect would re-send the x-api-key header and the prompt to the
+    // address in the Location header. The request goes to a fixed address and
+    // never needs a redirect, so one is treated as a failure.
+    fetchOptions: { redirect: 'error' },
   })
 
   const generateModel = provider.generateModel || DEFAULT_GENERATE_MODEL
@@ -504,6 +510,12 @@ function toProviderError(
    * because the same status answers a wrong path. Anthropic words it
    * "model: <id>".
    */
+  if (
+    error instanceof Anthropic.NotFoundError &&
+    isModelNotPermitted(String(error.message ?? ''))
+  ) {
+    return modelNotPermittedError(context.model, context.label, error)
+  }
   if (
     error instanceof Anthropic.NotFoundError &&
     error.type === 'not_found_error' &&

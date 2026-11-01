@@ -22,6 +22,7 @@ import type {
   Rect,
   ReviewResult,
   Settings,
+  SettingsChange,
   UsageReport,
   UsageStore,
   Conflict,
@@ -104,19 +105,19 @@ export type Message =
   | { type: 'set-enabled'; id: string; enabled: boolean; tabId?: number }
 
   /* --- settings and credentials ------------------------------------- */
-  /**
-   * Answers true, or `{ reloadTabs }` when the kill switch changed: the number
-   * of open tabs that may have run JavaScript and need a reload to match it.
-   */
   | { type: 'save-settings'; settings: Settings }
+  /** Applies one change to the stored settings and returns the settings as saved. */
+  | { type: 'patch-settings'; change: SettingsChange }
   /* The per-site off switch, by the host of `url`. */
   | { type: 'get-site-off'; url: string }
+  | { type: 'set-site-off'; url: string; off: boolean }
+  /** How many open tabs may be running JavaScript that a changed setting does not stop. */
+  | { type: 'count-js-tabs' }
   /* The sites on which picking and generation are refused (#131). */
   | { type: 'get-excluded-sites' }
   | { type: 'set-excluded-sites'; sites: string[] }
   /** Asks the page in the tab whether it has a password or payment field. */
   | { type: 'page-has-sensitive-fields'; tabId: number }
-  | { type: 'set-site-off'; url: string; off: boolean }
   | { type: 'set-credential'; providerId: string; credential: Credential }
   | { type: 'clear-credential'; providerId: string }
   /*

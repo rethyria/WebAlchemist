@@ -46,7 +46,8 @@ beforeEach(async () => {
   await ask({ type: 'reapply-everywhere', id: 'js-a' })
 })
 
-const withSwitch = (aiJsKillSwitch: boolean) => ({ ...DEFAULT_SETTINGS, aiJsKillSwitch })
+const setSwitch = (aiJsKillSwitch: boolean) =>
+  ask({ type: 'patch-settings', change: { kind: 'fields', fields: { aiJsKillSwitch } } })
 const stylesheetsRemoved = (tabId: number) => h.calls.removeCSS.filter((c) => c.tabId === tabId)
 
 describe('the setting that stops all transforms', () => {
@@ -56,33 +57,32 @@ describe('the setting that stops all transforms', () => {
   })
 
   it('unregisters hand-written JavaScript as well', async () => {
-    await ask({ type: 'save-settings', settings: withSwitch(true) })
+    await setSwitch(true)
     expect(h.userScriptsHeld.has('js-a')).toBe(false)
   })
 
   it('removes CSS from every open tab', async () => {
-    await ask({ type: 'save-settings', settings: withSwitch(true) })
+    await setSwitch(true)
     expect(stylesheetsRemoved(A)).toHaveLength(1)
     expect(stylesheetsRemoved(B)).toHaveLength(1)
   })
 
-  it('reports the tabs that ran JavaScript, not every tab', async () => {
-    const answer = await ask({ type: 'save-settings', settings: withSwitch(true) })
+  it('counts the tabs that ran JavaScript, not every tab', async () => {
+    await setSwitch(true)
     // Only tab A matches the JavaScript transform; tab B has CSS only.
-    expect(answer).toEqual({ reloadTabs: 1 })
+    expect(await ask({ type: 'count-js-tabs' })).toBe(1)
     expect(h.calls.reload).toEqual([])
   })
 
-  it('answers true and touches no tab when the setting did not change (control)', async () => {
-    const answer = await ask({ type: 'save-settings', settings: withSwitch(false) })
-    expect(answer).toBe(true)
+  it('touches no tab when the setting did not change (control)', async () => {
+    await setSwitch(false)
     expect(h.calls.removeCSS).toEqual([])
   })
 
   it('puts the CSS back when the setting is turned off again', async () => {
-    await ask({ type: 'save-settings', settings: withSwitch(true) })
+    await setSwitch(true)
     const before = h.calls.insertCSS.length
-    await ask({ type: 'save-settings', settings: withSwitch(false) })
+    await setSwitch(false)
     expect(h.calls.insertCSS.length).toBe(before + 2)
     expect(h.userScriptsHeld.has('js-a')).toBe(true)
   })

@@ -13,7 +13,7 @@ export const KILL_SWITCH_NOTE =
 
 /**
  * What to tell the user after the setting changed. `reloadTabs` is the number of
- * open tabs that may have run JavaScript, as answered by the background.
+ * open tabs that may have run JavaScript, as answered by the count-js-tabs message.
  */
 export function killSwitchNotice(on: boolean, reloadTabs: number): string {
   if (reloadTabs === 0) return ''
@@ -21,10 +21,4 @@ export function killSwitchNotice(on: boolean, reloadTabs: number): string {
   return on
     ? `${tabs} may still be running JavaScript. Reload ${reloadTabs === 1 ? 'it' : 'them'} to stop it.`
     : `Reload ${tabs} to run JavaScript transforms there again.`
-}
-
-/** Reads the answer to save-settings, which is `true` when the switch did not change. */
-export function reloadTabsOf(answer: unknown): number {
-  const count = (answer as { reloadTabs?: unknown } | null)?.reloadTabs
-  return typeof count === 'number' ? count : 0
 }

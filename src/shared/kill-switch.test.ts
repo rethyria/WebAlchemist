@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { KILL_SWITCH_LABEL, KILL_SWITCH_NOTE, killSwitchNotice, reloadTabsOf } from './kill-switch'
+import { KILL_SWITCH_LABEL, KILL_SWITCH_NOTE, killSwitchNotice } from './kill-switch'
 
 describe('kill switch wording', () => {
   it('does not claim to take effect immediately or to leave CSS running', () => {
@@ -15,11 +15,5 @@ describe('kill switch wording', () => {
     expect(killSwitchNotice(true, 1)).toContain('1 open tab')
     expect(killSwitchNotice(true, 3)).toContain('3 open tabs')
     expect(killSwitchNotice(false, 2)).toMatch(/run JavaScript transforms there again/)
-  })
-
-  it('reads the count from the background answer', () => {
-    expect(reloadTabsOf({ reloadTabs: 4 })).toBe(4)
-    expect(reloadTabsOf(true)).toBe(0)
-    expect(reloadTabsOf(null)).toBe(0)
   })
 })

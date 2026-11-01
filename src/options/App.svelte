@@ -6,11 +6,13 @@
     type CredentialStatus,
     type HealthCheckMode,
     type Settings,
+    type SettingsChange,
     type Transform,
     type UsageStore,
   } from '@shared/types'
   import { ACCENT_COLOURS } from '@shared/accents'
-  import { KILL_SWITCH_LABEL, KILL_SWITCH_NOTE, killSwitchNotice, reloadTabsOf } from '@shared/kill-switch'
+  import { KILL_SWITCH_LABEL, KILL_SWITCH_NOTE, killSwitchNotice } from '@shared/kill-switch'
+  import { NOT_SAVED_USAGE_ID } from '@shared/usage'
   import Toggle from '@sidebar/components/Toggle.svelte'
   import ProviderSettings from './ProviderSettings.svelte'
   import ExcludedSites from './ExcludedSites.svelte'
@@ -26,6 +28,8 @@
   let vault = $state({ sealed: false, unlocked: true })
   /** Set when the credentials could not be read and the vault is not locked. */
   let loadError = $state<string | null>(null)
+  /** Set when the vault unlocked but the stored keys could not be checked against their providers. */
+  let bindingError = $state<string | null>(null)
   let usage = $state<UsageStore>({ months: {}, transforms: {} })
   let transformNames = $state<Record<string, string>>({})
 
@@ -62,6 +66,7 @@
       usage = await call<UsageStore>({ type: 'get-usage' })
       const names: Record<string, string> = {}
       for (const id of Object.keys(usage.transforms)) {
+        if (id === NOT_SAVED_USAGE_ID) continue
         const found = await call<Transform | null>({ type: 'get-transform', id })
         if (found) names[id] = found.name
       }
@@ -87,13 +92,21 @@
     loadError = loaded.error ?? null
   }
 
-  async function save(next: Settings) {
-    const previous = settings?.aiJsKillSwitch
-    settings = next
-    document.documentElement.dataset['accent'] = next.accent
-    const changed = previous !== next.aiJsKillSwitch
-    const answer = await call({ type: 'save-settings', settings: next })
-    killNotice = changed ? killSwitchNotice(next.aiJsKillSwitch, reloadTabsOf(answer)) : killNotice
+  /**
+   * Sends one change for the background to apply to the stored settings. The
+   * page then shows what was stored, so it does not keep a copy that other
+   * pages have since changed.
+   */
+  async function change(next: SettingsChange) {
+    const before = settings?.aiJsKillSwitch
+    const saved = await call<Settings>({ type: 'patch-settings', change: next })
+    settings = saved
+    document.documentElement.dataset['accent'] = saved.accent
+    // The stop-all setting leaves scripts running in tabs that are already
+    // open, so the page says how many need a reload.
+    if (before !== undefined && before !== saved.aiJsKillSwitch) {
+      killNotice = killSwitchNotice(saved.aiJsKillSwitch, await call<number>({ type: 'count-js-tabs' }))
+    }
   }
 
   async function setKey(providerId: string, key: string) {
@@ -131,13 +144,19 @@
     </p>
   {/if}
 
+  {#if bindingError}
+    <p class="load-error" role="alert">
+      The vault is unlocked. The stored keys could not be checked against their providers: {bindingError}
+      Unlock the vault again to repeat the check.
+    </p>
+  {/if}
+
   {#if settings}
     <ProviderSettings
       {settings}
       {statuses}
-      onsave={save}
+      onchange={change}
       onsetkey={setKey}
-      onreadsettings={() => call<Settings>({ type: 'get-settings' })}
       onclearkey={clearKey}
       onconnectoauth={connectOAuth}
     />
@@ -148,7 +167,7 @@
       {vault}
       idleMinutes={settings.vaultIdleLockMinutes}
       onidlechange={async (vaultIdleLockMinutes) => {
-        if (settings) await save({ ...settings, vaultIdleLockMinutes })
+        await change({ kind: 'fields', fields: { vaultIdleLockMinutes } })
       }}
       onenable={async (passphrase) => {
         await call({ type: 'enable-vault', passphrase })
@@ -159,7 +178,10 @@
         await afterVault()
       }}
       onunlock={async (passphrase) => {
-        await call({ type: 'unlock-vault', passphrase })
+        const unlocked = await call<{ bindingError: string | null }>({ type: 'unlock-vault', passphrase })
+        // The vault is open at this point. A failed check of the stored keys is
+        // shown on its own, and is not an error of the unlock.
+        bindingError = unlocked.bindingError
         await afterVault()
       }}
       onlock={async () => {
@@ -188,7 +210,7 @@
             class="swatch"
             class:selected={settings.accent === accent}
             style="--swatch: {ACCENT_COLOURS[accent].swatch}"
-            onclick={() => settings && save({ ...settings, accent })}
+            onclick={() => change({ kind: 'fields', fields: { accent } })}
           ></button>
         {/each}
       </div>
@@ -205,7 +227,7 @@
             class="radio-card"
             class:selected={settings.healthCheckMode === mode.value}
             onclick={() =>
-              settings && save({ ...settings, healthCheckMode: mode.value })}
+              change({ kind: 'fields', fields: { healthCheckMode: mode.value } })}
           >
             <span class="radio-dot"></span>
             <span class="radio-label">{mode.label}</span>
@@ -226,7 +248,7 @@
           checked={settings.aiJsKillSwitch}
           label={KILL_SWITCH_LABEL}
           large
-          onchange={(checked) => settings && save({ ...settings, aiJsKillSwitch: checked })}
+          onchange={(checked) => change({ kind: 'fields', fields: { aiJsKillSwitch: checked } })}
         />
       </div>
     </section>

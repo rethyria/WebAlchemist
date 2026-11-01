@@ -43,11 +43,13 @@ import {
   type Credential,
   type CredentialStatus,
   type Settings,
+  type ProviderEditableField,
+  type SettingsChange,
   type TokenUsage,
   type Transform,
   type UsageStore,
 } from '@shared/types'
-import { addCall, monthOf } from '@shared/usage'
+import { NOT_SAVED_USAGE_ID, addCall, addTotals, monthOf } from '@shared/usage'
 import {
   LockedError,
   deriveKey,
@@ -74,6 +76,8 @@ const KEY_HISTORY = 'wa-transform-history'
 export const MAX_VERSIONS = 5
 const KEY_CREDENTIALS = 'credentials'
 const KEY_USAGE = 'usage'
+/** Set to true once bindStoredCredentials has finished a pass. */
+const KEY_BINDING_PASS = 'credentialBindingPassDone'
 
 type CredentialMap = Record<string, Credential>
 
@@ -88,7 +92,7 @@ export async function getSettings(): Promise<Settings> {
   return migrateSettings(raw)
 }
 
-export async function saveSettings(settings: Settings): Promise<void> {
+async function writeSettings(settings: Settings): Promise<void> {
   const idle = settings.vaultIdleLockMinutes
   if (!Number.isInteger(idle) || idle < 0) {
     throw new Error('The vault lock period must be a whole number of minutes, or 0 for never.')
@@ -132,6 +136,115 @@ export async function saveSettings(settings: Settings): Promise<void> {
   // that picking an accent colour does not count as using the vault.
   const before = previous?.vaultIdleLockMinutes ?? DEFAULT_SETTINGS.vaultIdleLockMinutes
   if (before !== idle && (await recallKey())) await armIdleLock()
+}
+
+/**
+ * Settings writes run one after another. A change is a read, a change and a
+ * write, and two that overlapped would each start from the same stored value
+ * so that one of them was lost. Same reasoning as the transform queue.
+ */
+let settingsQueue: Promise<unknown> = Promise.resolve()
+
+function mutateSettings<T>(work: () => Promise<T>): Promise<T> {
+  const result = settingsQueue.then(work, work)
+  settingsQueue = result.catch(() => undefined)
+  return result
+}
+
+/**
+ * Replaces the stored settings with the ones given. A caller that holds a copy
+ * from when it loaded should use changeSettings, which does not write back
+ * fields it did not mean to change.
+ */
+export function saveSettings(settings: Settings): Promise<void> {
+  return mutateSettings(() => writeSettings(settings))
+}
+
+const SETTINGS_FIELDS = [
+  'activeProviderId',
+  'healthCheckMode',
+  'accent',
+  'keepScreenshotPermission',
+  'aiJsKillSwitch',
+  'vaultIdleLockMinutes',
+] as const satisfies readonly (keyof Settings)[]
+
+const PROVIDER_FIELDS = [
+  'generateModel',
+  'reviewModel',
+  'supportsVision',
+  'price',
+  'oauth',
+] as const satisfies readonly ProviderEditableField[]
+
+/**
+ * Applies one change to the settings as they are stored now, inside the
+ * settings queue, and returns what was saved. Throws when the change is
+ * refused, and then writes nothing.
+ */
+export function changeSettings(change: SettingsChange): Promise<Settings> {
+  return mutateSettings(async () => {
+    const current = await getSettings()
+    let next: Settings
+    switch (change.kind) {
+      case 'add-provider':
+        if (current.providers.some((p) => p.id === change.provider.id)) {
+          throw new Error('A provider with that id already exists.')
+        }
+        next = {
+          ...current,
+          providers: [...current.providers, change.provider],
+          activeProviderId: current.activeProviderId ?? change.provider.id,
+        }
+        break
+      case 'remove-provider': {
+        const remaining = current.providers.filter((p) => p.id !== change.providerId)
+        next = {
+          ...current,
+          providers: remaining,
+          activeProviderId:
+            current.activeProviderId === change.providerId
+              ? (remaining[0]?.id ?? null)
+              : current.activeProviderId,
+        }
+        break
+      }
+      case 'fields': {
+        const fields: Record<string, unknown> = {}
+        for (const key of SETTINGS_FIELDS) {
+          if (key in change.fields) fields[key] = (change.fields as Record<string, unknown>)[key]
+        }
+        next = { ...current, ...fields }
+        if (
+          next.activeProviderId !== null &&
+          !next.providers.some((p) => p.id === next.activeProviderId)
+        ) {
+          throw new Error('The active provider must be one that is configured.')
+        }
+        break
+      }
+      case 'update-provider': {
+        const found = current.providers.find((p) => p.id === change.providerId)
+        if (!found) throw new Error('That provider is no longer configured.')
+        // Only the listed fields are taken from the message, so a change cannot
+        // alter the id, the type or the address of a provider.
+        const updated: Provider = { ...found }
+        for (const key of PROVIDER_FIELDS) {
+          if (change.set && key in change.set) {
+            ;(updated as unknown as Record<string, unknown>)[key] = (change.set as Record<string, unknown>)[key]
+          }
+        }
+        for (const key of change.unset ?? []) delete updated[key]
+        next = {
+          ...current,
+          providers: current.providers.map((p) => (p.id === found.id ? updated : p)),
+        }
+        break
+      }
+    }
+    await writeSettings(next)
+    return next
+  })
 }
 
 function migrateSettings(raw: Partial<Settings>): Settings {
@@ -385,8 +498,8 @@ export function updateTransform(
   })
 }
 
-export function deleteTransform(id: string): Promise<void> {
-  return mutateTransforms(async () => {
+export async function deleteTransform(id: string): Promise<void> {
+  await mutateTransforms(async () => {
     const { valid: all, invalid } = await readStored()
     await writeTransforms(
       all.filter((t) => t.id !== id),
@@ -394,6 +507,11 @@ export function deleteTransform(id: string): Promise<void> {
     )
     await forgetVersions(id)
   })
+  // The transform is gone, so its usage would otherwise stay in the store
+  // forever with no name to show. The provider totals by month keep the cost.
+  // The delete has already happened, so a failure here is not reported as a
+  // failed delete; the entry is removed by the next start-up sweep instead.
+  await pruneTransformUsage(id).catch(() => undefined)
 }
 
 /** Persists a new ordering. Order decides which transform wins a conflict. */
@@ -583,11 +701,19 @@ export async function disableVault(passphrase: string): Promise<void> {
   })
 }
 
-/** Derives and remembers the key for this browser session. */
-export async function unlockVault(passphrase: string): Promise<void> {
+/**
+ * Derives and remembers the key for this browser session.
+ *
+ * Returns the message of a failed binding pass, or null. The pass runs after
+ * the vault is open, so its failure is not a failed unlock: throwing it made
+ * the caller report the unlock as failed while the vault was unlocked. The pass
+ * runs again at the next unlock, and until it has recorded that it ran, reads
+ * still bind unbound keys.
+ */
+export async function unlockVault(passphrase: string): Promise<{ bindingError: string | null }> {
   const stored = await browser.storage.local.get(KEY_CREDENTIALS)
   const existing = stored[KEY_CREDENTIALS]
-  if (!isSealed(existing)) return
+  if (!isSealed(existing)) return { bindingError: null }
 
   const key = await deriveKey(passphrase, saltOf(existing))
   // Decrypt once before remembering, so a wrong passphrase is refused here
@@ -597,7 +723,15 @@ export async function unlockVault(passphrase: string): Promise<void> {
   await armIdleLock()
   // The first moment the map can be written after an upgrade, so this is where
   // keys stored before bindings existed are bound; see bindStoredCredentials.
-  await bindStoredCredentials()
+  try {
+    await bindStoredCredentials()
+    return { bindingError: null }
+  } catch (error) {
+    // Only the message is kept. It never holds a credential.
+    const message = error instanceof Error ? error.message : 'unknown error'
+    console.error('Binding stored credentials failed:', message)
+    return { bindingError: message }
+  }
 }
 
 /**
@@ -636,11 +770,13 @@ export async function discardVault(): Promise<void> {
 
 /** A stored credential was entered for a different destination than the provider's current one. */
 export class CredentialOriginError extends Error {
-  constructor(label: string, entered: string, current: string | null) {
+  constructor(label: string, entered: string | null, current: string | null) {
     super(
       current === null
         ? `The key for ${label} cannot be used because the provider has no valid address. Fix the address in settings and enter the key again.`
-        : `The key for ${label} was entered for ${entered}, but the provider now sends requests to ${current}. The key was not sent. Enter it again in settings.`,
+        : entered === null
+          ? `The key for ${label} has no recorded address, so it was not sent. Enter it again in settings.`
+          : `The key for ${label} was entered for ${entered}, but the provider now sends requests to ${current}. The key was not sent. Enter it again in settings.`,
     )
     this.name = 'CredentialOriginError'
   }
@@ -658,23 +794,26 @@ export class CredentialOriginError extends Error {
  * fall through to the unauthenticated path that loopback providers use.
  *
  * Migration: credentials written before binding existed carry no `boundTo`.
- * The first read binds one to the provider's destination at that moment and
- * saves it. That trusts the current settings, which is the only information
- * available, and it is the same trust the old code placed in them on every
- * request. A credential read for the first time after an unwanted edit is
- * therefore bound to the unwanted address; the other choice was to discard
- * every stored key on upgrade.
+ * bindStoredCredentials binds them in one pass when the extension is updated,
+ * or when a sealed vault is first unlocked afterwards, and records that the
+ * pass has run. Until it has run, a read still binds an unbound credential to
+ * the provider's destination at that moment and saves it, which trusts the
+ * current settings. After it has run, an unbound credential is refused, because
+ * the pass skipped it for a reason (its provider was removed or had no valid
+ * address) and binding it now would attach it to whatever address the settings
+ * hold at some later time.
  */
 export async function readCredentialForRequest(provider: Provider): Promise<Credential | null> {
   const found = (await readCredentialMap(true))[provider.id]
   if (!found) return null
-  if (found.boundTo) return checkedForProvider(provider, found)
+  if (found.boundTo) return checkedForProvider(provider, found, true)
 
   return withCredentialLock(async () => {
     const map = await readCredentialMap()
     const current = map[provider.id]
     if (!current) return null
-    const checked = checkedForProvider(provider, current)
+    const passDone = await bindingPassDone()
+    const checked = checkedForProvider(provider, current, passDone)
     if (!current.boundTo) {
       map[provider.id] = checked
       await writeCredentialMap(map)
@@ -683,18 +822,29 @@ export async function readCredentialForRequest(provider: Provider): Promise<Cred
   })
 }
 
+/** Whether bindStoredCredentials has finished a pass. */
+async function bindingPassDone(): Promise<boolean> {
+  return (await browser.storage.local.get(KEY_BINDING_PASS))[KEY_BINDING_PASS] === true
+}
+
 /**
- * Returns the credential bound to the provider's destination, binding a legacy
- * one that has no binding, or throws when the binding names another destination.
- * Does not write; the caller stores the bound copy when it has a reason to.
+ * Returns the credential bound to the provider's destination, or throws when
+ * the binding names another destination. A credential with no binding is bound
+ * to the destination while the binding pass has not run, and refused once it
+ * has. Does not write; the caller stores the bound copy when it has a reason to.
  */
-function checkedForProvider(provider: Provider, credential: Credential): Credential {
+function checkedForProvider(
+  provider: Provider,
+  credential: Credential,
+  passDone: boolean,
+): Credential {
   const destination = destinationOf(provider)
+  const refusedUnbound = passDone && !credential.boundTo
   const bound = credential.boundTo ?? destination ?? undefined
-  if (!destination || !bound || !sameBinding(bound, destination)) {
+  if (!destination || !bound || refusedUnbound || !sameBinding(bound, destination)) {
     throw new CredentialOriginError(
       provider.label,
-      credential.boundTo?.origin ?? '(unknown)',
+      credential.boundTo?.origin ?? null,
       destination?.origin ?? null,
     )
   }
@@ -703,7 +853,7 @@ function checkedForProvider(provider: Provider, credential: Credential): Credent
 
 /**
  * Binds every stored credential that has no binding to its provider's current
- * destination, in one pass.
+ * destination, in one pass, and records that the pass has run.
  *
  * Without this a key stored before bindings existed was bound by whichever
  * request read it first, which could be months after the upgrade and after the
@@ -711,7 +861,10 @@ function checkedForProvider(provider: Provider, credential: Credential): Credent
  * entered for. Doing it once, at the first point the extension runs after the
  * upgrade (a plaintext store) or the first point the sealed map can be written
  * (unlock), keeps that window short. A credential whose provider has been
- * removed, or has no valid address, is left unbound and is refused on use.
+ * removed, or has no valid address, is left unbound. Once the pass has run,
+ * reads refuse an unbound credential instead of binding it (see
+ * readCredentialForRequest). The record is written only when the pass finishes,
+ * so a pass that throws, for example on a locked vault, runs again later.
  * Throws LockedError for a sealed vault that is locked.
  */
 export async function bindStoredCredentials(): Promise<void> {
@@ -728,6 +881,7 @@ export async function bindStoredCredentials(): Promise<void> {
       changed = true
     }
     if (changed) await writeCredentialMap(map)
+    await browser.storage.local.set({ [KEY_BINDING_PASS]: true })
   })
 }
 
@@ -760,7 +914,8 @@ export function withCredentialForRequest<T>(
 ): Promise<T> {
   return withCredentialLock(async () => {
     const found = (await readCredentialMap())[provider.id]
-    const credential = found ? checkedForProvider(provider, found) : null
+    const passDone = await bindingPassDone()
+    const credential = found ? checkedForProvider(provider, found, passDone) : null
     const store = async (replacement: Credential): Promise<boolean> => {
       const map = await readCredentialMap()
       const current = map[provider.id]
@@ -839,15 +994,20 @@ function oauthStatus(
 
 /**
  * True when requests would refuse this credential because of where it was
- * entered. A credential with no binding is not a mismatch: it is bound on its
- * first read, so reporting it here would flag every key stored before binding
- * existed. Uses the same comparison as the request path so the two cannot
+ * entered. Before the binding pass has run, a credential with no binding is
+ * not a mismatch, because a read binds it, so reporting it would flag every
+ * key stored before binding existed. After the pass it is refused, and is
+ * reported. Uses the same comparison as the request path so the two cannot
  * disagree.
  */
-function refusedForProvider(provider: Provider | undefined, credential: Credential): boolean {
+function refusedForProvider(
+  provider: Provider | undefined,
+  credential: Credential,
+  passDone: boolean,
+): boolean {
   if (!provider) return false
   try {
-    checkedForProvider(provider, credential)
+    checkedForProvider(provider, credential, passDone)
     return false
   } catch (error) {
     if (error instanceof CredentialOriginError) return true
@@ -859,13 +1019,14 @@ function statusFor(
   providerId: string,
   provider: Provider | undefined,
   credential: Credential | undefined,
+  passDone: boolean,
 ): CredentialStatus {
   if (!credential) return { providerId, configured: false }
   const base: CredentialStatus =
     credential.kind === 'oauth'
       ? oauthStatus(providerId, credential)
       : { providerId, configured: true, kind: 'api_key' }
-  return refusedForProvider(provider, credential) ? { ...base, needsReentry: true } : base
+  return refusedForProvider(provider, credential, passDone) ? { ...base, needsReentry: true } : base
 }
 
 /** The only credential shape any other context is allowed to see. */
@@ -874,13 +1035,16 @@ export async function getCredentialStatus(providerId: string): Promise<Credentia
   const provider = credential
     ? (await getSettings()).providers.find((p) => p.id === providerId)
     : undefined
-  return statusFor(providerId, provider, credential)
+  return statusFor(providerId, provider, credential, await bindingPassDone())
 }
 
 export async function getAllCredentialStatuses(): Promise<CredentialStatus[]> {
   const map = await readCredentialMap()
   const settings = await getSettings()
-  return settings.providers.map((provider) => statusFor(provider.id, provider, map[provider.id]))
+  const passDone = await bindingPassDone()
+  return settings.providers.map((provider) =>
+    statusFor(provider.id, provider, map[provider.id], passDone),
+  )
 }
 
 /* ------------------------------------------------------------------ */
@@ -915,7 +1079,7 @@ export function recordUsage(call: {
   costUsd: number | null
   at?: number
 }): Promise<void> {
-  const run = async () => {
+  return mutateUsage(async () => {
     const store = await getUsage()
     const month = monthOf(call.at ?? Date.now())
     const byProvider = (store.months[month] ??= {})
@@ -928,10 +1092,59 @@ export function recordUsage(call: {
       )
     }
     await browser.storage.local.set({ [KEY_USAGE]: store })
-  }
-  const next = usageQueue.then(run, run)
+  })
+}
+
+function mutateUsage<T>(work: () => Promise<T>): Promise<T> {
+  const next = usageQueue.then(work, work)
   usageQueue = next.catch(() => undefined)
   return next
+}
+
+/**
+ * Removes one transform's usage entry. Called when the transform is deleted.
+ * Runs in the usage queue so it does not overlap a recording.
+ */
+export function pruneTransformUsage(transformId: string): Promise<void> {
+  return mutateUsage(async () => {
+    const store = await getUsage()
+    if (!(transformId in store.transforms)) return
+    delete store.transforms[transformId]
+    await browser.storage.local.set({ [KEY_USAGE]: store })
+  })
+}
+
+/**
+ * Moves the usage of every id that is not a saved transform into the single
+ * "not saved" entry.
+ *
+ * A draft gets its id before it is saved, and its model calls are recorded
+ * under that id. A draft that is then discarded leaves an entry that nothing
+ * else removes, one for each discarded draft. Nothing tells the background
+ * that a draft was discarded, so this runs when the browser starts and when
+ * the extension is installed or updated, when no sidebar can be holding a
+ * draft that is still being worked on. Running it while the sidebar is open
+ * would move the cost of a draft that has not been saved yet. Records that are
+ * stored but fail validation still count as saved, so their usage is kept.
+ */
+export function foldUnsavedUsage(): Promise<void> {
+  return mutateUsage(async () => {
+    const stored = (await browser.storage.local.get(KEY_TRANSFORMS))[KEY_TRANSFORMS]
+    const kept = new Set<string>([NOT_SAVED_USAGE_ID])
+    for (const record of Array.isArray(stored) ? stored : []) {
+      const id = (record as { id?: unknown } | null)?.id
+      if (typeof id === 'string') kept.add(id)
+    }
+    const store = await getUsage()
+    let changed = false
+    for (const [id, totals] of Object.entries(store.transforms)) {
+      if (kept.has(id)) continue
+      store.transforms[NOT_SAVED_USAGE_ID] = addTotals(store.transforms[NOT_SAVED_USAGE_ID], totals)
+      delete store.transforms[id]
+      changed = true
+    }
+    if (changed) await browser.storage.local.set({ [KEY_USAGE]: store })
+  })
 }
 
 /* ------------------------------------------------------------------ */

@@ -87,6 +87,8 @@ import {
   lockVault,
   reorderTransforms,
   saveSettings,
+  changeSettings,
+  foldUnsavedUsage,
   saveTransform,
   saveCredentialFor,
   unlockVault,
@@ -104,6 +106,21 @@ async function reregister(): Promise<void> {
 /* ------------------------------------------------------------------ */
 
 browser.runtime.onInstalled.addListener(async (details) => {
+  // First, before anything that reads settings or credentials. Keys stored
+  // before bindings existed are bound now, while the settings are still the
+  // ones they were entered under. A sealed vault is locked after a restart; its
+  // keys are bound when it is unlocked. A failure is logged and does not stop
+  // the registrations below; the pass runs again at the next unlock or update.
+  // Only the message is logged, never a credential.
+  if (details.reason === 'update' || details.reason === 'install') {
+    await bindStoredCredentials().catch((error: unknown) => {
+      console.error(
+        'Binding stored credentials failed:',
+        error instanceof Error ? error.message : 'unknown error',
+      )
+    })
+  }
+  await foldUnsavedUsage().catch(() => undefined)
   // The platform wipes every userScripts registration on update, and drops
   // dynamic content scripts too. Without this, transforms silently stop
   // working after an extension update — with no error, which is the worst
@@ -112,11 +129,10 @@ browser.runtime.onInstalled.addListener(async (details) => {
     await reregister()
     await reconcileContentScripts()
   }
-  // Keys stored before bindings existed are bound now, while the settings are
-  // still the ones they were entered under. A sealed vault is locked after a
-  // restart; its keys are bound when it is unlocked.
-  if (details.reason === 'update') await bindStoredCredentials().catch(() => {})
 })
+
+// Folds the usage of discarded drafts. See foldUnsavedUsage for why only here.
+browser.runtime.onStartup.addListener(() => void foldUnsavedUsage().catch(() => undefined))
 
 /*
  * Both directions matter. Firefox drops user script registrations when the
@@ -566,18 +582,12 @@ async function handle(
     case 'save-settings': {
       const switchBefore = (await getSettings()).aiJsKillSwitch
       await saveSettings(message.settings)
-      // The kill switch changes which scripts may run.
-      await reregister()
-      const switchAfter = (await getSettings()).aiJsKillSwitch
-      if (switchBefore === switchAfter) return true
-      // Unregistering a script does not undo code that already ran in an open
-      // tab, so CSS is taken out of (or put back into) the open tabs here, and
-      // the tabs that ran JavaScript are counted so the caller can say that
-      // they need a reload. They are not reloaded: that would discard
-      // unsaved text on every open site because of one setting.
-      await reapplyOpenTabs(() => true)
-      return { reloadTabs: await countTabsWithJavaScript(() => true) }
+      await afterSettingsWritten(switchBefore)
+      return true
     }
+
+    case 'count-js-tabs':
+      return countTabsWithJavaScript(() => true)
 
     case 'get-excluded-sites':
       return getExcludedSites()
@@ -604,6 +614,13 @@ async function handle(
       const tabs = await tabsWithJavaScript(onHost)
       if (message.off) for (const id of tabs) await browser.tabs.reload(id).catch(() => {})
       return { reloadTabs: message.off ? 0 : tabs.length, reloaded: message.off ? tabs.length : 0 }
+    }
+
+    case 'patch-settings': {
+      const switchBefore = (await getSettings()).aiJsKillSwitch
+      const saved = await changeSettings(message.change)
+      if (message.change.kind === 'fields') await afterSettingsWritten(switchBefore)
+      return saved
     }
 
     case 'set-credential': {
@@ -658,8 +675,7 @@ async function handle(
       return true
 
     case 'unlock-vault':
-      await unlockVault(message.passphrase)
-      return true
+      return unlockVault(message.passphrase)
 
     case 'lock-vault':
       await lockVault()
@@ -1308,6 +1324,21 @@ async function transformsForUrl(url: string): Promise<Transform[]> {
   // nothing is applied, counted on the badge or health-checked.
   if ((await getSettings()).aiJsKillSwitch || (await isUrlOff(url))) return []
   return (await matchingTransforms(url)).filter((t) => t.enabled)
+}
+
+/**
+ * What follows a settings write that may have changed the kill switch. The
+ * switch changes which scripts may run, so registrations are rebuilt. When it
+ * changed, CSS is also taken out of (or put back into) the open tabs.
+ * Unregistering a script does not undo code that already ran in an open tab, so
+ * those tabs are not touched here: the page that changed the setting asks for
+ * their number with count-js-tabs and tells the user to reload them. They are
+ * not reloaded, because that would discard unsaved text on every open site
+ * because of one setting.
+ */
+async function afterSettingsWritten(switchBefore: boolean): Promise<void> {
+  await reregister()
+  if ((await getSettings()).aiJsKillSwitch !== switchBefore) await reapplyOpenTabs(() => true)
 }
 
 /** Reapplies CSS and the badge in every open tab whose address passes `include`. */
