@@ -5,9 +5,9 @@
  * therefore reads a touch as one of three things: a tap, which selects the
  * element under the finger; a movement before the long-press delay, which is a
  * scroll and is left alone; and a long press followed by a drag, which draws a
- * rectangle. Only the last cancels the page's scrolling, and only after the
- * finger has been held still for the delay, so ordinary scrolling is never
- * blocked.
+ * rectangle. The page's scrolling is cancelled only while the finger is within
+ * the slop (so that a long press can still start a drag) and during the drag.
+ * A finger that moves past the slop is scrolling and is never cancelled.
  *
  * This file holds no timers and no DOM access, so the rules can be tested
  * directly. The caller starts a timer of LONG_PRESS_MS at touchstart and calls
@@ -61,9 +61,22 @@ export class TouchGesture {
     this.scrolling = fingers > 1
   }
 
-  /** True while the gesture is a drag, so the caller cancels the page's scrolling. */
+  /** True while the gesture is a drag, so the caller draws a rectangle. */
   get isDragging(): boolean {
     return this.dragging
+  }
+
+  /**
+   * True when the caller cancels the touchmove, which keeps the page from
+   * scrolling. That is a drag, and also the time between the finger going down
+   * and the long-press delay while the finger is still within the slop. Firefox
+   * decides whether a touch scrolls from its first moves, so a move that was
+   * not cancelled before the drag started could have started a scroll that the
+   * drag then cannot stop. A finger that has passed the slop, or a second
+   * finger, is a scroll and is never cancelled.
+   */
+  get cancelsMove(): boolean {
+    return this.start !== null && !this.scrolling
   }
 
   /** The rectangle to show after a move, or null when the move is not drawing one. */

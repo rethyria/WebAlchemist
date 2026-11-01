@@ -124,3 +124,54 @@ describe('helpers', () => {
     expect(LONG_PRESS_MS).toBe(500)
   })
 })
+
+describe('which touchmove events are cancelled (#128)', () => {
+  it('cancels a move within the slop while the long press is pending', () => {
+    const g = new TouchGesture()
+    g.begin({ x: 100, y: 100 }, 1)
+    g.move({ x: 103, y: 102 })
+    expect(g.cancelsMove).toBe(true)
+  })
+
+  it('cancels the moves of a drag', () => {
+    const g = new TouchGesture()
+    g.begin({ x: 100, y: 100 }, 1)
+    expect(g.hold()).toBe(true)
+    g.move({ x: 160, y: 150 })
+    expect(g.cancelsMove).toBe(true)
+  })
+
+  it('does not cancel a move past the slop before the long press (a scroll)', () => {
+    const g = new TouchGesture()
+    g.begin({ x: 100, y: 100 }, 1)
+    g.move({ x: 100, y: 140 })
+    expect(g.cancelsMove).toBe(false)
+  })
+
+  it('does not cancel two fingers', () => {
+    const g = new TouchGesture()
+    g.begin({ x: 100, y: 100 }, 2)
+    g.move({ x: 101, y: 100 })
+    expect(g.cancelsMove).toBe(false)
+  })
+
+  it('does not cancel anything when no touch is down', () => {
+    const g = new TouchGesture()
+    expect(g.cancelsMove).toBe(false)
+    g.begin({ x: 1, y: 1 }, 1)
+    g.end({ x: 1, y: 1 })
+    expect(g.cancelsMove).toBe(false)
+  })
+})
+
+describe('the touchmove handler in index.ts (#128)', () => {
+  // The handler cannot be run here, so this reads its source. It fails if
+  // preventDefault is called on every touchmove, which would block scrolling
+  // for the whole time the picker is open, or if the decision is dropped.
+  it('cancels only where the gesture says so', async () => {
+    const text = (await import('node:fs')).readFileSync(new URL('./index.ts', import.meta.url), 'utf8')
+    const body = /function onTouchMove\(event: TouchEvent\): void \{([\s\S]*?)\n\}\n/.exec(text)?.[1] ?? ''
+    expect(body).toContain('if (gesture.cancelsMove && event.cancelable) event.preventDefault()')
+    expect(body.match(/preventDefault\(\)/g)).toHaveLength(1)
+  })
+})

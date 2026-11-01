@@ -669,9 +669,10 @@ function onTouchMove(event: TouchEvent): void {
   const at = touchPoint(event)
   if (!at) return
   const rect = gesture.move(at)
-  // Cancelled only for a drag, so a finger moving before the long press still
-  // scrolls the page.
-  if (gesture.isDragging && event.cancelable) event.preventDefault()
+  // Cancelled while a long press may still start a drag, so that the page does
+  // not begin to scroll under a held finger, and during the drag. A finger that
+  // moves past the tolerance is scrolling and is left alone.
+  if (gesture.cancelsMove && event.cancelable) event.preventDefault()
   if (rect) {
     crop = rect
     overlay.showCrop(rect)
