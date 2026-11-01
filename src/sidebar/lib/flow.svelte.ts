@@ -22,7 +22,7 @@
  */
 
 import type { AnchoredElement, ContentEvent } from '@shared/messages'
-import type { RefinementTurn } from '@background/providers/types'
+import type { RefinementTurn, ReviewInstruction } from '@background/providers/types'
 import type { ScrollOffset } from '@shared/region'
 import {
   matchPresetsFor,
@@ -55,6 +55,7 @@ import {
   SENSITIVE_PAGE_MESSAGE,
 } from '@shared/excluded-sites'
 import { readCaptureGrant, recordCaptureGrant } from '@shared/capture-grant'
+import type { PickerAction } from '@shared/picker-keys'
 import { BackgroundError, generateOverPort, send } from './messaging.svelte'
 import { jsPreviewGate, reviewKey } from './preview-gate'
 
@@ -294,6 +295,20 @@ export class Flow {
   permissionDenied = $state(false)
 
   intent = $state('')
+  /**
+   * The page address the requests of this run carry, as it was when the element
+   * was picked (or found again for Repair and Edit). The panels show this value
+   * and `generate` sends it, so the two cannot differ.
+   */
+  get sentAddress(): string {
+    return this.picked?.context.url ?? ''
+  }
+  /**
+   * What `intent` was before the user could edit it: the model's `result.intent`
+   * after a generation, or the stored intent after Repair or Edit with AI. The
+   * review is told the intent was edited by the user when the two differ.
+   */
+  intentBaseline = ''
   matchPattern = $state('')
   review = $state<ReviewResult | null>(null)
   /**
@@ -505,6 +520,15 @@ export class Flow {
    * from the describing step.
    */
   private keptInstruction: string | null = null
+  /**
+   * The stored intent that `instruction` was pre-filled from, or null when the
+   * user wrote the first instruction themselves. Repair, Edit with AI and Edit
+   * description pre-fill from `transform.intent`, which a model or an imported
+   * bundle wrote, so the review has to be told that text did not come from the
+   * user (#52). Kept next to `keptInstruction` and restored with it.
+   */
+  private savedInstruction: string | null = null
+  private keptSavedInstruction: string | null = null
 
   /**
    * The element that was selected when "Change" started a new pick, held so
@@ -527,6 +551,7 @@ export class Flow {
     const held = this.rePickFrom
     this.rePickFrom = null
     this.keptInstruction = null
+    this.keptSavedInstruction = null
     if (!held) return false
     this.picked = held.picked
     this.tree = held.tree
@@ -547,6 +572,7 @@ export class Flow {
   async startPicking(purpose: 'describe' | 'author' = 'describe'): Promise<void> {
     this.pickPurpose = purpose
     this.keptInstruction = this.step === 'describing' ? this.instruction : null
+    this.keptSavedInstruction = this.step === 'describing' ? this.savedInstruction : null
     if (this.tabId === null) return
 
     const origin = originPermissionForUrl(this.url)
@@ -623,6 +649,17 @@ export class Flow {
     }
   }
 
+  /**
+   * Passes a picker key pressed in the sidebar on to the page. The page's own
+   * listener cannot see keys while the keyboard focus is here.
+   */
+  async sendPickerKey(action: PickerAction): Promise<void> {
+    if (this.tabId === null || this.step !== 'picking') return
+    // A failed delivery means the page went away, which the panel learns of
+    // through its own path; there is nothing useful to show for one key.
+    await send({ type: 'picker-key', tabId: this.tabId, action }).catch(() => {})
+  }
+
   async cancelPicking(): Promise<void> {
     if (this.tabId !== null) {
       await send({ type: 'stop-picking', tabId: this.tabId }).catch(() => {})
@@ -696,12 +733,17 @@ export class Flow {
         if (this.pickPurpose === 'author') void this.openAuthoring()
         else {
           const kept = this.keptInstruction
+          const keptSaved = this.keptSavedInstruction
           this.keptInstruction = null
+          this.keptSavedInstruction = null
           this.enterDescribing()
           // Changing the element is not starting a new description, so what
           // was typed stays. The screenshot, scope and references describe the
           // old element and are reset as before.
-          if (kept !== null) this.instruction = kept
+          if (kept !== null) {
+            this.instruction = kept
+            this.savedInstruction = keptSaved
+          }
         }
         return
       }
@@ -772,7 +814,9 @@ export class Flow {
     })
 
     await browser.tabs.create({
-      url: browser.runtime.getURL(`src/editor/index.html?draft=${encodeURIComponent(key)}`),
+      url: browser.runtime.getURL(
+        `src/editor/index.html?draft=${encodeURIComponent(key)}${this.tabId === null ? '' : `&tab=${this.tabId}`}`,
+      ),
     })
 
     this.step = 'list'
@@ -787,6 +831,7 @@ export class Flow {
     this.scopeCount = 1
     this.scopeContainer = null
     this.instruction = ''
+    this.savedInstruction = null
     this.history = []
     this.followUp = ''
     this.references = []
@@ -953,7 +998,8 @@ export class Flow {
       this.matchPattern = transform.match
       this.approvedCssUrls = transform.approvedCssUrls ?? []
       this.intent = transform.intent
-      this.instruction = transform.intent
+      this.intentBaseline = transform.intent
+      this.prefillInstruction(transform.intent)
       this.history = []
       this.references = []
       this.draft = transform
@@ -977,6 +1023,7 @@ export class Flow {
         transformId: transform.id,
         context: found.context,
         brokenReason,
+        tabId: this.tabId ?? undefined,
       })
       if (!current()) return
       const result = repaired.result
@@ -985,6 +1032,7 @@ export class Flow {
       this.result = result
       // Not result.intent: the destination was never what broke.
       this.intent = transform.intent
+      this.intentBaseline = transform.intent
       this.draft = this.buildDraft(result, found.anchor)
 
       this.stage = 'analysis'
@@ -1091,8 +1139,9 @@ export class Flow {
        * start of a new description and not a continuation of the old one.
        */
       this.enterDescribing()
-      this.instruction = transform.intent
+      this.prefillInstruction(transform.intent)
       this.intent = transform.intent
+      this.intentBaseline = transform.intent
       await this.restoreScopeDepth(transform)
       if (!current()) return
 
@@ -1152,7 +1201,8 @@ export class Flow {
       this.matchPattern = transform.match
       this.approvedCssUrls = transform.approvedCssUrls ?? []
       this.intent = transform.intent
-      this.instruction = transform.intent
+      this.intentBaseline = transform.intent
+      this.prefillInstruction(transform.intent)
       this.references = []
       this.followUp = ''
       this.draft = transform
@@ -1239,8 +1289,38 @@ export class Flow {
       draft: Transform | null
       analysis: ReviewResult | null
       intent: string
+      intentBaseline: string
     }
   } | null = null
+
+  /**
+   * Puts a stored intent in the instruction field and records that it came
+   * from storage. Every pre-fill goes through here so none can skip the record.
+   */
+  private prefillInstruction(storedIntent: string): void {
+    this.instruction = storedIntent
+    this.savedInstruction = storedIntent
+  }
+
+  /**
+   * Every instruction behind the current result, each with where it came from.
+   * The first one is the pre-filled text when there is a saved instruction, so
+   * it is compared with what was pre-filled to tell whether the user changed
+   * it. Later ones are follow-ups, which the user always wrote.
+   */
+  private reviewInstructions(): ReviewInstruction[] {
+    const texts = [
+      ...this.history.filter((turn) => turn.role === 'user').map((turn) => turn.content),
+      this.instruction,
+    ]
+    return texts.map((text, index): ReviewInstruction => {
+      if (index > 0 || this.savedInstruction === null) return { text, source: 'typed' }
+      return {
+        text,
+        source: text === this.savedInstruction ? 'saved-description' : 'saved-description-edited',
+      }
+    })
+  }
 
   private undoRefinement(): void {
     const held = this.refinement
@@ -1251,6 +1331,7 @@ export class Flow {
       this.draft = held.previous.draft
       this.analysis = held.previous.analysis
       this.intent = held.previous.intent
+      this.intentBaseline = held.previous.intentBaseline
     }
     this.history = held.history
     this.instruction = held.instruction
@@ -1299,6 +1380,11 @@ export class Flow {
     try {
       this.stage = 'context'
       const context: PageContext = { ...(await this.liveContext(picked)) }
+      // Everything else in the context is read again so it matches the page
+      // as it is now, but the address stays the one the panel has been showing.
+      // A page that navigates, or a query string it changes after the pick,
+      // would otherwise put an address in the request that the user never saw.
+      context.url = picked.context.url
       // Cancel can arrive while the page is being read; without this the
       // cancelled run still opened a port and sent the request.
       if (!current()) return
@@ -1398,10 +1484,12 @@ export class Flow {
           draft: this.draft,
           analysis: this.analysis,
           intent: this.intent,
+          intentBaseline: this.intentBaseline,
         }
       }
       this.result = result
       this.intent = result.intent
+      this.intentBaseline = result.intent
       // Keep the user's scope choice across a regeneration; only seed it once.
       this.matchPattern ||=
         this.matchPresets.find((p) => p.recommended)?.pattern ??
@@ -1655,6 +1743,10 @@ export class Flow {
       kind: result.kind,
       origin: 'ai',
       ...(result.kind === 'js' ? { world: result.world } : {}),
+      // A repair or a regeneration keeps the container restriction. The
+      // generation result knows nothing about it, and the record is replaced
+      // on save, so a field left out here would be removed (#127).
+      ...(this.draft?.cookieStoreId === undefined ? {} : { cookieStoreId: this.draft.cookieStoreId }),
       capabilities: result.capabilities,
       intent: this.intent,
       scopeDepth: this.scopeDepth,
@@ -1769,6 +1861,8 @@ export class Flow {
         type: 'review',
         code: result.code,
         intent: this.intent,
+        intentEditedByUser: this.intent !== this.intentBaseline,
+        instructions: this.reviewInstructions(),
         declaredCapabilities: result.capabilities,
         world: result.world,
         transformId: draft.id,
@@ -2016,9 +2110,14 @@ export class Flow {
       this.review = await send<ReviewResult>({
         type: 'review',
         code: result.code,
-        // The edited intent, not the model's. The reviewer is asked whether
-        // the code matches what the user says they wanted.
+        // The edited intent is sent as the generator's summary only. The
+        // reviewer judges against what the user typed, which is every user
+        // turn in the history followed by the current instruction, except a
+        // pre-filled stored intent the user has not changed (see
+        // reviewInstructions).
         intent: this.intent,
+        intentEditedByUser: this.intent !== this.intentBaseline,
+        instructions: this.reviewInstructions(),
         declaredCapabilities: result.capabilities,
         world: result.world,
         // The approval token is tied to the id and pattern, so the save must
@@ -2429,6 +2528,8 @@ export class Flow {
     this.scopeCount = 1
     this.scopeContainer = null
     this.instruction = ''
+    this.savedInstruction = null
+    this.keptSavedInstruction = null
     this.sendScreenshot = false
     this.history = []
     this.followUp = ''
@@ -2446,6 +2547,7 @@ export class Flow {
     this.approvedCssUrls = []
     this.permissionDenied = false
     this.intent = ''
+    this.intentBaseline = ''
     this.matchPattern = ''
     this.review = null
     this.reviewShown = false

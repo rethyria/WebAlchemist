@@ -1,8 +1,10 @@
 <script lang="ts">
+  import { radioGroup } from '@shared/radio-group'
   import type { MatchPreset } from '@shared/match'
   import type { GenerationResult } from '@shared/types'
   import { autogrow } from '../lib/autogrow'
   import Button from './Button.svelte'
+  import { focusOnMount } from '../lib/focus'
   import CodeBlock from './CodeBlock.svelte'
   import Label from './Label.svelte'
 
@@ -36,7 +38,7 @@
 <div class="panel">
   <header>
     <Label>Step 1 of 3 · Confirm</Label>
-    <h1>Is this what you meant?</h1>
+    <h1 use:focusOnMount>Is this what you meant?</h1>
   </header>
 
   <section>
@@ -53,7 +55,7 @@
 
   <section>
     <Label>Step 2 · Where it applies</Label>
-    <div class="options" role="radiogroup" aria-label="Where it applies">
+    <div class="options" role="radiogroup" aria-label="Where it applies" use:radioGroup>
       {#each presets as preset (preset.pattern)}
         <button
           type="button"

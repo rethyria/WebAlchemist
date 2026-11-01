@@ -13,6 +13,40 @@ export interface RefinementTurn {
   content: string
 }
 
+/**
+ * Where an instruction sent to the reviewer came from.
+ *
+ *  - `typed`: the user wrote it in this session.
+ *  - `saved-description`: pre-filled from a stored transform's intent (Repair,
+ *    Edit with AI, Edit description) and sent unchanged. A model or an imported
+ *    bundle wrote it, so it is not evidence of what the user wants.
+ *  - `saved-description-edited`: pre-filled the same way, then changed by the
+ *    user before sending. The user read and wrote the final text, so it counts
+ *    as theirs, and the reviewer is told how it started.
+ */
+export type InstructionSource = 'typed' | 'saved-description' | 'saved-description-edited'
+
+export interface ReviewInstruction {
+  text: string
+  source: InstructionSource
+}
+
+/** What a review call is given. Page content is never part of it. */
+export interface ReviewArgs {
+  code: string
+  /** The generator's summary of the intent. The model wrote it. */
+  intent: string
+  /** True when the user changed the intent after the model returned it. */
+  intentEditedByUser?: boolean
+  /**
+   * Every instruction behind this transform, verbatim, in order, each with its
+   * source. The message and the background entry point require it; it is
+   * optional here only so that adapter tests that exercise transport do not
+   * all need one.
+   */
+  instructions?: ReviewInstruction[]
+}
+
 export interface GenerateRequest {
   context: PageContext
   /** The user's latest instruction. */
@@ -81,13 +115,13 @@ export interface AiProvider {
   ): Promise<GenerationResult>
 
   /**
-   * Reviews generated JavaScript against the stated intent.
+   * Reviews generated JavaScript against what the user typed.
    *
    * Implementations MUST NOT include page content in this call. The reviewer's
    * independence comes entirely from not sharing the generator's context: a
    * page that can steer the generator can steer a reviewer that reads it too.
    */
-  review(args: { code: string; intent: string }): Promise<ModelReview>
+  review(args: ReviewArgs): Promise<ModelReview>
 
   /**
    * Whether the configured generation model accepts images, used to decide

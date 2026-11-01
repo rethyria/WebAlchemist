@@ -14,6 +14,8 @@ import type {
 } from '@shared/messages'
 import { exactPagePattern, matchesUrl, originPermissionForUrl } from '@shared/match'
 import { CAPTURE_GRANT_KEY } from '@shared/capture-grant'
+import { appliesInContainer } from '@shared/container'
+import { refuseInPrivateWindow, requireNormalWindow } from './private-window'
 import { regionAtScroll, viewportChanged, type ScrollOffset, type Viewport } from '@shared/region'
 import type {
   Accent,
@@ -25,13 +27,13 @@ import type {
   Transform,
   TransformRuntimeState,
 } from '@shared/types'
-import type { RefinementTurn } from './providers/types'
+import type { RefinementTurn, ReviewInstruction } from './providers/types'
 import { overlayPaletteFor } from '@shared/accents'
 import * as badge from './badge'
 import { recordRunTab, takeRunTabs, windowsWithRunTabs } from './run-tabs'
 import { isUrlOff, setHostOff } from './site-off'
 import { excludedHostOf, getExcludedSites, setExcludedSites } from './excluded-sites'
-import { excludedSiteMessage } from '@shared/excluded-sites'
+import { excludedHostFor, excludedSiteMessage } from '@shared/excluded-sites'
 import { hostOfUrl } from '@shared/site-off'
 import { isSidebarPortName, windowOfSidebarPort } from '@shared/sidebar-port'
 import { blockedStates, runStaticAnalysis } from './code-gate'
@@ -50,7 +52,6 @@ import {
 } from './handlers'
 import { documentOf, forgetTab, inTabQueue, startDocument } from './tab-queue'
 import { reconcile as reconcileContentScripts } from './content-scripts'
-import { buildProbeTransform } from './csp-probe'
 import {
   addPreviewedScript,
   archiveApplied,
@@ -399,7 +400,7 @@ async function evaluateTab(
   // evaluation of this tab is already out of date by the time this one reads
   // storage.
   const evaluation = beginEvaluation(tabId)
-  const transforms = await transformsForUrl(url)
+  const transforms = await inTabContainer(tabId, await transformsForUrl(url))
 
   /*
    * Before the early return below, not after. A tab that navigates from a site
@@ -577,6 +578,7 @@ async function handle(
     }
 
     case 'repair': {
+      await requireNormalWindow(message.tabId)
       await refuseExcludedUrl(message.context.url)
       const transforms = await getAllTransforms()
       const existing = transforms.find((t) => t.id === message.transformId)
@@ -634,6 +636,7 @@ async function handle(
     }
 
     case 'save-transform':
+      await refuseInPrivateWindow(message.tabId)
       return handleSaveTransform(
         message.source ? { ...message, transform: { ...message.transform, producedBy: message.source } } : message,
         saveDeps,
@@ -643,6 +646,7 @@ async function handle(
       return getVersions(message.id)
 
     case 'restore-transform-version': {
+      await refuseInPrivateWindow(message.tabId)
       const current = (await getAllTransforms()).find((t) => t.id === message.id)
       if (!current) throw new Error('That transform no longer exists.')
       const version = (await getVersions(message.id)).find((v) => v.id === message.versionId)
@@ -672,9 +676,6 @@ async function handle(
         saveDeps,
       )
     }
-
-    case 'save-transform':
-      return handleSaveTransform(message, saveDeps)
 
     case 'delete-transform': {
       const doomed = (await getAllTransforms()).find((t) => t.id === message.id)
@@ -720,11 +721,9 @@ async function handle(
     }
 
     case 'save-settings': {
-      const switchBefore = (await getSettings()).aiJsKillSwitch
       return handleSaveSettings(message, {
-        getSettings,
         saveSettings,
-        reregisterAll: () => afterSettingsWritten(switchBefore),
+        reregisterAll: (before) => afterSettingsWritten(before.aiJsKillSwitch),
         reapplyAllTabs,
       })
     }
@@ -735,8 +734,21 @@ async function handle(
     case 'get-excluded-sites':
       return getExcludedSites()
 
-    case 'set-excluded-sites':
-      return setExcludedSites(message.sites)
+    case 'set-excluded-sites': {
+      const before = await getExcludedSites()
+      const after = await setExcludedSites(message.sites)
+      // Registrations carry the list in `excludeMatches`, so they are rebuilt,
+      // and the content script registrations with them. Open tabs that the
+      // change covers lose or regain their CSS and badge count (#131).
+      await reregister()
+      await reconcileContentScripts()
+      const changed = (url: string) =>
+        excludedHostFor(before, url) !== excludedHostFor(after, url)
+      const nowExcluded = (url: string) => excludedHostFor(after, url) !== null
+      await clearCssPreviewsOn(nowExcluded)
+      await reapplyOpenTabs(changed)
+      return after
+    }
 
     case 'page-has-sensitive-fields':
       // Only an answer of false means the page has no such fields. No answer
@@ -764,8 +776,12 @@ async function handle(
     }
 
     case 'patch-settings': {
-      const switchBefore = (await getSettings()).aiJsKillSwitch
-      const saved = await changeSettings(message.change)
+      // Read inside the settings queue, so this change keeps its place there
+      // relative to a save sent at the same time (#85).
+      let switchBefore = false
+      const saved = await changeSettings(message.change, (before) => {
+        switchBefore = before.aiJsKillSwitch
+      })
       if (message.change.kind === 'fields') await afterSettingsWritten(switchBefore)
       return saved
     }
@@ -818,8 +834,7 @@ async function handle(
       return true
 
     case 'disable-vault':
-      await disableVault(message.passphrase)
-      return true
+      return disableVault(message.passphrase)
 
     case 'unlock-vault':
       return unlockVault(message.passphrase)
@@ -905,6 +920,7 @@ async function handle(
       return true
 
     case 'start-picking': {
+      await refuseInPrivateWindow(message.tabId)
       // The panel checks this first so that no permission is requested; this
       // is the check for any other caller of the message.
       await refuseExcludedTab(message.tabId)
@@ -939,9 +955,11 @@ async function handle(
      * keep the context it already has rather than as a failure.
      */
     case 'recapture':
+      await refuseInPrivateWindow(message.tabId)
       return askContent(message.tabId, { type: 'recapture' })
 
     case 'context-for-anchor': {
+      await refuseInPrivateWindow(message.tabId)
       await recordRunTabOf(message.tabId)
       // The page keeps the palette from the last start-picking, and a page
       // that has had no pick has none, so Edit description drew no outline.
@@ -978,6 +996,10 @@ async function handle(
       await sendToContent(message.tabId, { type: 'cancel-picking' })
       return true
 
+    case 'picker-key':
+      await sendToContent(message.tabId, { type: 'picker-key', action: message.action })
+      return true
+
     case 'retarget':
       await sendToContent(message.tabId, {
         type: 'retarget',
@@ -1009,17 +1031,27 @@ async function handle(
       await sendToContent(message.tabId, { type: 'clear-lock' })
       return true
 
-    case 'run-csp-probe': {
+    // Compiled only into a probe build, the same condition as the sidebar
+    // button that sends these. A release build would otherwise register a
+    // script that sends requests to localhost for any sender that asks.
+    case 'run-csp-probe':
+    case 'clear-csp-probe': {
+      if (import.meta.env.VITE_CSP_PROBE !== '1') {
+        throw new Error(`Unknown message type: ${message.type}`)
+      }
+      if (message.type === 'clear-csp-probe') {
+        await unregisterTransform('wa-csp-probe')
+        return true
+      }
       // Registered, never saved. It must not appear in the user's transform
       // list, and it must come back out when the run is over.
+      // Imported here, not at the top, so a release build does not bundle the
+      // probe's code once the flag test above is false.
+      const { buildProbeTransform } = await import('./csp-probe')
       await registerTransform(buildProbeTransform(), { skipAnalysis: true })
       await browser.tabs.update(message.tabId, { url: 'http://localhost:8787/' })
       return true
     }
-
-    case 'clear-csp-probe':
-      await unregisterTransform('wa-csp-probe')
-      return true
 
     case 'check-now': {
       // A manual check must actually run, even under once-per-session where
@@ -1031,7 +1063,7 @@ async function handle(
       // moved to.
       const evaluation = beginEvaluation(message.tabId)
       const isCurrent = () => isLatestEvaluation(message.tabId, evaluation)
-      const transforms = await transformsForUrl(message.url)
+      const transforms = await inTabContainer(message.tabId, await transformsForUrl(message.url))
       await forgetSession(message.url, transforms)
       const settings = await getSettings()
       const health = await runHealthCheck(message.tabId, transforms, isCurrent)
@@ -1051,6 +1083,7 @@ async function handle(
     }
 
     case 'capture-region':
+      await refuseInPrivateWindow(message.tabId)
       return captureWithLockDown(
         message.tabId,
         message.rect,
@@ -1247,6 +1280,7 @@ async function refuseWhenOff(tabId: number): Promise<void> {
     )
   }
   const url = (await browser.tabs.get(tabId).catch(() => undefined))?.url
+  if (url) await refuseExcludedUrl(url)
   if (url && (await isUrlOff(url))) {
     throw new Error(
       'Web Alchemist is turned off on this site, so the preview was not shown. Turn it on for this site to preview.',
@@ -1462,6 +1496,13 @@ async function runGeneration(
   signal: AbortSignal,
 ): Promise<void> {
   const { tabId } = request
+  // Before the badge changes and before anything is sent to a provider.
+  try {
+    await requireNormalWindow(tabId)
+  } catch (error) {
+    port.postMessage({ type: 'error', error: { message: (error as Error).message } })
+    return
+  }
   const accent = (await getSettings()).accent
 
   /*
@@ -1583,7 +1624,7 @@ async function repaintOtherTabs(
 async function restoreBadgeFacts(tabId: number, accent: Accent): Promise<void> {
   if (badge.hasFacts(tabId)) return
   const tab = await browser.tabs.get(tabId).catch(() => undefined)
-  const transforms = tab?.url ? await transformsForUrl(tab.url) : []
+  const transforms = tab?.url ? await inTabContainer(tabId, await transformsForUrl(tab.url)) : []
   await badge.transformCountChanged(
     tabId,
     transforms.map((t) => t.id),
@@ -1618,6 +1659,8 @@ browser.tabs.onRemoved.addListener(async (tabId) => {
 async function runReview(
   code: string,
   intent: string,
+  intentEditedByUser: boolean,
+  instructions: ReviewInstruction[],
   declared: Transform['capabilities'],
   transformId?: string,
 ): Promise<ReviewResult> {
@@ -1635,7 +1678,7 @@ async function runReview(
   // is suspended and the caller is told the receiving end does not exist.
   let model: ModelReview
   try {
-    model = await withKeepalive(() => provider.review({ code, intent }))
+    model = await withKeepalive(() => provider.review({ code, intent, intentEditedByUser, instructions }))
   } finally {
     // In `finally` so a billed response that failed to parse is still counted.
     await usage.settled()
@@ -1668,9 +1711,16 @@ async function matchingTransforms(url: string): Promise<Transform[]> {
 
 /** The subset that should actually run. */
 async function transformsForUrl(url: string): Promise<Transform[]> {
-  // Nothing runs while the kill switch is on or the site is turned off, so
-  // nothing is applied, counted on the badge or health-checked.
-  if ((await getSettings()).aiJsKillSwitch || (await isUrlOff(url))) return []
+  // Nothing runs while the kill switch is on, the site is turned off or the
+  // site is on the excluded list (#131), so nothing is applied, counted on the
+  // badge or health-checked.
+  if (
+    (await getSettings()).aiJsKillSwitch ||
+    (await isUrlOff(url)) ||
+    (await excludedHostOf(url)) !== null
+  ) {
+    return []
+  }
   return (await matchingTransforms(url)).filter((t) => t.enabled)
 }
 
@@ -1726,6 +1776,19 @@ async function countTabsWithJavaScript(include: (url: string) => boolean): Promi
 async function cssTransformsFor(tabId: number, url: string): Promise<Transform[]> {
   const [all, suspended] = await Promise.all([transformsForUrl(url), readSuspended(tabId)])
   return suspended === undefined ? all : all.filter((t) => t.id !== suspended)
+}
+
+/**
+ * Leaves out the CSS transforms restricted to a container other than the
+ * tab's. JavaScript transforms are kept, because a user script registration
+ * cannot be limited to a container (see shared/container.ts). The CSS apply
+ * path filters by container itself in handlers.ts; this is for the badge and
+ * the health check.
+ */
+async function inTabContainer(tabId: number, transforms: Transform[]): Promise<Transform[]> {
+  if (!transforms.some((t) => t.kind === 'css' && t.cookieStoreId !== undefined)) return transforms
+  const tab = await browser.tabs.get(tabId).catch(() => undefined)
+  return transforms.filter((t) => t.kind !== 'css' || appliesInContainer(t, tab?.cookieStoreId))
 }
 
 /**
@@ -1808,6 +1871,7 @@ const cssApplyDeps: CssApplyDeps = {
   getSettings,
   insertCss: (tabId, css) => browser.scripting.insertCSS({ target: { tabId }, css, origin: 'USER' }),
   removeCss: (tabId, css) => browser.scripting.removeCSS({ target: { tabId }, css, origin: 'USER' }),
+  tabCookieStore: async (tabId) => (await browser.tabs.get(tabId).catch(() => undefined))?.cookieStoreId,
   // Read from storage.session: see css-state.ts for why a module variable is not enough.
   applied: {
     read: (tabId) => readCss('applied', tabId),
@@ -1823,7 +1887,7 @@ async function reapply(tabId: number | undefined): Promise<void> {
   if (!tab?.url) return
   const url = tab.url
   await applyCssTransforms(tabId, () => cssTransformsFor(tabId, url), url)
-  const transforms = await transformsForUrl(url)
+  const transforms = await inTabContainer(tabId, await transformsForUrl(url))
 
   // Every mutation that changes what runs — save, delete, reorder, toggle —
   // reaches here, which is why the count is refreshed here rather than at each

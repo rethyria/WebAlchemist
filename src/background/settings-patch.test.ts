@@ -240,3 +240,89 @@ describe('changing one provider', () => {
     expect(reply.ok).toBe(false)
   })
 })
+
+describe('removing optional provider fields', () => {
+  const stored2 = () => ({
+    ...DEFAULT_SETTINGS,
+    providers: [{ ...provider('a'), price: { input: 1, output: 2 } }],
+    activeProviderId: 'a',
+  })
+
+  // The control is the allowed field in the same message shape: it is removed,
+  // so the refusal below comes from the list and not from the message form.
+  it('refuses to remove the id, type, address or label, and changes nothing', async () => {
+    for (const field of ['id', 'type', 'baseUrl', 'label']) {
+      h.local.set('settings', stored2())
+      const reply = await h.onMessage({
+        type: 'patch-settings',
+        change: { kind: 'update-provider', providerId: 'a', unset: [field] as never },
+      })
+      expect(reply.ok, field).toBe(false)
+      expect(stored(), field).toEqual(stored2())
+    }
+  })
+
+  it('control: the same message removes the price when it names the price', async () => {
+    h.local.set('settings', stored2())
+    const reply = await h.onMessage({
+      type: 'patch-settings',
+      change: { kind: 'update-provider', providerId: 'a', unset: ['price'] },
+    })
+    expect(reply.ok).toBe(true)
+    expect('price' in stored().providers[0]!).toBe(false)
+    expect(stored().providers[0]?.id).toBe('a')
+  })
+})
+
+describe('a stale active provider', () => {
+  const stale = () => ({ ...DEFAULT_SETTINGS, providers: [provider('a')], activeProviderId: 'gone' })
+
+  it('does not block an unrelated change such as the AI JavaScript kill switch', async () => {
+    h.local.set('settings', stale())
+    const reply = await h.onMessage({
+      type: 'patch-settings',
+      change: { kind: 'fields', fields: { aiJsKillSwitch: true } },
+    })
+    expect(reply.ok).toBe(true)
+    expect(stored().aiJsKillSwitch).toBe(true)
+  })
+
+  // Control: setting the active provider to one that does not exist is still refused.
+  it('control: a change that sets a missing active provider is still refused', async () => {
+    h.local.set('settings', stale())
+    const reply = await h.onMessage({
+      type: 'patch-settings',
+      change: { kind: 'fields', fields: { activeProviderId: 'also-gone' } },
+    })
+    expect(reply.ok).toBe(false)
+    expect(stored().activeProviderId).toBe('gone')
+  })
+})
+
+describe('saving the whole settings object', () => {
+  // A change is queued behind earlier ones; a save that skipped the queue wrote
+  // at once and was then overwritten by the change that was already running,
+  // so the later message lost to the earlier one.
+  it('runs after a change that was sent before it, in 20 of 20 runs', async () => {
+    for (let run = 0; run < 20; run += 1) {
+      h.local.set('settings', { ...DEFAULT_SETTINGS })
+      await Promise.all([
+        h.onMessage({ type: 'patch-settings', change: { kind: 'fields', fields: { accent: 'green' } } }),
+        h.onMessage({ type: 'save-settings', settings: { ...DEFAULT_SETTINGS, accent: 'blue' } }),
+      ])
+      expect(stored().accent).toBe('blue')
+    }
+  })
+
+  // Control: the same two messages sent in the opposite order end with the
+  // change, so the result above comes from the order and not from one of the
+  // two messages always winning.
+  it('control: the change wins when it is sent after the save', async () => {
+    h.local.set('settings', { ...DEFAULT_SETTINGS })
+    await Promise.all([
+      h.onMessage({ type: 'save-settings', settings: { ...DEFAULT_SETTINGS, accent: 'blue' } }),
+      h.onMessage({ type: 'patch-settings', change: { kind: 'fields', fields: { accent: 'green' } } }),
+    ])
+    expect(stored().accent).toBe('green')
+  })
+})

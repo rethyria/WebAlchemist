@@ -302,6 +302,7 @@ describe('handleReview and handleApproveCode', () => {
     type: 'review',
     code,
     intent: 'hide it',
+    instructions: [{ text: 'hide it', source: 'typed' }],
     declaredCapabilities: [],
     transformId: BIND.transformId,
     match: BIND.match,
@@ -367,7 +368,7 @@ describe('fromExtensionPage', () => {
 })
 
 describe('applyCssTransforms', () => {
-  function cssDeps(settings: Settings = DEFAULT_SETTINGS) {
+  function cssDeps(settings: Settings = DEFAULT_SETTINGS, tabStore?: string) {
     const log: string[] = []
     const applied = new Map<number, string>()
     const deps: CssApplyDeps = {
@@ -378,6 +379,7 @@ describe('applyCssTransforms', () => {
       removeCss: async (tab, css) => {
         log.push(`remove:${tab}:${css}`)
       },
+      tabCookieStore: async () => tabStore,
       applied: {
         read: async (tab) => applied.get(tab),
         write: async (tab, css) => {
@@ -447,6 +449,40 @@ describe('applyCssTransforms', () => {
     expect(applied.has(1)).toBe(false)
   })
 
+  it('leaves out CSS restricted to another container and keeps the rest (#127)', async () => {
+    const { deps, log } = cssDeps(DEFAULT_SETTINGS, 'firefox-container-1')
+    await applyCssTransforms(
+      deps,
+      1,
+      [
+        transform({ id: 'a', kind: 'css', code: GOOD_CSS, name: 'here', order: 0, cookieStoreId: 'firefox-container-1' }),
+        transform({ id: 'b', kind: 'css', code: GOOD_CSS, name: 'there', order: 1, cookieStoreId: 'firefox-container-2' }),
+        transform({ id: 'c', kind: 'css', code: GOOD_CSS, name: 'any', order: 2 }),
+      ],
+      URL_ON_PAGE,
+    )
+    expect(log).toEqual([`insert:1:/* here */\n${GOOD_CSS}\n\n/* any */\n${GOOD_CSS}`])
+  })
+
+  it('leaves out restricted CSS when the tab container cannot be read (#127)', async () => {
+    const { deps, log } = cssDeps(DEFAULT_SETTINGS, undefined)
+    await applyCssTransforms(
+      deps,
+      1,
+      [transform({ id: 'a', kind: 'css', code: GOOD_CSS, cookieStoreId: 'firefox-container-1' })],
+      URL_ON_PAGE,
+    )
+    expect(log).toEqual([])
+  })
+
+  // Control: the same transform with no restriction applies where the
+  // container is unknown, so the two tests above fail for the restriction.
+  it('control: unrestricted CSS applies where the container is unknown', async () => {
+    const { deps, log } = cssDeps(DEFAULT_SETTINGS, undefined)
+    await applyCssTransforms(deps, 1, [transform({ id: 'a', kind: 'css', code: GOOD_CSS })], URL_ON_PAGE)
+    expect(log).toHaveLength(1)
+  })
+
   it('does not inject the same CSS twice', async () => {
     const { deps, log } = cssDeps()
     const t = [transform({ kind: 'css', code: GOOD_CSS })]
@@ -460,9 +496,9 @@ describe('handleSaveSettings', () => {
   function settingsDeps(before: Settings) {
     const calls: string[] = []
     const deps: SettingsDeps = {
-      getSettings: async () => before,
       saveSettings: async () => {
         calls.push('save')
+        return before
       },
       reregisterAll: async () => {
         calls.push('reregister')

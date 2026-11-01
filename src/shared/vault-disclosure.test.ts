@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { DISCLOSURE_PLAIN, DISCLOSURE_SEALED, credentialDisclosure } from './vault-disclosure'
+import { DISCLOSURE_PLAIN, DISCLOSURE_SEALED, DISCLOSURE_TRANSFORMS, credentialDisclosure } from './vault-disclosure'
 
 const source = (path: string) => readFileSync(resolve(__dirname, '../..', path), 'utf8')
 
@@ -48,4 +48,27 @@ describe('the surfaces that show it', () => {
     expect(source('src/sidebar/components/Settings.svelte')).toMatch(/vault\s*:\s*VaultView/)
     expect(source('src/sidebar/App.svelte')).toMatch(/type: 'vault-state'/)
   })
+})
+
+describe('the transform disclosure (#132)', () => {
+  it('says transforms are not encrypted and names page text, addresses and descriptions', () => {
+    expect(DISCLOSURE_TRANSFORMS).toMatch(/never encrypted/)
+    expect(DISCLOSURE_TRANSFORMS).toMatch(/with or without a passphrase/)
+    expect(DISCLOSURE_TRANSFORMS).toMatch(/text from the page/)
+    expect(DISCLOSURE_TRANSFORMS).toMatch(/addresses/)
+    expect(DISCLOSURE_TRANSFORMS).toMatch(/description/)
+  })
+
+  // Control: the credential wording, which is true only for credentials, does
+  // not make the claim, so the two statements stay separate.
+  it('control: the sealed credential text does not say transforms are encrypted or not', () => {
+    expect(DISCLOSURE_SEALED).not.toMatch(/transform/i)
+  })
+
+  it.each(['src/options/VaultSettings.svelte', 'src/sidebar/components/Settings.svelte'])(
+    '%s shows it',
+    (path) => {
+      expect(source(path)).toMatch(/\{DISCLOSURE_TRANSFORMS\}/)
+    },
+  )
 })

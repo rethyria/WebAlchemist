@@ -1,10 +1,12 @@
 <script lang="ts">
+  import { focusOnMount } from '../lib/focus'
   import type { RefinementTurn } from '@background/providers/types'
   import type { GenerationResult, ReviewResult } from '@shared/types'
   import type { ElementContext } from '@shared/types'
   import { attemptNumber } from '../lib/attempt'
   import { autogrow } from '../lib/autogrow'
   import Button from './Button.svelte'
+  import AddressNote from './AddressNote.svelte'
   import CodeBlock from './CodeBlock.svelte'
   import Label from './Label.svelte'
 
@@ -25,6 +27,8 @@
     shotClipped: boolean
     shotMoved: boolean
     visionSupported: boolean
+    /** The page address the next request will carry, as it is sent. */
+    sentAddress: string
     onfollowup: (text: string) => void
     onaddreference: () => void
     onremovereference: (selector: string) => void
@@ -56,6 +60,7 @@
     shotClipped,
     shotMoved,
     visionSupported,
+    sentAddress,
     onfollowup,
     onaddreference,
     onremovereference,
@@ -105,7 +110,8 @@
 <div class="panel">
   <header>
     <span class="live" class:idle={isJs && !jsRan} aria-hidden="true"></span>
-    <span class="status">
+    <span class="status" role="heading" aria-level="1" use:focusOnMount>
+      <span class="sr-only">Code ready. </span>
       {#if !isJs && blocked}
         Not applied to the page
       {:else if !isJs}
@@ -295,6 +301,8 @@
         </button>
       {/if}
     </section>
+
+    <AddressNote address={sentAddress} />
 
     <div class="actions">
       <Button grow={1} small onclick={ondiscard}>Discard</Button>

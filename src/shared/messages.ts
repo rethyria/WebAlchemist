@@ -11,6 +11,7 @@
  * is and is not guaranteed.
  */
 
+import type { PickerAction } from './picker-keys'
 import type {
   Anchor,
   Credential,
@@ -35,7 +36,7 @@ import type {
 import type { Rule } from './css'
 import type { ScrollOffset } from './region'
 import type { OverlayPalette } from './accents'
-import type { RefinementTurn } from '@background/providers/types'
+import type { RefinementTurn, ReviewInstruction } from '@background/providers/types'
 
 /**
  * What a confirmed pick means.
@@ -60,11 +61,26 @@ export type Message =
   | { type: 'get-vision-support' }
 
   /* --- generation --------------------------------------------------- */
-  | { type: 'repair'; transformId: string; context: PageContext; brokenReason: string }
+  | {
+      type: 'repair'
+      transformId: string
+      context: PageContext
+      brokenReason: string
+      /** The tab the page came from, so a private window can be refused. */
+      tabId?: number
+    }
   | {
       type: 'review'
       code: string
+      /** The generator's summary of the intent. */
       intent: string
+      /** True when the user changed the intent after the model returned it. */
+      intentEditedByUser?: boolean
+      /**
+       * Every instruction, verbatim and in order, with where it came from. Only
+       * the typed ones are the reviewer's yardstick.
+       */
+      instructions: ReviewInstruction[]
       declaredCapabilities: Transform['capabilities']
       /** Part of what the approval is tied to. Absent means USER_SCRIPT. */
       world?: Transform['world']
@@ -129,6 +145,11 @@ export type Message =
       approvalToken?: string
       /** What produced the code, kept with the version it replaces. */
       source?: TransformSource
+      /**
+       * Removes a stored container restriction. Without it, a record that has
+       * no cookieStoreId keeps the stored one.
+       */
+      clearContainer?: boolean
     }
   | { type: 'get-transform-versions'; id: string }
   /**
@@ -254,6 +275,11 @@ export type Message =
   | { type: 'start-picking'; tabId: number; mode?: PickMode }
   | { type: 'stop-picking'; tabId: number }
   /**
+   * A picker key pressed while the keyboard focus is in the sidebar, where the
+   * page's own key listener cannot see it.
+   */
+  | { type: 'picker-key'; tabId: number; action: PickerAction }
+  /**
    * Re-reads the element currently being described, from the live page.
    *
    * Refinement used to resend the context captured when the element was first
@@ -316,6 +342,7 @@ export type ContentMessage =
   /** The palette travels with the request: the overlay cannot read our CSS. */
   | { type: 'start-picking'; palette: OverlayPalette; mode: PickMode }
   | { type: 'cancel-picking' }
+  | { type: 'picker-key'; action: PickerAction }
   | { type: 'recapture' }
   /**
    * The palette travels with this request as it does with start-picking. A
@@ -341,7 +368,12 @@ export type ContentMessage =
   | { type: 'set-lock-scope'; depth: number }
   | { type: 'clear-lock' }
   | { type: 'apply-transforms'; transforms: Transform[] }
-  | { type: 'run-health-check'; transforms: Transform[] }
+  | {
+      type: 'run-health-check'
+      transforms: Transform[]
+      /** Transform id to the token in the name of its script's error marker. */
+      errorTokens: Record<string, string>
+    }
   | { type: 'url-changed'; url: string }
   /** Answered only by a live instance; the background uses it to avoid reinjecting. */
   | { type: 'ping' }
@@ -492,6 +524,7 @@ export interface Responses {
   }
   'start-picking': boolean
   'stop-picking': boolean
+  'picker-key': boolean
   retarget: boolean
   'highlight-node': boolean
   'expand-node': TreeRow[]

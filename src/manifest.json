@@ -27,7 +27,8 @@
     "alarms"
   ],
   "optional_permissions": [
-    "userScripts"
+    "userScripts",
+    "cookies"
   ],
   "optional_host_permissions": [
     "*://*/*",

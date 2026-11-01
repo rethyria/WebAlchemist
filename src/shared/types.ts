@@ -141,6 +141,13 @@ export interface Transform {
    */
   approvedCssUrls?: string[]
   /**
+   * When set, a CSS transform applies only in tabs of this container (Firefox's
+   * cookie store id, for example "firefox-container-2"; "firefox-default" is a
+   * tab outside any container). Absent means every tab. Not applied to
+   * JavaScript transforms: see src/shared/container.ts.
+   */
+  cookieStoreId?: string
+  /**
    * What produced `code`. Absent on records saved before versions were kept,
    * and on records whose saving caller did not say.
    */
@@ -175,6 +182,11 @@ export interface TransformRuntimeState {
   brokenReason?: string
   /** Which stored assumption stopped holding, when we can attribute it. */
   failedAssumption?: string
+  /**
+   * The error text a script left on the page. The page controls it, so it is
+   * for display only and is never sent to a model (#123).
+   */
+  pageReportedError?: string
 }
 
 /**

@@ -260,6 +260,9 @@
         <section>
           <h3 class="label attention">What broke</h3>
           <p>{runtime?.brokenReason}</p>
+          {#if runtime?.pageReportedError}
+            <p class="assumption">Error text reported by the page: {runtime.pageReportedError}</p>
+          {/if}
           {#if runtime?.failedAssumption}
             <p class="assumption">This transform assumed {runtime.failedAssumption}.</p>
           {/if}

@@ -20,10 +20,15 @@
   import { activeTab, BackgroundError, send } from './lib/messaging.svelte'
   import { isForTab, type HealthCheckResult } from './lib/health-result'
   import { Flow } from './lib/flow.svelte'
+  import { focusList, returnedToList } from './lib/focus'
+  import { brokenAnnouncement } from './lib/announce'
+  import { tick } from 'svelte'
   import { holdSidebarPortForWindow } from './lib/sidebar-port'
   import Describing from './components/Describing.svelte'
   import ErrorCard from './components/ErrorCard.svelte'
   import Generating from './components/Generating.svelte'
+  import FirstRunDisclosure from './components/FirstRunDisclosure.svelte'
+  import { readDisclosureNeeded, recordDisclosureAck, watchDisclosureNeeded } from '@shared/disclosure-ack'
   import Picking from './components/Picking.svelte'
   import Refining from './components/Refining.svelte'
   import Reviewing from './components/Reviewing.svelte'
@@ -60,7 +65,51 @@
   /* Enabled transforms on any site that the safety check keeps from running. */
   let blockedCount = $state(0)
 
+  /*
+   * Null until the stored acknowledgement has been read, which counts as not
+   * acknowledged for every action but does not yet replace the list with the
+   * disclosure, so a person who has acknowledged does not see it flash. Every
+   * way to send page content to a model goes through `describe` below; the
+   * settings page holds the same gate for the key fields.
+   */
+  let disclosureNeeded = $state<boolean | null>(null)
+  /** Set when a person tried to use the model before acknowledging. */
+  let showDisclosure = $state(false)
+
+  /**
+   * Runs an action that leads to a model call, or shows the disclosure first.
+   * "Write it myself" does not use this, because it needs no provider.
+   */
+  function describe(action: () => void): void {
+    if (disclosureNeeded !== false) {
+      showDisclosure = true
+      return
+    }
+    action()
+  }
+
+  async function acknowledgeDisclosure() {
+    await recordDisclosureAck()
+    disclosureNeeded = false
+    showDisclosure = false
+  }
+
   const flow = new Flow(() => void afterSave())
+
+  /*
+   * When a run ends and the list comes back, the panel that had the focus has
+   * been removed. The list takes the focus so that a keyboard user does not
+   * start again from the top of the document. Not reactive on purpose: it is
+   * only the previous value of the step.
+   */
+  let previousStep: string | null = null
+  $effect(() => {
+    const step = flow.step
+    if (returnedToList(previousStep, step)) {
+      void tick().then(() => focusList(document))
+    }
+    previousStep = step
+  })
 
   /*
    * A repaired transform is listed as broken until something looks again, and
@@ -418,8 +467,12 @@
    * colouring so it can be read at all.
    */
   async function openEditor(transform: Transform) {
+    const tab = await activeTab()
     await browser.tabs.create({
-      url: browser.runtime.getURL(`src/editor/index.html?id=${encodeURIComponent(transform.id)}`),
+      // The tab is named so that the editor can record its container.
+      url: browser.runtime.getURL(
+        `src/editor/index.html?id=${encodeURIComponent(transform.id)}${tab?.id === undefined ? '' : `&tab=${tab.id}`}`,
+      ),
     })
   }
 
@@ -525,6 +578,8 @@
 
   $effect(() => {
     void load()
+    void readDisclosureNeeded().then((needed) => (disclosureNeeded = needed))
+    const stopWatching = watchDisclosureNeeded((needed) => (disclosureNeeded = needed))
 
     const onMessage = (message: ContentEvent, sender: browser.runtime.MessageSender) => {
       // Health results are the one content event the list owns rather than
@@ -603,6 +658,7 @@
       browser.tabs.onUpdated.removeListener(onTabUpdated)
       browser.tabs.onRemoved.removeListener(onTabRemoved)
       releasePort()
+      stopWatching()
     }
   })
 </script>
@@ -685,8 +741,26 @@
         what can be changed on it.
       </p>
     </div>
+  {:else if flow.step === 'list' && disclosureNeeded === true && (showDisclosure || transforms.length === 0)}
+    <!--
+      Before anything can be sent to a model. With saved transforms the list
+      stays first and this appears when a model action is chosen. "Write it
+      myself" is passed on because it needs no provider.
+    -->
+    <div class="first-run">
+      <FirstRunDisclosure
+        {vault}
+        takeFocus={showDisclosure}
+        onacknowledge={() => void acknowledgeDisclosure()}
+        onwriteitmyself={() => void flow.startPicking('author')}
+      />
+    </div>
   {:else if flow.step === 'picking'}
-    <Picking hover={flow.hover} oncancel={() => void flow.cancelPicking()} />
+    <Picking
+      hover={flow.hover}
+      oncancel={() => void flow.cancelPicking()}
+      onkey={(action) => void flow.sendPickerKey(action)}
+    />
   {:else if flow.step === 'describing' && flow.picked}
     <Describing
       target={flow.picked.target}
@@ -699,6 +773,7 @@
       shotClipped={flow.shotClipped}
       shotMoved={flow.shotMoved}
       visionSupported={flow.visionSupported}
+      sentAddress={flow.sentAddress}
       onchange={(value) => (flow.instruction = value)}
       onscreenshot={(value) =>
         value ? void flow.chooseScreenshotRegion() : flow.cancelScreenshot()}
@@ -725,6 +800,7 @@
       withScreenshot={flow.sendScreenshot}
       {contextSize}
       thinkingChars={flow.thinkingChars}
+      sentAddress={flow.sentAddress}
       oncancel={() => flow.cancelGenerating()}
     />
   {:else if flow.step === 'refining' && flow.result}
@@ -742,6 +818,7 @@
       shotClipped={flow.shotClipped}
       shotMoved={flow.shotMoved}
       visionSupported={flow.visionSupported}
+      sentAddress={flow.sentAddress}
       onfollowup={(value) => (flow.followUp = value)}
       onaddreference={() => void flow.addReference()}
       onremovereference={(selector) => flow.removeReference(selector)}
@@ -793,13 +870,13 @@
         <span class="bar mid"></span>
         <span class="bar target"></span>
       </div>
-      <h1>Point at something on this page and say what you want changed.</h1>
+      <h1 data-list-focus tabindex="-1">Point at something on this page and say what you want changed.</h1>
       <p>
         An AI writes the CSS or JavaScript. It is saved for {host || 'this site'} and
         applied on every visit. You approve the code before it runs.
       </p>
       <div class="cta">
-        <button type="button" class="primary" onclick={() => void flow.startPicking()}>
+        <button type="button" class="primary" onclick={() => describe(() => void flow.startPicking())}>
           Select an element
         </button>
         <p class="hint">Or drag a rectangle on the page</p>
@@ -829,7 +906,7 @@
   {:else}
     <header class="site">
       <span class="site-dot" aria-hidden="true"></span>
-      <span class="host">{host}</span>
+      <span class="host" role="heading" aria-level="1" data-list-focus tabindex="-1">{host}</span>
       <button
         type="button"
         class="check"
@@ -845,6 +922,9 @@
     {#if siteOff}
       <p class="hint off-note" role="status">Everything is turned off on this site.</p>
     {/if}
+
+    <!-- Persistent, so a health check that finds a broken transform is read out once. -->
+    <p class="sr-only" role="status">{brokenAnnouncement(brokenCount)}</p>
 
     {#if brokenCount > 0}
       <p class="broken-banner">
@@ -867,10 +947,11 @@
             (expandedId = expandedId === transform.id ? null : transform.id)}
           onrename={(name) => void renameTransform(transform, name)}
           onedit={() => void openEditor(transform)}
-          oneditwithai={() => void flow.editWithAi(transform)}
-          oneditintent={() => void flow.editIntent(transform)}
+          oneditwithai={() => describe(() => void flow.editWithAi(transform))}
+          oneditintent={() => describe(() => void flow.editIntent(transform))}
           ondelete={() => void removeTransform(transform)}
-          onrepair={(brokenReason: string) => void flow.repair(transform, brokenReason)}
+          onrepair={(brokenReason: string) =>
+            describe(() => void flow.repair(transform, brokenReason))}
           conflicts={conflictsFor(transform.id)}
           names={Object.fromEntries(transforms.map((t) => [t.id, t.name]))}
           dragging={draggingId === transform.id}
@@ -883,7 +964,7 @@
     </ul>
 
     <footer>
-      <button type="button" class="primary" onclick={() => void flow.startPicking()}>
+      <button type="button" class="primary" onclick={() => describe(() => void flow.startPicking())}>
         Select an element
       </button>
       <button type="button" class="link" onclick={() => void flow.startPicking('author')}>
@@ -1068,6 +1149,15 @@
     font: 600 12.5px var(--font-ui);
     color: var(--text);
     cursor: pointer;
+  }
+
+  .first-run {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    padding: var(--sp-20) 18px;
+    min-height: 0;
+    overflow-y: auto;
   }
 
   .empty {

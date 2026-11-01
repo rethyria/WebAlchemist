@@ -1446,6 +1446,269 @@ describe('reload and try again with a script that has run (#114)', () => {
   })
 })
 
+describe('a repair or regeneration of a transform restricted to a container (#127)', () => {
+  const restricted = { ...saved, enabled: true, cookieStoreId: 'firefox-container-3' }
+  const generated = {
+    name: 'New',
+    kind: 'css',
+    code: 'div { color: red }',
+    capabilities: [],
+    rationale: { targets: 't', approach: 'a', assumptions: [] },
+  }
+  const savedCall = () => calls.filter((c) => c.type === 'save-transform').at(-1)
+
+  async function repairAndSave(from: typeof saved) {
+    const flow = newFlow()
+    handler = (m) => {
+      if (m.type === 'context-for-anchor') return { ok: true, data: found }
+      if (m.type === 'repair' || m.type === 'generate') {
+        return { ok: true, data: { result: generated } }
+      }
+      return { ok: true, data: null }
+    }
+    await flow.repair(from, 'broken')
+    expect(flow.step).toBe('refining')
+    return flow
+  }
+
+  it('keeps the restriction in the record that is saved after a repair', async () => {
+    const flow = await repairAndSave(restricted)
+    await flow.save()
+    expect(savedCall()?.transform.cookieStoreId).toBe('firefox-container-3')
+    expect(savedCall()?.transform.code).toBe('div { color: red }')
+  })
+
+  // Control: a transform with no restriction is saved with none, so the field
+  // above comes from the transform that was repaired.
+  it('control: a repair of an unrestricted transform saves no restriction', async () => {
+    const flow = await repairAndSave({ ...restricted, cookieStoreId: undefined })
+    await flow.save()
+    expect(savedCall()?.transform).not.toHaveProperty('cookieStoreId')
+  })
+})
+
+describe('the review is given what the user typed (#52)', () => {
+  it('sends the description and every follow-up verbatim, not the model intent', async () => {
+    const flow = flowAtApprove()
+    flow.history = [
+      { role: 'user', content: 'first description' },
+      { role: 'assistant', content: 'model approach text' },
+    ]
+    flow.instruction = 'the follow-up as typed'
+    handler = () => ({ ok: true, data: { static: [], undeclaredCapabilities: [], passed: true } })
+
+    await flow.toReview()
+
+    const sent = calls.filter((c) => c.type === 'review').at(-1)
+    expect(sent.instructions).toEqual([
+      { text: 'first description', source: 'typed' },
+      { text: 'the follow-up as typed', source: 'typed' },
+    ])
+    expect(sent.intent).toBe('edited intent')
+  })
+})
+
+describe('the review is told where a pre-filled instruction came from (#52)', () => {
+  const repaired = {
+    ...jsResult,
+    code: 'document.body.remove()',
+    intent: 'new model intent',
+  }
+  const reviewHandler = (m: any) => {
+    if (m.type === 'context-for-anchor') return { ok: true, data: found }
+    if (m.type === 'repair') return { ok: true, data: { result: repaired } }
+    if (m.type === 'analyse' || m.type === 'review') {
+      return { ok: true, data: { static: [], undeclaredCapabilities: [], passed: true } }
+    }
+    return { ok: true, data: null }
+  }
+  const lastReview = () => calls.filter((c) => c.type === 'review').at(-1)
+
+  it('marks the stored intent as a saved description after Repair', async () => {
+    const flow = newFlow()
+    handler = reviewHandler
+    await flow.repair({ ...saved, kind: 'js', intent: 'STORED INTENT' }, 'broken')
+    expect(flow.step).toBe('refining')
+    await flow.toReview()
+    expect(lastReview().instructions).toEqual([
+      { text: 'STORED INTENT', source: 'saved-description' },
+    ])
+  })
+
+  it('keeps it marked after a follow-up moves it into the history', async () => {
+    const flow = newFlow()
+    handler = reviewHandler
+    await flow.repair({ ...saved, kind: 'js', intent: 'STORED INTENT' }, 'broken')
+    flow.history = [{ role: 'user', content: 'STORED INTENT' }]
+    flow.instruction = 'make it smaller'
+    await flow.toReview()
+    expect(lastReview().instructions).toEqual([
+      { text: 'STORED INTENT', source: 'saved-description' },
+      { text: 'make it smaller', source: 'typed' },
+    ])
+  })
+
+  it('marks Edit description text the user changed as edited, and unchanged text as saved', async () => {
+    const flow = newFlow()
+    handler = reviewHandler
+    await flow.editIntent({ ...saved, kind: 'js', intent: 'STORED INTENT' })
+    flow.result = jsResult
+    flow.instruction = 'STORED INTENT, but smaller'
+    await flow.toReview()
+    expect(lastReview().instructions).toEqual([
+      { text: 'STORED INTENT, but smaller', source: 'saved-description-edited' },
+    ])
+    flow.instruction = 'STORED INTENT'
+    await flow.toReview()
+    expect(lastReview().instructions).toEqual([{ text: 'STORED INTENT', source: 'saved-description' }])
+  })
+
+  it('keeps the mark through a re-pick inside Edit description', async () => {
+    const flow = newFlow()
+    handler = reviewHandler
+    await flow.editIntent({ ...saved, kind: 'js', intent: 'STORED INTENT' })
+    await flow.startPicking()
+    pick(flow)
+    flow.result = jsResult
+    await flow.toReview()
+    expect(lastReview().instructions).toEqual([{ text: 'STORED INTENT', source: 'saved-description' }])
+  })
+
+  it('control: a first description typed on a new pick is typed', async () => {
+    const flow = newFlow()
+    handler = reviewHandler
+    flow.picked = { ...found, cropDrawn: false } as any
+    flow.result = jsResult
+    flow.instruction = 'hide the banner'
+    await flow.toReview()
+    expect(lastReview().instructions).toEqual([{ text: 'hide the banner', source: 'typed' }])
+  })
+
+  it('control: a new pick after a repair does not inherit the mark', async () => {
+    const flow = newFlow()
+    handler = reviewHandler
+    await flow.repair({ ...saved, kind: 'js', intent: 'STORED INTENT' }, 'broken')
+    await flow.discard()
+    await flow.startPicking()
+    pick(flow)
+    flow.instruction = 'STORED INTENT'
+    flow.result = jsResult
+    await flow.toReview()
+    expect(lastReview().instructions).toEqual([{ text: 'STORED INTENT', source: 'typed' }])
+  })
+})
+
+describe('the review is told whether the user edited the intent (#52)', () => {
+  const lastReview = () => calls.filter((c) => c.type === 'review').at(-1)
+  const handlers = (m: any) => {
+    if (m.type === 'review') return { ok: true, data: { static: [], undeclaredCapabilities: [], passed: true } }
+    return { ok: true, data: null }
+  }
+
+  it('flags an intent that differs from the one the model returned', async () => {
+    const flow = flowAtApprove()
+    flow.intentBaseline = 'model intent'
+    flow.intent = 'edited intent'
+    handler = handlers
+    await flow.toReview()
+    expect(lastReview().intentEditedByUser).toBe(true)
+  })
+
+  it('control: does not flag an intent left as the model returned it', async () => {
+    const flow = flowAtApprove()
+    flow.intentBaseline = 'model intent'
+    flow.intent = 'model intent'
+    handler = handlers
+    await flow.toReview()
+    expect(lastReview().intentEditedByUser).toBe(false)
+  })
+
+  it('control: does not flag a stored intent after Repair, which differs from the new result', async () => {
+    const flow = newFlow()
+    handler = (m) => {
+      if (m.type === 'context-for-anchor') return { ok: true, data: found }
+      if (m.type === 'repair') return { ok: true, data: { result: { ...jsResult, intent: 'new model intent' } } }
+      return handlers(m)
+    }
+    await flow.repair({ ...saved, kind: 'js', intent: 'STORED' }, 'broken')
+    await flow.toReview()
+    expect(lastReview().intent).toBe('STORED')
+    expect(lastReview().intentEditedByUser).toBe(false)
+  })
+})
+
+describe('the address that is shown is the address that is sent (#65)', () => {
+  /** Replaces the port so the request the flow posts can be read. */
+  function capturePort() {
+    const posted: any[] = []
+    ;(globalThis as any).browser.runtime.connect = () => {
+      const listeners: ((m: object) => void)[] = []
+      return {
+        onMessage: { addListener: (fn: (m: object) => void) => listeners.push(fn) },
+        onDisconnect: { addListener: () => {} },
+        postMessage: (message: any) => {
+          posted.push(message)
+          queueMicrotask(() => listeners.forEach((fn) => fn({ type: 'error', error: { message: 'stop' } })))
+        },
+        disconnect: () => {},
+      }
+    }
+    return posted
+  }
+  afterEach(() => {
+    ;(globalThis as any).browser.runtime.connect = () => {
+      throw new Error('no port in test')
+    }
+  })
+
+  const picked = { ...context, url: 'https://shop.example/cart' }
+  const recaptured = { ...context, url: 'https://shop.example/cart?step=2' }
+
+  it('sends the address captured at pick time, not the one read at send time', async () => {
+    const posted = capturePort()
+    const flow = newFlow()
+    flow.picked = { ...found, context: picked, cropDrawn: false } as any
+    flow.instruction = 'hide the banner'
+    handler = (m) => (m.type === 'recapture' ? { ok: true, data: recaptured } : { ok: true, data: null })
+    await flow.generate()
+    expect(posted).toHaveLength(1)
+    expect(posted[0].context.url).toBe('https://shop.example/cart')
+  })
+
+  it('control: the other parts of the context are still the freshly captured ones', async () => {
+    const posted = capturePort()
+    const flow = newFlow()
+    flow.picked = { ...found, context: picked, cropDrawn: false } as any
+    flow.instruction = 'hide the banner'
+    handler = (m) =>
+      m.type === 'recapture'
+        ? { ok: true, data: { ...recaptured, target: { ...context.target, selector: 'div.live' } } }
+        : { ok: true, data: null }
+    await flow.generate()
+    expect(posted[0].context.target.selector).toBe('div.live')
+  })
+
+  it('exposes the pinned address for the panels that show it', async () => {
+    const flow = newFlow()
+    expect(flow.sentAddress).toBe('')
+    flow.picked = { ...found, context: picked, cropDrawn: false } as any
+    expect(flow.sentAddress).toBe('https://shop.example/cart')
+  })
+
+  it('has an address to show after Repair, and it is the one the repair message carried', async () => {
+    const flow = newFlow()
+    const repairContext = { ...context, url: 'https://shop.example/repair' }
+    handler = (m) => {
+      if (m.type === 'context-for-anchor') return { ok: true, data: { ...found, context: repairContext } }
+      if (m.type === 'repair') return failure('network')
+      return { ok: true, data: null }
+    }
+    await flow.repair(saved, 'broken')
+    const sent = calls.find((c) => c.type === 'repair')
+    expect(sent.context.url).toBe('https://shop.example/repair')
+  })
+})
+
 /* -------------------------------------------------------------------- */
 /* Excluded sites and the sensitive-page warning (#131)                  */
 /* -------------------------------------------------------------------- */
