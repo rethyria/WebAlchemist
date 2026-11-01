@@ -113,3 +113,18 @@ describe('generation over the port', () => {
     expect(JSON.stringify(posted[0])).toContain('excluded')
   })
 })
+
+describe('the one-shot generate message (#131)', () => {
+  it('is not handled, so no page text reaches a provider through it', async () => {
+    await reply({ type: 'set-excluded-sites', sites: ['bank.example'] })
+    // Before the handler was removed this reached the provider with no
+    // exclusion check, and failed here only because no provider is set up.
+    const out = await reply({
+      type: 'generate',
+      context: { url: 'https://login.bank.example/a' },
+      instruction: 'x',
+      history: [],
+    })
+    expect(out).toEqual({ ok: true, data: undefined })
+  })
+})

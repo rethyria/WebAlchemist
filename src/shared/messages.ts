@@ -60,15 +60,6 @@ export type Message =
   | { type: 'get-vision-support' }
 
   /* --- generation --------------------------------------------------- */
-  | {
-      type: 'generate'
-      context: PageContext
-      instruction: string
-      history: RefinementTurn[]
-      scopeDepth?: number
-      scopeContainer?: string | null
-      transformId?: string
-    }
   | { type: 'repair'; transformId: string; context: PageContext; brokenReason: string }
   | {
       type: 'review'

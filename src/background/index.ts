@@ -537,22 +537,6 @@ async function handle(
       return withKeepalive(() => provider.supportsVision())
     }
 
-    case 'generate': {
-      const usage = createUsageRecorder(message.transformId)
-      try {
-        const provider = await resolveActiveProvider(usage.listener)
-        return await withKeepalive(() =>
-          provider.generate({
-            context: message.context,
-            instruction: message.instruction,
-            history: message.history,
-          }),
-        )
-      } finally {
-        await usage.settled()
-      }
-    }
-
     case 'repair': {
       await refuseExcludedUrl(message.context.url)
       const transforms = await getAllTransforms()
