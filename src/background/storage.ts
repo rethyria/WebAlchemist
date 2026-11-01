@@ -94,8 +94,22 @@ export async function saveSettings(settings: Settings): Promise<void> {
     | undefined
   // Checked here and not only in the settings page: this is reached by a
   // message that any extension context can send.
+  //
+  // Only endpoints that are new or differ from the stored ones are checked.
+  // Checking every provider made one stored provider whose endpoint breaks a
+  // rule added later (for example a plain http address saved by an older
+  // version) fail every settings save, including the switch that stops
+  // AI-written JavaScript. An unchanged endpoint is compared against what is
+  // stored, not against what the message claims, so this cannot be used to
+  // smuggle in a new one. The request paths check the endpoint again before
+  // anything is sent.
+  const storedEndpoints = new Map<string, string>()
+  for (const stored of previous?.providers ?? []) {
+    for (const [what, url] of endpointsOf(stored)) storedEndpoints.set(`${stored.id}\n${what}`, url)
+  }
   for (const provider of settings.providers) {
     for (const [what, url] of endpointsOf(provider)) {
+      if (storedEndpoints.get(`${provider.id}\n${what}`) === url) continue
       assertEndpoint(url, `${what} of ${provider.label}`)
     }
   }
