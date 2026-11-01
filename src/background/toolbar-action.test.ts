@@ -87,6 +87,20 @@ describe('start-picking message to the page', () => {
     return h.calls.sendMessage.find((c) => c.message.type === 'start-picking')!.message
   }
 
+  it('asks for touch picking on Android even when the platform read has not finished (#128)', async () => {
+    h.os = 'android'
+    h.tabUrls.set(3, 'https://example.com/')
+    h.contentReply = (message) => (message.type === 'ping' ? true : undefined)
+    const release = h.hold('browser.runtime.getPlatformInfo')
+    await h.boot()
+    const pending = h.onMessage({ type: 'start-picking', tabId: 3 })
+    await settle()
+    release()
+    expect((await pending).error?.message).toBeUndefined()
+    const sent = h.calls.sendMessage.find((c) => c.message.type === 'start-picking')!.message
+    expect(sent.touch).toBe(true)
+  })
+
   it('asks for touch picking on Android', async () => {
     h.os = 'android'
     expect((await startPicking()).touch).toBe(true)

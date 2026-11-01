@@ -85,6 +85,19 @@ describe('screenshots', () => {
       expect(reply.error.message).toBe(SCREENSHOTS_UNAVAILABLE)
     })
 
+    it('are refused on Android even when the platform read has not finished (#128)', async () => {
+      h.os = 'android'
+      h.tabUrls.set(3, 'https://example.com/')
+      const release = h.hold('browser.runtime.getPlatformInfo')
+      await h.boot()
+      const pending = capture()
+      await new Promise((resolve) => setTimeout(resolve, 20))
+      release()
+      const reply = await pending
+      expect(reply.ok).toBe(false)
+      expect(reply.error.message).toBe(SCREENSHOTS_UNAVAILABLE)
+    })
+
     it('are not refused with that message on desktop', async () => {
       h.os = 'linux'
       h.tabUrls.set(3, 'https://example.com/')

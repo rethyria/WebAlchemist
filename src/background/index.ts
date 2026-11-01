@@ -251,9 +251,13 @@ async function removeCssWithoutAccess(): Promise<void> {
 /**
  * The operating system, read once so that the toolbar handler can decide
  * without waiting. See open-panel.ts for why the handler must not wait.
+ *
+ * A handler that runs after the event page wakes can run before the read has
+ * finished, and would see undefined, which reads as "not Android". Those
+ * handlers await `platformReady` first. The toolbar handler does not.
  */
 let platformOs: string | undefined
-void browser.runtime
+const platformReady: Promise<void> = browser.runtime
   .getPlatformInfo()
   .then((info) => {
     platformOs = info.os
@@ -941,6 +945,7 @@ async function handle(
       return true
 
     case 'start-picking': {
+      await platformReady
       await refuseInPrivateWindow(message.tabId)
       // The panel checks this first so that no permission is requested; this
       // is the check for any other caller of the message.
@@ -1106,6 +1111,7 @@ async function handle(
     }
 
     case 'capture-region':
+      await platformReady
       if (platformOs === 'android') throw new Error(SCREENSHOTS_UNAVAILABLE)
       await refuseInPrivateWindow(message.tabId)
       return captureWithLockDown(
