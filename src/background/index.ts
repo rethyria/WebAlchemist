@@ -672,7 +672,10 @@ async function handle(
       return setExcludedSites(message.sites)
 
     case 'page-has-sensitive-fields':
-      return (await askContent(message.tabId, { type: 'sensitive-fields' })) === true
+      // Only an answer of false means the page has no such fields. No answer
+      // (no content script, or the page did not reply) is reported as a page
+      // with them, so that the panel asks before sending text it could not check (#131).
+      return (await askContent(message.tabId, { type: 'sensitive-fields' })) !== false
 
     case 'get-site-off':
       return isUrlOff(message.url)

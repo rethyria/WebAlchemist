@@ -79,11 +79,16 @@ describe('repair', () => {
 })
 
 describe('page-has-sensitive-fields', () => {
-  it('relays the page answer, and reads true only for true', async () => {
+  it('relays the page answer when there is one', async () => {
     h.contentReply = (m) => (m.type === 'sensitive-fields' ? true : undefined)
     expect((await reply({ type: 'page-has-sensitive-fields', tabId: 2 })).data).toBe(true)
-    h.contentReply = () => undefined
+    h.contentReply = (m) => (m.type === 'sensitive-fields' ? false : undefined)
     expect((await reply({ type: 'page-has-sensitive-fields', tabId: 2 })).data).toBe(false)
+  })
+
+  it('reports a page with such fields when the page gives no answer (#131)', async () => {
+    h.contentReply = () => undefined
+    expect((await reply({ type: 'page-has-sensitive-fields', tabId: 2 })).data).toBe(true)
   })
 })
 
