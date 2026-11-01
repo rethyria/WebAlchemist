@@ -13,6 +13,7 @@
  * moved outright, since every call site in the sidebar imports from here.
  */
 import { BackgroundError } from '@shared/messaging.svelte'
+import type { UsageReport } from '@shared/types'
 export { BackgroundError, send } from '@shared/messaging.svelte'
 
 /**
@@ -32,11 +33,15 @@ export function generateOverPort(
     scopeContainer?: string | null
     /* For the toolbar badge: a sidebar port carries no tab of its own. */
     tabId?: number | undefined
+    /* The transform being authored or repaired, so its cost is attributed to it. */
+    transformId?: string
   },
   handlers: {
     onSent: () => void
     onThinking: (characters: number) => void
     onChunk: (accumulated: string) => void
+    /** Called before the result resolves, with what the call used. */
+    onUsage?: (usage: UsageReport | undefined) => void
   },
 ): { result: Promise<unknown>; cancel: () => void } {
   const port = browser.runtime.connect({ name: 'wa-generate' })
@@ -58,6 +63,7 @@ export function generateOverPort(
         case 'done':
           settled = true
           port.disconnect()
+          handlers.onUsage?.(message['usage'] as UsageReport | undefined)
           resolve(message['result'])
           return
         case 'error': {

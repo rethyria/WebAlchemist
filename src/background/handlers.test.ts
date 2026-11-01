@@ -71,11 +71,21 @@ function saveDeps(stored: Transform[] = [], settings: Settings = DEFAULT_SETTING
     getAllTransforms: async () => stored,
     getSettings: async () => settings,
     tabUrl: async () => 'https://shop.example.com/cart',
+    // Same field check as the real one, so a record with a missing field is refused.
+    assertValidTransform: (value) => {
+      if (!value || typeof (value as Transform).id !== 'string') {
+        throw new Error('This transform has no valid "id" field, so it was not saved.')
+      }
+    },
     saveTransform: async (t) => {
       calls.push(`save:${t.id}`)
+      return t
     },
     registerTransform: async (t) => {
       calls.push(`register:${t.id}`)
+    },
+    transformEdited: async (id) => {
+      calls.push(`badge:${id}`)
     },
     reapply: async () => {
       calls.push('reapply')
@@ -99,6 +109,27 @@ describe('handleSaveTransform: JavaScript', () => {
     expect(calls).toEqual([])
   })
 
+  it('refuses a record with a missing field before reading its code', async () => {
+    const { deps, calls } = saveDeps()
+    const broken = { ...transform({}), id: undefined } as unknown as Transform
+    await expect(handleSaveTransform(saveMessage(broken), deps)).rejects.toThrow(/valid "id" field/)
+    expect(calls).toEqual([])
+  })
+
+  it('registers and badges the record as stored, not the copy that was sent', async () => {
+    const token = await recordApproval(GOOD_JS, undefined, [], 'match', BIND)
+    const { deps, calls } = saveDeps()
+    deps.saveTransform = async (t) => {
+      calls.push(`save:${t.id}`)
+      return { ...t, enabled: false }
+    }
+    deps.registerTransform = async (t) => {
+      calls.push(`register:${t.enabled}`)
+    }
+    await handleSaveTransform(saveMessage(transform({ enabled: true }), token), deps)
+    expect(calls).toContain('register:false')
+  })
+
   it('refuses code that was never approved, and nothing is stored or registered', async () => {
     const { deps, calls } = saveDeps()
     await expect(handleSaveTransform(saveMessage(transform({})), deps)).rejects.toThrow(/not approved/)
@@ -109,7 +140,7 @@ describe('handleSaveTransform: JavaScript', () => {
     const token = await recordApproval(GOOD_JS, undefined, [], 'match', BIND)
     const { deps, calls } = saveDeps()
     await handleSaveTransform(saveMessage(transform({}), token), deps)
-    expect(calls).toEqual(['save:t', 'register:t', 'reapply'])
+    expect(calls).toEqual(['save:t', 'register:t', 'badge:t', 'reapply'])
   })
 
   it('refuses a token that was issued for another transform or another match pattern', async () => {
@@ -169,7 +200,7 @@ describe('handleSaveTransform: CSS', () => {
   it('control: ordinary CSS is saved and applied, and not registered as a script', async () => {
     const { deps, calls } = saveDeps()
     await handleSaveTransform(saveMessage(transform({ kind: 'css', code: GOOD_CSS })), deps)
-    expect(calls).toEqual(['save:t', 'reapply'])
+    expect(calls).toEqual(['save:t', 'badge:t', 'reapply'])
   })
 
   it('uses the page the save came from: the same CSS passes where the site allows it', async () => {
@@ -312,7 +343,15 @@ describe('applyCssTransforms', () => {
       removeCss: async (tab, css) => {
         log.push(`remove:${tab}:${css}`)
       },
-      applied,
+      applied: {
+        read: async (tab) => applied.get(tab),
+        write: async (tab, css) => {
+          applied.set(tab, css)
+        },
+        forget: async (tab) => {
+          applied.delete(tab)
+        },
+      },
     }
     return { deps, log, applied }
   }

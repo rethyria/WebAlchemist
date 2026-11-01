@@ -41,6 +41,7 @@ import type {
   TransformKind,
   TreePath,
   TreeRow,
+  UsageReport,
 } from '@shared/types'
 import { extractPartialString } from '@shared/partial-json'
 import { BackgroundError, generateOverPort, send } from './messaging.svelte'
@@ -59,9 +60,23 @@ export type Step =
  * way out. Collapsing them into one "something went wrong" card would lose the
  * only useful part — what to do next.
  */
+/** The steps in which the typed description is still shown after a failure. */
+const DESCRIPTION_STEPS: Step[] = ['describing', 'refining', 'reviewing', 'saving']
+
 export type FlowError =
   | { kind: 'no-provider'; message: string }
-  | { kind: 'request-failed'; message: string; detail?: string }
+  | {
+      kind: 'request-failed'
+      message: string
+      detail?: string
+      /**
+       * Whether the description the user typed is still on screen. Set by
+       * show(); the card says "Your description is kept." only when true,
+       * because a failed repair, AI edit or delete leaves the list and keeps
+       * nothing.
+       */
+      descriptionKept?: boolean
+    }
   /**
    * `retryInSeconds` counts down to zero and then the retry fires on its own.
    *
@@ -70,6 +85,10 @@ export type FlowError =
    */
   | { kind: 'rate-limited'; message: string; retryInSeconds: number | null }
   | { kind: 'credential-expired'; message: string }
+  /** The configured model is unknown or retired. The way out is the model setting. */
+  | { kind: 'model-unavailable'; message: string; descriptionKept?: boolean }
+  /** No credit or a billing problem. Retrying cannot help until the user fixes it. */
+  | { kind: 'billing'; message: string; descriptionKept?: boolean }
 
 interface Picked {
   context: PageContext
@@ -191,6 +210,21 @@ export class Flow {
    * same path as saving is what makes the preview trustworthy.
    */
   draft = $state<Transform | null>(null)
+  /**
+   * What the last model call used, kept for the panel. Undefined until a call
+   * returns a response; a report whose `usage` is null means the provider sent
+   * no usage block, which the panel shows as "not reported".
+   */
+  lastUsage = $state<UsageReport | undefined>(undefined)
+  /**
+   * The id a new transform will be saved under, chosen before the first
+   * request so that the cost of generating and reviewing it is attributed to
+   * it. An existing transform keeps its own id through `draft`.
+   */
+  private pendingId: string | null = null
+  private transformKey(): string {
+    return this.draft?.id ?? (this.pendingId ??= crypto.randomUUID())
+  }
   /** Exactly what was injected, so removal takes the same string back out. */
   previewedCss = $state<string | null>(null)
   /** Set once the draft has been registered and the page reloaded. */
@@ -288,6 +322,10 @@ export class Flow {
     // A run in progress keeps the tab it started on. Rebinding would silently
     // move the subject out from under the user.
     if (this.step !== 'list') return
+    // An error card on the list, and the retry or countdown behind it, belong
+    // to the tab it came from. Leaving them up let "Try again" or the
+    // countdown run a paid request against the tab the user had moved to.
+    if ((tabId ?? null) !== this.tabId) this.dismissError()
     this.tabId = tabId ?? null
     this.url = url
     this.ownerHost = this.hostname()
@@ -324,7 +362,13 @@ export class Flow {
    * anchored to it.
    */
   pageReloading(tabId: number): void {
-    if (tabId !== this.tabId || this.step === 'list') return
+    if (tabId !== this.tabId) return
+    if (this.step === 'list') {
+      // No run to end, but an error card here refers to the page that is
+      // being replaced, and its retry would act on the new page.
+      this.dismissError()
+      return
+    }
     if (this.ourReload !== 'none') {
       // Ours. Stay armed: the same navigation may report loading again, and
       // only the load settling tells us it is over.
@@ -378,33 +422,96 @@ export class Flow {
    */
   private pickPurpose: 'describe' | 'author' = 'describe'
 
+  /**
+   * The description typed before "Change" started a new pick, held until the
+   * pick arrives. A pick that arrives while the step is 'picking' goes through
+   * enterDescribing, which empties the instruction, so the text has to be kept
+   * somewhere that survives the step change. Null when the pick did not start
+   * from the describing step.
+   */
+  private keptInstruction: string | null = null
+
+  /**
+   * The element that was selected when "Change" started a new pick, held so
+   * that cancelling the pick can go back to it. Null when the pick did not
+   * start from the describing step, in which case there is nothing to go back
+   * to and cancelling discards the run.
+   */
+  private rePickFrom: { picked: Picked; tree: TreeRow[] } | null = null
+
+  /**
+   * Ends a cancelled or failed re-pick by returning to the describing step
+   * with the element, the draft, the match pattern and the typed text as they
+   * were. Returns false when the pick did not start from the describing step.
+   *
+   * Cancelling a re-pick used to discard the whole run, which is right for a
+   * first pick and wrong here: in Edit description it threw away an edit the
+   * user had only paused to point at a different element.
+   */
+  private returnFromRePick(): boolean {
+    const held = this.rePickFrom
+    this.rePickFrom = null
+    this.keptInstruction = null
+    if (!held) return false
+    this.picked = held.picked
+    this.tree = held.tree
+    this.hover = null
+    this.step = 'describing'
+    return true
+  }
+
   async startPicking(purpose: 'describe' | 'author' = 'describe'): Promise<void> {
     this.pickPurpose = purpose
+    this.keptInstruction = this.step === 'describing' ? this.instruction : null
     if (this.tabId === null) return
 
     const origin = originPermissionForUrl(this.url)
     if (!origin) return
+
+    /*
+     * A new pick from the list starts a new transform. Anything still held
+     * from an earlier run would otherwise become part of it, and a draft's id
+     * decides which saved transform a save replaces. Synchronous on purpose:
+     * the permission request below has to remain the first await, or the
+     * gesture is spent. Re-picking from Edit description arrives with the step
+     * 'describing' and keeps its draft deliberately.
+     */
+    if (this.step === 'list') {
+      this.draft = null
+      this.result = null
+      this.matchPattern = ''
+      void this.resumeSuspended()
+    }
 
     try {
       // First await — the gesture has to still be live when this runs. See
       // runJs for why the request is inside the try rather than before it.
       const granted = await browser.permissions.request({ origins: [origin] })
       if (!granted) {
-        this.error = {
+        this.show({
           kind: 'request-failed',
           message: `Web Alchemist needs permission to read ${this.hostname()} before it can point at anything on it.`,
-        }
+        })
         return
       }
 
       this.error = null
       this.hover = null
+      this.rePickFrom =
+        this.step === 'describing' && this.picked
+          ? { picked: this.picked, tree: this.tree }
+          : null
       this.picked = null
       this.step = 'picking'
       await send({ type: 'start-picking', tabId: this.tabId })
     } catch (cause) {
-      this.step = 'list'
-      this.fail(cause)
+      /*
+       * A failed re-pick from the describing step goes back there, as a
+       * cancelled one does. Otherwise only the step was changed, which left
+       * the draft, the suspended CSS transform and the outline in place.
+       */
+      if (!this.returnFromRePick()) await this.discard()
+      this.fail(cause, () => this.startPicking(purpose))
     }
   }
 
@@ -419,14 +526,47 @@ export class Flow {
   async cancelPicking(): Promise<void> {
     if (this.tabId !== null) {
       await send({ type: 'stop-picking', tabId: this.tabId }).catch(() => {})
-      await this.clearLock()
     }
-    this.step = 'list'
-    this.hover = null
+    // Cancelling "Change" goes back to the description it was started from.
+    if (this.returnFromRePick()) return
+    /*
+     * Any other pick ends the run, through discard rather than a bare step
+     * change. A first pick can still hold a draft, its match pattern and a
+     * suspended saved transform; going back to the list with only the step
+     * changed left all three in place: the suspended transform stayed off the
+     * page, and the next new pick inherited the draft's id and saved over the
+     * saved transform.
+     */
+    await this.discard()
   }
 
-  /** Content events arrive here from App's runtime listener. */
-  receive(event: ContentEvent): void {
+  /**
+   * Whether a run is waiting for an event from the page: a pick, a retarget
+   * on the describing step, a reference pick or a region pick.
+   */
+  private get awaitingPageEvent(): boolean {
+    return (
+      this.step === 'picking' ||
+      this.step === 'describing' ||
+      this.awaitingReference ||
+      this.choosingRegion
+    )
+  }
+
+  /**
+   * Content events arrive here from App's runtime listener.
+   *
+   * `sender` is checked here, and not left to the background's sender check
+   * (#68), because a content script's runtime.sendMessage reaches every
+   * extension page directly and the background never sees it. Without the
+   * check, a script in any other tab could send an element or a region, and
+   * the next generation would be built from its content. Events are ignored
+   * unless they come from the tab the run is working on and a run is waiting
+   * for one.
+   */
+  receive(event: ContentEvent, sender: { tab?: { id?: number | undefined } | undefined }): void {
+    if (sender.tab?.id === undefined || sender.tab.id !== this.tabId) return
+    if (!this.awaitingPageEvent) return
     switch (event.type) {
       case 'element-hovered':
         if (this.step === 'picking') this.hover = event.target
@@ -449,8 +589,18 @@ export class Flow {
         // Retargeting must not wipe what has already been typed — the user is
         // adjusting the target of a description they are partway through.
         if (retargeting) return
+        // The new element replaces the one held for a cancelled re-pick.
+        this.rePickFrom = null
         if (this.pickPurpose === 'author') void this.openAuthoring()
-        else this.enterDescribing()
+        else {
+          const kept = this.keptInstruction
+          this.keptInstruction = null
+          this.enterDescribing()
+          // Changing the element is not starting a new description, so what
+          // was typed stays. The screenshot, scope and references describe the
+          // old element and are reset as before.
+          if (kept !== null) this.instruction = kept
+        }
         return
       }
 
@@ -472,7 +622,13 @@ export class Flow {
 
       case 'picking-cancelled':
         this.awaitingReference = false
-        if (this.step === 'picking') this.step = 'list'
+        // Without this, Esc during a region pick left the screenshot button
+        // disabled: both panels disable it while this is true and offer no
+        // other way out of region mode.
+        this.choosingRegion = false
+        // Same as cancelPicking: back to the description for a re-pick, and
+        // otherwise the list must not keep the old run.
+        if (this.step === 'picking' && !this.returnFromRePick()) void this.discard()
         return
 
       case 'health-check-result':
@@ -688,13 +844,15 @@ export class Flow {
       this.streamed = ''
       this.thinkingChars = 0
       this.streamedKind = transform.kind
-      const result = await send<GenerationResult>({
+      const repaired = await send<{ result: GenerationResult; usage?: UsageReport }>({
         type: 'repair',
         transformId: transform.id,
         context: found.context,
         brokenReason,
       })
       if (!current()) return
+      const result = repaired.result
+      if (repaired.usage) this.lastUsage = repaired.usage
 
       this.result = result
       // Not result.intent: the destination was never what broke.
@@ -718,10 +876,15 @@ export class Flow {
       this.step = 'refining'
     } catch (cause) {
       if (!current()) return
-      // Back to the list, which is where a repair is started from. There is no
-      // half-finished description to preserve here.
-      this.step = 'list'
-      this.fail(cause)
+      /*
+       * Back to the list, which is where a repair is started from, and there
+       * is no half-finished description to preserve. The draft holds the saved
+       * transform's id, so keeping it let the next new transform save over the
+       * one that was being repaired. The error is recorded after the discard
+       * so that it is still on screen once the list is shown.
+       */
+      await this.discard()
+      this.fail(cause, () => this.repair(transform, brokenReason))
     } finally {
       this.stopClock()
     }
@@ -814,7 +977,17 @@ export class Flow {
       }
     } catch (cause) {
       this.stopClock()
-      this.fail(cause)
+      if (!current()) return
+      /*
+       * Back to the list, as repair and editWithAi do. The step was set to
+       * 'generating' at the top, and nothing else moves it on failure, so
+       * without this the panel stayed on a stopped Generating checklist and
+       * "Try again" ran a plain generate() against whatever was left picked.
+       * Through discard because the failure can come after the draft was set
+       * and the saved transform suspended.
+       */
+      await this.discard()
+      this.fail(cause, () => this.editIntent(transform))
     }
   }
 
@@ -893,14 +1066,42 @@ export class Flow {
       void this.checkVisionSupport()
     } catch (cause) {
       if (!current()) return
-      this.step = 'list'
-      this.fail(cause)
+      // As in repair: the draft carries the saved id, and the transform was
+      // suspended above, so both have to be undone before the list is shown.
+      await this.discard()
+      this.fail(cause, () => this.editWithAi(transform))
     } finally {
       this.stopClock()
     }
   }
 
-  async generate(): Promise<void> {
+  /**
+   * What `regenerate` replaced, kept until the attempt it started ends.
+   *
+   * The follow-up, the instruction and the history are changed before the
+   * request is sent, because generate reads them. If the attempt then fails or
+   * is cancelled, the panel returns to refining and these values have to go
+   * back: otherwise the follow-up box is empty, and the next attempt sends the
+   * old result's rationale as the assistant's answer to a request it never
+   * answered.
+   */
+  private refinement: { history: RefinementTurn[]; instruction: string; followUp: string } | null = null
+
+  private undoRefinement(): void {
+    const held = this.refinement
+    this.refinement = null
+    if (!held) return
+    this.history = held.history
+    this.instruction = held.instruction
+    this.followUp = held.followUp
+  }
+
+  /**
+   * `again` is what "Try again" repeats. A refinement passes itself, because
+   * repeating plain generate() would send the restored instruction, not the
+   * follow-up that failed.
+   */
+  async generate(again: () => Promise<void> = () => this.generate()): Promise<void> {
     const picked = this.picked
     if (!picked || !this.instruction.trim()) return
 
@@ -908,6 +1109,7 @@ export class Flow {
     const token = ++this.generation
     const current = () => token === this.generation
 
+    this.stopSecondaryPicker()
     this.step = 'generating'
     this.error = null
     this.startClock()
@@ -915,6 +1117,9 @@ export class Flow {
     try {
       this.stage = 'context'
       const context: PageContext = { ...(await this.liveContext(picked)) }
+      // Cancel can arrive while the page is being read; without this the
+      // cancelled run still opened a port and sent the request.
+      if (!current()) return
       if (this.references.length > 0) context.references = [...this.references]
 
       // Already captured and already on screen in the panel; nothing is taken
@@ -934,6 +1139,7 @@ export class Flow {
           scopeDepth: this.scopeDepth,
           scopeContainer: this.scopeContainer,
           tabId: this.tabId ?? undefined,
+          transformId: this.transformKey(),
         },
         {
           onSent: () => {
@@ -943,6 +1149,9 @@ export class Flow {
             if (!current()) return
             this.stage = 'thinking'
             this.thinkingChars = characters
+          },
+          onUsage: (usage) => {
+            if (current() && usage) this.lastUsage = usage
           },
           onChunk: (accumulated) => {
             if (!current()) return
@@ -973,17 +1182,14 @@ export class Flow {
       this.cancelGeneration = null
       if (!current()) return
 
-      this.result = result
-      this.intent = result.intent
-      // Keep the user's scope choice across a regeneration; only seed it once.
-      this.matchPattern ||=
-        this.matchPresets.find((p) => p.recommended)?.pattern ??
-        this.matchPresets[0]?.pattern ??
-        ''
-      this.draft = this.buildDraft(result, picked.anchor)
-
+      /*
+       * Nothing about the new result is stored until the analysis has come
+       * back and the run is still current. Cancel is available during the
+       * analysis, and it returns to the previous result; storing the new
+       * result first would have left it paired with the old preview.
+       */
       this.stage = 'analysis'
-      this.analysis =
+      const analysis: ReviewResult =
         result.kind === 'js'
           ? await send<ReviewResult>({
               type: 'analyse',
@@ -992,6 +1198,17 @@ export class Flow {
             })
           : await this.checkCss(result.code)
       if (!current()) return
+
+      this.result = result
+      this.intent = result.intent
+      // Keep the user's scope choice across a regeneration; only seed it once.
+      this.matchPattern ||=
+        this.matchPresets.find((p) => p.recommended)?.pattern ??
+        this.matchPresets[0]?.pattern ??
+        ''
+      this.draft = this.buildDraft(result, picked.anchor)
+      this.analysis = analysis
+      this.refinement = null
 
       this.stage = 'preview'
       await this.applyPreview(result)
@@ -1002,7 +1219,8 @@ export class Flow {
       // Back where they started, with what they typed intact — a failed
       // request should not cost the user their description.
       this.step = from === 'refining' ? 'refining' : 'describing'
-      this.fail(cause)
+      this.undoRefinement()
+      this.fail(cause, again)
     } finally {
       this.stopClock()
       /*
@@ -1056,11 +1274,11 @@ export class Flow {
     const granted = await browser.permissions.request({ origins: ['<all_urls>'] })
     if (!granted) {
       this.sendScreenshot = false
-      this.error = {
+      this.show({
         kind: 'request-failed',
         message:
           'Firefox only lets an extension capture a page with access to all sites. Without it, screenshots cannot be taken; everything else still works.',
-      }
+      })
     }
     return granted
   }
@@ -1077,7 +1295,7 @@ export class Flow {
       await send({ type: 'start-picking', tabId: this.tabId, mode: 'region' })
     } catch (cause) {
       this.choosingRegion = false
-      this.fail(cause)
+      this.fail(cause, () => this.chooseScreenshotRegion())
     }
   }
 
@@ -1101,7 +1319,7 @@ export class Flow {
         }),
       )
     } catch (cause) {
-      this.fail(cause)
+      this.fail(cause, () => this.captureRegion(rect, viewportWidth))
     }
   }
 
@@ -1154,7 +1372,7 @@ export class Flow {
       await send({ type: 'start-picking', tabId: this.tabId, mode: 'reference' })
     } catch (cause) {
       this.awaitingReference = false
-      this.fail(cause)
+      this.fail(cause, () => this.addReference())
     }
   }
 
@@ -1165,7 +1383,7 @@ export class Flow {
   private buildDraft(result: GenerationResult, anchor: Anchor): Transform {
     const now = Date.now()
     return {
-      id: this.draft?.id ?? crypto.randomUUID(),
+      id: this.transformKey(),
       name: result.name,
       // A repair of a disabled transform must not switch it back on, and a
       // regeneration must not either.
@@ -1275,11 +1493,11 @@ export class Flow {
        */
       const granted = await this.requestFor('js', '')
       if (!granted) {
-        this.error = {
+        this.show({
           kind: 'request-failed',
           message:
             'Running a script needs Firefox’s user scripts permission. Nothing was run, and your description is kept.',
-        }
+        })
         return
       }
 
@@ -1291,7 +1509,7 @@ export class Flow {
       // Otherwise a reload that never came leaves us armed, and the next
       // genuine refresh is swallowed instead of resetting the panel.
       this.ourReload = 'none'
-      this.fail(cause)
+      this.fail(cause, () => this.runJs())
     }
   }
 
@@ -1333,6 +1551,11 @@ export class Flow {
     const text = this.followUp.trim()
     if (!text || !this.result) return
 
+    this.refinement = {
+      history: this.history,
+      instruction: this.instruction,
+      followUp: this.followUp,
+    }
     this.history = [
       ...this.history,
       { role: 'user', content: this.instruction },
@@ -1340,7 +1563,7 @@ export class Flow {
     ]
     this.instruction = text
     this.followUp = ''
-    await this.generate()
+    await this.generate(() => this.regenerate())
   }
 
   /**
@@ -1381,6 +1604,21 @@ export class Flow {
   cancelGenerating(): void {
     this.cancelGeneration?.()
     this.cancelGeneration = null
+    /*
+     * A refinement has a result, a preview and a conversation worth keeping,
+     * so cancelling it goes back to refining with the follow-up text restored
+     * for editing. Discarding the run here threw all of that away for a
+     * request that was only slow. A first generation has nothing to return to.
+     */
+    if (this.refinement && this.result) {
+      // Ends the attempt: its callbacks and its result are ignored from here.
+      this.generation += 1
+      this.stopClock()
+      this.clearShot()
+      this.undoRefinement()
+      this.step = 'refining'
+      return
+    }
     void this.discard()
   }
 
@@ -1389,6 +1627,7 @@ export class Flow {
   /* ---------------------------------------------------------------- */
 
   toSaving(): void {
+    this.stopSecondaryPicker()
     this.step = 'saving'
   }
 
@@ -1422,15 +1661,17 @@ export class Flow {
         intent: this.intent,
         declaredCapabilities: result.capabilities,
         world: result.world,
-        // The approval token is tied to these two, so the save must send the
-        // same id and pattern. The pattern is not editable between here and
-        // the save: changing it goes back to the saving step, which reviews again.
-        transformId: this.draft?.id ?? '',
+        // The approval token is tied to the id and pattern, so the save must
+        // send the same ones. The id is also what the review's cost is added
+        // to. The pattern is not editable between here and the save: changing
+        // it goes back to the saving step, which reviews again.
+        transformId: this.transformKey(),
         match: this.matchPattern,
       })
+      if (this.review.usage) this.lastUsage = this.review.usage
     } catch (cause) {
       this.step = 'saving'
-      this.fail(cause)
+      this.fail(cause, () => this.toReview())
     }
   }
 
@@ -1568,7 +1809,7 @@ export class Flow {
       this.reset()
       this.onSaved()
     } catch (cause) {
-      this.fail(cause)
+      this.fail(cause, () => this.save())
     }
   }
 
@@ -1576,41 +1817,97 @@ export class Flow {
   /* Errors and lifecycle                                              */
   /* ---------------------------------------------------------------- */
 
-  private fail(cause: unknown): void {
+  /**
+   * What "Try again" and the rate-limit countdown repeat.
+   *
+   * Recorded together with the error. Both used to call generate() whatever
+   * had failed, so a rate-limited review or a failed save started a new paid
+   * generation, and a failed delete did nothing. `null` means there is nothing
+   * to repeat, and the card then offers no retry.
+   */
+  private retryAction = $state<(() => Promise<void>) | null>(null)
+
+  /** Whether the current error has a request that can be repeated. */
+  get canRetry(): boolean {
+    return this.retryAction !== null
+  }
+
+  /** Records an error that has no request to repeat. */
+  show(error: FlowError, retry: (() => Promise<void>) | null = null): void {
+    this.error =
+      (error.kind === 'request-failed' ||
+        error.kind === 'model-unavailable' ||
+        error.kind === 'billing') &&
+      error.descriptionKept === undefined
+        ? { ...error, descriptionKept: DESCRIPTION_STEPS.includes(this.step) }
+        : error
+    /*
+     * The retry belongs to the tab the failure happened on. Without this, a
+     * retry or a countdown left on the list survived a tab switch and then ran
+     * a paid request on the newly bound tab with the old transform. bindTab
+     * and pageReloading also clear the card; this covers a path that reaches
+     * retry() some other way.
+     */
+    const tab = this.tabId
+    this.retryAction =
+      retry === null ? null : async () => (this.tabId === tab ? retry() : undefined)
+  }
+
+  /**
+   * Records the failure of a request, and `retry`, the call that repeats it.
+   * Public so the list view can report a failed delete the same way.
+   */
+  fail(cause: unknown, retry: (() => Promise<void>) | null = null): void {
     if (!(cause instanceof BackgroundError)) {
-      this.error = { kind: 'request-failed', message: String(cause) }
+      this.show({ kind: 'request-failed', message: String(cause) }, retry)
       return
     }
 
     switch (cause.kind) {
       case 'no-credential':
-        this.error = { kind: 'no-provider', message: cause.message }
+        this.show({ kind: 'no-provider', message: cause.message })
         return
       case 'auth':
-        this.error = { kind: 'credential-expired', message: cause.message }
+        this.show({ kind: 'credential-expired', message: cause.message })
+        return
+      case 'model-unavailable':
+        // Only the error is set. The description, scope and picked element stay
+        // as they are, so choosing another model and retrying needs no retyping.
+        this.error = { kind: 'model-unavailable', message: cause.message }
+        return
+      case 'billing':
+        this.error = { kind: 'billing', message: cause.message }
         return
       case 'rate-limit':
-        this.error = {
-          kind: 'rate-limited',
-          message: cause.message,
-          retryInSeconds: cause.retryInSeconds ?? null,
-        }
-        if (cause.retryInSeconds !== undefined) this.startRetryCountdown()
+        this.show(
+          {
+            kind: 'rate-limited',
+            message: cause.message,
+            // A countdown to a retry that has no action would end by silently
+            // removing the card, so only a repeatable request gets one.
+            retryInSeconds: retry === null ? null : (cause.retryInSeconds ?? null),
+          },
+          retry,
+        )
+        if (cause.retryInSeconds !== undefined && retry !== null) this.startRetryCountdown()
         return
       default:
-        this.error = { kind: 'request-failed', message: cause.message }
+        this.show({ kind: 'request-failed', message: cause.message }, retry)
     }
   }
 
   dismissError(): void {
     this.cancelRetryCountdown()
     this.error = null
+    this.retryAction = null
   }
 
   async retry(): Promise<void> {
+    const action = this.retryAction
     this.cancelRetryCountdown()
     this.error = null
-    await this.generate()
+    this.retryAction = null
+    await action?.()
   }
 
   /* ---------------------------------------------------------------- */
@@ -1670,8 +1967,36 @@ export class Flow {
     this.timer = null
   }
 
+  /**
+   * Takes the page out of a reference or region pick that the panel started.
+   *
+   * Those picks run in the page while the panel stays on refining or
+   * describing, so acting in the panel (Discard, Keep it, Generate) does not
+   * end them by itself, and the page stayed dimmed and swallowed the next
+   * click. Nothing is sent when no such pick is active, so a stop-picking
+   * message is not sent on every reset. The flags are cleared here as well,
+   * because the page's own "picking-cancelled" event no longer reaches a
+   * panel that has moved on.
+   */
+  private stopSecondaryPicker(): void {
+    const active = this.awaitingReference || this.choosingRegion
+    this.awaitingReference = false
+    this.choosingRegion = false
+    if (active && this.tabId !== null) {
+      void send({ type: 'stop-picking', tabId: this.tabId }).catch(() => {})
+    }
+  }
+
   reset(): void {
+    this.stopSecondaryPicker()
     this.stopClock()
+    // The countdown's own comment says resetting the flow stops it, but this
+    // did not. A card and a timer that outlive the run it belonged to end by
+    // calling retry() with nothing to repeat.
+    this.dismissError()
+    this.refinement = null
+    this.keptInstruction = null
+    this.rePickFrom = null
     this.generation += 1
     // The run is over, so the all-sites grant it may have taken goes back.
     this.cancelScreenshot()
@@ -1688,6 +2013,8 @@ export class Flow {
     this.followUp = ''
     this.result = null
     this.draft = null
+    this.pendingId = null
+    this.lastUsage = undefined
     this.previewedCss = null
     this.jsRan = false
     this.analysis = null

@@ -9,19 +9,22 @@
    */
   interface Props {
     error: FlowError
-    onretry: () => void
+    /** Null when there is no request to repeat; the retry buttons are then not shown. */
+    onretry: (() => void) | null
     onsettings: () => void
+    /** Opens settings at the model pickers. */
+    onmodelsettings: () => void
     ondismiss: () => void
   }
 
-  let { error, onretry, onsettings, ondismiss }: Props = $props()
+  let { error, onretry, onsettings, onmodelsettings, ondismiss }: Props = $props()
 
   let detailOpen = $state(false)
 </script>
 
 <div
   class="card"
-  class:block={error.kind === 'request-failed'}
+  class:block={error.kind === 'request-failed' || error.kind === 'billing'}
   class:attention={error.kind === 'rate-limited'}
   role="alert"
 >
@@ -39,16 +42,43 @@
       <span class="dot block" aria-hidden="true"></span>
       <span class="title">The request failed</span>
     </div>
-    <p>{error.message} Your description is kept.</p>
+    <p>{error.message}{error.descriptionKept ? ' Your description is kept.' : ''}</p>
     {#if detailOpen && error.detail}
       <pre>{error.detail}</pre>
     {/if}
     <div class="actions">
-      <Button variant="primary" small onclick={onretry}>Try again</Button>
+      {#if onretry}
+        <Button variant="primary" small onclick={onretry}>Try again</Button>
+      {/if}
       {#if error.detail}
         <Button small onclick={() => (detailOpen = !detailOpen)}>
           {detailOpen ? 'Hide response' : 'Show response'}
         </Button>
+      {/if}
+      <Button small onclick={ondismiss}>Dismiss</Button>
+    </div>
+  {:else if error.kind === 'model-unavailable'}
+    <div class="head">
+      <span class="dot block" aria-hidden="true"></span>
+      <span class="title">Model not available</span>
+    </div>
+    <p>{error.message}{error.descriptionKept ? ' Your description is kept.' : ''}</p>
+    <div class="actions">
+      <Button variant="primary" small onclick={onmodelsettings}>Open model settings</Button>
+      {#if onretry}
+        <Button small onclick={onretry}>Try again</Button>
+      {/if}
+      <Button small onclick={ondismiss}>Dismiss</Button>
+    </div>
+  {:else if error.kind === 'billing'}
+    <div class="head">
+      <span class="dot block" aria-hidden="true"></span>
+      <span class="title">Billing problem</span>
+    </div>
+    <p>{error.message}{error.descriptionKept ? ' Your description is kept.' : ''}</p>
+    <div class="actions">
+      {#if onretry}
+        <Button variant="primary" small onclick={onretry}>Try again</Button>
       {/if}
       <Button small onclick={ondismiss}>Dismiss</Button>
     </div>
@@ -72,14 +102,18 @@
         {error.retryInSeconds === 1 ? 'second' : 'seconds'}
       </p>
       <div class="actions">
-        <Button small onclick={onretry}>Try now</Button>
+        {#if onretry}
+          <Button small onclick={onretry}>Try now</Button>
+        {/if}
         <Button small onclick={ondismiss}>Cancel</Button>
       </div>
     {:else}
       <!-- No guidance from the provider, so nothing to count down from. -->
       <div class="actions">
-        <Button variant="primary" small onclick={onretry}>Try again</Button>
-        <Button small onclick={ondismiss}>Cancel</Button>
+        {#if onretry}
+          <Button variant="primary" small onclick={onretry}>Try again</Button>
+        {/if}
+        <Button small onclick={ondismiss}>{onretry ? 'Cancel' : 'Dismiss'}</Button>
       </div>
     {/if}
   {:else}

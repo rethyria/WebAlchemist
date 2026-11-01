@@ -14,19 +14,24 @@
   import type { ConflictSpec } from '@shared/messages'
   import { parseRules } from '@shared/css'
   import { activeTab, BackgroundError, send } from './lib/messaging.svelte'
+  import { isForTab, type HealthCheckResult } from './lib/health-result'
   import { Flow } from './lib/flow.svelte'
+  import { holdSidebarPortForWindow } from './lib/sidebar-port'
   import Describing from './components/Describing.svelte'
   import ErrorCard from './components/ErrorCard.svelte'
   import Generating from './components/Generating.svelte'
   import Picking from './components/Picking.svelte'
   import Refining from './components/Refining.svelte'
   import Reviewing from './components/Reviewing.svelte'
+  import UsageLine from './components/UsageLine.svelte'
   import Saving from './components/Saving.svelte'
   import SettingsPanel from './components/Settings.svelte'
+  import type { VaultView } from '@shared/vault-disclosure'
   import TransformRow from './components/TransformRow.svelte'
 
   let settings = $state<Settings | null>(null)
   let statuses = $state<CredentialStatus[]>([])
+  let vault = $state<VaultView>({ sealed: false, unlocked: true })
   let transforms = $state<Transform[]>([])
   let healthStates = $state<TransformRuntimeState[]>([])
   /* Stored code that no longer passes the safety checks, so is not running. */
@@ -160,10 +165,20 @@
     await refreshBlockedCount()
   }
 
+  /*
+   * Read when the panel loads and each time the settings panel opens, because
+   * the vault can be locked, by the idle timer or by hand, while the sidebar
+   * stays open, and the disclosure there must describe the current state.
+   */
+  async function refreshVault() {
+    vault = await send<VaultView>({ type: 'vault-state' })
+  }
+
   async function load() {
     loadError = null
     try {
       applySettings(await send<Settings>({ type: 'get-settings' }))
+      await refreshVault()
       statuses = await send<CredentialStatus[]>({ type: 'get-credential-statuses' })
 
       const tab = await activeTab()
@@ -230,7 +245,7 @@
       try {
         granted = await flow.requestFor('js', transform.match)
       } catch (cause) {
-        flow.error = { kind: 'request-failed', message: String(cause) }
+        flow.fail(cause)
         return
       }
       if (!granted) return
@@ -399,7 +414,7 @@
         ...(tab?.id === undefined ? {} : { tabId: tab.id }),
       })
     } catch (cause) {
-      flow.error = { kind: 'request-failed', message: String(cause) }
+      flow.fail(cause, () => removeTransform(transform))
       return
     }
     if (expandedId === transform.id) expandedId = null
@@ -411,14 +426,28 @@
     void browser.runtime.openOptionsPage()
   }
 
+  /** Ignores results for tabs the panel is not showing; see health-result.ts. */
+  async function showHealthResult(message: HealthCheckResult) {
+    const tab = await activeTab()
+    if (isForTab(message, tab?.id)) healthStates = message.states
+  }
+
+  /*
+   * openOptionsPage takes no fragment, so the page is opened as a tab to land
+   * on the model pickers. The options page scrolls to the element with this id.
+   */
+  function openModelSettings() {
+    void browser.tabs.create({ url: `${browser.runtime.getURL('src/options/index.html')}#models` })
+  }
+
   $effect(() => {
     void load()
 
-    const onMessage = (message: ContentEvent) => {
+    const onMessage = (message: ContentEvent, sender: browser.runtime.MessageSender) => {
       // Health results are the one content event the list owns rather than
       // the flow — they describe saved transforms, not the draft.
-      if (message.type === 'health-check-result') healthStates = message.states
-      else flow.receive(message)
+      if (message.type === 'health-check-result') void showHealthResult(message)
+      else flow.receive(message, sender)
     }
     browser.runtime.onMessage.addListener(onMessage)
 
@@ -464,8 +493,13 @@
 
     // Held open for the lifetime of the panel. The background watches for it
     // to drop, which is how "closing this panel discards it" is kept true —
-    // a closed sidebar gets no chance to run cleanup of its own.
-    const port = browser.runtime.connect({ name: 'wa-sidebar' })
+    // a closed sidebar gets no chance to run cleanup of its own. It is opened
+    // again whenever the background drops it, because a suspension does that
+    // while the panel is still open.
+    const releasePort = holdSidebarPortForWindow(
+      (name) => browser.runtime.connect({ name }),
+      async () => (await browser.windows.getCurrent()).id,
+    )
 
     return () => {
       browser.runtime.onMessage.removeListener(onMessage)
@@ -473,7 +507,7 @@
       browser.tabs.onActivated.removeListener(onTabChange)
       browser.tabs.onUpdated.removeListener(onTabUpdated)
       browser.tabs.onRemoved.removeListener(onTabRemoved)
-      port.disconnect()
+      releasePort()
     }
   })
 </script>
@@ -484,7 +518,10 @@
     <button
       type="button"
       class="chrome-link"
-      onclick={() => (showSettings = !showSettings)}
+      onclick={() => {
+        showSettings = !showSettings
+        if (showSettings) refreshVault().catch(() => undefined)
+      }}
     >
       {showSettings ? 'Done' : 'Settings'}
     </button>
@@ -505,8 +542,9 @@
   {#if flow.error}
     <ErrorCard
       error={flow.error}
-      onretry={() => void flow.retry()}
+      onretry={flow.canRetry ? () => void flow.retry() : null}
       onsettings={openSettingsPage}
+      onmodelsettings={openModelSettings}
       ondismiss={() => flow.dismissError()}
     />
   {/if}
@@ -523,6 +561,7 @@
     <SettingsPanel
       {settings}
       {statuses}
+      {vault}
       onsave={(next: Settings) => void saveSettings(next)}
       onfullpage={openSettingsPage}
     />
@@ -616,6 +655,7 @@
       ondiscard={() => void flow.discard()}
       onkeep={() => flow.toSaving()}
     />
+    <UsageLine report={flow.lastUsage} />
   {:else if flow.step === 'saving' && flow.result}
     <Saving
       result={flow.result}
@@ -639,6 +679,7 @@
       onsave={() => void flow.save()}
       onback={() => flow.toSaving()}
     />
+    <UsageLine report={flow.lastUsage} />
   {:else if transforms.length === 0}
     <div class="empty">
       <div class="diagram" aria-hidden="true">

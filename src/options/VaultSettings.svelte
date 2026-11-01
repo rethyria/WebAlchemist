@@ -7,6 +7,14 @@
    * true statements, and the one shown follows the stored data rather than a
    * setting — see `vaultState` in storage.ts.
    */
+  import { MIN_PASSPHRASE_LENGTH, VAULT_IDLE_OPTIONS } from '@shared/vault-policy'
+  import {
+    DISCLOSURE_PLAIN,
+    DISCLOSURE_SEALED,
+    LOCKED_CONSEQUENCE,
+    STATUS_LOCKED,
+    STATUS_UNLOCKED,
+  } from '@shared/vault-disclosure'
   import Button from '@sidebar/components/Button.svelte'
 
   interface Props {
@@ -15,6 +23,9 @@
      * rune in this file as a store subscription on the prop.
      */
     vault: { sealed: boolean; unlocked: boolean }
+    /** Minutes of no use before the vault locks itself; 0 means never. */
+    idleMinutes: number
+    onidlechange: (minutes: number) => Promise<void>
     onenable: (passphrase: string) => Promise<void>
     ondisable: (passphrase: string) => Promise<void>
     onunlock: (passphrase: string) => Promise<void>
@@ -22,7 +33,7 @@
     ondiscard: () => Promise<void>
   }
 
-  let { vault, onenable, ondisable, onunlock, onlock, ondiscard }: Props = $props()
+  let { vault, idleMinutes, onidlechange, onenable, ondisable, onunlock, onlock, ondiscard }: Props = $props()
 
   type Panel = 'enable' | 'disable' | 'unlock' | null
   let panel = $state<Panel>(null)
@@ -32,12 +43,8 @@
   let busy = $state(false)
   let discardArmed = $state(false)
 
-  /*
-   * Long rather than complex. A passphrase protecting a file at rest is only
-   * ever attacked offline, where character-class rules buy far less than
-   * length — and 600,000 PBKDF2 iterations is doing the rest of the work.
-   */
-  const MINIMUM = 12
+  // The background enforces the same limit; see vault-policy.ts for why.
+  const MINIMUM = MIN_PASSPHRASE_LENGTH
 
   let canSubmit = $derived.by(() => {
     if (busy || passphrase.length === 0) return false
@@ -55,6 +62,19 @@
   function open(next: Panel): void {
     panel = panel === next ? null : next
     reset()
+  }
+
+  async function discard(): Promise<void> {
+    error = null
+    try {
+      await ondiscard()
+      open(null)
+    } catch (cause) {
+      // Shown, not dropped: the background refuses this from any state but
+      // sealed and locked, and a silent refusal would look like a dead button.
+      error = cause instanceof Error ? cause.message : String(cause)
+      discardArmed = false
+    }
   }
 
   async function submit(): Promise<void> {
@@ -86,12 +106,7 @@
   <h2>How your credentials are stored</h2>
 
   {#if !vault.sealed}
-    <p class="body">
-      Keys are stored as plain text in this browser profile's directory. Browsers offer
-      extensions no access to the operating system keychain, so this data is protected by
-      file permissions and nothing else. Anyone who can read your profile directory can
-      read these keys.
-    </p>
+    <p class="body">{DISCLOSURE_PLAIN}</p>
     <p class="body">
       A passphrase changes that. Your keys are encrypted with it, and nothing stored on
       this machine can decrypt them without it — so reading the profile directory yields
@@ -108,21 +123,36 @@
       replace the key at your provider after turning this on.
     </p>
   {:else}
-    <p class="body">
-      Keys are encrypted with your passphrase. What sits in this browser profile is
-      ciphertext, and nothing stored on this machine decrypts it — the key is derived from
-      your passphrase when you unlock, and kept in memory for the session only.
-    </p>
+    <p class="body">{DISCLOSURE_SEALED}</p>
     <p class="body">
       This protects the profile at rest. It does not protect against software already
       running inside this extension while it is unlocked, which can ask for the keys the
       same way the extension itself does.
     </p>
     <p class="body">
-      <strong>{vault.unlocked ? 'Unlocked for this session.' : 'Locked.'}</strong>
+      <strong>{vault.unlocked ? STATUS_UNLOCKED : STATUS_LOCKED}</strong>
       {#if !vault.unlocked}
-        Generating anything will fail until you unlock.
+        {LOCKED_CONSEQUENCE}
       {/if}
+    </p>
+  {/if}
+
+  {#if vault.sealed}
+    <label class="idle">
+      Lock automatically after
+      <select
+        value={idleMinutes}
+        onchange={(event) => void onidlechange(Number(event.currentTarget.value))}
+      >
+        {#each VAULT_IDLE_OPTIONS as option}
+          <option value={option.minutes}>{option.label}</option>
+        {/each}
+      </select>
+      without a request to a provider
+    </label>
+    <p class="note">
+      Locking stops generation until the passphrase is entered again. With Never selected, the
+      vault stays unlocked until the browser closes or it is locked by hand.
     </p>
   {/if}
 
@@ -199,10 +229,14 @@
         <Button small onclick={() => open(null)}>Cancel</Button>
       </div>
 
-      {#if panel === 'unlock'}
+      {#if panel === 'unlock' && vault.sealed && !vault.unlocked}
         <!--
           The only exit from a forgotten passphrase, and it is destructive, so
-          it asks twice and is never the primary action.
+          it asks twice and is never the primary action. It is also tied to the
+          vault state, not only to the open panel: the panel can stay open while
+          the state changes underneath it, for example when another settings tab
+          unlocks the vault, and discarding is wrong from any state but sealed
+          and locked. The background refuses it from other states as well.
         -->
         <div class="forgotten">
           {#if !discardArmed}
@@ -215,7 +249,7 @@
               again; your transforms are not affected.
             </p>
             <div class="actions">
-              <Button small onclick={() => void ondiscard().then(() => open(null))}>
+              <Button small onclick={() => void discard()}>
                 Discard the stored keys
               </Button>
               <Button small onclick={() => (discardArmed = false)}>Keep them</Button>
@@ -246,6 +280,24 @@
     margin: 0;
     font: 12px/1.6 var(--font-ui);
     color: var(--text-dim);
+  }
+
+  .idle {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-7);
+    flex-wrap: wrap;
+    font: 12px/1.6 var(--font-ui);
+    color: var(--text-dim);
+  }
+
+  .idle select {
+    padding: 4px 6px;
+    border: 1px solid var(--border);
+    border-radius: var(--r-input);
+    background: var(--surface);
+    font: 12px var(--font-ui);
+    color: var(--text);
   }
 
   .caution {

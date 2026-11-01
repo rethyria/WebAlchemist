@@ -38,8 +38,12 @@ const BROKEN_TEXT = '!'
 export interface TabFacts {
   /** Enabled transforms matching this tab's URL. */
   matching: number
-  /** How many of them the last health check called broken. */
-  broken: number
+  /**
+   * Ids of the transforms the last health check called broken. Ids rather than
+   * a count, so that saving or deleting one of them can remove exactly it; a
+   * count has no way to tell which transform a repair fixed.
+   */
+  broken: Set<string>
   /** A generation is running for this tab right now. */
   working: boolean
 }
@@ -58,7 +62,7 @@ const facts = new Map<number, TabFacts>()
 function factsFor(tabId: number): TabFacts {
   const existing = facts.get(tabId)
   if (existing) return existing
-  const fresh: TabFacts = { matching: 0, broken: 0, working: false }
+  const fresh: TabFacts = { matching: 0, broken: new Set(), working: false }
   facts.set(tabId, fresh)
   return fresh
 }
@@ -74,7 +78,7 @@ function factsFor(tabId: number): TabFacts {
  */
 export function badgeFor(tab: TabFacts): { text: string; background: string } | null {
   if (tab.working) return { text: WORKING_TEXT, background: 'accent' }
-  if (tab.broken > 0) return { text: BROKEN_TEXT, background: BROKEN }
+  if (tab.broken.size > 0) return { text: BROKEN_TEXT, background: BROKEN }
   if (tab.matching > 0) return { text: String(tab.matching), background: 'accent' }
   return null
 }
@@ -123,29 +127,51 @@ export async function tabNavigated(
 ): Promise<void> {
   const tab = factsFor(tabId)
   tab.matching = matching
-  tab.broken = 0
+  tab.broken = new Set()
   await paint(tabId, accent)
 }
 
 /** After a save, a delete, or a toggle, where no navigation happened. */
 export async function transformCountChanged(
   tabId: number,
-  matching: number,
+  matchingIds: string[],
   accent: Accent,
 ): Promise<void> {
   const tab = factsFor(tabId)
-  tab.matching = matching
+  tab.matching = matchingIds.length
+  /*
+   * A transform that no longer matches this tab, or was disabled or deleted,
+   * cannot be broken on it. Without this the marker stayed until the next
+   * navigation, naming a transform that was no longer there.
+   */
+  const matching = new Set(matchingIds)
+  for (const id of tab.broken) if (!matching.has(id)) tab.broken.delete(id)
   await paint(tabId, accent)
 }
 
+/** Replaces the broken set with what a health check just found. */
 export async function healthChecked(
   tabId: number,
-  brokenCount: number,
+  brokenIds: string[],
   accent: Accent,
 ): Promise<void> {
-  const tab = factsFor(tabId)
-  tab.broken = brokenCount
+  factsFor(tabId).broken = new Set(brokenIds)
   await paint(tabId, accent)
+}
+
+/**
+ * Removes one transform from the broken set of every tab, after it was saved
+ * or deleted.
+ *
+ * A save replaces the code the check judged, so the old verdict no longer
+ * applies; the next check decides again. Every tab is visited because the
+ * transform may match tabs other than the one the edit was made from, and only
+ * that one is reapplied.
+ */
+export async function transformEdited(id: string, accent: Accent): Promise<void> {
+  for (const [tabId, tab] of facts) {
+    if (tab.broken.delete(id)) await paint(tabId, accent)
+  }
 }
 
 export async function generationStarted(tabId: number, accent: Accent): Promise<void> {
@@ -156,6 +182,11 @@ export async function generationStarted(tabId: number, accent: Accent): Promise<
 export async function generationEnded(tabId: number, accent: Accent): Promise<void> {
   factsFor(tabId).working = false
   await paint(tabId, accent)
+}
+
+/** Whether anything is known about this tab, which a suspension erases. */
+export function hasFacts(tabId: number): boolean {
+  return facts.has(tabId)
 }
 
 export function tabClosed(tabId: number): void {

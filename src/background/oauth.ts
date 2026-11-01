@@ -25,6 +25,7 @@
  */
 
 import type { Credential, OAuthConfig } from '@shared/types'
+import { assertEndpoint } from '@shared/endpoint-policy'
 
 /** RFC 7636 §4.1: 43–128 characters from the unreserved set. */
 const VERIFIER_BYTES = 32
@@ -151,10 +152,27 @@ export function expiryFrom(payload: TokenPayload, now: number): number {
   return now + (payload.expires_in ?? ASSUMED_LIFETIME_SECONDS) * 1000
 }
 
+/**
+ * How long a token request may take. A refresh holds the credential lock while
+ * it waits, so an endpoint that never answers would otherwise block every
+ * credential change.
+ */
+export const TOKEN_REQUEST_TIMEOUT_MS = 15_000
+
 /** Refresh this far ahead of expiry, so a request in flight does not expire. */
 export const REFRESH_MARGIN_MS = 60_000
 
-export function needsRefresh(expiresAt: number, now: number): boolean {
+export function needsRefresh(
+  expiresAt: number | undefined,
+  now: number,
+  hasRefreshToken = true,
+): boolean {
+  // An unknown expiry is not treated as an expired one; a 401 settles it.
+  if (expiresAt === undefined) return false
+  // The margin exists so that a refresh finishes before the token ends. With no
+  // refresh token there is nothing to start, so applying it only reported the
+  // sign-in as ended a minute early while the token still worked.
+  if (!hasRefreshToken) return expiresAt <= now
   return expiresAt - REFRESH_MARGIN_MS <= now
 }
 
@@ -165,14 +183,28 @@ export function credentialFrom(
   previousRefreshToken?: string,
 ): Extract<Credential, { kind: 'oauth' }> {
   const refreshToken = payload.refresh_token ?? previousRefreshToken
-  if (!payload.access_token || !refreshToken) {
+  if (!payload.access_token) {
     throw new Error('The provider did not return a usable token.')
   }
+  /*
+   * A missing refresh token is accepted. Some providers issue one only when an
+   * `offline_access` scope is requested and others never do, and refusing the
+   * response discarded an access token that was valid. The sign-in then lasts
+   * until that token ends, and the adapter says so when it does.
+   *
+   * With no refresh token and no `expires_in` the lifetime is left unknown
+   * rather than assumed to be an hour: an assumed expiry that is too short
+   * would refuse a working token, and a 401 reports a dead one anyway.
+   */
+  const expiresAt =
+    payload.expires_in !== undefined || refreshToken
+      ? expiryFrom(payload, now)
+      : undefined
   return {
     kind: 'oauth',
     accessToken: payload.access_token,
-    refreshToken,
-    expiresAt: expiryFrom(payload, now),
+    ...(refreshToken ? { refreshToken } : {}),
+    ...(expiresAt !== undefined ? { expiresAt } : {}),
     tokenEndpoint: config.tokenEndpoint,
     clientId: config.clientId,
   }
@@ -187,6 +219,12 @@ export function credentialFrom(
  * as thin as it is — every decision worth testing has been moved above.
  */
 export async function connect(config: OAuthConfig): Promise<Extract<Credential, { kind: 'oauth' }>> {
+  // Before anything is opened or sent. Settings are checked when saved, but
+  // this is the last point before the authorization code and the verifier
+  // leave the extension, so it does not rely on that having happened.
+  assertEndpoint(config.authorizationEndpoint, 'authorization endpoint')
+  assertEndpoint(config.tokenEndpoint, 'token endpoint')
+
   const redirectUri = browser.identity.getRedirectURL()
   const { verifier, challenge } = await createPkce()
   const state = randomState()
@@ -198,17 +236,32 @@ export async function connect(config: OAuthConfig): Promise<Extract<Credential, 
 
   const code = parseRedirect(returned, state)
 
-  const response = await fetch(config.tokenEndpoint, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
-      grant_type: 'authorization_code',
-      code,
-      redirect_uri: redirectUri,
-      client_id: config.clientId,
-      code_verifier: verifier,
-    }),
-  })
+  /*
+   * `redirect: 'error'`: the default follows a 307 or 308 and sends the same
+   * body to the new location, which would hand the code and the verifier to any
+   * address the token endpoint named, including plain http. The endpoint was
+   * checked above; a redirect target was not.
+   */
+  let response: Response
+  try {
+    response = await fetch(config.tokenEndpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      redirect: 'error',
+      body: new URLSearchParams({
+        grant_type: 'authorization_code',
+        code,
+        redirect_uri: redirectUri,
+        client_id: config.clientId,
+        code_verifier: verifier,
+      }),
+    })
+  } catch (error) {
+    throw new Error(
+      'The sign-in server could not be reached, or it redirected the token request, which is not allowed. Check the token endpoint in settings.',
+      { cause: error },
+    )
+  }
 
   if (!response.ok) {
     throw new Error(

@@ -10,17 +10,22 @@
    */
   import { ACCENTS, type Accent, type CredentialStatus, type HealthCheckMode, type Settings } from '@shared/types'
   import { ACCENT_COLOURS } from '@shared/accents'
+  import { credentialDisclosure, type VaultView } from '@shared/vault-disclosure'
   import Label from './Label.svelte'
   import Toggle from './Toggle.svelte'
 
   interface Props {
     settings: Settings
     statuses: CredentialStatus[]
+    /** Whether credentials are sealed with a passphrase, and whether they are unlocked. */
+    vault: VaultView
     onsave: (settings: Settings) => void
     onfullpage: () => void
   }
 
-  let { settings, statuses, onsave, onfullpage }: Props = $props()
+  let { settings, statuses, vault, onsave, onfullpage }: Props = $props()
+
+  let disclosure = $derived(credentialDisclosure(vault))
 
 
   const HEALTH_MODES: { value: HealthCheckMode; label: string; note?: string }[] = [
@@ -66,7 +71,11 @@
           {activeStatus?.kind === 'oauth' ? 'oauth' : 'api key'}
         </span>
         <span class="state">
-          {activeStatus?.configured ? 'Key configured' : 'No credential'}
+          {#if activeStatus?.needsReentry}
+            {activeStatus.kind === 'oauth' ? 'Sign in again' : 'Enter the key again'} for this provider
+          {:else}
+            {activeStatus?.configured ? 'Key configured' : 'No credential'}
+          {/if}
         </span>
       </div>
       <div class="models">
@@ -144,10 +153,10 @@
 
   <div class="disclosure">
     <span class="card-title">Where your keys are stored</span>
-    <span class="note">
-      Plain text in this browser profile. Browsers give extensions no keychain, so
-      file permissions on the profile directory are the only protection.
-    </span>
+    <span class="note">{disclosure.text}</span>
+    {#if disclosure.status}
+      <span class="note"><strong>{disclosure.status}</strong></span>
+    {/if}
   </div>
 
   <footer>

@@ -13,6 +13,8 @@
  *   code       the implementation itself.
  */
 
+import { DEFAULT_VAULT_IDLE_MINUTES } from './vault-policy'
+
 export const SCHEMA_VERSION = 1
 
 export type TransformKind = 'css' | 'js'
@@ -182,6 +184,20 @@ export interface Conflict {
 export type ProviderType = 'anthropic' | 'openai-compatible'
 
 /**
+ * What a credential was entered for: the provider type and the origin its
+ * requests go to. The background compares it with the provider's current
+ * destination before every request and refuses to send on a mismatch.
+ *
+ * Optional only because credentials stored by earlier versions have none. The
+ * first read binds such a credential to the provider's destination at that
+ * moment; see `readCredentialForRequest` in storage.ts.
+ */
+export interface CredentialBinding {
+  type: ProviderType
+  origin: string
+}
+
+/**
  * Credentials are keyed by provider *id*, not provider type, so two
  * OpenAI-compatible endpoints hold independent keys. Removing a provider
  * clears its credential.
@@ -191,13 +207,23 @@ export type ProviderType = 'anthropic' | 'openai-compatible'
  * implemented only for providers that sanction it.
  */
 export type Credential =
-  | { kind: 'api_key'; value: string }
+  | { kind: 'api_key'; value: string; boundTo?: CredentialBinding }
   | {
       kind: 'oauth'
+      boundTo?: CredentialBinding
       accessToken: string
-      refreshToken: string
-      /** Epoch ms. Refresh is attempted ahead of this. */
-      expiresAt: number
+      /**
+       * Absent when the provider issued none, for example because no
+       * `offline_access` scope was requested. The sign-in then ends when the
+       * access token does.
+       */
+      refreshToken?: string
+      /**
+       * Epoch ms. Refresh is attempted ahead of this. Absent when the provider
+       * sent no `expires_in` and issued no refresh token, so that no lifetime
+       * has to be guessed for a token that cannot be renewed.
+       */
+      expiresAt?: number
       tokenEndpoint: string
       clientId: string
     }
@@ -237,6 +263,16 @@ export const ANTHROPIC_MODELS: ModelOption[] = [
 ]
 
 /**
+ * How a model is named in messages: "Opus 5 (claude-opus-5)" for a listed
+ * model, and the id alone for any other, since an id typed by hand has no
+ * label to show.
+ */
+export function modelDisplayName(id: string): string {
+  const known = ANTHROPIC_MODELS.find((m) => m.id === id)
+  return known ? `${known.label} (${id})` : id
+}
+
+/**
  * What an OpenAI-compatible provider needs before it can be signed into.
  *
  * Typed in by hand rather than discovered. There is no registry of these, and
@@ -274,6 +310,60 @@ export interface Provider {
    * OpenAI-compatible endpoints there is no equivalent, so it is set by hand.
    */
   supportsVision: boolean
+  /**
+   * Optional price the user entered, in US dollars per million tokens. Used for
+   * OpenAI-compatible providers only, because they have no price list the
+   * extension could read. Anthropic prices come from ANTHROPIC_MODELS.
+   */
+  price?: TokenPrice
+}
+
+/** US dollars per million tokens. */
+export interface TokenPrice {
+  input: number
+  output: number
+}
+
+/** Token counts a provider reported for one call. */
+export interface TokenUsage {
+  inputTokens: number
+  outputTokens: number
+}
+
+/**
+ * What one model call used, for showing in the panel.
+ *
+ * `usage` is null when the response carried no usable usage block, which the
+ * panel shows as "not reported" and which is not the same as zero tokens.
+ * `costUsd` is null when no price is known for the model.
+ */
+export interface UsageReport {
+  model: string
+  usage: TokenUsage | null
+  costUsd: number | null
+}
+
+/** Running totals for one provider in one month, or for one transform. */
+export interface UsageTotals {
+  /** Every call made, including those whose response had no usage block. */
+  calls: number
+  /** Calls whose response reported usage. The token sums cover these only. */
+  reportedCalls: number
+  inputTokens: number
+  outputTokens: number
+  /** Cost of the calls that had a price. Summed when each call was made. */
+  costUsd: number
+  /** Calls that were priced; may be fewer than reportedCalls. */
+  pricedCalls: number
+}
+
+/**
+ * Everything recorded. Months are UTC calendar months written "2026-11",
+ * since providers bill and reset limits on UTC.
+ */
+export interface UsageStore {
+  months: Record<string, Record<string, UsageTotals>>
+  transforms: Record<string, UsageTotals>
 }
 
 /** What the sidebar is allowed to know about a credential. Never the value. */
@@ -283,6 +373,14 @@ export interface CredentialStatus {
   kind?: Credential['kind']
   /** Epoch ms, oauth only. Lets the UI warn before a hard expiry. */
   expiresAt?: number
+  /** Oauth only. False when there is no refresh token and sign-in must be repeated at expiry. */
+  renewable?: boolean
+  /**
+   * True when the stored credential is bound to a different origin or provider
+   * type than the provider now uses, so requests refuse it. `configured` stays
+   * true so the credential can still be replaced or cleared.
+   */
+  needsReentry?: boolean
 }
 
 /* ------------------------------------------------------------------ */
@@ -349,6 +447,11 @@ export interface Settings {
    * `block`. A wildcard key for a public suffix such as `*.com` is ignored.
    */
   cssUrlPolicy: Record<string, CssUrlMode>
+  /**
+   * Minutes without a provider call after which an unlocked vault locks
+   * itself. Zero means never. Has no effect while credentials are not sealed.
+   */
+  vaultIdleLockMinutes: number
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -360,6 +463,7 @@ export const DEFAULT_SETTINGS: Settings = {
   keepScreenshotPermission: false,
   aiJsKillSwitch: false,
   cssUrlPolicy: {},
+  vaultIdleLockMinutes: DEFAULT_VAULT_IDLE_MINUTES,
 }
 
 /* ------------------------------------------------------------------ */
@@ -404,6 +508,8 @@ export interface ReviewResult {
   approvalToken?: string
   /** False when anything blocking is outstanding. */
   passed: boolean
+  /** Present when a model call was made for this result. */
+  usage?: UsageReport
 }
 
 /* ------------------------------------------------------------------ */

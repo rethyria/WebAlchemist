@@ -31,8 +31,13 @@ export interface SaveDeps {
   getSettings: () => Promise<Settings>
   /** The URL of a tab, or undefined when there is none or it has closed. */
   tabUrl: (tabId: number | undefined) => Promise<string | undefined>
-  saveTransform: (transform: Transform) => Promise<void>
+  /** Throws a message when a record is not usable, before any other check reads its fields. */
+  assertValidTransform: (value: unknown) => void
+  /** Stores the transform and returns the record as stored, which is what is registered and applied. */
+  saveTransform: (transform: Transform) => Promise<Transform>
   registerTransform: (transform: Transform) => Promise<unknown>
+  /** Refreshes the badge for a transform that was saved. */
+  transformEdited: (id: string) => Promise<void>
   /** Brings a tab up to date after a change. */
   reapply: (tabId: number | undefined) => Promise<void>
 }
@@ -47,6 +52,11 @@ export interface SaveDeps {
  * to check it for itself.
  */
 export async function handleSaveTransform(message: Of<'save-transform'>, deps: SaveDeps): Promise<true> {
+  // First, so a record with a missing field is refused with a message before
+  // analysis reads fields it may not have. saveTransform checks again; this is
+  // only the earlier point.
+  deps.assertValidTransform(message.transform)
+
   if (message.transform.kind === 'js') {
     const analysis = runStaticAnalysis(message.transform.code, message.transform.capabilities)
     if (!analysis.passed) {
@@ -101,13 +111,18 @@ export async function handleSaveTransform(message: Of<'save-transform'>, deps: S
     }
   }
 
-  await deps.saveTransform(message.transform)
-  if (message.transform.kind === 'js') {
-    await deps.registerTransform(message.transform)
-    // Spent only now that the save succeeded, so a failed save can be retried
-    // with the same token, and a successful one cannot be repeated with it.
-    if (message.approvalToken) await spendApproval(message.approvalToken)
+  // Register what was stored, not what was sent: a save keeps the stored
+  // `enabled`, and the copy that arrived may hold an older value.
+  const saved = await deps.saveTransform(message.transform)
+  if (saved.kind === 'js') {
+    await deps.registerTransform(saved)
   }
+  // Spent only now that the save succeeded, so a failed save can be retried
+  // with the same token, and a successful one cannot be repeated with it.
+  if (message.transform.kind === 'js' && message.approvalToken) {
+    await spendApproval(message.approvalToken)
+  }
+  await deps.transformEdited(saved.id)
   // Apply it now rather than on the next navigation. The preview was just taken
   // down, so without this the page visibly reverts on save.
   await deps.reapply(message.tabId)
@@ -121,8 +136,8 @@ export async function handleSaveTransform(message: Of<'save-transform'>, deps: S
 export interface PreviewCssDeps {
   getSettings: () => Promise<Settings>
   tabUrl: (tabId: number | undefined) => Promise<string | undefined>
-  /** Injects the CSS into the tab, or removes the preview when given null. */
-  setPreviewCss: (tabId: number, css: string | null) => Promise<void>
+  /** Injects the CSS into the tab as that tab's preview, replacing an earlier one. */
+  setPreviewCss: (tabId: number, css: string) => Promise<void>
 }
 
 /**
@@ -142,7 +157,13 @@ export async function handlePreviewCss(message: Of<'preview-css'>, deps: Preview
 
 export interface ReviewDeps {
   /** Static analysis, then the model review when analysis passes. */
-  runReview: (code: string, intent: string, declared: Transform['capabilities']) => Promise<ReviewResult>
+  runReview: (
+    code: string,
+    intent: string,
+    declared: Transform['capabilities'],
+    /** The transform the call is for, so its cost is added to that transform. */
+    transformId?: string,
+  ) => Promise<ReviewResult>
   recordApproval?: typeof recordApproval
 }
 
@@ -160,7 +181,12 @@ export async function handleReview(
   deps: ReviewDeps,
 ): Promise<ReviewResult> {
   const record = deps.recordApproval ?? recordApproval
-  const result = await deps.runReview(message.code, message.intent, message.declaredCapabilities)
+  const result = await deps.runReview(
+    message.code,
+    message.intent,
+    message.declaredCapabilities,
+    message.transformId,
+  )
   if (result.model && trusted) {
     const verdict: ApprovalVerdict = result.model.verdict
     const approvalToken = await record(message.code, message.world, message.declaredCapabilities, verdict, {
@@ -265,11 +291,17 @@ export interface CssApplyDeps {
   insertCss: (tabId: number, css: string) => Promise<void>
   removeCss: (tabId: number, css: string) => Promise<void>
   /**
-   * What is currently injected in each tab. Held because removeCSS matches on
+   * What is currently injected in each tab. Kept because removeCSS matches on
    * content: taking a stylesheet back out requires the exact string that went
-   * in. Without it, saving or toggling could only add, never replace.
+   * in. Without it, saving or toggling could only add, never replace. It is
+   * kept in storage.session in the extension (see css-state.ts), so a
+   * suspension of the background page does not lose it.
    */
-  applied: Map<number, string>
+  applied: {
+    read: (tabId: number) => Promise<string | undefined>
+    write: (tabId: number, css: string) => Promise<void>
+    forget: (tabId: number) => Promise<void>
+  }
 }
 
 /**
@@ -296,17 +328,17 @@ export async function applyCssTransforms(
     .map((t) => `/* ${t.name} */\n${t.code}`)
     .join('\n\n')
 
-  const previous = deps.applied.get(tabId)
+  const previous = await deps.applied.read(tabId)
   if (previous !== undefined && previous !== css) {
     await deps.removeCss(tabId, previous).catch(() => {})
-    deps.applied.delete(tabId)
+    await deps.applied.forget(tabId)
   }
 
   if (!css || previous === css) return
 
   try {
     await deps.insertCss(tabId, css)
-    deps.applied.set(tabId, css)
+    await deps.applied.write(tabId, css)
   } catch {
     // No host permission for this origin yet, which is expected until the user
     // saves their first transform for the site.

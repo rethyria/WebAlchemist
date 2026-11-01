@@ -22,6 +22,8 @@ import type {
   Rect,
   ReviewResult,
   Settings,
+  UsageReport,
+  UsageStore,
   Conflict,
   Transform,
   TransformRuntimeState,
@@ -60,6 +62,7 @@ export type Message =
       history: RefinementTurn[]
       scopeDepth?: number
       scopeContainer?: string | null
+      transformId?: string
     }
   | { type: 'repair'; transformId: string; context: PageContext; brokenReason: string }
   | {
@@ -69,8 +72,12 @@ export type Message =
       declaredCapabilities: Transform['capabilities']
       /** Part of what the approval is tied to. Absent means USER_SCRIPT. */
       world?: Transform['world']
-      /** The transform and match pattern the approval token is tied to. */
+      /**
+       * The transform the approval token is tied to. It is also the transform
+       * the call is for, so its cost is added to that transform.
+       */
       transformId: string
+      /** The match pattern the approval token is tied to. */
       match: string
     }
   /**
@@ -88,6 +95,8 @@ export type Message =
       transformId: string
       match: string
     }
+  /** Recorded token usage, for the settings page. */
+  | { type: 'get-usage' }
   /** Static analysis alone — no model call, so it is free to run before preview. */
   | { type: 'analyse'; code: string; declaredCapabilities: Transform['capabilities'] }
   /**
@@ -335,7 +344,16 @@ export type ContentEvent =
       viewportWidth: number
     }
   | { type: 'picking-cancelled' }
-  | { type: 'health-check-result'; states: TransformRuntimeState[] }
+  | {
+      type: 'health-check-result'
+      /**
+       * The tab the check ran in. Several tabs finish loading while one sidebar
+       * is open, and without this the sidebar cannot tell whose states these
+       * are.
+       */
+      tabId: number
+      states: TransformRuntimeState[]
+    }
 
 /**
  * An element the page found for us, described the way a pick describes one.
@@ -394,7 +412,9 @@ export interface Responses {
   'vault-state': { sealed: boolean; unlocked: boolean }
   'get-vision-support': boolean
   generate: GenerationResult
-  repair: GenerationResult
+  /** `usage` is absent when no call returned a response. */
+  repair: { result: GenerationResult; usage?: UsageReport }
+  'get-usage': UsageStore
   /** Null when the anchor no longer resolves on this page. */
   'context-for-anchor': AnchoredElement | null
   'find-conflicts': Conflict[]
@@ -405,7 +425,7 @@ export interface Responses {
   'preview-js': boolean
   'clear-preview-js': boolean
   'export-transforms': { schemaVersion: number; exportedAt: number; transforms: Transform[] }
-  'import-transforms': { imported: number; needsRegeneration: string[] }
+  'import-transforms': { imported: number; skipped: number; needsRegeneration: string[] }
   'capture-region': { dataUrl: string; rect: Rect; clipped: boolean }
   'start-picking': boolean
   'stop-picking': boolean

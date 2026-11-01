@@ -162,6 +162,16 @@ describe('expiry arithmetic', () => {
     expect(needsRefresh(now - 1, now)).toBe(true)
   })
 
+  it('does not apply the margin when there is no refresh token to renew with', () => {
+    expect(needsRefresh(now + REFRESH_MARGIN_MS - 1000, now, false)).toBe(false)
+    expect(needsRefresh(now + 1, now, false)).toBe(false)
+    // Control: the token still counts as ended at and after its expiry.
+    expect(needsRefresh(now, now, false)).toBe(true)
+    expect(needsRefresh(now - 1, now, false)).toBe(true)
+    // Control: with a refresh token the margin still applies.
+    expect(needsRefresh(now + REFRESH_MARGIN_MS - 1000, now, true)).toBe(true)
+  })
+
   /* The control: a margin of zero would pass the two tests above by accident. */
   it('uses a margin that is actually non-zero', () => {
     expect(REFRESH_MARGIN_MS).toBeGreaterThan(0)
@@ -202,7 +212,22 @@ describe('building the stored credential', () => {
     expect(() => credentialFrom({ refresh_token: 'R' }, config, now)).toThrow(/usable token/)
   })
 
-  it('refuses a first response with no refresh token and nothing to fall back on', () => {
-    expect(() => credentialFrom({ access_token: 'A' }, config, now)).toThrow(/usable token/)
+  it('accepts a response with no refresh token and stores none', () => {
+    const credential = credentialFrom({ access_token: 'A', expires_in: 300 }, config, now)
+    expect(credential.accessToken).toBe('A')
+    expect(credential.expiresAt).toBe(now + 300_000)
+    expect('refreshToken' in credential).toBe(false)
+  })
+
+  // Without a refresh token an assumed lifetime would make the extension
+  // refuse a token that still works, so the expiry is left unknown instead.
+  it('leaves the expiry unknown when there is neither a refresh token nor expires_in', () => {
+    const credential = credentialFrom({ access_token: 'A' }, config, now)
+    expect('expiresAt' in credential).toBe(false)
+  })
+
+  it('control: a refresh token with no expires_in still gets the assumed hour', () => {
+    const credential = credentialFrom({ access_token: 'A', refresh_token: 'R' }, config, now)
+    expect(credential.expiresAt).toBe(now + 3600_000)
   })
 })

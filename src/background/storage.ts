@@ -43,11 +43,15 @@ import {
   type Credential,
   type CredentialStatus,
   type Settings,
+  type TokenUsage,
   type Transform,
+  type UsageStore,
 } from '@shared/types'
+import { addCall, monthOf } from '@shared/usage'
 import {
   LockedError,
   deriveKey,
+  IDLE_ALARM,
   forgetKey,
   isSealed,
   randomSalt,
@@ -57,10 +61,15 @@ import {
   seal,
   unseal,
 } from './vault'
+import { MIN_PASSPHRASE_LENGTH } from '@shared/vault-policy'
+import { assertEndpoint, endpointsOf } from '@shared/endpoint-policy'
+import { destinationOf, sameBinding } from '@shared/credential-binding'
+import type { Provider } from '@shared/types'
 
 const KEY_SETTINGS = 'settings'
 const KEY_TRANSFORMS = 'transforms'
 const KEY_CREDENTIALS = 'credentials'
+const KEY_USAGE = 'usage'
 
 type CredentialMap = Record<string, Credential>
 
@@ -76,7 +85,49 @@ export async function getSettings(): Promise<Settings> {
 }
 
 export async function saveSettings(settings: Settings): Promise<void> {
+  const idle = settings.vaultIdleLockMinutes
+  if (!Number.isInteger(idle) || idle < 0) {
+    throw new Error('The vault lock period must be a whole number of minutes, or 0 for never.')
+  }
+  const previous = (await browser.storage.local.get(KEY_SETTINGS))[KEY_SETTINGS] as
+    | Partial<Settings>
+    | undefined
+  // Checked here and not only in the settings page: this is reached by a
+  // message that any extension context can send.
+  //
+  // Only endpoints that are new or differ from the stored ones are checked.
+  // Checking every provider made one stored provider whose endpoint breaks a
+  // rule added later (for example a plain http address saved by an older
+  // version) fail every settings save, including the switch that stops
+  // AI-written JavaScript. An unchanged endpoint is compared against what is
+  // stored, not against what the message claims, so this cannot be used to
+  // smuggle in a new one. The request paths check the endpoint again before
+  // anything is sent.
+  const storedEndpoints = new Map<string, string>()
+  for (const stored of previous?.providers ?? []) {
+    for (const [what, url] of endpointsOf(stored)) storedEndpoints.set(`${stored.id}\n${what}`, url)
+  }
+  for (const provider of settings.providers) {
+    for (const [what, url] of endpointsOf(provider)) {
+      if (storedEndpoints.get(`${provider.id}\n${what}`) === url) continue
+      assertEndpoint(url, `${what} of ${provider.label}`)
+    }
+  }
+  for (const provider of settings.providers) {
+    const price = provider.price
+    if (price === undefined) continue
+    const valid = (n: unknown) => typeof n === 'number' && Number.isFinite(n) && n >= 0
+    if (!valid(price.input) || !valid(price.output)) {
+      throw new Error(`The price for ${provider.label} must be two numbers of 0 or more.`)
+    }
+  }
   await browser.storage.local.set({ [KEY_SETTINGS]: settings })
+
+  // A changed period applies to the vault that is open now, not only to the
+  // next unlock. Other settings changes leave the running timer alone, so
+  // that picking an accent colour does not count as using the vault.
+  const before = previous?.vaultIdleLockMinutes ?? DEFAULT_SETTINGS.vaultIdleLockMinutes
+  if (before !== idle && (await recallKey())) await armIdleLock()
 }
 
 function migrateSettings(raw: Partial<Settings>): Settings {
@@ -90,34 +141,212 @@ function migrateSettings(raw: Partial<Settings>): Settings {
 /* Transforms                                                          */
 /* ------------------------------------------------------------------ */
 
-export async function getAllTransforms(): Promise<Transform[]> {
+const isObject = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value)
+
+const isStringArray = (value: unknown): boolean =>
+  Array.isArray(value) && value.every((item) => typeof item === 'string')
+
+/**
+ * Names the first field of a record that code elsewhere would misread, or
+ * returns null when the record is usable.
+ *
+ * Stored records were never validated, so a hand-edited import with no `match`
+ * made matchesUrl throw on every navigation, which stopped every site from
+ * being restyled (#90). The check covers what would throw or mis-sort when
+ * used: the identifying and matching fields, the kind, the sort key, `intent`,
+ * and the nested objects whose fields the health check, the content script and
+ * the prompt builder read without checking (the anchor's tag, classes, path and
+ * selector, the rationale's assumptions).
+ *
+ * It does not check the contents of `code` or the rationale's text. A record
+ * with odd text in those fields fails inside one transform instead of across
+ * all of them. The fields it does check have been in the Transform type since
+ * the first version, so records from older versions pass.
+ */
+function firstProblem(value: unknown): string | null {
+  if (!isObject(value)) return 'record'
+  const { anchor, rationale } = value
+  if (typeof value.id !== 'string' || value.id === '') return 'id'
+  if (typeof value.name !== 'string') return 'name'
+  if (typeof value.enabled !== 'boolean') return 'enabled'
+  if (typeof value.order !== 'number' || !Number.isFinite(value.order)) return 'order'
+  if (typeof value.match !== 'string') return 'match'
+  if (value.kind !== 'css' && value.kind !== 'js') return 'kind'
+  if (typeof value.code !== 'string') return 'code'
+  if (typeof value.intent !== 'string') return 'intent'
+  if (!Array.isArray(value.capabilities)) return 'capabilities'
+  if (!isObject(anchor)) return 'anchor'
+  if (typeof anchor.selector !== 'string') return 'anchor.selector'
+  if (typeof anchor.tag !== 'string') return 'anchor.tag'
+  if (typeof anchor.path !== 'string') return 'anchor.path'
+  if (!isStringArray(anchor.classes)) return 'anchor.classes'
+  if (!isObject(rationale)) return 'rationale'
+  if (!isStringArray(rationale.assumptions)) return 'rationale.assumptions'
+  return null
+}
+
+export function isValidTransform(value: unknown): value is Transform {
+  return firstProblem(value) === null
+}
+
+/**
+ * Throws a message for the sidebar when a record is not usable. A provider
+ * that ignores strict structured output can return a transform with a field
+ * missing; storing it would answer ok and then hide it, because reads skip
+ * invalid records.
+ */
+export function assertValidTransform(value: unknown): asserts value is Transform {
+  const problem = firstProblem(value)
+  if (problem !== null) {
+    throw new Error(`This transform has no valid "${problem}" field, so it was not saved.`)
+  }
+}
+
+/**
+ * Splits the stored list into records this version can use and everything
+ * else, which is kept exactly as stored.
+ *
+ * Invalid records are not deleted. One may be a hand-edited import that the
+ * user means to fix, or a record from a newer version that this version cannot
+ * read; discarding it at the next unrelated save would lose it without a word.
+ * Every write puts the invalid entries back unchanged (see writeTransforms).
+ */
+async function readStored(): Promise<{ valid: Transform[]; invalid: unknown[] }> {
   const stored = await browser.storage.local.get(KEY_TRANSFORMS)
-  const list = (stored[KEY_TRANSFORMS] as Transform[] | undefined) ?? []
-  return list.sort((a, b) => a.order - b.order)
+  const raw = stored[KEY_TRANSFORMS]
+  const list: unknown[] = Array.isArray(raw) ? raw : []
+  return {
+    valid: list.filter(isValidTransform),
+    invalid: list.filter((record) => !isValidTransform(record)),
+  }
 }
 
-export async function saveTransform(transform: Transform): Promise<void> {
-  const all = await getAllTransforms()
-  const index = all.findIndex((t) => t.id === transform.id)
-  const next = { ...transform, updatedAt: Date.now() }
-  if (index === -1) all.push(next)
-  else all[index] = next
-  await browser.storage.local.set({ [KEY_TRANSFORMS]: all })
+async function writeTransforms(valid: Transform[], invalid: unknown[]): Promise<void> {
+  await browser.storage.local.set({ [KEY_TRANSFORMS]: [...valid, ...invalid] })
 }
 
-export async function deleteTransform(id: string): Promise<void> {
-  const all = await getAllTransforms()
-  await browser.storage.local.set({
-    [KEY_TRANSFORMS]: all.filter((t) => t.id !== id),
+/**
+ * Reads the transform list, leaving out records that fail isValidTransform.
+ *
+ * Skipping rather than throwing is deliberate: this runs on every navigation,
+ * and an error here would disable every other transform for the sake of one.
+ * The skipped records stay in storage; see readStored.
+ */
+export async function getAllTransforms(): Promise<Transform[]> {
+  const { valid } = await readStored()
+  return valid.sort((a, b) => a.order - b.order)
+}
+
+/** How many stored records are skipped on read, for the interface to report. */
+export async function countSkippedTransforms(): Promise<number> {
+  return (await readStored()).invalid.length
+}
+
+/**
+ * The tail of the chain of transform mutations. Each mutation waits for the one
+ * before it, so a read-modify-write never starts while another is between its
+ * read and its write.
+ *
+ * The transform list is stored as one array, so every change reads the whole
+ * array and writes the whole array back. Two handlers running at once both read
+ * the same array and the second write discards the first (#84). A lock inside
+ * the browser's storage was not an option, since storage.local has no
+ * transactions; ordering the calls in this module is the available fix. It
+ * covers only this background script, which is the only context that calls
+ * these functions.
+ *
+ * Reads stay outside the queue: a read sees either the state before a write or
+ * after it, never a partial one, so it has nothing to wait for.
+ */
+let transformQueue: Promise<unknown> = Promise.resolve()
+
+function mutateTransforms<T>(work: () => Promise<T>): Promise<T> {
+  // A failed mutation must not stop the ones behind it, so the chain continues
+  // from the outcome of the previous call whether it succeeded or not.
+  const result = transformQueue.then(work, work)
+  transformQueue = result.catch(() => undefined)
+  return result
+}
+
+/**
+ * Stores a transform, replacing the record with the same id when there is one.
+ *
+ * When it replaces a record, the stored `order`, `enabled` and `createdAt` are
+ * kept and the caller's values for them are ignored. The sidebar and the editor
+ * send a copy of the record from when they loaded it, and nothing refreshes
+ * that copy, so a save from either one carried the old order after a reorder
+ * and the old enabled flag after a toggle, and undid both (#85). Only
+ * `reorderTransforms` and `updateTransform` change those fields. Returns the
+ * record as stored, which is what callers should register or apply.
+ */
+export function saveTransform(transform: Transform): Promise<Transform> {
+  return mutateTransforms(async () => {
+    const { valid: all, invalid } = await readStored()
+    const index = all.findIndex((t) => t.id === transform.id)
+    const existing = index === -1 ? undefined : all[index]
+    const next = {
+      ...transform,
+      ...(existing && {
+        order: existing.order,
+        enabled: existing.enabled,
+        createdAt: existing.createdAt,
+      }),
+      updatedAt: Date.now(),
+    }
+    assertValidTransform(next)
+    if (index === -1) all.push(next)
+    else all[index] = next
+    await writeTransforms(all, invalid)
+    return next
+  })
+}
+
+/**
+ * Changes some fields of one stored transform. The read, the change and the
+ * write all happen inside the queue.
+ *
+ * A caller that reads the transform with getAllTransforms and then calls
+ * saveTransform with a changed copy does the read outside the queue. A save
+ * that runs between the two is then overwritten by the copy, which still holds
+ * the old values of every field the caller did not mean to change. That is how
+ * the enable toggle lost a concurrent save of the same transform. Returns the
+ * stored record, or null when no transform has that id.
+ */
+export function updateTransform(
+  id: string,
+  patch: Partial<Omit<Transform, 'id'>>,
+): Promise<Transform | null> {
+  return mutateTransforms(async () => {
+    const { valid: all, invalid } = await readStored()
+    const index = all.findIndex((t) => t.id === id)
+    if (index === -1) return null
+    const next = { ...all[index]!, ...patch, id, updatedAt: Date.now() }
+    assertValidTransform(next)
+    all[index] = next
+    await writeTransforms(all, invalid)
+    return next
+  })
+}
+
+export function deleteTransform(id: string): Promise<void> {
+  return mutateTransforms(async () => {
+    const { valid: all, invalid } = await readStored()
+    await writeTransforms(
+      all.filter((t) => t.id !== id),
+      invalid,
+    )
   })
 }
 
 /** Persists a new ordering. Order decides which transform wins a conflict. */
-export async function reorderTransforms(orderedIds: string[]): Promise<void> {
-  const all = await getAllTransforms()
-  const position = new Map(orderedIds.map((id, index) => [id, index]))
-  const next = all.map((t) => ({ ...t, order: position.get(t.id) ?? t.order }))
-  await browser.storage.local.set({ [KEY_TRANSFORMS]: next })
+export function reorderTransforms(orderedIds: string[]): Promise<void> {
+  return mutateTransforms(async () => {
+    const { valid: all, invalid } = await readStored()
+    const position = new Map(orderedIds.map((id, index) => [id, index]))
+    const next = all.map((t) => ({ ...t, order: position.get(t.id) ?? t.order }))
+    await writeTransforms(next, invalid)
+  })
 }
 
 /* ------------------------------------------------------------------ */
@@ -132,7 +361,7 @@ export async function reorderTransforms(orderedIds: string[]): Promise<void> {
  * settings flag. A flag can disagree with the bytes; the bytes cannot disagree
  * with themselves.
  */
-async function readCredentialMap(): Promise<CredentialMap> {
+async function readCredentialMap(touch = false): Promise<CredentialMap> {
   const stored = await browser.storage.local.get(KEY_CREDENTIALS)
   const value = stored[KEY_CREDENTIALS]
   if (value === undefined) return {}
@@ -140,7 +369,33 @@ async function readCredentialMap(): Promise<CredentialMap> {
 
   const key = await recallKey()
   if (!key) throw new LockedError()
-  return JSON.parse(await unseal(key, value)) as CredentialMap
+  const map = JSON.parse(await unseal(key, value)) as CredentialMap
+  if (touch) await armIdleLock()
+  return map
+}
+
+/**
+ * Starts, or restarts, the countdown to the idle lock.
+ *
+ * An alarm rather than a timer in the page or a `setTimeout`: the background
+ * is an event page that the browser stops when it is idle, and a timer stops
+ * with it, so the vault would stay unlocked. A named alarm survives the page
+ * being stopped and wakes it, and creating one with the same name replaces
+ * the earlier one, which is what makes each use restart the countdown.
+ *
+ * Restarted only by provider calls, so that opening settings or the sidebar,
+ * which read credential statuses, does not keep an unattended vault open.
+ */
+async function armIdleLock(): Promise<void> {
+  const minutes = (await getSettings()).vaultIdleLockMinutes
+  if (minutes > 0) await browser.alarms.create(IDLE_ALARM, { delayInMinutes: minutes })
+  else await browser.alarms.clear(IDLE_ALARM)
+}
+
+/** Handles an alarm from the browser; the background registers this at start. */
+export async function handleVaultIdleAlarm(alarm: { name: string }): Promise<void> {
+  if (alarm.name !== IDLE_ALARM) return
+  await lockVault()
 }
 
 /** Writes the map back in whichever form it is currently kept. */
@@ -160,6 +415,34 @@ async function writeCredentialMap(map: CredentialMap): Promise<void> {
   })
 }
 
+/**
+ * Runs credential read-modify-write steps one at a time.
+ *
+ * Every change to the credential map reads it, edits it and writes it back, and
+ * each of those is an await. Two changes that overlap both read the same
+ * starting map and the later write discards the earlier one. That is how a
+ * rotated OAuth refresh token was lost when the vault was being enabled, and it
+ * also happens between two plain writes, such as two providers refreshing at
+ * once.
+ *
+ * Local to the credential map on purpose. Transform writes have the same
+ * problem and get their own queue; sharing one would make a credential write
+ * wait behind an unrelated transform write for no reason.
+ *
+ * A failed step must not stop the queue, so the chain continues from the
+ * settled result and the caller still receives its own rejection.
+ */
+let credentialQueue: Promise<unknown> = Promise.resolve()
+
+function withCredentialLock<T>(step: () => Promise<T>): Promise<T> {
+  const run = credentialQueue.then(step, step)
+  credentialQueue = run.then(
+    () => undefined,
+    () => undefined,
+  )
+  return run
+}
+
 /** Whether credentials are stored sealed, and whether they can be read now. */
 export async function vaultState(): Promise<{ sealed: boolean; unlocked: boolean }> {
   const stored = await browser.storage.local.get(KEY_CREDENTIALS)
@@ -168,6 +451,9 @@ export async function vaultState(): Promise<{ sealed: boolean; unlocked: boolean
   return { sealed: true, unlocked: (await recallKey()) !== null }
 }
 
+const ALREADY_SEALED =
+  'The credentials are already protected by a passphrase. Remove that passphrase first to set a different one.'
+
 /**
  * Turns passphrase mode on, sealing whatever is already stored.
  *
@@ -175,14 +461,42 @@ export async function vaultState(): Promise<{ sealed: boolean; unlocked: boolean
  * lock the user out of the thing they just set up.
  */
 export async function enableVault(passphrase: string): Promise<void> {
-  const stored = await browser.storage.local.get(KEY_CREDENTIALS)
-  if (isSealed(stored[KEY_CREDENTIALS])) return
+  // Checked here as well as in the settings page: this function is reached by
+  // a message that any extension context can send, and the page's check is
+  // only a convenience for the person typing.
+  if (passphrase.length < MIN_PASSPHRASE_LENGTH) {
+    throw new Error(`The passphrase must be at least ${MIN_PASSPHRASE_LENGTH} characters.`)
+  }
 
-  const map = (stored[KEY_CREDENTIALS] as CredentialMap | undefined) ?? {}
+  // Refused rather than ignored. Returning silently here let the settings page
+  // show a sealed vault as unencrypted, accept a new passphrase, and discard
+  // it, so the person believed a passphrase was in force that had never been
+  // applied. Checked before deriving so the refusal is immediate.
+  if (isSealed((await browser.storage.local.get(KEY_CREDENTIALS))[KEY_CREDENTIALS])) {
+    throw new Error(ALREADY_SEALED)
+  }
+
+  // The key is derived before the credential map is read, and the read, seal
+  // and write then happen inside the lock. Derivation takes several hundred
+  // milliseconds, and reading the map first meant sealing a copy that was
+  // already out of date by the time it was written.
   const salt = randomSalt()
   const key = await deriveKey(passphrase, salt)
-  await browser.storage.local.set({ [KEY_CREDENTIALS]: await seal(key, salt, JSON.stringify(map)) })
-  await rememberKey(key)
+
+  await withCredentialLock(async () => {
+    const stored = await browser.storage.local.get(KEY_CREDENTIALS)
+    // Checked again: another enable may have finished during the derivation.
+    if (isSealed(stored[KEY_CREDENTIALS])) throw new Error(ALREADY_SEALED)
+
+    const map = (stored[KEY_CREDENTIALS] as CredentialMap | undefined) ?? {}
+    await browser.storage.local.set({
+      [KEY_CREDENTIALS]: await seal(key, salt, JSON.stringify(map)),
+    })
+    // Still inside the lock: a write queued behind this one must find the key
+    // in the session, or it would fail as locked.
+    await rememberKey(key)
+    await armIdleLock()
+  })
 }
 
 /**
@@ -199,9 +513,17 @@ export async function disableVault(passphrase: string): Promise<void> {
   if (!isSealed(existing)) return
 
   const key = await deriveKey(passphrase, saltOf(existing))
-  const map = JSON.parse(await unseal(key, existing)) as CredentialMap
-  await browser.storage.local.set({ [KEY_CREDENTIALS]: map })
-  await forgetKey()
+  await unseal(key, existing)
+
+  // The map is read again inside the lock, because a write may have landed
+  // during the derivation and the copy decrypted above would not include it.
+  await withCredentialLock(async () => {
+    const latest = (await browser.storage.local.get(KEY_CREDENTIALS))[KEY_CREDENTIALS]
+    if (!isSealed(latest)) return
+    const map = JSON.parse(await unseal(key, latest)) as CredentialMap
+    await browser.storage.local.set({ [KEY_CREDENTIALS]: map })
+    await forgetKey()
+  })
 }
 
 /** Derives and remembers the key for this browser session. */
@@ -215,10 +537,20 @@ export async function unlockVault(passphrase: string): Promise<void> {
   // rather than accepted and then failing on the next generation.
   await unseal(key, existing)
   await rememberKey(key)
+  await armIdleLock()
+  // The first moment the map can be written after an upgrade, so this is where
+  // keys stored before bindings existed are bound; see bindStoredCredentials.
+  await bindStoredCredentials()
 }
 
+/**
+ * Through the credential lock, so a lock waits for a refresh that is in
+ * progress. A provider that rotates refresh tokens has already invalidated the
+ * old one when its response arrives; forgetting the key before the new one is
+ * stored makes that write fail as locked, and the sign-in is lost.
+ */
 export async function lockVault(): Promise<void> {
-  await forgetKey()
+  await withCredentialLock(() => forgetKey())
 }
 
 /**
@@ -227,65 +559,322 @@ export async function lockVault(): Promise<void> {
  * There is no recovery — that is the property being bought. Discarding the
  * credentials and starting over is the honest alternative to pretending
  * otherwise, and it is destructive enough that the UI asks twice.
+ *
+ * Allowed only when the credentials are sealed and locked, the one state a
+ * forgotten passphrase produces. Without this check the message deleted
+ * plaintext keys when the page's view of the vault was wrong, and deleted
+ * readable keys from an unlocked vault, where "Remove the passphrase" is the
+ * path that keeps them.
  */
 export async function discardVault(): Promise<void> {
-  await browser.storage.local.remove(KEY_CREDENTIALS)
-  await forgetKey()
+  await withCredentialLock(async () => {
+    const state = await vaultState()
+    if (!state.sealed || state.unlocked) {
+      throw new Error('Stored credentials can be discarded only while they are sealed and locked.')
+    }
+    await browser.storage.local.remove(KEY_CREDENTIALS)
+    await forgetKey()
+  })
+}
+
+/** A stored credential was entered for a different destination than the provider's current one. */
+export class CredentialOriginError extends Error {
+  constructor(label: string, entered: string, current: string | null) {
+    super(
+      current === null
+        ? `The key for ${label} cannot be used because the provider has no valid address. Fix the address in settings and enter the key again.`
+        : `The key for ${label} was entered for ${entered}, but the provider now sends requests to ${current}. The key was not sent. Enter it again in settings.`,
+    )
+    this.name = 'CredentialOriginError'
+  }
 }
 
 /**
- * Reads a credential for use in an outbound request. This must never be
+ * Reads a credential for use in an outbound request, and only if it was
+ * entered for the destination this provider currently has. This must never be
  * exposed over the message channel — callers outside the background script get
  * getCredentialStatus() instead.
+ *
+ * Credentials are keyed by provider id, and an id survives an edit of the base
+ * URL or the type. Without this comparison, such an edit sent the stored key to
+ * the new address. The refusal is an error rather than a null so that it cannot
+ * fall through to the unauthenticated path that loopback providers use.
+ *
+ * Migration: credentials written before binding existed carry no `boundTo`.
+ * The first read binds one to the provider's destination at that moment and
+ * saves it. That trusts the current settings, which is the only information
+ * available, and it is the same trust the old code placed in them on every
+ * request. A credential read for the first time after an unwanted edit is
+ * therefore bound to the unwanted address; the other choice was to discard
+ * every stored key on upgrade.
  */
-export async function readCredentialForRequest(
-  providerId: string,
-): Promise<Credential | null> {
-  const map = await readCredentialMap()
-  return map[providerId] ?? null
+export async function readCredentialForRequest(provider: Provider): Promise<Credential | null> {
+  const found = (await readCredentialMap(true))[provider.id]
+  if (!found) return null
+  if (found.boundTo) return checkedForProvider(provider, found)
+
+  return withCredentialLock(async () => {
+    const map = await readCredentialMap()
+    const current = map[provider.id]
+    if (!current) return null
+    const checked = checkedForProvider(provider, current)
+    if (!current.boundTo) {
+      map[provider.id] = checked
+      await writeCredentialMap(map)
+    }
+    return checked
+  })
+}
+
+/**
+ * Returns the credential bound to the provider's destination, binding a legacy
+ * one that has no binding, or throws when the binding names another destination.
+ * Does not write; the caller stores the bound copy when it has a reason to.
+ */
+function checkedForProvider(provider: Provider, credential: Credential): Credential {
+  const destination = destinationOf(provider)
+  const bound = credential.boundTo ?? destination ?? undefined
+  if (!destination || !bound || !sameBinding(bound, destination)) {
+    throw new CredentialOriginError(
+      provider.label,
+      credential.boundTo?.origin ?? '(unknown)',
+      destination?.origin ?? null,
+    )
+  }
+  return credential.boundTo ? credential : { ...credential, boundTo: destination }
+}
+
+/**
+ * Binds every stored credential that has no binding to its provider's current
+ * destination, in one pass.
+ *
+ * Without this a key stored before bindings existed was bound by whichever
+ * request read it first, which could be months after the upgrade and after the
+ * base URL had been edited, so the key was bound to an address it was never
+ * entered for. Doing it once, at the first point the extension runs after the
+ * upgrade (a plaintext store) or the first point the sealed map can be written
+ * (unlock), keeps that window short. A credential whose provider has been
+ * removed, or has no valid address, is left unbound and is refused on use.
+ * Throws LockedError for a sealed vault that is locked.
+ */
+export async function bindStoredCredentials(): Promise<void> {
+  await withCredentialLock(async () => {
+    const map = await readCredentialMap()
+    const providers = (await getSettings()).providers
+    let changed = false
+    for (const [providerId, credential] of Object.entries(map)) {
+      if (credential.boundTo) continue
+      const provider = providers.find((p) => p.id === providerId)
+      const destination = provider ? destinationOf(provider) : null
+      if (!destination) continue
+      map[providerId] = { ...credential, boundTo: destination }
+      changed = true
+    }
+    if (changed) await writeCredentialMap(map)
+  })
+}
+
+/**
+ * Runs `step` with the provider's credential while holding the credential lock,
+ * and gives it a function that stores a replacement.
+ *
+ * For a refresh, which has to read the credential, wait for the token endpoint
+ * and store what comes back as one operation. Done in three separate steps, a
+ * credential removed or reconnected while the request was waiting was
+ * overwritten by the old grant's refreshed copy. Holding the lock means a
+ * removal or reconnection waits until the refresh has stored its token, and
+ * then applies on top of it. The cost is that those changes wait as long as
+ * the request does, which is why the request has a timeout.
+ *
+ * The store function writes only if the stored credential is still the same
+ * sign-in (same refresh token and token endpoint) as the one the step was
+ * given, and returns whether it did. The lock already prevents a change by any
+ * code that takes it; this covers a write that does not.
+ *
+ * Inside `step`, do not call a function that takes the lock itself, such as
+ * setCredential, because it would wait for this step to finish.
+ */
+export function withCredentialForRequest<T>(
+  provider: Provider,
+  step: (
+    credential: Credential | null,
+    store: (replacement: Credential) => Promise<boolean>,
+  ) => Promise<T>,
+): Promise<T> {
+  return withCredentialLock(async () => {
+    const found = (await readCredentialMap())[provider.id]
+    const credential = found ? checkedForProvider(provider, found) : null
+    const store = async (replacement: Credential): Promise<boolean> => {
+      const map = await readCredentialMap()
+      const current = map[provider.id]
+      if (!credential || !current || !sameSignIn(current, credential)) return false
+      map[provider.id] = replacement
+      await writeCredentialMap(map)
+      return true
+    }
+    return step(credential, store)
+  })
+}
+
+function sameSignIn(a: Credential, b: Credential): boolean {
+  return (
+    a.kind === 'oauth' &&
+    b.kind === 'oauth' &&
+    a.refreshToken === b.refreshToken &&
+    a.tokenEndpoint === b.tokenEndpoint
+  )
+}
+
+/**
+ * Reads a stored credential without checking where it would be sent. For code
+ * that needs to inspect or copy a credential, such as tests; never use the
+ * result to build a request.
+ */
+export async function readStoredCredential(providerId: string): Promise<Credential | null> {
+  return (await readCredentialMap())[providerId] ?? null
+}
+
+/**
+ * Saves a credential bound to the provider's current destination. A binding
+ * supplied by the caller is replaced, since the sender of a message is not the
+ * authority on where the key was entered.
+ */
+export async function saveCredentialFor(provider: Provider, credential: Credential): Promise<void> {
+  const boundTo = destinationOf(provider)
+  if (!boundTo) throw new Error(`${provider.label} has no valid address to bind the key to.`)
+  await setCredential(provider.id, { ...credential, boundTo })
 }
 
 export async function setCredential(
   providerId: string,
   credential: Credential,
 ): Promise<void> {
-  const map = await readCredentialMap()
-  map[providerId] = credential
-  await writeCredentialMap(map)
+  // The refresh token is sent to this address on every refresh, so it is
+  // checked where the credential is saved as well as where it is used.
+  if (credential.kind === 'oauth') assertEndpoint(credential.tokenEndpoint, 'token endpoint')
+  await withCredentialLock(async () => {
+    const map = await readCredentialMap()
+    map[providerId] = credential
+    await writeCredentialMap(map)
+  })
 }
 
 export async function clearCredential(providerId: string): Promise<void> {
-  const map = await readCredentialMap()
-  delete map[providerId]
-  await writeCredentialMap(map)
+  await withCredentialLock(async () => {
+    const map = await readCredentialMap()
+    delete map[providerId]
+    await writeCredentialMap(map)
+  })
+}
+
+function oauthStatus(
+  providerId: string,
+  credential: Extract<Credential, { kind: 'oauth' }>,
+): CredentialStatus {
+  return {
+    providerId,
+    configured: true,
+    kind: 'oauth',
+    ...(credential.expiresAt !== undefined ? { expiresAt: credential.expiresAt } : {}),
+    renewable: Boolean(credential.refreshToken),
+  }
+}
+
+/**
+ * True when requests would refuse this credential because of where it was
+ * entered. A credential with no binding is not a mismatch: it is bound on its
+ * first read, so reporting it here would flag every key stored before binding
+ * existed. Uses the same comparison as the request path so the two cannot
+ * disagree.
+ */
+function refusedForProvider(provider: Provider | undefined, credential: Credential): boolean {
+  if (!provider) return false
+  try {
+    checkedForProvider(provider, credential)
+    return false
+  } catch (error) {
+    if (error instanceof CredentialOriginError) return true
+    throw error
+  }
+}
+
+function statusFor(
+  providerId: string,
+  provider: Provider | undefined,
+  credential: Credential | undefined,
+): CredentialStatus {
+  if (!credential) return { providerId, configured: false }
+  const base: CredentialStatus =
+    credential.kind === 'oauth'
+      ? oauthStatus(providerId, credential)
+      : { providerId, configured: true, kind: 'api_key' }
+  return refusedForProvider(provider, credential) ? { ...base, needsReentry: true } : base
 }
 
 /** The only credential shape any other context is allowed to see. */
-export async function getCredentialStatus(
-  providerId: string,
-): Promise<CredentialStatus> {
+export async function getCredentialStatus(providerId: string): Promise<CredentialStatus> {
   const credential = (await readCredentialMap())[providerId]
-  if (!credential) return { providerId, configured: false }
-  return credential.kind === 'oauth'
-    ? { providerId, configured: true, kind: 'oauth', expiresAt: credential.expiresAt }
-    : { providerId, configured: true, kind: 'api_key' }
+  const provider = credential
+    ? (await getSettings()).providers.find((p) => p.id === providerId)
+    : undefined
+  return statusFor(providerId, provider, credential)
 }
 
 export async function getAllCredentialStatuses(): Promise<CredentialStatus[]> {
   const map = await readCredentialMap()
   const settings = await getSettings()
-  return settings.providers.map((provider) => {
-    const credential = map[provider.id]
-    if (!credential) return { providerId: provider.id, configured: false }
-    return credential.kind === 'oauth'
-      ? {
-          providerId: provider.id,
-          configured: true,
-          kind: 'oauth' as const,
-          expiresAt: credential.expiresAt,
-        }
-      : { providerId: provider.id, configured: true, kind: 'api_key' as const }
-  })
+  return settings.providers.map((provider) => statusFor(provider.id, provider, map[provider.id]))
+}
+
+/* ------------------------------------------------------------------ */
+/* Usage                                                               */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Calls to recordUsage run one after another. Each is a read, an add and a
+ * write of the whole store, and a review that finishes while a generation is
+ * being recorded would otherwise read the same starting value and one of the
+ * two additions would be lost.
+ */
+let usageQueue: Promise<unknown> = Promise.resolve()
+
+export async function getUsage(): Promise<UsageStore> {
+  const stored = (await browser.storage.local.get(KEY_USAGE))[KEY_USAGE] as
+    | Partial<UsageStore>
+    | undefined
+  return { months: stored?.months ?? {}, transforms: stored?.transforms ?? {} }
+}
+
+/**
+ * Adds one call to the provider's total for the month and, when the call
+ * belongs to a transform, to that transform's total. A call whose response had
+ * no usage block still counts as a call, so "not reported" is visible in the
+ * totals and is not turned into zero tokens.
+ */
+export function recordUsage(call: {
+  providerId: string
+  transformId?: string
+  usage: TokenUsage | null
+  costUsd: number | null
+  at?: number
+}): Promise<void> {
+  const run = async () => {
+    const store = await getUsage()
+    const month = monthOf(call.at ?? Date.now())
+    const byProvider = (store.months[month] ??= {})
+    byProvider[call.providerId] = addCall(byProvider[call.providerId], call.usage, call.costUsd)
+    if (call.transformId) {
+      store.transforms[call.transformId] = addCall(
+        store.transforms[call.transformId],
+        call.usage,
+        call.costUsd,
+      )
+    }
+    await browser.storage.local.set({ [KEY_USAGE]: store })
+  }
+  const next = usageQueue.then(run, run)
+  usageQueue = next.catch(() => undefined)
+  return next
 }
 
 /* ------------------------------------------------------------------ */
@@ -307,6 +896,13 @@ export async function exportTransforms(): Promise<ExportBundle> {
   }
 }
 
+export interface ImportResult {
+  imported: number
+  /** Records left out because they failed isValidTransform. */
+  skipped: number
+  needsRegeneration: string[]
+}
+
 /**
  * Imports a bundle. JS transforms arrive without code — a shared JS transform
  * carries only intent and anchor, and the importer's own model regenerates the
@@ -315,25 +911,45 @@ export async function exportTransforms(): Promise<ExportBundle> {
  * outside resources, which is how it can send page data to another server, so
  * the caller checks it for that.
  */
-export async function importTransforms(
+export function importTransforms(
   bundle: ExportBundle,
   /** True for a CSS transform whose code must not be imported. */
   rejectCss: (transform: Transform) => boolean = () => false,
-): Promise<{
-  imported: number
-  needsRegeneration: string[]
-}> {
+): Promise<ImportResult> {
+  return mutateTransforms(() => importTransformsNow(bundle, rejectCss))
+}
+
+async function importTransformsNow(
+  bundle: ExportBundle,
+  rejectCss: (transform: Transform) => boolean,
+): Promise<ImportResult> {
+  // `undefined > SCHEMA_VERSION` is false, so a file with no version used to
+  // pass the check below. A missing or non-numeric version means the file is
+  // not one of ours, or was cut short.
+  if (
+    !isObject(bundle) ||
+    typeof bundle.schemaVersion !== 'number' ||
+    !Array.isArray(bundle.transforms)
+  ) {
+    throw new Error('This file is not a Web Alchemist export.')
+  }
   if (bundle.schemaVersion > SCHEMA_VERSION) {
     throw new Error(
       `This file was made by a newer version of Web Alchemist (schema ${bundle.schemaVersion}). Update the extension to import it.`,
     )
   }
 
-  const existing = await getAllTransforms()
+  const { valid: existing, invalid } = await readStored()
   const needsRegeneration: string[] = []
   let nextOrder = existing.length
 
+  let skipped = 0
+
   for (const incoming of bundle.transforms) {
+    if (!isValidTransform(incoming)) {
+      skipped++
+      continue
+    }
     const transform: Transform = {
       ...incoming,
       id: crypto.randomUUID(),
@@ -362,6 +978,6 @@ export async function importTransforms(
     existing.push(transform)
   }
 
-  await browser.storage.local.set({ [KEY_TRANSFORMS]: existing })
-  return { imported: bundle.transforms.length, needsRegeneration }
+  await writeTransforms(existing, invalid)
+  return { imported: bundle.transforms.length - skipped, skipped, needsRegeneration }
 }
