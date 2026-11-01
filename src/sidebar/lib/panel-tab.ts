@@ -41,3 +41,13 @@ export async function showPanelAfterPick(eventType: string, deps: TabFocusDeps):
   const own = await deps.ownTab().catch(() => undefined)
   if (own?.id !== undefined) await deps.activate(own.id).catch(() => {})
 }
+
+/**
+ * Whether a tab update concerns the page the panel works on. A panel bound to
+ * a page tab works on that tab, whichever tab is in front, and the panel's own
+ * tab is the one in front while it is open. The docked sidebar works on the
+ * active tab.
+ */
+export function isPageOfPanel(bound: number | null, tabId: number, tabActive: boolean): boolean {
+  return bound === null ? tabActive : tabId === bound
+}

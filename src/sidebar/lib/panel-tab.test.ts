@@ -3,7 +3,13 @@
  */
 
 import { describe, expect, it, vi } from 'vitest'
-import { endsPick, showPageForPick, showPanelAfterPick, type TabFocusDeps } from './panel-tab'
+import {
+  endsPick,
+  isPageOfPanel,
+  showPageForPick,
+  showPanelAfterPick,
+  type TabFocusDeps,
+} from './panel-tab'
 
 function deps(bound: number | null): TabFocusDeps & { activate: ReturnType<typeof vi.fn> } {
   return {
@@ -58,5 +64,26 @@ describe('the panel runs showPanelAfterPick only for an event the flow accepted 
     )
     expect(source).toContain('else if (flow.receive(message, sender)) void showPanelAfterPick(')
     expect(source.match(/showPanelAfterPick\(/g)).toHaveLength(1)
+  })
+})
+
+describe('which tab updates reload the panel (#128)', () => {
+  it('follows the bound tab even when it is not the active one', () => {
+    expect(isPageOfPanel(7, 7, false)).toBe(true)
+  })
+  it('ignores another tab, even the active one, when bound', () => {
+    expect(isPageOfPanel(7, 8, true)).toBe(false)
+  })
+  it('follows the active tab in the docked sidebar', () => {
+    expect(isPageOfPanel(null, 8, true)).toBe(true)
+    expect(isPageOfPanel(null, 8, false)).toBe(false)
+  })
+
+  it('is what App.svelte uses in its tab update listener', async () => {
+    const source = (await import('node:fs')).readFileSync(
+      new URL('../App.svelte', import.meta.url),
+      'utf8',
+    )
+    expect(source).toContain('if (change.url && isPageOfPanel(boundTab(), id, tab.active)) void load()')
   })
 })

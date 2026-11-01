@@ -27,6 +27,24 @@ describe('toolbar action', () => {
     expect(h.calls.tabsCreate).toEqual([])
   })
 
+  it('calls sidebarAction.open before the listener returns, as the user-action rule requires (#128)', async () => {
+    h.os = 'linux'
+    await h.boot()
+    await settle()
+    // No await between the call and the check: an await in the handler before
+    // sidebarAction.open() would leave the count at 0 here.
+    click({ id: 3 })
+    expect(h.calls.sidebarOpen).toBe(1)
+  })
+
+  it('calls sidebarAction.open before the listener returns while the platform is unknown (#128)', async () => {
+    h.os = 'linux'
+    await h.boot()
+    // No settle: the start-up platform read may not have finished.
+    click({ id: 3 })
+    expect(h.calls.sidebarOpen).toBe(1)
+  })
+
   it('opens the panel in a tab bound to the clicked tab on Android, and not the sidebar', async () => {
     h.os = 'android'
     await h.boot()

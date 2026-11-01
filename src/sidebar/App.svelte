@@ -21,7 +21,12 @@
   import { isForTab, type HealthCheckResult } from './lib/health-result'
   import { Flow } from './lib/flow.svelte'
   import { boundTab } from '@shared/panel-binding'
-  import { showPageForPick, showPanelAfterPick, type TabFocusDeps } from './lib/panel-tab'
+  import {
+    isPageOfPanel,
+    showPageForPick,
+    showPanelAfterPick,
+    type TabFocusDeps,
+  } from './lib/panel-tab'
   import { focusList, returnedToList } from './lib/focus'
   import { brokenAnnouncement } from './lib/announce'
   import { tick } from 'svelte'
@@ -641,7 +646,7 @@
       // we asked for ourselves — see Flow.ourReload.
       if (change.status === 'loading') flow.pageReloading(id)
       if (change.status === 'complete') flow.pageLoaded(id)
-      if (change.url && (boundTab() === null ? tab.active : id === boundTab())) void load()
+      if (change.url && isPageOfPanel(boundTab(), id, tab.active)) void load()
     }
     browser.tabs.onUpdated.addListener(onTabUpdated)
 
