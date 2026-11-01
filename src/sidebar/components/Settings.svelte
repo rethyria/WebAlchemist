@@ -11,7 +11,7 @@
   import { REVOKE_KEY_NOTICE } from '@shared/disclosure'
   import { ACCENTS, type Accent, type CredentialStatus, type HealthCheckMode, type Settings } from '@shared/types'
   import { ACCENT_COLOURS } from '@shared/accents'
-  import { credentialDisclosure, type VaultView } from '@shared/vault-disclosure'
+  import { DISCLOSURE_TRANSFORMS, credentialDisclosure, type VaultView } from '@shared/vault-disclosure'
   import Label from './Label.svelte'
   import Toggle from './Toggle.svelte'
 
@@ -158,6 +158,7 @@
     {#if disclosure.status}
       <span class="note"><strong>{disclosure.status}</strong></span>
     {/if}
+    <span class="note">{DISCLOSURE_TRANSFORMS}</span>
     <span class="note">{REVOKE_KEY_NOTICE}</span>
   </div>
 
