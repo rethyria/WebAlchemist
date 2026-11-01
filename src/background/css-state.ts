@@ -160,6 +160,7 @@ export async function forgetSuspended(tabId: number): Promise<void> {
  * tracking the browser's own history entries, which an extension cannot read.
  */
 const ARCHIVE_PREFIX = 'wa-preview-archive-'
+const APPLIED_ARCHIVE_PREFIX = 'wa-applied-archive-'
 const ARCHIVE_LIMIT = 5
 
 export interface ArchivedPreview {
@@ -168,34 +169,50 @@ export interface ArchivedPreview {
   windowId?: number | undefined
 }
 
-async function readArchive(tabId: number): Promise<ArchivedPreview[]> {
-  const key = `${ARCHIVE_PREFIX}${tabId}`
+async function readArchive(prefix: string, tabId: number): Promise<ArchivedPreview[]> {
+  const key = `${prefix}${tabId}`
   const value = (await browser.storage.session.get(key))[key]
   return Array.isArray(value) ? (value as ArchivedPreview[]) : []
 }
 
-/** Files `css` under `url`, replacing an earlier entry for the same URL. */
-export async function archivePreview(tabId: number, entry: ArchivedPreview): Promise<void> {
-  const kept = (await readArchive(tabId)).filter((existing) => existing.url !== entry.url)
-  await browser.storage.session.set({
-    [`${ARCHIVE_PREFIX}${tabId}`]: [...kept, entry].slice(-ARCHIVE_LIMIT),
-  })
+async function archive(prefix: string, tabId: number, entry: ArchivedPreview): Promise<void> {
+  const kept = (await readArchive(prefix, tabId)).filter((existing) => existing.url !== entry.url)
+  await browser.storage.session.set({ [`${prefix}${tabId}`]: [...kept, entry].slice(-ARCHIVE_LIMIT) })
 }
 
-/** Removes and returns the entry filed under `url`, if there is one. */
-export async function takeArchivedPreview(
+async function takeArchived(
+  prefix: string,
   tabId: number,
   url: string,
 ): Promise<ArchivedPreview | undefined> {
-  const all = await readArchive(tabId)
+  const all = await readArchive(prefix, tabId)
   const found = all.find((entry) => entry.url === url)
   if (!found) return undefined
-  await browser.storage.session.set({
-    [`${ARCHIVE_PREFIX}${tabId}`]: all.filter((entry) => entry !== found),
-  })
+  await browser.storage.session.set({ [`${prefix}${tabId}`]: all.filter((entry) => entry !== found) })
   return found
 }
 
+/** Files `css` under `url`, replacing an earlier entry for the same URL. */
+export const archivePreview = (tabId: number, entry: ArchivedPreview): Promise<void> =>
+  archive(ARCHIVE_PREFIX, tabId, entry)
+
+/** Removes and returns the entry filed under `url`, if there is one. */
+export const takeArchivedPreview = (tabId: number, url: string): Promise<ArchivedPreview | undefined> =>
+  takeArchived(ARCHIVE_PREFIX, tabId, url)
+
+/*
+ * The same for the stylesheet this extension applied from stored transforms. A
+ * page restored from the back-forward cache keeps that stylesheet even when a
+ * site's CSS setting was tightened while the page was cached, and the string
+ * that removes it is forgotten when the tab leaves the document, so it is filed
+ * the way a preview's is.
+ */
+export const archiveApplied = (tabId: number, entry: ArchivedPreview): Promise<void> =>
+  archive(APPLIED_ARCHIVE_PREFIX, tabId, entry)
+
+export const takeArchivedApplied = (tabId: number, url: string): Promise<ArchivedPreview | undefined> =>
+  takeArchived(APPLIED_ARCHIVE_PREFIX, tabId, url)
+
 export async function forgetArchive(tabId: number): Promise<void> {
-  await browser.storage.session.remove(`${ARCHIVE_PREFIX}${tabId}`)
+  await browser.storage.session.remove([`${ARCHIVE_PREFIX}${tabId}`, `${APPLIED_ARCHIVE_PREFIX}${tabId}`])
 }

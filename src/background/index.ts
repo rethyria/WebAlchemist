@@ -54,6 +54,7 @@ import { reconcile as reconcileContentScripts } from './content-scripts'
 import { buildProbeTransform } from './csp-probe'
 import {
   addPreviewedScript,
+  archiveApplied,
   archivePreview,
   forgetArchive,
   forgetCss,
@@ -64,6 +65,7 @@ import {
   previewWindow,
   suspendedTabIds,
   suspendedWindow,
+  takeArchivedApplied,
   takeArchivedPreview,
   readCss,
   readSuspended,
@@ -317,7 +319,24 @@ browser.webNavigation.onCommitted.addListener(async (details) => {
   const recorded = browser.storage.session.set({ [leftUrlKey]: details.url })
   let orphaned: string | undefined
   await inTabQueue(details.tabId, async () => {
+    // Filed under the address of the document being left, as a preview is, for
+    // the case that the tab comes back to it from the back-forward cache.
+    const leftUrl = (await leaving)[leftUrlKey]
+    const appliedCss = await readCss('applied', details.tabId)
+    if (appliedCss !== undefined && typeof leftUrl === 'string') {
+      await archiveApplied(details.tabId, { url: leftUrl, css: appliedCss })
+    }
     await forgetCss('applied', details.tabId)
+    if (restored) {
+      // A restored document still has the stylesheet it had when it was left,
+      // and it was chosen under the settings of that time. It is taken out
+      // before the CSS for the present settings is applied, so a site whose
+      // setting was tightened while the page was cached does not keep CSS that
+      // the new setting refuses (#80). Nothing is removed when the browser
+      // loaded the page afresh: removing a stylesheet that is not there does nothing.
+      const before = await takeArchivedApplied(details.tabId, details.url)
+      if (before) await removePreviewCss(details.tabId, before.css)
+    }
     /*
      * A preview belongs to the document it was inserted into. When the tab
      * leaves that document its string is filed under the document's URL
