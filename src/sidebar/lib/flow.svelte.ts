@@ -689,9 +689,17 @@ export class Flow {
    * unless they come from the tab the run is working on and a run is waiting
    * for one.
    */
-  receive(event: ContentEvent, sender: { tab?: { id?: number | undefined } | undefined }): void {
-    if (sender.tab?.id === undefined || sender.tab.id !== this.tabId) return
-    if (!this.awaitingPageEvent) return
+  receive(
+    event: ContentEvent,
+    sender: { tab?: { id?: number | undefined } | undefined },
+  ): boolean {
+    if (sender.tab?.id === undefined || sender.tab.id !== this.tabId) return false
+    if (!this.awaitingPageEvent) return false
+    this.applyPageEvent(event)
+    return true
+  }
+
+  private applyPageEvent(event: ContentEvent): void {
     switch (event.type) {
       case 'element-hovered':
         if (this.step === 'picking') this.hover = event.target

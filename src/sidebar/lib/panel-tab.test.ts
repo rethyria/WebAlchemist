@@ -47,3 +47,16 @@ describe('showPanelAfterPick', () => {
     expect(d.activate).not.toHaveBeenCalled()
   })
 })
+
+describe('the panel runs showPanelAfterPick only for an event the flow accepted (#128)', () => {
+  // App.svelte cannot be mounted here, so this reads its source. It fails if
+  // the call goes back to running for every event from any tab.
+  it('guards the call with the result of Flow.receive', async () => {
+    const source = (await import('node:fs')).readFileSync(
+      new URL('../App.svelte', import.meta.url),
+      'utf8',
+    )
+    expect(source).toContain('else if (flow.receive(message, sender)) void showPanelAfterPick(')
+    expect(source.match(/showPanelAfterPick\(/g)).toHaveLength(1)
+  })
+})

@@ -924,6 +924,20 @@ describe('events from the page', () => {
     expect(flow.picked).toBeNull()
   })
 
+  it('reports whether the event was accepted, which gates showing the panel tab (#128)', async () => {
+    const flow = await flowWaitingForPick()
+    expect(flow.receive(elementPicked, fromOtherTab)).toBe(false)
+    expect(flow.receive(elementPicked, {})).toBe(false)
+    expect(flow.receive({ type: 'picking-cancelled' } as any, fromOtherTab)).toBe(false)
+    expect(flow.receive(elementPicked, fromRunTab)).toBe(true)
+  })
+
+  it('reports an event as not accepted when no run is waiting for the page (#128)', () => {
+    const flow = newFlow()
+    expect(flow.step).toBe('list')
+    expect(flow.receive({ type: 'picking-cancelled' } as any, fromRunTab)).toBe(false)
+  })
+
   it('ignores a pick that carries no sender tab', async () => {
     const flow = await flowWaitingForPick()
     flow.receive(elementPicked, {})

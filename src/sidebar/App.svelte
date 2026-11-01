@@ -593,8 +593,10 @@
       // Health results are the one content event the list owns rather than
       // the flow — they describe saved transforms, not the draft.
       if (message.type === 'health-check-result') void showHealthResult(message)
-      else flow.receive(message, sender)
-      void showPanelAfterPick(message.type, tabFocus)
+      // The panel tab is brought forward only for an event that the flow
+      // accepted: one from the run's own page, while a run waits for the page.
+      // A pick that ends in another tab must not move the user.
+      else if (flow.receive(message, sender)) void showPanelAfterPick(message.type, tabFocus)
     }
     browser.runtime.onMessage.addListener(onMessage)
 
