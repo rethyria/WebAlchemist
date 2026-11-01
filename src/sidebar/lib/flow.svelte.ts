@@ -56,6 +56,7 @@ import {
 } from '@shared/excluded-sites'
 import { readCaptureGrant, recordCaptureGrant } from '@shared/capture-grant'
 import { BackgroundError, generateOverPort, send } from './messaging.svelte'
+import { jsPreviewGate, reviewKey } from './preview-gate'
 
 /** An address without its fragment, so that scrolling to an anchor is not a new page. */
 const pageKey = (url: string): string => url.split('#')[0] ?? url
@@ -273,6 +274,14 @@ export class Flow {
   previewedCss = $state<string | null>(null)
   /** Set once the draft has been registered and the page reloaded. */
   jsRan = $state(false)
+  /**
+   * The model review run before a JavaScript preview, and what it was run for.
+   * It is a separate call from the review at the approval step: it is made
+   * earlier, for the preview, and its approval token is not used for saving.
+   */
+  previewReview = $state<ReviewResult | null>(null)
+  private previewReviewFor: string | null = null
+  previewReviewing = $state(false)
   /**
    * External CSS URLs the user approved in the approval panel, for a site set
    * to list them. Saved on the transform, so only these URLs may load.
@@ -1724,6 +1733,52 @@ export class Flow {
     }
   }
 
+  /** The review run for the preview, only while it still describes the current code. */
+  get currentPreviewReview(): ReviewResult | null {
+    const result = this.result
+    if (!result || this.previewReviewFor !== reviewKey(result, this.intent)) return null
+    return this.previewReview
+  }
+
+  /** True when the current JavaScript may be run as a preview. See jsPreviewGate. */
+  get jsPreviewAllowed(): boolean {
+    return jsPreviewGate(this.analysis, this.currentPreviewReview).allowed
+  }
+
+  /**
+   * Runs the model review for the preview. The preview button is offered only
+   * after this has completed with a verdict of match (issue 55), because the
+   * preview runs the code on the page before anything is saved.
+   */
+  async reviewForPreview(): Promise<void> {
+    const result = this.result
+    const draft = this.draft
+    if (!result || result.kind !== 'js' || !draft || this.previewReviewing) return
+    if (!this.analysis?.passed) return
+    const token = this.generation
+    const key = reviewKey(result, this.intent)
+    this.previewReviewing = true
+    try {
+      const review = await send<ReviewResult>({
+        type: 'review',
+        code: result.code,
+        intent: this.intent,
+        declaredCapabilities: result.capabilities,
+        world: result.world,
+        transformId: draft.id,
+        match: draft.match,
+      })
+      if (token !== this.generation) return
+      if (review.usage) this.lastUsage = review.usage
+      this.previewReview = review
+      this.previewReviewFor = key
+    } catch (cause) {
+      if (token === this.generation) this.fail(cause, () => this.reviewForPreview())
+    } finally {
+      this.previewReviewing = false
+    }
+  }
+
   /**
    * JS only. Registers the draft and reloads, so it runs the way it will run.
    *
@@ -1735,7 +1790,7 @@ export class Flow {
    */
   async runJs(): Promise<void> {
     const draft = this.draft
-    if (!draft || this.tabId === null || !this.analysis?.passed) return
+    if (!draft || this.tabId === null || !this.jsPreviewAllowed) return
     // Discard, a tab close and a new generation all bump the generation. The
     // reply to preview-js arrives after the registration already exists, so a
     // run that is no longer current has to take that registration out again.
@@ -2370,6 +2425,9 @@ export class Flow {
     this.lastUsage = undefined
     this.previewedCss = null
     this.jsRan = false
+    this.previewReview = null
+    this.previewReviewFor = null
+    this.previewReviewing = false
     this.analysis = null
     this.approvedCssUrls = []
     this.permissionDenied = false

@@ -24,6 +24,9 @@ let h: Harness
 beforeEach(() => {
   h = createHarness()
   h.hasUserScripts = true
+  // A preview is registered for the page of the tab it runs in, so the tab has one.
+  h.tabUrls.set(3, 'https://example.com/')
+  h.tabUrls.set(5, 'https://example.com/')
 })
 
 /** Boots once to register what is stored, then clears the record of calls. */
@@ -112,6 +115,44 @@ describe('a saved script whose edit is being previewed, at start-up', () => {
     await h.onMessage({ type: 'clear-preview-js', id: 'script-1' })
     expect(h.userScriptsHeld.has('preview-script-1')).toBe(false)
     expect(h.userScriptsHeld.has('script-1')).toBe(true)
+  })
+})
+
+describe('the pages a JavaScript preview is registered for (#55)', () => {
+  const draft = () => ({ ...js({ id: 'draft', match: '*.example.com/*' }), world: 'USER_SCRIPT' })
+
+  it('is the page of the tab and no other page of the site', async () => {
+    h.tabUrls.set(3, 'https://www.example.com/shop/item?id=4')
+    await h.boot()
+    await h.onMessage({ type: 'preview-js', tabId: 3, transform: draft() })
+    const matches: string[] = h.userScriptsHeld.get('preview-draft').matches
+    expect(matches.length).toBeGreaterThan(0)
+    expect(matches.every((m) => m.startsWith('https://www.example.com/shop/item'))).toBe(true)
+  })
+
+  it('is not taken from the address in the message', async () => {
+    h.tabUrls.set(3, 'https://www.example.com/a')
+    await h.boot()
+    await h.onMessage({ type: 'preview-js', tabId: 3, transform: draft() })
+    // The only wildcard is the query suffix the registry adds to every path.
+    const matches: string[] = h.userScriptsHeld.get('preview-draft').matches
+    expect(matches.every((m) => m.replace(/\?\*$/, '').startsWith('https://www.example.com/a') && !m.replace(/\?\*$/, '').includes('*'))).toBe(true)
+  })
+
+  it('refuses a tab whose page cannot be written as an exact pattern', async () => {
+    h.tabUrls.set(3, 'about:blank')
+    await h.boot()
+    const reply = await h.onMessage({ type: 'preview-js', tabId: 3, transform: draft() })
+    expect(reply.ok).toBe(false)
+    expect(reply.error.message).toMatch(/cannot be previewed/)
+    expect(h.userScriptsHeld.has('preview-draft')).toBe(false)
+  })
+
+  it('control: the same transform, once saved, is registered for its whole pattern', async () => {
+    h.local.set('transforms', [{ ...draft(), id: 'draft' }])
+    await h.boot()
+    const matches: string[] = h.userScriptsHeld.get('draft').matches
+    expect(matches.some((m) => m.includes('*.example.com'))).toBe(true)
   })
 })
 

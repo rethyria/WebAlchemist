@@ -748,6 +748,10 @@
       onscreenshot={(value) =>
         value ? void flow.chooseScreenshotRegion() : flow.cancelScreenshot()}
       onregenerate={() => void flow.regenerate()}
+      previewReview={flow.currentPreviewReview}
+      previewReviewing={flow.previewReviewing}
+      previewAllowed={flow.jsPreviewAllowed}
+      onreviewfirst={() => void flow.reviewForPreview()}
       onrun={() => void flow.runJs()}
       onreload={() => void flow.reloadAndRetry()}
       ondiscard={() => void flow.discard()}

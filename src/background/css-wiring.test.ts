@@ -255,6 +255,7 @@ describe('a save of JavaScript while a preview is ending (#91)', () => {
    */
   async function saveWhileEnding() {
     await start([js(GOOD_JS)])
+    h.tabUrls.set(3, 'https://shop.example.com/')
     await ask({ type: 'preview-js', tabId: 3, transform: js(GOOD_JS + ' // draft') })
     const { approvalToken } = await ask({
       type: 'approve-code',

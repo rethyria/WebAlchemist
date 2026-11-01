@@ -42,6 +42,7 @@ const localStored: Record<string, unknown> = {}
 
 const { Flow } = await import('./flow.svelte')
 const { BackgroundError } = await import('./messaging.svelte')
+const { reviewKey } = await import('./preview-gate')
 
 const URL_ = 'https://www.example.com/'
 const anchor = { tag: 'div', classes: [], path: 'html>body>div', landmarks: [], selector: 'div.x' }
@@ -88,6 +89,32 @@ function newFlow() {
   const flow = new Flow(() => {})
   flow.bindTab(1, URL_)
   return flow
+}
+
+/**
+ * Marks a flow's JavaScript as read by the second model with a verdict of
+ * match, which the preview requires (issue 55). The review is stored the way
+ * reviewForPreview stores it, without a model call.
+ */
+function reviewedForRun(flow: InstanceType<typeof Flow>) {
+  flow.result = { ...jsResultBase, code: flow.draft?.code ?? 'x' } as any
+  ;(flow as any).previewReview = {
+    static: [],
+    undeclaredCapabilities: [],
+    passed: true,
+    model: { verdict: 'match', explanation: '' },
+  }
+  ;(flow as any).previewReviewFor = reviewKey(flow.result as any, flow.intent)
+}
+const jsResultBase = {
+  name: 'n',
+  kind: 'js',
+  world: 'USER_SCRIPT',
+  requestedWorld: 'USER_SCRIPT',
+  worldReason: '',
+  capabilities: [],
+  rationale: { targets: '', approach: '', assumptions: [] },
+  intent: 'i',
 }
 
 /** The sender of an event from the tab the flows in these tests are bound to. */
@@ -374,6 +401,7 @@ describe('repeating a failed request', () => {
     const flow = newFlow()
     flow.draft = { ...saved, kind: 'js' }
     flow.analysis = { static: [], undeclaredCapabilities: [], passed: true } as any
+    reviewedForRun(flow)
     ;(globalThis as any).browser.permissions.request = async () => false
     await flow.runJs()
     ;(globalThis as any).browser.permissions.request = async () => true
@@ -852,6 +880,7 @@ describe('whether the error card says the description is kept', () => {
     const flow = flowAtRefining()
     flow.draft = { ...saved, kind: 'js' }
     flow.analysis = { static: [], undeclaredCapabilities: [], passed: true } as any
+    reviewedForRun(flow)
     ;(globalThis as any).browser.permissions.request = async () => false
     await flow.runJs()
     ;(globalThis as any).browser.permissions.request = async () => true
@@ -1331,6 +1360,7 @@ describe('a JavaScript preview that is answered after the run ended (#98)', () =
     const flow = newFlow()
     flow.draft = { ...saved, kind: 'js' }
     flow.analysis = { static: [], undeclaredCapabilities: [], passed: true } as any
+    reviewedForRun(flow)
     return flow
   }
 
@@ -1651,6 +1681,7 @@ describe('ending a run that has a preview request in flight (#110, #98)', () => 
     const flow = newFlow()
     flow.draft = { ...saved, kind: 'js' }
     flow.analysis = { static: [], undeclaredCapabilities: [], passed: true } as any
+    reviewedForRun(flow)
     const reply = gateOf()
     const lock = gateOf()
     handler = async (m) => {
@@ -1676,6 +1707,7 @@ describe('ending a run that has a preview request in flight (#110, #98)', () => 
     const flow = newFlow()
     flow.draft = { ...saved, kind: 'js' }
     flow.analysis = { static: [], undeclaredCapabilities: [], passed: true } as any
+    reviewedForRun(flow)
     handler = async () => ({ ok: true, data: null })
     await flow.runJs()
     expect(flow.jsRan).toBe(true)
@@ -1887,5 +1919,62 @@ describe('the world a script runs in (issue 53)', () => {
         : { ok: true, data: m.type === 'analyse' ? review : null }
     await flow.editWithAi({ ...saved, kind: 'js', world: 'MAIN', code: 'x' })
     expect(flow.result?.world).toBe('MAIN')
+  })
+})
+
+describe('running JavaScript only after the model review (issue 55)', () => {
+  const clean = { static: [], undeclaredCapabilities: [], passed: true }
+  const verdict = (v: string) => ({ ...clean, model: { verdict: v, explanation: 'why' } })
+
+  function flowWithUnreviewedScript() {
+    const flow = newFlow()
+    flow.draft = { ...saved, kind: 'js' }
+    flow.result = { ...jsResultBase, code: 'x' } as any
+    flow.analysis = clean as any
+    return flow
+  }
+  const previews = () => calls.filter((c) => c.type === 'preview-js')
+
+  it('does not register the preview before the review has run', async () => {
+    const flow = flowWithUnreviewedScript()
+    await flow.runJs()
+    expect(previews()).toEqual([])
+    expect(flow.jsRan).toBe(false)
+  })
+
+  it('reviews with the draft id and pattern, and then registers the preview', async () => {
+    const flow = flowWithUnreviewedScript()
+    handler = (m) => ({ ok: true, data: m.type === 'review' ? verdict('match') : null })
+    await flow.reviewForPreview()
+    expect(calls.find((c) => c.type === 'review')).toMatchObject({ transformId: 'OLD', match: '*.example.com/*' })
+    expect(flow.jsPreviewAllowed).toBe(true)
+    await flow.runJs()
+    expect(previews().length).toBe(1)
+    expect(flow.jsRan).toBe(true)
+  })
+
+  it.each(['mismatch', 'uncertain'])('does not register the preview after a verdict of %s', async (v) => {
+    const flow = flowWithUnreviewedScript()
+    handler = (m) => ({ ok: true, data: m.type === 'review' ? verdict(v) : null })
+    await flow.reviewForPreview()
+    await flow.runJs()
+    expect(previews()).toEqual([])
+  })
+
+  it('stops counting a review once the intent changes', async () => {
+    const flow = flowWithUnreviewedScript()
+    handler = (m) => ({ ok: true, data: m.type === 'review' ? verdict('match') : null })
+    await flow.reviewForPreview()
+    flow.intent = 'something else'
+    expect(flow.jsPreviewAllowed).toBe(false)
+    await flow.runJs()
+    expect(previews()).toEqual([])
+  })
+
+  it('does not review code that the local analysis rejected', async () => {
+    const flow = flowWithUnreviewedScript()
+    flow.analysis = { ...clean, passed: false } as any
+    await flow.reviewForPreview()
+    expect(calls.some((c) => c.type === 'review')).toBe(false)
   })
 })

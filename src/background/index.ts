@@ -12,7 +12,7 @@ import type {
   Message,
   MessageResponse,
 } from '@shared/messages'
-import { matchesUrl, originPermissionForUrl } from '@shared/match'
+import { exactPagePattern, matchesUrl, originPermissionForUrl } from '@shared/match'
 import { CAPTURE_GRANT_KEY } from '@shared/capture-grant'
 import { regionAtScroll, viewportChanged, type ScrollOffset, type Viewport } from '@shared/region'
 import type {
@@ -860,6 +860,19 @@ async function handle(
       if (!analysis.passed) {
         throw new Error('Static analysis rejected this code, so it was not run.')
       }
+      /*
+       * Registered for the page in this tab only. The draft's own match pattern
+       * is usually the whole site with its subdomains, and a preview that used
+       * it ran unreviewed code on every other tab of the site that loaded
+       * while the preview was registered (#55). The address is read from the
+       * tab here and not taken from the message.
+       */
+      const previewMatch = exactPagePattern(await tabUrlOf(message.tabId))
+      if (previewMatch === null) {
+        throw new Error('This page cannot be previewed, so the script was not run.')
+      }
+      const previewTransform = { ...message.transform, match: previewMatch }
+
       // Recorded before registering: registerPreview pauses the saved script
       // first, so a close of the sidebar during or after a failed registration
       // has to find the id in storage to restore it. Registration runs in the
@@ -869,7 +882,7 @@ async function handle(
       await inRegistryQueue(async () => {
         await addPreviewedScript(message.transform.id, windowId)
         try {
-          await registerPreview(message.transform)
+          await registerPreview(previewTransform)
         } catch (cause) {
           await removePreviewedScript(message.transform.id)
           throw cause

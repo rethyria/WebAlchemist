@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { matchPresetsFor, matchesUrl, originPermissionFor, parsePattern } from './match'
+import { exactPagePattern, matchPresetsFor, matchesUrl, originPermissionFor, parsePattern } from './match'
 
 describe('matchesUrl', () => {
   it('matches a whole-site pattern against any path', () => {
@@ -235,5 +235,26 @@ describe('originPermissionFor', () => {
   it('derives the origin permission a pattern requires', () => {
     expect(originPermissionFor('reddit.com/r/programming/*')).toBe('*://reddit.com/*')
     expect(originPermissionFor('*.example.com/*')).toBe('*://*.example.com/*')
+  })
+})
+
+describe('exactPagePattern', () => {
+  it('keeps the scheme, host and path and drops the query and fragment', () => {
+    expect(exactPagePattern('https://www.example.com/a/b?q=1#top')).toBe('https://www.example.com/a/b')
+  })
+
+  it('does not cover another subdomain or another path', () => {
+    const pattern = exactPagePattern('https://www.example.com/a')!
+    expect(matchesUrl(pattern, 'https://www.example.com/a')).toBe(true)
+    expect(matchesUrl(pattern, 'https://mail.example.com/a')).toBe(false)
+    expect(matchesUrl(pattern, 'https://www.example.com/b')).toBe(false)
+  })
+
+  it('refuses a page that cannot be written as an exact pattern', () => {
+    expect(exactPagePattern(undefined)).toBeNull()
+    expect(exactPagePattern('about:blank')).toBeNull()
+    expect(exactPagePattern('not a url')).toBeNull()
+    // A `*` in the path would be read as a wildcard and widen the pattern.
+    expect(exactPagePattern('https://example.com/a*b')).toBeNull()
   })
 })

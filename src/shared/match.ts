@@ -113,6 +113,26 @@ export function matchPresetsFor(rawUrl: string): MatchPreset[] {
   return presets
 }
 
+/**
+ * The match pattern for one page: its scheme, host and path, with no query.
+ * Used for a script preview, which must run on the tab being edited and on no
+ * other page. Returns null for a page that cannot be written as a pattern: a
+ * scheme other than http and https, or a path containing `*`, which a match
+ * pattern would read as a wildcard and so widen.
+ */
+export function exactPagePattern(rawUrl: string | undefined): string | null {
+  if (rawUrl === undefined) return null
+  let url: URL
+  try {
+    url = new URL(rawUrl)
+  } catch {
+    return null
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') return null
+  if (url.pathname.includes('*')) return null
+  return `${url.protocol}//${url.hostname}${url.pathname}`
+}
+
 /** Escapes regex metacharacters except `*`, which becomes a wildcard. */
 function patternToRegExp(pattern: string): RegExp {
   const escaped = pattern
