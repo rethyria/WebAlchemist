@@ -1207,13 +1207,22 @@ export interface ImportResult {
  * Imports a bundle. JS transforms arrive without code — a shared JS transform
  * carries only intent and anchor, and the importer's own model regenerates the
  * implementation locally under their own review and capability gates. CSS
- * arrives with code intact, since CSS cannot exfiltrate anything.
+ * arrives with code intact unless `rejectCss` refuses it: CSS can request
+ * outside resources, which is how it can send page data to another server, so
+ * the caller checks it for that.
  */
-export function importTransforms(bundle: ExportBundle): Promise<ImportResult> {
-  return mutateTransforms(() => importTransformsNow(bundle))
+export function importTransforms(
+  bundle: ExportBundle,
+  /** True for a CSS transform whose code must not be imported. */
+  rejectCss: (transform: Transform) => boolean = () => false,
+): Promise<ImportResult> {
+  return mutateTransforms(() => importTransformsNow(bundle, rejectCss))
 }
 
-async function importTransformsNow(bundle: ExportBundle): Promise<ImportResult> {
+async function importTransformsNow(
+  bundle: ExportBundle,
+  rejectCss: (transform: Transform) => boolean,
+): Promise<ImportResult> {
   // `undefined > SCHEMA_VERSION` is false, so a file with no version used to
   // pass the check below. A missing or non-numeric version means the file is
   // not one of ours, or was cut short.
@@ -1253,6 +1262,16 @@ async function importTransformsNow(bundle: ExportBundle): Promise<ImportResult> 
     if (transform.kind === 'js') {
       // Never import third-party JavaScript. Strip it and mark for local
       // regeneration from the intent.
+      transform.code = ''
+      transform.enabled = false
+      needsRegeneration.push(transform.id)
+    }
+
+    // An approval in a shared file was given by the sender, not by the person
+    // importing it, so it counts for nothing here.
+    delete transform.approvedCssUrls
+
+    if (transform.kind === 'css' && rejectCss(transform)) {
       transform.code = ''
       transform.enabled = false
       needsRegeneration.push(transform.id)

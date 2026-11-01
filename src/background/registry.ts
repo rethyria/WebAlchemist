@@ -38,6 +38,7 @@
 import { excludePatternsFor } from '@shared/site-off'
 import type { Capability, Transform } from '@shared/types'
 import { parsePattern } from '@shared/match'
+import { problemWithStoredCode } from './code-gate'
 import { wrapTransform } from './harness'
 import { userScripts, type ExecutionWorld, type Mv3RegisteredUserScript } from './userscripts-api'
 import { getOffHosts } from './site-off'
@@ -155,33 +156,56 @@ export async function hasUserScriptsPermission(): Promise<boolean> {
  */
 
 /**
- * What should be registered for a transform, or null when nothing should be:
- * it is not JavaScript, is disabled, has no code, or the kill switch is on.
+ * What should be registered for a transform. `registration` is null when
+ * nothing should be: the transform is not JavaScript, is disabled, has no
+ * code, is not wanted while the kill switch is on, or (unless
+ * `skipAnalysis` is set) has code that no longer passes static analysis.
+ * `blocked` is true only for the last case, so a caller can tell a script the
+ * safety check refuses from one that is simply not wanted.
+ *
+ * Static analysis runs here, at registration, and not only when code is saved.
+ * Registration happens on install, update, start-up, a settings change and an
+ * import, all from stored code, and an analyser that was tightened after the
+ * code was saved would otherwise never see it again.
+ *
+ * `skipAnalysis` is for the CSP probe alone, whose job is to attempt network
+ * access and so cannot pass. The code it registers is fixed in this extension.
  */
-async function registrationFor(transform: Transform): Promise<Mv3RegisteredUserScript | null> {
-  if (transform.kind !== 'js' || !transform.enabled || !transform.code) return null
+async function registrationFor(
+  transform: Transform,
+  options: { skipAnalysis?: boolean } = {},
+): Promise<{ registration: Mv3RegisteredUserScript | null; blocked: boolean }> {
+  const none = { registration: null, blocked: false }
+  if (transform.kind !== 'js' || !transform.enabled || !transform.code) return none
 
   const settings = await getSettings()
   // The switch covers hand-written scripts too: the user's own code can break
   // a page as much as the model's, and a switch that leaves some JavaScript
   // running cannot be relied on as the way to stop all of it.
-  if (settings.aiJsKillSwitch) return null
+  if (settings.aiJsKillSwitch) return none
+
+  if (!options.skipAnalysis && problemWithStoredCode(transform, settings) !== null) {
+    return { registration: null, blocked: true }
+  }
 
   const offHosts = await getOffHosts()
   const worldId = worldIdFor(transform)
   const world = transform.world ?? 'USER_SCRIPT'
 
   return {
-    id: transform.id,
-    matches: matchPatternsFor(transform),
-    // The per-site off switch. The registration stays, so that turning the site
-    // back on needs no re-registration of anything else.
-    ...(offHosts.length > 0 ? { excludeMatches: excludePatternsFor(offHosts) } : {}),
-    // Wrapped so the transform re-applies after framework re-renders.
-    js: [{ code: wrapTransform(transform) }],
-    world: world satisfies ExecutionWorld,
-    ...(world === 'USER_SCRIPT' ? { worldId } : {}),
-    runAt: 'document_idle',
+    registration: {
+      id: transform.id,
+      matches: matchPatternsFor(transform),
+      // The per-site off switch. The registration stays, so that turning the site
+      // back on needs no re-registration of anything else.
+      ...(offHosts.length > 0 ? { excludeMatches: excludePatternsFor(offHosts) } : {}),
+      // Wrapped so the transform re-applies after framework re-renders.
+      js: [{ code: wrapTransform(transform) }],
+      world: world satisfies ExecutionWorld,
+      ...(world === 'USER_SCRIPT' ? { worldId } : {}),
+      runAt: 'document_idle',
+    },
+    blocked: false,
   }
 }
 
@@ -196,9 +220,21 @@ async function configureWorldFor(transform: Transform): Promise<void> {
   })
 }
 
-async function registerTransformNow(transform: Transform): Promise<void> {
-  const registration = await registrationFor(transform)
-  if (!registration) return
+/**
+ * Registers a script so it runs on matching pages. Returns false when the
+ * script was left unregistered on purpose (see registrationFor). A script that
+ * fails static analysis is unregistered rather than skipped, because a
+ * registration made earlier would still be running.
+ */
+async function registerTransformNow(
+  transform: Transform,
+  options: { skipAnalysis?: boolean } = {},
+): Promise<boolean> {
+  const { registration, blocked } = await registrationFor(transform, options)
+  if (!registration) {
+    if (blocked) await unregisterTransformNow(transform.id)
+    return false
+  }
 
   if (!(await hasUserScriptsPermission())) {
     throw new Error(
@@ -214,6 +250,7 @@ async function registerTransformNow(transform: Transform): Promise<void> {
   } else {
     await userScripts.register([registration])
   }
+  return true
 }
 
 /**
@@ -249,7 +286,7 @@ async function registerPreviewNow(transform: Transform): Promise<void> {
   // real page, and the switch exists to stop that. The alternative, running it because the user asked, was
   // rejected: a setting that a button next to the code can bypass is not a
   // kill switch. The refusal is thrown, and not returned silently, because
-  // registerTransform returns without registering in this case and the caller
+  // registerTransformNow returns without registering in this case and the caller
   // would then report a run that never happened. It is checked before the saved
   // registration is paused, so a refused preview changes nothing.
   const settings = await getSettings()
@@ -274,10 +311,22 @@ async function registerPreviewNow(transform: Transform): Promise<void> {
 async function registerPreviewScript(transform: Transform): Promise<void> {
   // `enabled` is forced on because the saved record's flag describes the saved
   // script, not the question being asked, which is whether to run this draft
-  // now. The draft copies the saved flag, and registerTransform returns
+  // now. The draft copies the saved flag, and registerTransformNow returns
   // without registering a disabled transform, so a preview of a disabled
   // script reloaded the page and ran nothing. The saved record is not changed.
-  await registerTransformNow({ ...transform, enabled: true, id: previewIdFor(transform.id) })
+  //
+  // registerTransformNow returns false, and registers nothing, when static
+  // analysis refuses the code. A preview that was refused has to fail here:
+  // returning normally would let the caller reload the page and report a run
+  // that never happened.
+  const registered = await registerTransformNow({
+    ...transform,
+    enabled: true,
+    id: previewIdFor(transform.id),
+  })
+  if (!registered) {
+    throw new Error('This code did not pass the safety check, so it was not run.')
+  }
 }
 
 /**
@@ -382,8 +431,11 @@ async function reregisterAllNow(
     if (transform.kind !== 'js') continue
     if (!killed && previewed.includes(transform.id)) continue
     try {
-      const registration = await registrationFor(transform)
-      if (!registration) continue
+      const { registration, blocked } = await registrationFor(transform)
+      if (!registration) {
+        if (blocked) skipped += 1
+        continue
+      }
       wanted.add(transform.id)
       const current = held.get(transform.id)
       if (current && sameRegistration(current, registration)) {
@@ -431,8 +483,10 @@ function queued<T>(work: () => Promise<T>): Promise<T> {
   return result
 }
 
-export const registerTransform = (transform: Transform): Promise<void> =>
-  queued(() => registerTransformNow(transform))
+export const registerTransform = (
+  transform: Transform,
+  options: { skipAnalysis?: boolean } = {},
+): Promise<boolean> => queued(() => registerTransformNow(transform, options))
 export const unregisterTransform = (id: string): Promise<void> => queued(() => unregisterTransformNow(id))
 export const registerPreview = (transform: Transform): Promise<void> =>
   queued(() => registerPreviewNow(transform))

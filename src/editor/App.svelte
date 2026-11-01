@@ -2,7 +2,14 @@
   import { radioGroup } from '@shared/radio-group'
   import { focusOnMount } from '@sidebar/lib/focus'
   import '@shared/tokens.css'
-  import type { ReviewResult, Settings, Transform, TransformVersion } from '@shared/types'
+  import type {
+    CssUrlMode,
+    ReviewResult,
+    Settings,
+    Transform,
+    TransformVersion,
+  } from '@shared/types'
+  import { hostOfPattern, modeForHost, policyKeyOfPattern } from '@safety/css-check'
   import { compareWithCurrent, sourceLabel } from '@shared/versions'
   import { matchPresetsFor, matchesUrl, originPermissionFor, parsePattern } from '@shared/match'
   import { send } from '@shared/messaging.svelte'
@@ -52,6 +59,37 @@ import { excludedAccessMessage, excludedHostForPattern } from '@shared/excluded-
    */
   let excludedSites = $state<string[]>([])
   let justSaved = $state(false)
+
+  /*
+   * What CSS on this site may load, kept in settings per site (host name from
+   * the match pattern). Changing it takes effect at once rather than on Save:
+   * it is a property of the site, not of this transform's text.
+   */
+  let cssPolicy = $state<Record<string, CssUrlMode>>({})
+  let cssSiteHost = $derived(hostOfPattern(match.trim() || savedMatch))
+  /* `*.host` for a pattern that covers subdomains, `host` for one host, null when neither can be set. */
+  let cssPolicyKey = $derived(policyKeyOfPattern(match.trim() || savedMatch))
+  let cssMode = $derived<CssUrlMode>(cssSiteHost ? modeForHost(cssPolicy, cssSiteHost) : 'block')
+  /* External addresses waiting for approval, and whether the user ticked the box. */
+  let pendingUrls = $state<string[]>([])
+  let approveListed = $state(false)
+
+  async function setCssMode(mode: CssUrlMode) {
+    if (!cssPolicyKey) return
+    try {
+      const fresh = await send<Settings>({ type: 'get-settings' })
+      const next = { ...fresh.cssUrlPolicy }
+      if (mode === 'block') delete next[cssPolicyKey]
+      else next[cssPolicyKey] = mode
+      await send({ type: 'save-settings', settings: { ...fresh, cssUrlPolicy: next } })
+      cssPolicy = next
+      pendingUrls = []
+      approveListed = false
+      if (transform && !creating) await send({ type: 'reapply-everywhere', id: transform.id })
+    } catch (cause) {
+      findings = [String(cause instanceof Error ? cause.message : cause)]
+    }
+  }
 
   /*
    * Creating is dirty from the start in the sense that leaving loses work, but
@@ -179,20 +217,27 @@ import { excludedAccessMessage, excludedHostForPattern } from '@shared/excluded-
   /**
    * The approval a restored JavaScript version needs before the background
    * saves it, as fields to add to the restore request. Restore has no
-   * exemption from the approval rules.
-   *
-   * THE ONE PLACE FOR THE APPROVAL TOKEN. `approve-code` is not on main yet (it
-   * is in the safety lane). When it lands, this function sends it for a
-   * JavaScript transform, with the code, world and capabilities of `version`,
-   * the transform id and `version.match`, as the editor's save does, and
-   * returns `{ approvalToken }`. The background's restore case then has to pass
-   * that token to the save it makes through saveAndApply.
+   * exemption from the approval rules: the version's code, world and
+   * capabilities, the transform id and the version's match are approved
+   * through `approve-code`, as the editor's save does, and the background's
+   * restore case passes the returned token to the same save handler. Code the
+   * user chose to restore after reading it in the confirmation is the approval
+   * here, as typed code is for a save. CSS needs no token.
    */
   async function approvalForRestore(
-    _current: Transform,
-    _version: TransformVersion,
-  ): Promise<Record<string, never>> {
-    return {}
+    current: Transform,
+    version: TransformVersion,
+  ): Promise<{ approvalToken?: string }> {
+    if (current.kind !== 'js') return {}
+    const { approvalToken } = await send<{ approvalToken: string }>({
+      type: 'approve-code',
+      code: version.code,
+      declaredCapabilities: version.capabilities,
+      ...(version.world ? { world: version.world } : {}),
+      transformId: current.id,
+      match: version.match,
+    })
+    return { approvalToken }
   }
 
   /*
@@ -298,6 +343,7 @@ import { excludedAccessMessage, excludedHostForPattern } from '@shared/excluded-
        * written. The background repeats it on save — this is the copy that can
        * explain itself.
        */
+      let approvalToken: string | undefined
       if ((creating ? kind : current.kind) === 'js') {
         const analysis = await send<ReviewResult>({
           type: 'analyse',
@@ -309,14 +355,62 @@ import { excludedAccessMessage, excludedHostForPattern } from '@shared/excluded-
           findings = blocking.map((f) => `Line ${f.line}: ${f.explanation}`)
           return
         }
+        // Code the user typed was seen by the user, which is the approval here.
+        approvalToken = (
+          await send<{ approvalToken: string }>({
+            type: 'approve-code',
+            code,
+            declaredCapabilities: current.capabilities,
+            ...(current.world ? { world: current.world } : {}),
+            transformId: current.id,
+            match: wanted,
+          })
+        ).approvalToken
+      }
+
+      /*
+       * The CSS check, for the same reason as the JavaScript one above. Hand-
+       * written CSS is not exempt: the person typing it may have pasted it from
+       * somewhere, and a rule that loads an address sends a request on every
+       * visit.
+       */
+      let approvedCssUrls = current.approvedCssUrls
+      if ((creating ? kind : current.kind) === 'css') {
+        const check = await send<ReviewResult>({
+          type: 'analyse-css',
+          css: code,
+          match: wanted,
+          approvedUrls: approveListed ? [...(approvedCssUrls ?? []), ...pendingUrls] : (approvedCssUrls ?? []),
+        })
+        if (check.static.length > 0) {
+          findings = check.static.map((f) => `Line ${f.line}: ${f.explanation}`)
+          return
+        }
+        if (!check.passed) {
+          pendingUrls = check.pendingUrls ?? []
+          approveListed = false
+          findings = ['This CSS loads addresses outside the site. Tick the box below to approve them, then save again.']
+          return
+        }
+        if (approveListed) approvedCssUrls = [...(approvedCssUrls ?? []), ...pendingUrls]
+        pendingUrls = []
       }
 
       const next: Transform = creating
-        ? { ...current, code, match: wanted, kind, name: name.trim(), updatedAt: Date.now() }
+        ? {
+            ...current,
+            code,
+            match: wanted,
+            kind,
+            name: name.trim(),
+            ...(approvedCssUrls ? { approvedCssUrls } : {}),
+            updatedAt: Date.now(),
+          }
         : {
             ...current,
             code,
             match: wanted,
+            ...(approvedCssUrls ? { approvedCssUrls } : {}),
             rationale: {
               targets: current.rationale.targets,
               // The old prose described the old code. Saying so is better than
@@ -331,7 +425,12 @@ import { excludedAccessMessage, excludedHostForPattern } from '@shared/excluded-
       // Every tab the transform matches, not just one: this page is not on any
       // of them, and a save that only reached the last-focused tab would look
       // like it had not worked.
-      await send({ type: 'save-transform', transform: next, source: 'hand-edit' })
+      await send({
+        type: 'save-transform',
+        transform: next,
+        source: 'hand-edit',
+        ...(approvalToken ? { approvalToken } : {}),
+      })
       await send({ type: 'reapply-everywhere', id: current.id })
       if (!creating) await loadVersions()
 
@@ -400,6 +499,7 @@ import { excludedAccessMessage, excludedHostForPattern } from '@shared/excluded-
     void send<Settings>({ type: 'get-settings' })
       .then((settings) => {
         document.documentElement.dataset['accent'] = settings.accent
+        cssPolicy = settings.cssUrlPolicy ?? {}
       })
       .catch(() => {
         // The accent is decoration; failing to read it must not stop editing.
@@ -526,6 +626,43 @@ import { excludedAccessMessage, excludedHostForPattern } from '@shared/excluded-
       {/if}
     </section>
 
+    {#if (creating ? kind : transform.kind) === 'css'}
+      <details class="advanced">
+        <summary>Advanced: addresses CSS may load</summary>
+        <label for="css-mode">For {cssSiteHost ?? 'this site'}</label>
+        <select
+          id="css-mode"
+          value={cssMode}
+          disabled={!cssPolicyKey}
+          onchange={(event) => void setCssMode(event.currentTarget.value as CssUrlMode)}
+        >
+          <option value="block">Only data: addresses (default)</option>
+          <option value="same-origin">Data: addresses and addresses on the same site</option>
+          <option value="list-external">Same site, and other addresses that are approved one by one</option>
+        </select>
+        <p class="hint">
+          CSS that loads an address makes the browser send a request on every visit, and a
+          request can carry information about the page. @import is never allowed.
+          {#if !cssPolicyKey}This pattern has no fixed host name, or covers every site under a public
+            suffix such as .com, so the default applies.{/if}
+        </p>
+      </details>
+      {#if pendingUrls.length > 0}
+        <div class="findings">
+          <strong>Needs approval.</strong>
+          <ul>
+            {#each pendingUrls as url}
+              <li><code>{url}</code></li>
+            {/each}
+          </ul>
+          <label>
+            <input type="checkbox" bind:checked={approveListed} />
+            Approve loading {pendingUrls.length === 1 ? 'this address' : 'these addresses'}
+          </label>
+        </div>
+      {/if}
+    {/if}
+
     {#if findings.length > 0}
       <!-- An alert, so a save that fails is read out when the message appears. -->
       <div class="findings" role="alert">
@@ -620,6 +757,28 @@ import { excludedAccessMessage, excludedHostForPattern } from '@shared/excluded-
 </main>
 
 <style>
+  .advanced {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-5);
+    font: 12px/1.5 var(--font-ui);
+    color: var(--text-dim);
+  }
+
+  .advanced summary {
+    cursor: pointer;
+  }
+
+  .advanced select {
+    max-width: 480px;
+    padding: 4px 6px;
+    border: 1px solid var(--border);
+    border-radius: var(--r-badge);
+    background: var(--surface-raised);
+    font: 12px var(--font-ui);
+    color: var(--text);
+  }
+
   :global(body) {
     margin: 0;
     background: var(--surface);

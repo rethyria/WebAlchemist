@@ -5,6 +5,7 @@
   import Button from './Button.svelte'
   import Toggle from './Toggle.svelte'
   import Label from './Label.svelte'
+  import AddressNote from './AddressNote.svelte'
 
   interface Props {
     /** True when the pick came from a drawn rectangle. */
@@ -19,6 +20,8 @@
     shotClipped: boolean
     shotMoved: boolean
     visionSupported: boolean
+    /** The page address as it will be sent to the provider. */
+    sentAddress: string
     onchange: (instruction: string) => void
     onscreenshot: (send: boolean) => void
     onincluderegion: () => void
@@ -47,6 +50,7 @@
     shotClipped,
     shotMoved,
     visionSupported,
+    sentAddress,
     onchange,
     onscreenshot,
     onincluderegion,
@@ -384,6 +388,8 @@
       </Button>
     </div>
   </section>
+
+  <AddressNote address={sentAddress} />
 
   {#if visionSupported}
     <section class="screenshot">

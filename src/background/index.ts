@@ -6,7 +6,6 @@
  * script talk to this module; only this module talks to a provider.
  */
 
-import { analyseJavaScript, applyCapabilityPolicy } from '@safety/static-analysis'
 import type {
   ContentEvent,
   ContentMessage,
@@ -26,7 +25,7 @@ import type {
   Transform,
   TransformRuntimeState,
 } from '@shared/types'
-import type { RefinementTurn } from './providers/types'
+import type { RefinementTurn, ReviewInstruction } from './providers/types'
 import { overlayPaletteFor } from '@shared/accents'
 import * as badge from './badge'
 import { recordRunTab, takeRunTabs, windowsWithRunTabs } from './run-tabs'
@@ -35,11 +34,25 @@ import { excludedHostOf, getExcludedSites, setExcludedSites } from './excluded-s
 import { excludedSiteMessage } from '@shared/excluded-sites'
 import { hostOfUrl } from '@shared/site-off'
 import { isSidebarPortName, windowOfSidebarPort } from '@shared/sidebar-port'
+import { blockedStates, runStaticAnalysis } from './code-gate'
+import { checkCssForPage, checkCssTransform, pageUrlFor, sameCssContext } from './css-gate'
+import {
+  applyCssTransforms as applyCssTransformsFor,
+  fromExtensionPage,
+  handleApproveCode,
+  handleBlockedCount,
+  handlePreviewCss,
+  handleReview,
+  handleSaveSettings,
+  handleSaveTransform,
+  type CssApplyDeps,
+  type SaveDeps,
+} from './handlers'
 import { documentOf, forgetTab, inTabQueue, startDocument } from './tab-queue'
 import { reconcile as reconcileContentScripts } from './content-scripts'
-import { buildProbeTransform } from './csp-probe'
 import {
   addPreviewedScript,
+  archiveApplied,
   archivePreview,
   forgetArchive,
   forgetCss,
@@ -50,6 +63,7 @@ import {
   previewWindow,
   suspendedTabIds,
   suspendedWindow,
+  takeArchivedApplied,
   takeArchivedPreview,
   readCss,
   readSuspended,
@@ -303,7 +317,24 @@ browser.webNavigation.onCommitted.addListener(async (details) => {
   const recorded = browser.storage.session.set({ [leftUrlKey]: details.url })
   let orphaned: string | undefined
   await inTabQueue(details.tabId, async () => {
+    // Filed under the address of the document being left, as a preview is, for
+    // the case that the tab comes back to it from the back-forward cache.
+    const leftUrl = (await leaving)[leftUrlKey]
+    const appliedCss = await readCss('applied', details.tabId)
+    if (appliedCss !== undefined && typeof leftUrl === 'string') {
+      await archiveApplied(details.tabId, { url: leftUrl, css: appliedCss })
+    }
     await forgetCss('applied', details.tabId)
+    if (restored) {
+      // A restored document still has the stylesheet it had when it was left,
+      // and it was chosen under the settings of that time. It is taken out
+      // before the CSS for the present settings is applied, so a site whose
+      // setting was tightened while the page was cached does not keep CSS that
+      // the new setting refuses (#80). Nothing is removed when the browser
+      // loaded the page afresh: removing a stylesheet that is not there does nothing.
+      const before = await takeArchivedApplied(details.tabId, details.url)
+      if (before) await removePreviewCss(details.tabId, before.css)
+    }
     /*
      * A preview belongs to the document it was inserted into. When the tab
      * leaves that document its string is filed under the document's URL
@@ -508,9 +539,10 @@ async function handle(
         // Registration carries the code, so a changed script has to be
         // re-registered; the page picks it up on its next load either way.
         // Queued with the start-up rebuild so the two cannot interleave (#91).
-        await inRegistryQueue(() =>
-          saved.enabled ? registerTransform(saved) : unregisterTransform(saved.id),
-        )
+        await inRegistryQueue(async () => {
+          if (saved.enabled) await registerTransform(saved)
+          else await unregisterTransform(saved.id)
+        })
       }
 
       /*
@@ -528,6 +560,12 @@ async function handle(
       }
       return true
     }
+
+    case 'get-blocked-states':
+      return blockedStates(await matchingTransforms(message.url), await getSettings(), message.url)
+
+    case 'get-blocked-count':
+      return handleBlockedCount({ getAllTransforms, getSettings })
 
     case 'get-credential-statuses':
       return getAllCredentialStatuses()
@@ -568,12 +606,12 @@ async function handle(
     }
 
     case 'review':
-      return runReview(
-        message.code,
-        message.intent,
-        message.declaredCapabilities,
-        message.transformId,
-      )
+      return handleReview(message, fromExtensionPage(sender, browser.runtime.getURL('')), {
+        runReview,
+      })
+
+    case 'approve-code':
+      return handleApproveCode(message, fromExtensionPage(sender, browser.runtime.getURL('')))
 
     case 'get-usage':
       return getUsage()
@@ -581,10 +619,23 @@ async function handle(
     case 'analyse':
       return runStaticAnalysis(message.code, message.declaredCapabilities)
 
+    case 'analyse-css': {
+      const tab =
+        message.tabId === undefined
+          ? undefined
+          : await browser.tabs.get(message.tabId).catch(() => undefined)
+      return checkCssForPage(
+        message.css,
+        await getSettings(),
+        pageUrlFor(message.match, tab?.url),
+        message.approvedUrls,
+      )
+    }
+
     case 'save-transform':
-      return saveAndApply(
-        message.source ? { ...message.transform, producedBy: message.source } : message.transform,
-        message.tabId,
+      return handleSaveTransform(
+        message.source ? { ...message, transform: { ...message.transform, producedBy: message.source } } : message,
+        saveDeps,
       )
 
     case 'get-transform-versions':
@@ -595,23 +646,34 @@ async function handle(
       if (!current) throw new Error('That transform no longer exists.')
       const version = (await getVersions(message.id)).find((v) => v.id === message.versionId)
       if (!version) throw new Error('That version is no longer kept.')
-      // The same path as any other save, so a restored script meets the static
-      // analysis as it is now: the rules may have changed since it was saved.
-      // The current state becomes a version in turn, so a restore can be undone.
+      // The same handler as any other save, with no exemption, so a restored
+      // script meets the static analysis as it is now (the rules may have
+      // changed since it was saved) and needs an approval token for its code,
+      // world, capabilities and match. The editor obtains the token from
+      // approve-code. The current state becomes a version in turn, so a
+      // restore can be undone.
       const { world: _world, producedBy: _producedBy, ...rest } = current
-      return saveAndApply(
+      return handleSaveTransform(
         {
-          ...rest,
-          code: version.code,
-          rationale: version.rationale,
-          match: version.match,
-          capabilities: version.capabilities,
-          ...(version.world === undefined ? {} : { world: version.world }),
-          ...(version.producedBy === undefined ? {} : { producedBy: version.producedBy }),
+          type: 'save-transform',
+          transform: {
+            ...rest,
+            code: version.code,
+            rationale: version.rationale,
+            match: version.match,
+            capabilities: version.capabilities,
+            ...(version.world === undefined ? {} : { world: version.world }),
+            ...(version.producedBy === undefined ? {} : { producedBy: version.producedBy }),
+          },
+          ...(message.tabId === undefined ? {} : { tabId: message.tabId }),
+          ...(message.approvalToken ? { approvalToken: message.approvalToken } : {}),
         },
-        message.tabId,
+        saveDeps,
       )
     }
+
+    case 'save-transform':
+      return handleSaveTransform(message, saveDeps)
 
     case 'delete-transform': {
       const doomed = (await getAllTransforms()).find((t) => t.id === message.id)
@@ -646,9 +708,10 @@ async function handle(
       const next = await updateTransform(message.id, { enabled: message.enabled })
       if (!next) throw new Error('That transform no longer exists.')
       if (next.kind === 'js') {
-        await inRegistryQueue(() =>
-          next.enabled ? registerTransform(next) : unregisterTransform(next.id),
-        )
+        await inRegistryQueue(async () => {
+          if (next.enabled) await registerTransform(next)
+          else await unregisterTransform(next.id)
+        })
       }
       // A toggle that takes effect on the next reload is not a toggle.
       await reapply(message.tabId)
@@ -657,9 +720,12 @@ async function handle(
 
     case 'save-settings': {
       const switchBefore = (await getSettings()).aiJsKillSwitch
-      await saveSettings(message.settings)
-      await afterSettingsWritten(switchBefore)
-      return true
+      return handleSaveSettings(message, {
+        getSettings,
+        saveSettings,
+        reregisterAll: () => afterSettingsWritten(switchBefore),
+        reapplyAllTabs,
+      })
     }
 
     case 'count-js-tabs':
@@ -765,10 +831,18 @@ async function handle(
       await discardVault()
       return true
 
-    case 'preview-css':
+    case 'preview-css': {
+      // Taken before the first check reads the tab, so that a navigation after
+      // the check is seen when the preview is about to be inserted.
+      const checkedDocument = documentOf(message.tabId)
       await refuseWhenOff(message.tabId)
-      await setPreviewCss(message.tabId, message.css, await windowOfTab(message.tabId))
-      return true
+      return handlePreviewCss(message, {
+        getSettings,
+        tabUrl: tabUrlOf,
+        setPreviewCss: async (tabId, css) =>
+          setPreviewCss(tabId, css, await windowOfTab(tabId), checkedDocument),
+      })
+    }
 
     case 'clear-preview-css':
       await clearPreviewCss(message.tabId, message.css)
@@ -925,17 +999,27 @@ async function handle(
       await sendToContent(message.tabId, { type: 'clear-lock' })
       return true
 
-    case 'run-csp-probe': {
+    // Compiled only into a probe build, the same condition as the sidebar
+    // button that sends these. A release build would otherwise register a
+    // script that sends requests to localhost for any sender that asks.
+    case 'run-csp-probe':
+    case 'clear-csp-probe': {
+      if (import.meta.env.VITE_CSP_PROBE !== '1') {
+        throw new Error(`Unknown message type: ${message.type}`)
+      }
+      if (message.type === 'clear-csp-probe') {
+        await unregisterTransform('wa-csp-probe')
+        return true
+      }
       // Registered, never saved. It must not appear in the user's transform
       // list, and it must come back out when the run is over.
-      await registerTransform(buildProbeTransform())
+      // Imported here, not at the top, so a release build does not bundle the
+      // probe's code once the flag test above is false.
+      const { buildProbeTransform } = await import('./csp-probe')
+      await registerTransform(buildProbeTransform(), { skipAnalysis: true })
       await browser.tabs.update(message.tabId, { url: 'http://localhost:8787/' })
       return true
     }
-
-    case 'clear-csp-probe':
-      await unregisterTransform('wa-csp-probe')
-      return true
 
     case 'check-now': {
       // A manual check must actually run, even under once-per-session where
@@ -949,16 +1033,21 @@ async function handle(
       const isCurrent = () => isLatestEvaluation(message.tabId, evaluation)
       const transforms = await transformsForUrl(message.url)
       await forgetSession(message.url, transforms)
-      const states = await runHealthCheck(message.tabId, transforms, isCurrent)
+      const settings = await getSettings()
+      const health = await runHealthCheck(message.tabId, transforms, isCurrent)
+      // A transform whose code is refused is listed as broken whatever the page
+      // check found, so the result carries it too.
+      const blocked = blockedStates(transforms, settings, message.url)
+      const states = mergeBlocked(health ?? [], blocked)
       // Without this a manual check showed its result in the panel only: a
       // broken transform it found left the badge unchanged, and a clean result
       // did not clear an earlier "!". No result means no change, and neither
       // does a result for a page the tab has left.
-      if (states && isCurrent()) {
+      if ((health || blocked.length > 0) && isCurrent()) {
         const { accent } = await getSettings()
         if (isCurrent()) await badge.healthChecked(message.tabId, brokenIds(states), accent)
       }
-      return states ?? []
+      return states
     }
 
     case 'capture-region':
@@ -976,13 +1065,34 @@ async function handle(
       return exportTransforms()
 
     case 'import-transforms': {
+      /*
+       * Shared CSS arrives with its code, so it gets the same check as CSS
+       * written here. One that fails is imported without code and disabled,
+       * the way shared JavaScript is, so the row is kept and nothing runs.
+       * The check uses the importer's own settings for the site, so a site
+       * set to allow more is not held to the default.
+       */
+      const settings = await getSettings()
       const result = await importTransforms(
         message.bundle as Awaited<ReturnType<typeof exportTransforms>>,
+        (t) => !checkCssTransform(t, settings).passed,
       )
       await reregister()
       return result
     }
   }
+}
+
+/**
+ * A transform that may not run is listed as broken whatever the page check
+ * found: its anchor can resolve perfectly well while its code is the problem.
+ */
+function mergeBlocked(
+  states: TransformRuntimeState[],
+  blocked: TransformRuntimeState[],
+): TransformRuntimeState[] {
+  const ids = new Set(blocked.map((b) => b.id))
+  return [...states.filter((s) => !ids.has(s.id)), ...blocked]
 }
 
 /**
@@ -1002,11 +1112,15 @@ async function checkAndPublish(
   transforms: Transform[],
   isCurrent: () => boolean,
 ): Promise<void> {
-  const states = await runHealthCheck(tabId, transforms, isCurrent)
-  if (!states) return
-  await markChecked(url, transforms)
-
   const settings = await getSettings()
+  const blocked = blockedStates(transforms, settings, url)
+  const health = await runHealthCheck(tabId, transforms, isCurrent)
+  if (health) await markChecked(url, transforms)
+  // No health result because the page was replaced means there is nothing
+  // current to publish, blocked transforms included.
+  if (!health && (blocked.length === 0 || !isCurrent())) return
+  const states = mergeBlocked(health ?? [], blocked)
+
   // Checked again after each await: the tab can navigate while the settings
   // are read or the badge is written, and a result for the old page must not
   // reach the badge or the sidebar.
@@ -1044,8 +1158,20 @@ async function windowOfTab(tabId: number): Promise<number | undefined> {
   return (await browser.tabs.get(tabId).catch(() => undefined))?.windowId
 }
 
-function setPreviewCss(tabId: number, css: string, windowId: number | undefined): Promise<void> {
+function setPreviewCss(
+  tabId: number,
+  css: string,
+  windowId: number | undefined,
+  /** The document the CSS was checked for. A preview is refused for any other. */
+  checkedDocument: number,
+): Promise<void> {
   return inTabQueue(tabId, async () => {
+    // The check read the tab's address for one document. The CSS may pass for
+    // that page and fail for the one the tab shows now, and insertCSS would put
+    // it into whichever is there.
+    if (documentOf(tabId) !== checkedDocument) {
+      throw new Error('The page changed while the preview was being prepared, so it was not shown.')
+    }
     const existing = await readCss('preview', tabId)
     if (existing) {
       await removePreviewCss(tabId, existing)
@@ -1489,27 +1615,11 @@ browser.tabs.onRemoved.addListener(async (tabId) => {
  * something blocking — there is nothing to learn from a second opinion on code
  * that is already rejected, and the call is not free.
  */
-/**
- * The deterministic half, on its own. Separated because it is free and local,
- * which is what lets it gate the preview — the model review costs a call and
- * only happens once, at approval.
- */
-function runStaticAnalysis(
-  code: string,
-  declared: Transform['capabilities'],
-): ReviewResult {
-  const outcome = analyseJavaScript(code)
-  const { findings, undeclared } = applyCapabilityPolicy(outcome, declared)
-  return {
-    static: findings,
-    undeclaredCapabilities: undeclared,
-    passed: !findings.some((f) => f.severity === 'block'),
-  }
-}
-
 async function runReview(
   code: string,
   intent: string,
+  intentEditedByUser: boolean,
+  instructions: ReviewInstruction[],
   declared: Transform['capabilities'],
   transformId?: string,
 ): Promise<ReviewResult> {
@@ -1527,7 +1637,7 @@ async function runReview(
   // is suspended and the caller is told the receiving end does not exist.
   let model: ModelReview
   try {
-    model = await withKeepalive(() => provider.review({ code, intent }))
+    model = await withKeepalive(() => provider.review({ code, intent, intentEditedByUser, instructions }))
   } finally {
     // In `finally` so a billed response that failed to parse is still counted.
     await usage.settled()
@@ -1623,7 +1733,8 @@ async function cssTransformsFor(tabId: number, url: string): Promise<Transform[]
 /**
  * CSS is applied by the background script rather than the content script:
  * insertCSS at the USER origin needs no page-side code, survives re-renders
- * without observers, and cannot be tampered with from the page.
+ * without observers, and cannot be tampered with from the page. The logic,
+ * including the check of stored CSS, is in handlers.ts so it can be tested.
  */
 function applyCssTransforms(
   tabId: number,
@@ -1667,88 +1778,44 @@ async function tabStillShows(
     // Not compared as strings: a page that sets location.hash while it loads
     // reports a URL with a fragment that the commit event did not have, and
     // skipping the insert there left the page with no CSS (#57). The CSS is
-    // still right when the same transforms match both URLs.
+    // still right when the same transforms match both URLs and the CSS is
+    // filtered the same way for both: the filter depends on the site's CSS
+    // setting and on the origin, so a move to another origin is not the same page.
     const all = await getAllTransforms()
     const same = all.every(
       (t) => matchesUrl(t.match, current) === matchesUrl(t.match, expected.url),
     )
     if (!same) return false
+    if (!sameCssContext(await getSettings(), current, expected.url)) return false
   }
   return documentOf(tabId) === expected.document
 }
 
+/**
+ * Applies the CSS through the shared handler, which checks every stored
+ * stylesheet before it is inserted. `tabStillShows` is passed as the last check
+ * before the insert, so a tab that navigated during the waits gets nothing.
+ */
 async function applyCss(
   tabId: number,
   transforms: Transform[],
   expected: { document: number; url: string },
 ): Promise<void> {
-  const css = transforms
-    .filter((t) => t.kind === 'css' && t.enabled)
-    .sort((a, b) => a.order - b.order)
-    .map((t) => `/* ${t.name} */\n${t.code}`)
-    .join('\n\n')
-
-  // Read from storage.session: see css-state.ts for why a module variable is not enough.
-  const previous = await readCss('applied', tabId)
-  if (previous !== undefined && previous !== css) {
-    await browser.scripting
-      .removeCSS({ target: { tabId }, css: previous, origin: 'USER' })
-      .catch(() => {})
-    await forgetCss('applied', tabId)
-  }
-
-  if (!css || previous === css) return
-  if (!(await tabStillShows(tabId, expected))) return
-
-  try {
-    await browser.scripting.insertCSS({ target: { tabId }, css, origin: 'USER' })
-    await writeCss('applied', tabId, css)
-  } catch {
-    // No host permission for this origin yet, which is expected until the user
-    // saves their first transform for the site.
-  }
+  await applyCssTransformsFor(cssApplyDeps, tabId, transforms, expected.url, () =>
+    tabStillShows(tabId, expected),
+  )
 }
 
-/**
- * Saves a transform and puts the result on the page: the one path that a new
- * transform, an edit, a repair and a restored version all take.
- */
-async function saveAndApply(transform: Transform, tabId: number | undefined): Promise<true> {
-  // First, so a record with a missing field is refused with a message
-  // before analysis reads fields it may not have. saveTransform checks
-  // again; this is only the earlier point.
-  assertValidTransform(transform)
-
-  /*
-   * Re-run the gate here rather than trusting that the caller did, exactly
-   * as preview-js does. This stopped being a formality when transform code
-   * became hand-editable: the sidebar is no longer only ever sending back
-   * something it just analysed, so the last point before code is persisted
-   * and registered has to check it for itself.
-   */
-  if (transform.kind === 'js') {
-    const analysis = runStaticAnalysis(transform.code, transform.capabilities)
-    if (!analysis.passed) {
-      throw new Error('Static analysis rejected this code, so it was not saved.')
-    }
-  }
-
-  // Register what was stored, not what was sent: a save keeps the stored
-  // `enabled`, and the copy that arrived may hold an older value.
-  const before = (await getAllTransforms()).find((t) => t.id === transform.id)
-  const saved = await saveTransform(transform)
-  if (saved.kind === 'js') {
-    await inRegistryQueue(() => registerTransform(saved))
-  }
-  const { accent } = await getSettings()
-  await badge.transformEdited(saved.id, accent)
-  await repaintOtherTabs([saved.match, before?.match], accent)
-  // After a repair the next load has to check again, even in once-per-session mode.
-  await forgetSessionChecksFor(saved.id)
-  // Apply it now rather than on the next navigation. The preview was just
-  // taken down, so without this the page visibly reverts on save.
-  await reapply(tabId)
-  return true
+const cssApplyDeps: CssApplyDeps = {
+  getSettings,
+  insertCss: (tabId, css) => browser.scripting.insertCSS({ target: { tabId }, css, origin: 'USER' }),
+  removeCss: (tabId, css) => browser.scripting.removeCSS({ target: { tabId }, css, origin: 'USER' }),
+  // Read from storage.session: see css-state.ts for why a module variable is not enough.
+  applied: {
+    read: (tabId) => readCss('applied', tabId),
+    write: (tabId, css) => writeCss('applied', tabId, css),
+    forget: (tabId) => forgetCss('applied', tabId),
+  },
 }
 
 /** Recomputes and applies whatever should be running in this tab right now. */
@@ -1769,6 +1836,37 @@ async function reapply(tabId: number | undefined): Promise<void> {
     transforms.map((t) => t.id),
     settings.accent,
   )
+}
+
+/** Recomputes what runs in every open tab, for a change that is not tied to one transform. */
+async function reapplyAllTabs(): Promise<void> {
+  for (const tab of await browser.tabs.query({})) await reapply(tab.id)
+}
+
+/** The URL of a tab, or undefined when there is no such tab or it has no URL. */
+async function tabUrlOf(tabId: number | undefined): Promise<string | undefined> {
+  if (tabId === undefined) return undefined
+  const tab = await browser.tabs.get(tabId).catch(() => undefined)
+  return tab?.url
+}
+
+const saveDeps: SaveDeps = {
+  getAllTransforms,
+  getSettings,
+  tabUrl: tabUrlOf,
+  assertValidTransform,
+  saveTransform,
+  // Queued with the rebuild so a rebuild between the save and the
+  // registration cannot read the old script from storage (#91).
+  registerTransform: (transform) => inRegistryQueue(() => registerTransform(transform)),
+  transformEdited: async (id) => badge.transformEdited(id, (await getSettings()).accent),
+  afterSave: async (saved, before) => {
+    const { accent } = await getSettings()
+    await repaintOtherTabs([saved.match, before?.match], accent)
+    // After a repair the next load has to check again, even in once-per-session mode.
+    await forgetSessionChecksFor(saved.id)
+  },
+  reapply,
 }
 
 /* ------------------------------------------------------------------ */

@@ -22,7 +22,7 @@
  */
 
 import type { AnchoredElement, ContentEvent } from '@shared/messages'
-import type { RefinementTurn } from '@background/providers/types'
+import type { RefinementTurn, ReviewInstruction } from '@background/providers/types'
 import type { ScrollOffset } from '@shared/region'
 import {
   matchPresetsFor,
@@ -273,12 +273,32 @@ export class Flow {
   previewedCss = $state<string | null>(null)
   /** Set once the draft has been registered and the page reloaded. */
   jsRan = $state(false)
+  /**
+   * External CSS URLs the user approved in the approval panel, for a site set
+   * to list them. Saved on the transform, so only these URLs may load.
+   */
+  approvedCssUrls = $state<string[]>([])
+
   /** Static analysis, run locally after every generation. Gates the preview. */
   analysis = $state<ReviewResult | null>(null)
   /** Set when the user declines the grant the transform needs to function. */
   permissionDenied = $state(false)
 
   intent = $state('')
+  /**
+   * The page address the requests of this run carry, as it was when the element
+   * was picked (or found again for Repair and Edit). The panels show this value
+   * and `generate` sends it, so the two cannot differ.
+   */
+  get sentAddress(): string {
+    return this.picked?.context.url ?? ''
+  }
+  /**
+   * What `intent` was before the user could edit it: the model's `result.intent`
+   * after a generation, or the stored intent after Repair or Edit with AI. The
+   * review is told the intent was edited by the user when the two differ.
+   */
+  intentBaseline = ''
   matchPattern = $state('')
   review = $state<ReviewResult | null>(null)
 
@@ -484,6 +504,15 @@ export class Flow {
    * from the describing step.
    */
   private keptInstruction: string | null = null
+  /**
+   * The stored intent that `instruction` was pre-filled from, or null when the
+   * user wrote the first instruction themselves. Repair, Edit with AI and Edit
+   * description pre-fill from `transform.intent`, which a model or an imported
+   * bundle wrote, so the review has to be told that text did not come from the
+   * user (#52). Kept next to `keptInstruction` and restored with it.
+   */
+  private savedInstruction: string | null = null
+  private keptSavedInstruction: string | null = null
 
   /**
    * The element that was selected when "Change" started a new pick, held so
@@ -506,6 +535,7 @@ export class Flow {
     const held = this.rePickFrom
     this.rePickFrom = null
     this.keptInstruction = null
+    this.keptSavedInstruction = null
     if (!held) return false
     this.picked = held.picked
     this.tree = held.tree
@@ -526,6 +556,7 @@ export class Flow {
   async startPicking(purpose: 'describe' | 'author' = 'describe'): Promise<void> {
     this.pickPurpose = purpose
     this.keptInstruction = this.step === 'describing' ? this.instruction : null
+    this.keptSavedInstruction = this.step === 'describing' ? this.savedInstruction : null
     if (this.tabId === null) return
 
     const origin = originPermissionForUrl(this.url)
@@ -686,12 +717,17 @@ export class Flow {
         if (this.pickPurpose === 'author') void this.openAuthoring()
         else {
           const kept = this.keptInstruction
+          const keptSaved = this.keptSavedInstruction
           this.keptInstruction = null
+          this.keptSavedInstruction = null
           this.enterDescribing()
           // Changing the element is not starting a new description, so what
           // was typed stays. The screenshot, scope and references describe the
           // old element and are reset as before.
-          if (kept !== null) this.instruction = kept
+          if (kept !== null) {
+            this.instruction = kept
+            this.savedInstruction = keptSaved
+          }
         }
         return
       }
@@ -777,6 +813,7 @@ export class Flow {
     this.scopeCount = 1
     this.scopeContainer = null
     this.instruction = ''
+    this.savedInstruction = null
     this.history = []
     this.followUp = ''
     this.references = []
@@ -941,8 +978,10 @@ export class Flow {
       this.picked = { ...found, cropDrawn: false }
       // What a regeneration from the refining panel will build on.
       this.matchPattern = transform.match
+      this.approvedCssUrls = transform.approvedCssUrls ?? []
       this.intent = transform.intent
-      this.instruction = transform.intent
+      this.intentBaseline = transform.intent
+      this.prefillInstruction(transform.intent)
       this.history = []
       this.references = []
       this.draft = transform
@@ -974,6 +1013,7 @@ export class Flow {
       this.result = result
       // Not result.intent: the destination was never what broke.
       this.intent = transform.intent
+      this.intentBaseline = transform.intent
       this.draft = this.buildDraft(result, found.anchor)
 
       this.stage = 'analysis'
@@ -984,7 +1024,7 @@ export class Flow {
               code: result.code,
               declaredCapabilities: result.capabilities,
             })
-          : { static: [], undeclaredCapabilities: [], passed: true }
+          : await this.checkCss(result.code)
       if (!current()) return
 
       this.stage = 'preview'
@@ -1071,6 +1111,7 @@ export class Flow {
       this.tree = found.tree ?? []
       this.draft = transform
       this.matchPattern = transform.match
+      this.approvedCssUrls = transform.approvedCssUrls ?? []
 
       /*
        * enterDescribing clears the instruction, so the pre-fill has to follow
@@ -1079,8 +1120,9 @@ export class Flow {
        * start of a new description and not a continuation of the old one.
        */
       this.enterDescribing()
-      this.instruction = transform.intent
+      this.prefillInstruction(transform.intent)
       this.intent = transform.intent
+      this.intentBaseline = transform.intent
       await this.restoreScopeDepth(transform)
       if (!current()) return
 
@@ -1138,8 +1180,10 @@ export class Flow {
 
       this.picked = { ...found, cropDrawn: false }
       this.matchPattern = transform.match
+      this.approvedCssUrls = transform.approvedCssUrls ?? []
       this.intent = transform.intent
-      this.instruction = transform.intent
+      this.intentBaseline = transform.intent
+      this.prefillInstruction(transform.intent)
       this.references = []
       this.followUp = ''
       this.draft = transform
@@ -1180,7 +1224,7 @@ export class Flow {
               code: transform.code,
               declaredCapabilities: transform.capabilities,
             })
-          : { static: [], undeclaredCapabilities: [], passed: true }
+          : await this.checkCss(transform.code)
       if (!current()) return
 
       await this.applyPreview(this.result)
@@ -1223,8 +1267,38 @@ export class Flow {
       draft: Transform | null
       analysis: ReviewResult | null
       intent: string
+      intentBaseline: string
     }
   } | null = null
+
+  /**
+   * Puts a stored intent in the instruction field and records that it came
+   * from storage. Every pre-fill goes through here so none can skip the record.
+   */
+  private prefillInstruction(storedIntent: string): void {
+    this.instruction = storedIntent
+    this.savedInstruction = storedIntent
+  }
+
+  /**
+   * Every instruction behind the current result, each with where it came from.
+   * The first one is the pre-filled text when there is a saved instruction, so
+   * it is compared with what was pre-filled to tell whether the user changed
+   * it. Later ones are follow-ups, which the user always wrote.
+   */
+  private reviewInstructions(): ReviewInstruction[] {
+    const texts = [
+      ...this.history.filter((turn) => turn.role === 'user').map((turn) => turn.content),
+      this.instruction,
+    ]
+    return texts.map((text, index): ReviewInstruction => {
+      if (index > 0 || this.savedInstruction === null) return { text, source: 'typed' }
+      return {
+        text,
+        source: text === this.savedInstruction ? 'saved-description' : 'saved-description-edited',
+      }
+    })
+  }
 
   private undoRefinement(): void {
     const held = this.refinement
@@ -1235,6 +1309,7 @@ export class Flow {
       this.draft = held.previous.draft
       this.analysis = held.previous.analysis
       this.intent = held.previous.intent
+      this.intentBaseline = held.previous.intentBaseline
     }
     this.history = held.history
     this.instruction = held.instruction
@@ -1283,6 +1358,11 @@ export class Flow {
     try {
       this.stage = 'context'
       const context: PageContext = { ...(await this.liveContext(picked)) }
+      // Everything else in the context is read again so it matches the page
+      // as it is now, but the address stays the one the panel has been showing.
+      // A page that navigates, or a query string it changes after the pick,
+      // would otherwise put an address in the request that the user never saw.
+      context.url = picked.context.url
       // Cancel can arrive while the page is being read; without this the
       // cancelled run still opened a port and sent the request.
       if (!current()) return
@@ -1373,7 +1453,7 @@ export class Flow {
               code: result.code,
               declaredCapabilities: result.capabilities,
             })
-          : { static: [], undeclaredCapabilities: [], passed: true }
+          : await this.checkCss(result.code)
       if (!current()) return
 
       if (this.refinement) {
@@ -1382,10 +1462,12 @@ export class Flow {
           draft: this.draft,
           analysis: this.analysis,
           intent: this.intent,
+          intentBaseline: this.intentBaseline,
         }
       }
       this.result = result
       this.intent = result.intent
+      this.intentBaseline = result.intent
       // Keep the user's scope choice across a regeneration; only seed it once.
       this.matchPattern ||=
         this.matchPresets.find((p) => p.recommended)?.pattern ??
@@ -1651,6 +1733,31 @@ export class Flow {
   }
 
   /**
+   * The CSS check, which loads nothing and costs nothing. The background
+   * repeats it on save and before any CSS is applied, so this copy exists to
+   * show the result.
+   */
+  private async checkCss(css: string): Promise<ReviewResult> {
+    return send<ReviewResult>({
+      type: 'analyse-css',
+      css,
+      match: this.matchPattern,
+      ...(this.tabId === null ? {} : { tabId: this.tabId }),
+      approvedUrls: this.approvedCssUrls,
+    })
+  }
+
+  /** The user approved the external URLs the panel listed. */
+  async approveCssUrls(): Promise<void> {
+    const result = this.result
+    if (!result || result.kind !== 'css') return
+    this.approvedCssUrls = [
+      ...new Set([...this.approvedCssUrls, ...(this.review?.pendingUrls ?? [])]),
+    ]
+    this.review = await this.checkCss(result.code)
+  }
+
+  /**
    * CSS previews at the USER origin, the same way a saved transform applies,
    * so what is on screen during refinement is what will be stored.
    *
@@ -1661,7 +1768,17 @@ export class Flow {
   private async applyPreview(result: GenerationResult): Promise<void> {
     if (result.kind !== 'css' || this.tabId === null) return
     await this.clearPreview()
-    await send({ type: 'preview-css', tabId: this.tabId, css: result.code })
+    // Nothing reaches the page until the CSS check has passed. A request a
+    // rule causes is sent at once and cannot be recalled by discarding it, so
+    // the preview is skipped and the panel says why. The background repeats
+    // the check before injecting.
+    if (!this.analysis?.passed) return
+    await send({
+      type: 'preview-css',
+      tabId: this.tabId,
+      css: result.code,
+      approvedUrls: this.approvedCssUrls,
+    })
     this.previewedCss = result.code
   }
 
@@ -1900,11 +2017,17 @@ export class Flow {
     this.step = 'reviewing'
     this.review = null
 
-    // CSS is not sent for model review: it cannot make a request, read
-    // storage, or reach a cookie, so there is no behaviour for a reviewer to
-    // disagree with. Static analysis has nothing to say about it either.
+    // CSS is not sent for model review: it cannot read storage or a cookie,
+    // and what it can request is decided by the CSS check rather than by a
+    // reviewer's opinion of the intent. The check is repeated here, after the
+    // scope and any approvals were chosen.
     if (result.kind === 'css') {
-      this.review = { static: [], undeclaredCapabilities: [], passed: true }
+      try {
+        this.review = await this.checkCss(result.code)
+      } catch (cause) {
+        this.step = 'saving'
+        this.fail(cause)
+      }
       return
     }
 
@@ -1912,11 +2035,22 @@ export class Flow {
       this.review = await send<ReviewResult>({
         type: 'review',
         code: result.code,
-        // The edited intent, not the model's. The reviewer is asked whether
-        // the code matches what the user says they wanted.
+        // The edited intent is sent as the generator's summary only. The
+        // reviewer judges against what the user typed, which is every user
+        // turn in the history followed by the current instruction, except a
+        // pre-filled stored intent the user has not changed (see
+        // reviewInstructions).
         intent: this.intent,
+        intentEditedByUser: this.intent !== this.intentBaseline,
+        instructions: this.reviewInstructions(),
         declaredCapabilities: result.capabilities,
+        world: result.world,
+        // The approval token is tied to the id and pattern, so the save must
+        // send the same ones. The id is also what the review's cost is added
+        // to. The pattern is not editable between here and the save: changing
+        // it goes back to the saving step, which reviews again.
         transformId: this.transformKey(),
+        match: this.matchPattern,
       })
       if (this.review.usage) this.lastUsage = this.review.usage
     } catch (cause) {
@@ -1945,7 +2079,13 @@ export class Flow {
       declaredCapabilities: [],
     })
     this.analysis = analysis
-    this.review = { ...analysis, ...(this.review?.model ? { model: this.review.model } : {}) }
+    this.review = {
+      ...analysis,
+      ...(this.review?.model ? { model: this.review.model } : {}),
+      // Dropping a capability only reduces what the approval has to cover, so
+      // the token from the review is still the one the save needs.
+      ...(this.review?.approvalToken ? { approvalToken: this.review.approvalToken } : {}),
+    }
   }
 
   /**
@@ -2060,6 +2200,9 @@ export class Flow {
         intent: this.intent,
         match: this.matchPattern,
         capabilities: this.result?.capabilities ?? draft.capabilities,
+        ...(draft.kind === 'css' && this.approvedCssUrls.length > 0
+          ? { approvedCssUrls: this.approvedCssUrls }
+          : {}),
         updatedAt: Date.now(),
       }
 
@@ -2076,6 +2219,7 @@ export class Flow {
         source: this.producedBy,
         // So it applies to the page now, rather than on the next load.
         ...(this.tabId === null ? {} : { tabId: this.tabId }),
+        ...(this.review?.approvalToken ? { approvalToken: this.review.approvalToken } : {}),
       })
       this.reset()
       this.onSaved()
@@ -2286,6 +2430,8 @@ export class Flow {
     this.scopeCount = 1
     this.scopeContainer = null
     this.instruction = ''
+    this.savedInstruction = null
+    this.keptSavedInstruction = null
     this.sendScreenshot = false
     this.history = []
     this.followUp = ''
@@ -2297,8 +2443,10 @@ export class Flow {
     this.previewedCss = null
     this.jsRan = false
     this.analysis = null
+    this.approvedCssUrls = []
     this.permissionDenied = false
     this.intent = ''
+    this.intentBaseline = ''
     this.matchPattern = ''
     this.review = null
     this.stage = 'context'

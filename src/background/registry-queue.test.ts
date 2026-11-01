@@ -62,7 +62,8 @@ const script = {
   intent: 'x',
   rationale: { targets: '', approach: '', assumptions: [] },
   anchor: { tag: 'div', classes: [], path: 'html>body>div', landmarks: [], selector: 'div' },
-  code: 'a()',
+  // Passes static analysis, which registration now runs.
+  code: "document.querySelector('aside').style.display = 'none'",
   createdAt: 1,
   updatedAt: 1,
 } as any

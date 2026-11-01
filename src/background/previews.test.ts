@@ -129,6 +129,10 @@ beforeAll(async () => {
   onConnect = listeners.get('browser.runtime.onConnect')!
 })
 
+// Code that passes static analysis, since registering and previewing run it.
+const SAVED_CODE = "document.querySelector('aside').style.display = 'none'"
+const DRAFT_CODE = "document.querySelector('nav').style.display = 'none'"
+
 const saved = {
   id: 'SAVED',
   name: 'Saved',
@@ -142,14 +146,14 @@ const saved = {
   intent: 'x',
   rationale: { targets: '', approach: '', assumptions: [] },
   anchor: { tag: 'div', classes: [], path: 'html>body>div', landmarks: [], selector: 'div.x' },
-  code: 'savedCode()',
+  code: SAVED_CODE,
   createdAt: 1,
   updatedAt: 1,
 }
 const extensionPage = { url: 'moz-extension://abc/src/sidebar/index.html', id: 'wa@test' }
 const holds = (id: string) => JSON.stringify(registered.get(id) ?? null)
 
-const previewJs = (code = 'draftCode()') =>
+const previewJs = (code = DRAFT_CODE) =>
   onMessage(
     { type: 'preview-js', tabId: 1, transform: { ...saved, code } },
     extensionPage,
@@ -166,14 +170,14 @@ beforeEach(async () => {
   tabHooks.tab = (tabId) => ({ id: tabId, active: true, windowId: 3, url: 'https://www.example.com/' })
   captureCalls.length = 0
   sentToTabs.length = 0
-  registered.set('SAVED', { id: 'SAVED', js: [{ code: 'savedCode()' }] })
+  registered.set('SAVED', { id: 'SAVED', js: [{ code: SAVED_CODE }] })
 })
 
 describe('preview-js and clear-preview-js', () => {
   it('pauses the saved script while the preview is registered', async () => {
     expect(await previewJs()).toMatchObject({ ok: true })
     expect(registered.has('SAVED')).toBe(false)
-    expect(holds('preview-SAVED')).toContain('draftCode()')
+    expect(holds('preview-SAVED')).toContain(DRAFT_CODE)
   })
 
   it('registers the saved script again when the preview is cleared', async () => {
@@ -182,8 +186,8 @@ describe('preview-js and clear-preview-js', () => {
       ok: true,
     })
     expect(registered.has('preview-SAVED')).toBe(false)
-    expect(holds('SAVED')).toContain('savedCode()')
-    expect(holds('SAVED')).not.toContain('draftCode()')
+    expect(holds('SAVED')).toContain(SAVED_CODE)
+    expect(holds('SAVED')).not.toContain(DRAFT_CODE)
   })
 
   it('registers the saved script again when the sidebar closes with a preview running', async () => {
@@ -195,7 +199,7 @@ describe('preview-js and clear-preview-js', () => {
     // The handler does not return its promise, so wait for its effect.
     port.onDisconnect.addListener.mock.calls[0]![0]()
     await vi.waitFor(() => expect(registered.has('preview-SAVED')).toBe(false))
-    await vi.waitFor(() => expect(holds('SAVED')).toContain('savedCode()'))
+    await vi.waitFor(() => expect(holds('SAVED')).toContain(SAVED_CODE))
   })
 
   it('removes the preview and restores the saved script when the reload fails', async () => {
@@ -204,14 +208,14 @@ describe('preview-js and clear-preview-js', () => {
     }
     expect(await previewJs()).toMatchObject({ ok: false })
     expect(registered.has('preview-SAVED')).toBe(false)
-    expect(holds('SAVED')).toContain('savedCode()')
+    expect(holds('SAVED')).toContain(SAVED_CODE)
     // The id is no longer stored, so a later sidebar close has nothing to clear.
     expect([...session.values()].flat()).not.toContain('SAVED')
   })
 
   it('keeps the preview registered when the reload succeeds (control)', async () => {
     expect(await previewJs()).toMatchObject({ ok: true })
-    expect(holds('preview-SAVED')).toContain('draftCode()')
+    expect(holds('preview-SAVED')).toContain(DRAFT_CODE)
     expect(session.get('wa-preview-scripts')).toEqual(['SAVED'])
   })
 
@@ -222,7 +226,7 @@ describe('preview-js and clear-preview-js', () => {
     const port = { name: 'wa-sidebar', sender: extensionPage, onDisconnect: { addListener: vi.fn() } }
     onConnect(port)
     await port.onDisconnect.addListener.mock.calls[0]![0]()
-    expect(holds('SAVED')).toBe(JSON.stringify({ id: 'SAVED', js: [{ code: 'savedCode()' }] }))
+    expect(holds('SAVED')).toBe(JSON.stringify({ id: 'SAVED', js: [{ code: SAVED_CODE }] }))
   })
 })
 

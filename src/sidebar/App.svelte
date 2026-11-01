@@ -46,7 +46,14 @@
   let statuses = $state<CredentialStatus[]>([])
   let vault = $state<VaultView>({ sealed: false, unlocked: true })
   let transforms = $state<Transform[]>([])
-  let runtimeStates = $state<TransformRuntimeState[]>([])
+  let healthStates = $state<TransformRuntimeState[]>([])
+  /* Stored code that no longer passes the safety checks, so is not running. */
+  let blockedStates = $state<TransformRuntimeState[]>([])
+  /* Blocked wins: the page check can find the element and still miss that the code is refused. */
+  let runtimeStates = $derived([
+    ...healthStates.filter((s) => !blockedStates.some((b) => b.id === s.id)),
+    ...blockedStates,
+  ])
   let conflicts = $state<Conflict[]>([])
   let url = $state('')
   /* Origins currently held, for the rows' "No access to this site" state. */
@@ -55,6 +62,8 @@
   let loadError = $state<{ message: string; retryable: boolean } | null>(null)
   let checking = $state(false)
   let showSettings = $state(false)
+  /* Enabled transforms on any site that the safety check keeps from running. */
+  let blockedCount = $state(0)
 
   /*
    * Null until the stored acknowledgement has been read, which counts as not
@@ -180,13 +189,16 @@
   }
 
   async function refresh() {
+    await refreshBlockedCount()
     if (!transformable) {
       transforms = []
       conflicts = []
+      blockedStates = []
       return
     }
     await readGrants()
     transforms = await send<Transform[]>({ type: 'get-transforms-for-url', url })
+    blockedStates = await send<TransformRuntimeState[]>({ type: 'get-blocked-states', url })
     siteOff = (await send<boolean>({ type: 'get-site-off', url })) === true
     await findConflicts()
   }
@@ -250,6 +262,15 @@
     document.documentElement.dataset['accent'] = next.accent
   }
 
+  async function refreshBlockedCount() {
+    try {
+      blockedCount = await send<number>({ type: 'get-blocked-count' })
+    } catch {
+      // The count is a notice; failing to read it must not stop the list loading.
+      blockedCount = 0
+    }
+  }
+
   /*
    * Sends only the fields the user changed, as one patch the background applies
    * to what is stored. A whole settings object would carry back every value this
@@ -266,6 +287,8 @@
     applySettings(next)
     const saved = await send<Settings>({ type: 'patch-settings', change: { kind: 'fields', fields } })
     applySettings(saved)
+    // A site setting can change which stored CSS passes the check.
+    await refreshBlockedCount()
     if ('aiJsKillSwitch' in fields) {
       killNotice = killSwitchNotice(saved.aiJsKillSwitch, await send<number>({ type: 'count-js-tabs' }))
     }
@@ -325,7 +348,7 @@
     if (tab?.id === undefined || !url) return
     checking = true
     try {
-      runtimeStates = await send<TransformRuntimeState[]>({
+      healthStates = await send<TransformRuntimeState[]>({
         type: 'check-now',
         tabId: tab.id,
         url,
@@ -450,6 +473,7 @@
   }
 
   async function editCode(transform: Transform, code: string): Promise<string | null> {
+    let approvalToken: string | undefined
     if (transform.kind === 'js') {
       const analysis = await send<ReviewResult>({
         type: 'analyse',
@@ -462,6 +486,17 @@
           .map((f) => `Line ${f.line}: ${f.explanation}`)
           .join('\n')
       }
+      // Code the user typed was seen by the user, which is the approval here.
+      approvalToken = (
+        await send<{ approvalToken: string }>({
+          type: 'approve-code',
+          code,
+          declaredCapabilities: transform.capabilities,
+          ...(transform.world ? { world: transform.world } : {}),
+          transformId: transform.id,
+          match: transform.match,
+        })
+      ).approvalToken
     }
 
     const next: Transform = {
@@ -481,6 +516,7 @@
         transform: next,
         source: 'hand-edit',
         ...(tab?.id === undefined ? {} : { tabId: tab.id }),
+        ...(approvalToken ? { approvalToken } : {}),
       })
     } catch (cause) {
       return cause instanceof BackgroundError ? cause.message : String(cause)
@@ -515,7 +551,7 @@
     }
     if (expandedId === transform.id) expandedId = null
     transforms = transforms.filter((t) => t.id !== transform.id)
-    runtimeStates = runtimeStates.filter((s) => s.id !== transform.id)
+    healthStates = healthStates.filter((s) => s.id !== transform.id)
   }
 
   function openSettingsPage() {
@@ -525,7 +561,7 @@
   /** Ignores results for tabs the panel is not showing; see health-result.ts. */
   async function showHealthResult(message: HealthCheckResult) {
     const tab = await activeTab()
-    if (isForTab(message, tab?.id)) runtimeStates = message.states
+    if (isForTab(message, tab?.id)) healthStates = message.states
   }
 
   /*
@@ -660,6 +696,14 @@
     />
   {/if}
 
+  {#if blockedCount > 0 && !showSettings && transformable && flow.step === 'list' && !flow.awayFromOwner}
+    <p class="broken-banner" role="status">
+      {blockedCount}
+      {blockedCount === 1 ? 'transform is' : 'transforms are'} blocked by the current safety check and
+      {blockedCount === 1 ? 'is' : 'are'} not running. This count covers every site.
+    </p>
+  {/if}
+
   {#if showSettings && settings}
     <SettingsPanel
       {settings}
@@ -725,6 +769,7 @@
       shotClipped={flow.shotClipped}
       shotMoved={flow.shotMoved}
       visionSupported={flow.visionSupported}
+      sentAddress={flow.sentAddress}
       onchange={(value) => (flow.instruction = value)}
       onscreenshot={(value) =>
         value ? void flow.chooseScreenshotRegion() : flow.cancelScreenshot()}
@@ -751,6 +796,7 @@
       withScreenshot={flow.sendScreenshot}
       {contextSize}
       thinkingChars={flow.thinkingChars}
+      sentAddress={flow.sentAddress}
       oncancel={() => flow.cancelGenerating()}
     />
   {:else if flow.step === 'refining' && flow.result}
@@ -768,6 +814,7 @@
       shotClipped={flow.shotClipped}
       shotMoved={flow.shotMoved}
       visionSupported={flow.visionSupported}
+      sentAddress={flow.sentAddress}
       onfollowup={(value) => (flow.followUp = value)}
       onaddreference={() => void flow.addReference()}
       onremovereference={(selector) => flow.removeReference(selector)}
@@ -799,6 +846,7 @@
       origin={originPermissionFor(flow.matchPattern)}
       permissionDenied={flow.permissionDenied}
       onrefuse={() => void flow.refuseCapabilities()}
+      onapproveurls={() => void flow.approveCssUrls()}
       onsave={() => void flow.save()}
       onback={() => flow.toSaving()}
     />
