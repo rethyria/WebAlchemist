@@ -96,28 +96,86 @@ export async function getAllTransforms(): Promise<Transform[]> {
   return list.sort((a, b) => a.order - b.order)
 }
 
-export async function saveTransform(transform: Transform): Promise<void> {
-  const all = await getAllTransforms()
-  const index = all.findIndex((t) => t.id === transform.id)
-  const next = { ...transform, updatedAt: Date.now() }
-  if (index === -1) all.push(next)
-  else all[index] = next
-  await browser.storage.local.set({ [KEY_TRANSFORMS]: all })
+/**
+ * The tail of the chain of transform mutations. Each mutation waits for the one
+ * before it, so a read-modify-write never starts while another is between its
+ * read and its write.
+ *
+ * The transform list is stored as one array, so every change reads the whole
+ * array and writes the whole array back. Two handlers running at once both read
+ * the same array and the second write discards the first (#84). A lock inside
+ * the browser's storage was not an option, since storage.local has no
+ * transactions; ordering the calls in this module is the available fix. It
+ * covers only this background script, which is the only context that calls
+ * these functions.
+ *
+ * Reads stay outside the queue: a read sees either the state before a write or
+ * after it, never a partial one, so it has nothing to wait for.
+ */
+let transformQueue: Promise<unknown> = Promise.resolve()
+
+function mutateTransforms<T>(work: () => Promise<T>): Promise<T> {
+  // A failed mutation must not stop the ones behind it, so the chain continues
+  // from the outcome of the previous call whether it succeeded or not.
+  const result = transformQueue.then(work, work)
+  transformQueue = result.catch(() => undefined)
+  return result
 }
 
-export async function deleteTransform(id: string): Promise<void> {
-  const all = await getAllTransforms()
-  await browser.storage.local.set({
-    [KEY_TRANSFORMS]: all.filter((t) => t.id !== id),
+export function saveTransform(transform: Transform): Promise<void> {
+  return mutateTransforms(async () => {
+    const all = await getAllTransforms()
+    const index = all.findIndex((t) => t.id === transform.id)
+    const next = { ...transform, updatedAt: Date.now() }
+    if (index === -1) all.push(next)
+    else all[index] = next
+    await browser.storage.local.set({ [KEY_TRANSFORMS]: all })
+  })
+}
+
+/**
+ * Changes some fields of one stored transform. The read, the change and the
+ * write all happen inside the queue.
+ *
+ * A caller that reads the transform with getAllTransforms and then calls
+ * saveTransform with a changed copy does the read outside the queue. A save
+ * that runs between the two is then overwritten by the copy, which still holds
+ * the old values of every field the caller did not mean to change. That is how
+ * the enable toggle lost a concurrent save of the same transform. Returns the
+ * stored record, or null when no transform has that id.
+ */
+export function updateTransform(
+  id: string,
+  patch: Partial<Omit<Transform, 'id'>>,
+): Promise<Transform | null> {
+  return mutateTransforms(async () => {
+    const all = await getAllTransforms()
+    const index = all.findIndex((t) => t.id === id)
+    if (index === -1) return null
+    const next = { ...all[index]!, ...patch, id, updatedAt: Date.now() }
+    all[index] = next
+    await browser.storage.local.set({ [KEY_TRANSFORMS]: all })
+    return next
+  })
+}
+
+export function deleteTransform(id: string): Promise<void> {
+  return mutateTransforms(async () => {
+    const all = await getAllTransforms()
+    await browser.storage.local.set({
+      [KEY_TRANSFORMS]: all.filter((t) => t.id !== id),
+    })
   })
 }
 
 /** Persists a new ordering. Order decides which transform wins a conflict. */
-export async function reorderTransforms(orderedIds: string[]): Promise<void> {
-  const all = await getAllTransforms()
-  const position = new Map(orderedIds.map((id, index) => [id, index]))
-  const next = all.map((t) => ({ ...t, order: position.get(t.id) ?? t.order }))
-  await browser.storage.local.set({ [KEY_TRANSFORMS]: next })
+export function reorderTransforms(orderedIds: string[]): Promise<void> {
+  return mutateTransforms(async () => {
+    const all = await getAllTransforms()
+    const position = new Map(orderedIds.map((id, index) => [id, index]))
+    const next = all.map((t) => ({ ...t, order: position.get(t.id) ?? t.order }))
+    await browser.storage.local.set({ [KEY_TRANSFORMS]: next })
+  })
 }
 
 /* ------------------------------------------------------------------ */
@@ -313,7 +371,14 @@ export async function exportTransforms(): Promise<ExportBundle> {
  * implementation locally under their own review and capability gates. CSS
  * arrives with code intact, since CSS cannot exfiltrate anything.
  */
-export async function importTransforms(bundle: ExportBundle): Promise<{
+export function importTransforms(bundle: ExportBundle): Promise<{
+  imported: number
+  needsRegeneration: string[]
+}> {
+  return mutateTransforms(() => importTransformsNow(bundle))
+}
+
+async function importTransformsNow(bundle: ExportBundle): Promise<{
   imported: number
   needsRegeneration: string[]
 }> {

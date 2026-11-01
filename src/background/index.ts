@@ -53,6 +53,7 @@ import {
   saveTransform,
   setCredential,
   unlockVault,
+  updateTransform,
   vaultState,
 } from './storage'
 
@@ -324,11 +325,10 @@ async function handle(
       return true
 
     case 'set-enabled': {
-      const all = await getAllTransforms()
-      const target = all.find((t) => t.id === message.id)
-      if (!target) throw new Error('That transform no longer exists.')
-      const next = { ...target, enabled: message.enabled }
-      await saveTransform(next)
+      // One queued update rather than a read followed by saveTransform: the
+      // read has to be inside the queue or a concurrent save is overwritten.
+      const next = await updateTransform(message.id, { enabled: message.enabled })
+      if (!next) throw new Error('That transform no longer exists.')
       if (next.kind === 'js') {
         if (next.enabled) await registerTransform(next)
         else await unregisterTransform(next.id)
