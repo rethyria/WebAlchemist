@@ -36,7 +36,7 @@ import {
   removePreviewedScript,
   writeCss,
 } from './css-state'
-import { forgetSession, runHealthCheck, shouldCheck } from './health'
+import { forgetSession, markChecked, runHealthCheck, shouldCheck } from './health'
 import { withKeepalive } from './keepalive'
 import { isContentEvent as isContentEventType, isExtensionPage } from './sender'
 import { connect as connectOAuth } from './oauth'
@@ -181,13 +181,13 @@ async function evaluateTab(
   if (!navigated || transforms.length > 0) await applyCssTransforms(tabId, transforms)
 
   if (transforms.length === 0) return
-  if (!shouldCheck(settings, url)) return
+  if (!(await shouldCheck(settings, url, transforms))) return
 
   // Deliberately not awaited alongside the CSS application: the check waits up
   // to three seconds for a slow page to settle, and CSS must not queue behind
   // it. A visible delay before the page restyles would be a worse bug than a
   // late health result.
-  void checkAndPublish(tabId, transforms, () => isLatestEvaluation(tabId, evaluation))
+  void checkAndPublish(tabId, url, transforms, () => isLatestEvaluation(tabId, evaluation))
 }
 
 /*
@@ -623,8 +623,8 @@ async function handle(
     case 'check-now': {
       // A manual check must actually run, even under once-per-session where
       // this host has already been seen.
-      forgetSession(message.url)
       const transforms = await transformsForUrl(message.url)
+      await forgetSession(message.url, transforms)
       const states = await runHealthCheck(message.tabId, transforms)
       // Without this a manual check showed its result in the panel only: a
       // broken transform it found left the badge unchanged, and a clean result
@@ -666,11 +666,13 @@ function brokenIds(states: TransformRuntimeState[]): string[] {
 
 async function checkAndPublish(
   tabId: number,
+  url: string,
   transforms: Transform[],
   isCurrent: () => boolean,
 ): Promise<void> {
   const states = await runHealthCheck(tabId, transforms, isCurrent)
   if (!states) return
+  await markChecked(url, transforms)
 
   const settings = await getSettings()
   await badge.healthChecked(tabId, brokenIds(states), settings.accent)

@@ -144,3 +144,58 @@ describe('the broken badge after a repair, a delete or a manual check (#88)', ()
     expect(badgeText()).toBe('!')
   })
 })
+
+describe('once-per-session checks (#94)', () => {
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 0))
+  const checks = () => h.calls.sendMessage.filter((c) => c.message.type === 'run-health-check')
+  const pathA = cssTransform({ id: 'a', match: 'example.com/a*' })
+  const pathB = cssTransform({ id: 'b', match: 'example.com/b*' })
+
+  beforeEach(async () => {
+    h.local.set('transforms', [pathA, pathB])
+    h.local.set('settings', { ...(await h.onMessage({ type: 'get-settings' })).data, healthCheckMode: 'once-per-session' })
+    h.contentReply = (message) =>
+      message.type === 'ping' ? true : { type: 'health-check-result', states: [] }
+    await h.boot()
+  })
+
+  it('does not check a site again after a suspension', async () => {
+    await commit('https://example.com/a1')
+    await settle()
+    expect(checks()).toHaveLength(1)
+    await h.boot() // suspension: module state is lost, storage.session is kept
+    await commit('https://example.com/a1')
+    await settle()
+    expect(checks()).toHaveLength(1)
+  })
+
+  it('checks a host again when no result arrived the first time', async () => {
+    h.contentReply = (message) => (message.type === 'ping' ? true : undefined)
+    await commit('https://example.com/a1')
+    await settle()
+    expect(checks()).toHaveLength(1)
+    h.contentReply = (message) =>
+      message.type === 'ping' ? true : { type: 'health-check-result', states: [] }
+    await commit('https://example.com/a1')
+    await settle()
+    expect(checks()).toHaveLength(2)
+  })
+
+  it('checks each path that has different transforms', async () => {
+    await commit('https://example.com/a1')
+    await settle()
+    await commit('https://example.com/b1')
+    await settle()
+    expect(checks()).toHaveLength(2)
+  })
+
+  it('control: a second page with the same transforms is not checked', async () => {
+    // Shows the tests above count checks that happen and not checks that are
+    // always skipped: the case once-per-session exists for still skips.
+    await commit('https://example.com/a1')
+    await settle()
+    await commit('https://example.com/a2')
+    await settle()
+    expect(checks()).toHaveLength(1)
+  })
+})

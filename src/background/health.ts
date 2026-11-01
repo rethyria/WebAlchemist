@@ -16,28 +16,60 @@ import type { ContentMessage } from '@shared/messages'
 import type { Settings, Transform, TransformRuntimeState } from '@shared/types'
 
 /**
- * Hosts already checked this session, for `once-per-session`.
+ * The record of what `once-per-session` has already checked, one
+ * `storage.session` key per check.
  *
- * Deliberately in memory: a session ends when the browser closes, and that is
- * exactly when this should be forgotten. Persisting it would mean a transform
- * that broke overnight goes unnoticed until the user clears something they
- * cannot see.
+ * It was a module variable, on the reasoning that a session ends when the
+ * browser closes and that is when it should be forgotten. That reasoning held
+ * for the browser closing and missed the event page being suspended after 30
+ * seconds idle, which also emptied it: a site was then checked again after every
+ * idle period instead of once per browser session. `storage.session` lasts
+ * exactly as long as the browser session and survives a suspension, so it
+ * matches the wording of the setting. It is not `storage.local`, which would
+ * carry the record across restarts and hide a transform that broke overnight.
+ *
+ * One key per check rather than one list under one key: two tabs finishing at
+ * the same moment would each read the list, add their own entry and write it
+ * back, and one entry would be lost.
+ *
+ * The key is the host plus the ids of the transforms checked. The host alone
+ * treated `example.com/a*` and `example.com/b*` as one site and checked only
+ * whichever path was opened first; the ids alone would treat two sites that a
+ * wildcard transform matches as one.
  */
-const checkedThisSession = new Set<string>()
+function sessionKey(url: string, transforms: Transform[]): string | null {
+  const host = hostOf(url)
+  if (!host) return null
+  return `wa-health-checked:${host}:${transforms.map((t) => t.id).sort().join(',')}`
+}
 
-export function shouldCheck(settings: Settings, url: string): boolean {
+export async function shouldCheck(
+  settings: Settings,
+  url: string,
+  transforms: Transform[],
+): Promise<boolean> {
   switch (settings.healthCheckMode) {
     case 'every-load':
       return true
     case 'manual':
       return false
     case 'once-per-session': {
-      const host = hostOf(url)
-      if (!host || checkedThisSession.has(host)) return false
-      checkedThisSession.add(host)
-      return true
+      const key = sessionKey(url, transforms)
+      if (!key) return false
+      return !((await browser.storage.session.get(key))[key] as boolean | undefined)
     }
   }
+}
+
+/**
+ * Records a check, once a result has arrived. Not before: a check that got no
+ * answer, because the content script did not respond within 5 seconds, told the
+ * user nothing, and marking it would have suppressed every later attempt this
+ * session.
+ */
+export async function markChecked(url: string, transforms: Transform[]): Promise<void> {
+  const key = sessionKey(url, transforms)
+  if (key) await browser.storage.session.set({ [key]: true })
 }
 
 function hostOf(url: string): string | null {
@@ -131,7 +163,7 @@ async function waitForContentScript(
 }
 
 /** Exposed so a manual check can bypass the per-session record. */
-export function forgetSession(url: string): void {
-  const host = hostOf(url)
-  if (host) checkedThisSession.delete(host)
+export async function forgetSession(url: string, transforms: Transform[]): Promise<void> {
+  const key = sessionKey(url, transforms)
+  if (key) await browser.storage.session.remove(key)
 }
