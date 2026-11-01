@@ -4,6 +4,7 @@
   import { focusOnMount } from '../lib/focus'
   import Button from './Button.svelte'
   import Label from './Label.svelte'
+  import { boundTab } from '@shared/panel-binding'
 
   interface Props {
     hover: HoverTarget | null
@@ -13,6 +14,9 @@
 
   let { hover, oncancel, onkey }: Props = $props()
 
+  /** The panel is open in a tab (Firefox for Android), so the page is picked by touch. */
+  const touch = boundTab() !== null
+
   let trail = $derived(hover?.breadcrumb.slice(0, -1) ?? [])
   let leaf = $derived(hover?.breadcrumb.at(-1) ?? '')
 
@@ -21,7 +25,9 @@
       ? 'Drawing a rectangle'
       : hover?.crop
         ? 'Resolved from your rectangle'
-        : 'Hovering the page',
+        : touch
+          ? 'Waiting for a tap on the page'
+          : 'Hovering the page',
   )
 
   /*
@@ -85,19 +91,33 @@
         {/if}
       </div>
     {:else}
-      <p class="waiting">Move the pointer over the page, or use the arrow keys.</p>
+      <p class="waiting">
+        {touch ? 'Tap an element on the page.' : 'Move the pointer over the page, or use the arrow keys.'}
+      </p>
     {/if}
   </section>
 
-  <div class="keys">
-    <Label>Walk the tree</Label>
-    <dl>
-      {#each KEYS as [key, meaning]}
-        <dt><kbd>{key}</kbd></dt>
-        <dd>{meaning}</dd>
-      {/each}
-    </dl>
-  </div>
+  {#if touch}
+    <div class="keys">
+      <Label>Picking by touch</Label>
+      <p class="waiting">
+        The page is shown while picking. Tap an element to select it. To draw an area instead,
+        touch and hold still for half a second, then drag. A drag that starts sooner scrolls the
+        page. After a tap, this panel comes back and lists the element's parent, children and
+        siblings, which can be chosen from the tree.
+      </p>
+    </div>
+  {:else}
+    <div class="keys">
+      <Label>Walk the tree</Label>
+      <dl>
+        {#each KEYS as [key, meaning]}
+          <dt><kbd>{key}</kbd></dt>
+          <dd>{meaning}</dd>
+        {/each}
+      </dl>
+    </div>
+  {/if}
 
   <Button full onclick={oncancel}>Cancel</Button>
 </div>

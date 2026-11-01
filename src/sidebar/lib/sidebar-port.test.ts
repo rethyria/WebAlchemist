@@ -112,6 +112,47 @@ describe('holdSidebarPortForWindow', () => {
     expect(names).toEqual(['wa-sidebar'])
   })
 
+  it('opens the port under the panel tab id when the panel is open in a tab (#128)', async () => {
+    const names: string[] = []
+    const getWindowId = vi.fn(async () => 7)
+    holdSidebarPortForWindow(
+      (name) => {
+        names.push(name)
+        return { onDisconnect: { addListener: () => {} }, disconnect: () => {} }
+      },
+      getWindowId,
+      async () => 50,
+    )
+    await vi.advanceTimersByTimeAsync(0)
+    expect(names).toEqual(['wa-sidebar:tab:50'])
+    expect(getWindowId).not.toHaveBeenCalled()
+  })
+
+  it('uses the window name when no panel tab getter is given, as in the docked sidebar (control)', async () => {
+    const names: string[] = []
+    holdSidebarPortForWindow(
+      (name) => {
+        names.push(name)
+        return { onDisconnect: { addListener: () => {} }, disconnect: () => {} }
+      },
+      async () => 7,
+      undefined,
+    )
+    await vi.advanceTimersByTimeAsync(0)
+    expect(names).toEqual(['wa-sidebar:7'])
+  })
+
+  it('passes the panel tab getter only when the panel is bound (#128)', async () => {
+    // App.svelte cannot be mounted here, so this reads its source.
+    const source = (await import('node:fs')).readFileSync(
+      new URL('../App.svelte', import.meta.url),
+      'utf8',
+    )
+    expect(source).toContain(
+      'boundTab() === null ? undefined : async () => (await browser.tabs.getCurrent())?.id',
+    )
+  })
+
   it('does not connect when the panel closes before the lookup finishes', async () => {
     const connect = vi.fn()
     const stop = holdSidebarPortForWindow(connect, async () => 7)

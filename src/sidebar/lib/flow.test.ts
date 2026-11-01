@@ -42,6 +42,7 @@ const localStored: Record<string, unknown> = {}
 
 const { Flow } = await import('./flow.svelte')
 const { BackgroundError } = await import('./messaging.svelte')
+const { setBoundTab } = await import('@shared/panel-binding')
 const { reviewKey } = await import('./preview-gate')
 
 const URL_ = 'https://www.example.com/'
@@ -954,6 +955,20 @@ describe('events from the page', () => {
     expect(flow.picked).toBeNull()
   })
 
+  it('reports whether the event was accepted, which gates showing the panel tab (#128)', async () => {
+    const flow = await flowWaitingForPick()
+    expect(flow.receive(elementPicked, fromOtherTab)).toBe(false)
+    expect(flow.receive(elementPicked, {})).toBe(false)
+    expect(flow.receive({ type: 'picking-cancelled' } as any, fromOtherTab)).toBe(false)
+    expect(flow.receive(elementPicked, fromRunTab)).toBe(true)
+  })
+
+  it('reports an event as not accepted when no run is waiting for the page (#128)', () => {
+    const flow = newFlow()
+    expect(flow.step).toBe('list')
+    expect(flow.receive({ type: 'picking-cancelled' } as any, fromRunTab)).toBe(false)
+  })
+
   it('ignores a pick that carries no sender tab', async () => {
     const flow = await flowWaitingForPick()
     flow.receive(elementPicked, {})
@@ -1506,6 +1521,261 @@ describe('the review is given what the user typed (#52)', () => {
       { text: 'the follow-up as typed', source: 'typed' },
     ])
     expect(sent.intent).toBe('edited intent')
+  })
+})
+
+describe('the description of an imported transform (#56)', () => {
+  const importedJs = { ...saved, kind: 'js', origin: 'imported', code: '', intent: 'IMPORTED INTENT' }
+  const handlerFor = (m: any) => {
+    if (m.type === 'context-for-anchor') return { ok: true, data: found }
+    if (m.type === 'analyse' || m.type === 'review') {
+      return { ok: true, data: { static: [], undeclaredCapabilities: [], passed: true } }
+    }
+    return { ok: true, data: null }
+  }
+  const lastReview = () => calls.filter((c) => c.type === 'review').at(-1)
+  const jsOut = { ...jsResult, code: 'document.body.remove()' }
+
+  it('labels an unchanged imported description as imported for the reviewer', async () => {
+    const flow = newFlow()
+    handler = handlerFor
+    await flow.editIntent(importedJs)
+    flow.result = jsOut
+    await flow.toReview()
+    expect(lastReview().instructions).toEqual([{ text: 'IMPORTED INTENT', source: 'imported-description' }])
+  })
+
+  it('counts the description as the user\'s once it was changed, and says where it started', async () => {
+    const flow = newFlow()
+    handler = handlerFor
+    await flow.editIntent(importedJs)
+    flow.result = jsOut
+    flow.instruction = 'IMPORTED INTENT, only the banner'
+    await flow.toReview()
+    expect(lastReview().instructions).toEqual([
+      { text: 'IMPORTED INTENT, only the banner', source: 'imported-description-edited' },
+    ])
+  })
+
+  it('control: the same flow for a transform the user saved is a saved description, not an imported one', async () => {
+    const flow = newFlow()
+    handler = handlerFor
+    await flow.editIntent({ ...importedJs, origin: 'ai' })
+    flow.result = jsOut
+    await flow.toReview()
+    expect(lastReview().instructions).toEqual([{ text: 'IMPORTED INTENT', source: 'saved-description' }])
+  })
+
+  it('shows the description before anything is sent when Repair is chosen', async () => {
+    const flow = newFlow()
+    handler = handlerFor
+    await flow.repair(importedJs, 'broken')
+    expect(flow.step).toBe('describing')
+    expect(flow.instruction).toBe('IMPORTED INTENT')
+    expect(calls.some((c) => c.type === 'repair')).toBe(false)
+  })
+
+  it('control: Repair of a transform the user saved still starts the repair at once', async () => {
+    const flow = newFlow()
+    handler = (m: any) =>
+      m.type === 'repair' ? { ok: true, data: { result: jsOut } } : handlerFor(m)
+    await flow.repair({ ...importedJs, origin: 'ai', code: 'x()' }, 'broken')
+    expect(calls.some((c) => c.type === 'repair')).toBe(true)
+  })
+
+  describe('what the generator is sent', () => {
+    beforeEach(() => {
+      ports.length = 0
+      ;(globalThis as any).browser.runtime.connect = fakeConnect
+    })
+    afterEach(() => {
+      ;(globalThis as any).browser.runtime.connect = realConnect
+    })
+
+    it('marks an unchanged imported description', async () => {
+      const flow = newFlow()
+      handler = handlerFor
+      await flow.editIntent(importedJs)
+      void flow.generate()
+      const port = await nextPort(1)
+      expect(port.request.instruction).toBe('IMPORTED INTENT')
+      expect(port.request.instructionImported).toBe(true)
+    })
+
+    it('does not mark a description the user changed', async () => {
+      const flow = newFlow()
+      handler = handlerFor
+      await flow.editIntent(importedJs)
+      flow.instruction = 'IMPORTED INTENT, only the banner'
+      void flow.generate()
+      const port = await nextPort(1)
+      expect(port.request.instructionImported).toBe(false)
+    })
+
+    it('does not mark the description of a transform the user saved (control)', async () => {
+      const flow = newFlow()
+      handler = handlerFor
+      await flow.editIntent({ ...importedJs, origin: 'ai' })
+      void flow.generate()
+      const port = await nextPort(1)
+      expect(port.request.instructionImported).toBe(false)
+    })
+  })
+})
+
+describe('a follow-up on an imported transform (#56)', () => {
+  const importedWithCode = {
+    ...saved,
+    kind: 'js',
+    origin: 'imported',
+    code: 'document.body.remove()',
+    intent: 'IMPORTED INTENT',
+    rationale: { targets: '', approach: 'FILE APPROACH', assumptions: [] },
+  }
+  const handlerFor = (m: any) => {
+    if (m.type === 'context-for-anchor') return { ok: true, data: found }
+    if (m.type === 'analyse' || m.type === 'review') {
+      return { ok: true, data: { static: [], undeclaredCapabilities: [], passed: true } }
+    }
+    return { ok: true, data: null }
+  }
+  const lastReview = () => calls.filter((c) => c.type === 'review').at(-1)
+
+  beforeEach(() => {
+    ports.length = 0
+    ;(globalThis as any).browser.runtime.connect = fakeConnect
+    handler = handlerFor
+  })
+  afterEach(() => {
+    ;(globalThis as any).browser.runtime.connect = realConnect
+  })
+
+  describe('Change with AI', () => {
+    it('keeps the description and the file rationale out of the history and sends the description fenced', async () => {
+      const flow = newFlow()
+      await flow.editWithAi(importedWithCode)
+      flow.followUp = 'make it blue'
+      const run = flow.regenerate()
+      const port = await nextPort(1)
+      expect(port.request.instruction).toBe('make it blue')
+      expect(port.request.history).toEqual([])
+      expect(port.request.importedDescription).toBe('IMPORTED INTENT')
+      expect(JSON.stringify(port.request)).not.toContain('FILE APPROACH')
+      port.emit({ type: 'done', result: { ...cssResult('MODEL APPROACH'), kind: 'js', code: 'x()' } })
+      await run
+
+      // The next turn still carries the description, and the history now holds
+      // only what the user typed and what the model answered.
+      flow.followUp = 'and bigger'
+      const next = flow.regenerate()
+      const second = await nextPort(2)
+      expect(second.request.importedDescription).toBe('IMPORTED INTENT')
+      expect(second.request.history).toEqual([
+        { role: 'user', content: 'make it blue' },
+        { role: 'assistant', content: 'MODEL APPROACH' },
+      ])
+      second.emit({ type: 'done', result: cssResult('A3') })
+      await next
+    })
+
+    it('labels the description as imported for the review, in both the instructions and the intent', async () => {
+      const flow = newFlow()
+      await flow.editWithAi(importedWithCode)
+      await flow.toReview()
+      expect(lastReview().intentImported).toBe(true)
+
+      flow.followUp = 'make it blue'
+      const run = flow.regenerate()
+      const port = await nextPort(1)
+      flow.result = { ...jsResultBase, code: 'x()' } as any
+      await flow.toReview()
+      expect(lastReview().instructions).toEqual([
+        { text: 'IMPORTED INTENT', source: 'imported-description' },
+        { text: 'make it blue', source: 'typed' },
+      ])
+      port.emit({ type: 'done', result: { ...cssResult('M'), kind: 'js', code: 'x()' } })
+      await run
+      // The generator wrote the intent now, so it is no longer called imported.
+      await flow.toReview()
+      expect(lastReview().intentImported).toBeUndefined()
+    })
+
+    it('control: a transform the user saved keeps its turns in the history and sends no imported description', async () => {
+      const flow = newFlow()
+      await flow.editWithAi({ ...importedWithCode, origin: 'ai' })
+      flow.followUp = 'make it blue'
+      void flow.regenerate()
+      const port = await nextPort(1)
+      expect(port.request.history).toEqual([
+        { role: 'user', content: 'IMPORTED INTENT' },
+        { role: 'assistant', content: 'FILE APPROACH' },
+      ])
+      expect(port.request.importedDescription).toBeUndefined()
+    })
+
+    it('puts the history back when the follow-up fails, so the description is still sent next time', async () => {
+      const flow = newFlow()
+      await flow.editWithAi(importedWithCode)
+      flow.followUp = 'make it blue'
+      const failing = flow.regenerate()
+      ;(await nextPort(1)).emit({ type: 'error', error: { message: 'failed', kind: 'network' } })
+      await failing
+      const again = flow.retry()
+      const port = await nextPort(2)
+      expect(port.request.importedDescription).toBe('IMPORTED INTENT')
+      expect(port.request.history).toEqual([])
+      port.emit({ type: 'done', result: cssResult('A2') })
+      await again
+    })
+  })
+
+  describe('Edit description, sent unchanged', () => {
+    const importedJs = { ...saved, kind: 'js', origin: 'imported', code: '', intent: 'IMPORTED INTENT' }
+
+    it('keeps the description out of the history on the follow-up and sends it fenced', async () => {
+      const flow = newFlow()
+      await flow.editIntent(importedJs)
+      const first = flow.generate()
+      const port1 = await nextPort(1)
+      expect(port1.request.instructionImported).toBe(true)
+      port1.emit({ type: 'done', result: cssResult('A1') })
+      await first
+
+      flow.followUp = 'only the banner'
+      const run = flow.regenerate()
+      const port = await nextPort(2)
+      expect(port.request.instruction).toBe('only the banner')
+      expect(port.request.instructionImported).toBe(false)
+      expect(port.request.importedDescription).toBe('IMPORTED INTENT')
+      expect(port.request.history).toEqual([])
+      port.emit({ type: 'done', result: cssResult('A2') })
+      await run
+
+      flow.result = { ...jsResultBase, code: 'x()' } as any
+      await flow.toReview()
+      expect(lastReview().instructions).toEqual([
+        { text: 'IMPORTED INTENT', source: 'imported-description' },
+        { text: 'only the banner', source: 'typed' },
+      ])
+    })
+
+    it('control: a description the user changed is theirs and goes into the history', async () => {
+      const flow = newFlow()
+      await flow.editIntent(importedJs)
+      flow.instruction = 'IMPORTED INTENT, only the banner'
+      const first = flow.generate()
+      ;(await nextPort(1)).emit({ type: 'done', result: cssResult('A1') })
+      await first
+
+      flow.followUp = 'smaller'
+      void flow.regenerate()
+      const port = await nextPort(2)
+      expect(port.request.importedDescription).toBeUndefined()
+      expect(port.request.history).toEqual([
+        { role: 'user', content: 'IMPORTED INTENT, only the banner' },
+        { role: 'assistant', content: 'A1' },
+      ])
+    })
   })
 })
 
@@ -2136,6 +2406,35 @@ describe('saving for a site on the excluded list (#131)', () => {
     const flow = flowFor('*.example.com/*', ['www.example.com'])
     void flow.save()
     expect(flow.error).toMatchObject({ kind: 'request-failed' })
+  })
+})
+
+describe('screenshots in a panel that is bound to a page tab (#128)', () => {
+  afterEach(() => setBoundTab(null))
+
+  /** A run that reaches Describing, with a model that supports images. */
+  async function describingWithVisionModel() {
+    handler = (m) =>
+      m.type === 'get-vision-support' ? { ok: true, data: true } : { ok: true, data: null }
+    const flow = newFlow()
+    await flow.startPicking()
+    pick(flow)
+    expect(flow.step).toBe('describing')
+    // checkVisionSupport is not awaited by the step change.
+    await vi.waitFor(() => expect(calls.some((c) => c.type === 'get-vision-support')).toBe(true))
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    return flow
+  }
+
+  it('does not offer a screenshot when the panel is bound, even if the model supports images', async () => {
+    setBoundTab(5)
+    const flow = await describingWithVisionModel()
+    expect(flow.visionSupported).toBe(false)
+  })
+
+  it('offers a screenshot in the docked sidebar for the same model (control)', async () => {
+    const flow = await describingWithVisionModel()
+    expect(flow.visionSupported).toBe(true)
   })
 })
 

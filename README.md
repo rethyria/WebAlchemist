@@ -12,7 +12,9 @@ As of November 2026 the architecture, the data model, the safety checks and the 
 
 ## Platforms
 
-The interface is a Firefox sidebar and a settings page, which exist on desktop Firefox. The manifest sets 142 as the minimum for Firefox for Android, and Firefox for Android has no sidebars. A tab-based interface for Android is tracked in issue 128 and is not in this version of the code. No part of the extension has been run on an Android device.
+On desktop Firefox the interface is a sidebar, a settings page and an editor page. Firefox for Android has no sidebars, so there the toolbar (menu) action opens the same panel in a browser tab. The background script puts the id of the page tab in the panel's address, and the panel works on that tab only after it checks the id. Picking works by touch: a tap selects the element under the finger, and a finger movement before half a second has passed scrolls the page as usual. Touching and holding still for half a second and then dragging draws a rectangle. After a pick, the panel shows the tree for moving to the parent, a child or a sibling.
+
+The manifest sets 142 as the minimum for Firefox for Android. Screenshots are not offered there, and where Firefox for Android does not provide the identity API, signing in with a provider account is not offered (an API key works). Both limits come from what is known about the Firefox for Android APIs and have not been tested. None of the Android behaviour has been run on a device or an emulator, so it is untested.
 
 ## Development
 
@@ -138,9 +140,16 @@ When the user generates, repairs or edits a transform, the background script sen
 
 The model review sends the code and the user's instructions, not the page. Nothing is sent to the developer, and the extension has no analytics or error reporting. A first-run disclosure with this information is shown before a credential can be entered, and again when its version changes.
 
-## Import, export and versions
+## Import, export and backup
 
-The background script can export all transforms as a file with a schema version, and import such a file. Credentials and provider settings are never exported. An imported JavaScript transform arrives without its code and disabled, and is marked for regeneration by the importer's own model under the importer's own checks. An imported CSS transform keeps its code only if it passes the CSS check, and approvals for external addresses in the file are discarded. No screen in the extension sends the export or import messages as of November 2026, so there is no way to use them from the interface. Earlier versions of a transform, the last five, are restored from the editor.
+The settings page has an "Export and import" section with three actions: "Export to share", "Back up" and "Import from file". Both kinds of export are JSON files and either can be encrypted with a passphrase of at least 12 characters (PBKDF2 and AES-GCM). Neither file contains credentials or provider settings, and a backup does not contain provider addresses. Both hold text and addresses taken from the pages the transforms were written for.
+
+- A shared export carries CSS code, and for JavaScript only the description (the intent), without code.
+- A backup also carries JavaScript code, the capabilities it declared, and two settings, the accent colour and the health check mode.
+
+An import shows what it would add before anything is saved, and the transforms that it adds are always turned off. The importing extension rebuilds each record from the fields that an import may take, so a file cannot set approvals, a world or a transform's enabled state. Imported JavaScript from a shared file has no code until the importer's own model has written code that passes the importer's static analysis and review. JavaScript code from a backup stays off until the user has read and approved it, and it must pass static analysis. CSS from a file is kept only if it passes the CSS check under the importer's settings. A pattern in a file is refused when it covers every site, when it starts with a wildcard host, when it names a local or private address, or when it reaches a site on the importer's excluded list. An import is limited to 20 sites, 1000 records and 5 MB. A restore applies only the accent colour and the health check mode from a backup's settings.
+
+The last five versions of each transform are kept, and the editor restores one after a confirmation.
 
 ## Durability
 
@@ -153,7 +162,7 @@ CSS is inserted at the user cascade origin, where `!important` in the extension'
 - Screenshots show only the visible part of the tab. A taller target is captured partly and reported as clipped. Capturing needs either the toolbar button click or the all-sites access grant.
 - The static analysis and the model review are not complete, and the CSP of the script world does not limit network access. Approving code is the control that the user holds.
 - A tab that already ran JavaScript keeps running it after the kill switch or a site's off switch is used, until the tab is reloaded.
-- The extension has not been run on an Android device, and the Android tab interface is not in this version of the code.
+- The Android tab interface has not been run on a device or an emulator.
 
 ## Design
 

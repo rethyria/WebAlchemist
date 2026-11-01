@@ -108,6 +108,21 @@ describe('previewing a saved JavaScript transform', () => {
     expect(store.has('preview-SAVED')).toBe(true)
   })
 
+  it('says that restored code is waiting for approval, and does not call it a failed safety check', async () => {
+    await registerTransform(saved)
+    const error = await registerPreview({ ...saved, awaitsApproval: true, code: DRAFT_CODE }).catch(
+      (cause: unknown) => cause as Error,
+    )
+    expect((error as Error).message).toMatch(/waiting for approval/)
+    expect((error as Error).message).not.toMatch(/safety check/)
+    // Nothing was registered and the saved script was not paused.
+    expect(store.has('preview-SAVED')).toBe(false)
+    expect(store.has('SAVED')).toBe(true)
+    // Control: the same draft without the flag registers.
+    await registerPreview({ ...saved, code: DRAFT_CODE })
+    expect(store.has('preview-SAVED')).toBe(true)
+  })
+
   it('runs a preview of a script that is disabled in storage', async () => {
     await registerPreview({ ...saved, enabled: false, code: DRAFT_CODE })
     expect(code('preview-SAVED')).toContain(DRAFT_CODE)

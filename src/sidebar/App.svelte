@@ -20,6 +20,13 @@
   import { activeTab, BackgroundError, send } from './lib/messaging.svelte'
   import { isForTab, type HealthCheckResult } from './lib/health-result'
   import { Flow } from './lib/flow.svelte'
+  import { boundTab } from '@shared/panel-binding'
+  import {
+    isPageOfPanel,
+    showPageForPick,
+    showPanelAfterPick,
+    type TabFocusDeps,
+  } from './lib/panel-tab'
   import { focusList, returnedToList } from './lib/focus'
   import { brokenAnnouncement } from './lib/announce'
   import { tick } from 'svelte'
@@ -65,6 +72,11 @@
   /* Enabled transforms on any site that the safety check keeps from running. */
   let blockedCount = $state(0)
 
+  const tabFocus: TabFocusDeps = {
+    boundTab,
+    ownTab: () => browser.tabs.getCurrent(),
+    activate: (id) => browser.tabs.update(id, { active: true }),
+  }
   /*
    * Null until the stored acknowledgement has been read, which counts as not
    * acknowledged for every action but does not yet replace the list with the
@@ -95,6 +107,7 @@
   }
 
   const flow = new Flow(() => void afterSave())
+  flow.onPickStarted = () => void showPageForPick(tabFocus)
 
   /*
    * When a run ends and the list comes back, the panel that had the focus has
@@ -361,7 +374,12 @@
     }
   }
 
-  async function setEnabled(transform: Transform, enabled: boolean) {
+  /**
+   * `approve` is for JavaScript restored from a backup: the user has just read
+   * its code and pressed Approve, so the approval is recorded for exactly that
+   * code, world, capabilities, id and match pattern and sent with the toggle.
+   */
+  async function setEnabled(transform: Transform, enabled: boolean, approve = false) {
     /*
      * Re-enabling a JS transform registers a user script again, which needs
      * the permission. If it was revoked since the transform was saved, the
@@ -385,14 +403,33 @@
       if (!granted) return
     }
 
+    let approvalToken: string | undefined
+    if (approve) {
+      approvalToken = (
+        await send<{ approvalToken: string }>({
+          type: 'approve-code',
+          code: transform.code,
+          declaredCapabilities: transform.capabilities,
+          ...(transform.world ? { world: transform.world } : {}),
+          transformId: transform.id,
+          match: transform.match,
+        })
+      ).approvalToken
+    }
+
     const tab = await activeTab()
     await send({
       type: 'set-enabled',
       id: transform.id,
       enabled,
       ...(tab?.id === undefined ? {} : { tabId: tab.id }),
+      ...(approvalToken ? { approvalToken } : {}),
     })
-    transforms = transforms.map((t) => (t.id === transform.id ? { ...t, enabled } : t))
+    transforms = transforms.map((t) => {
+      if (t.id !== transform.id) return t
+      const { awaitsApproval: _approved, ...rest } = t
+      return { ...rest, enabled }
+    })
   }
 
   /*
@@ -588,7 +625,10 @@
       // Health results are the one content event the list owns rather than
       // the flow — they describe saved transforms, not the draft.
       if (message.type === 'health-check-result') void showHealthResult(message)
-      else flow.receive(message, sender)
+      // The panel tab is brought forward only for an event that the flow
+      // accepted: one from the run's own page, while a run waits for the page.
+      // A pick that ends in another tab must not move the user.
+      else if (flow.receive(message, sender)) void showPanelAfterPick(message.type, tabFocus)
     }
     browser.runtime.onMessage.addListener(onMessage)
 
@@ -633,7 +673,7 @@
       // we asked for ourselves — see Flow.ourReload.
       if (change.status === 'loading') flow.pageReloading(id)
       if (change.status === 'complete') flow.pageLoaded(id)
-      if (change.url && tab.active) void load()
+      if (change.url && isPageOfPanel(boundTab(), id, tab.active)) void load()
     }
     browser.tabs.onUpdated.addListener(onTabUpdated)
 
@@ -650,6 +690,8 @@
     const releasePort = holdSidebarPortForWindow(
       (name) => browser.runtime.connect({ name }),
       async () => (await browser.windows.getCurrent()).id,
+      // A panel open in a tab is keyed by its own tab, not by the window.
+      boundTab() === null ? undefined : async () => (await browser.tabs.getCurrent())?.id,
     )
 
     return () => {
@@ -944,6 +986,7 @@
           runtime={stateFor(transform.id)}
           hasAccess={hasAccess(heldOrigins, transform)}
           ongrant={() => void grantAccess(transform)}
+          onapprove={() => void setEnabled(transform, true, true)}
           expanded={expandedId === transform.id}
           ontoggle={(enabled) => void setEnabled(transform, enabled)}
           onexpand={() =>

@@ -1,7 +1,14 @@
 <script lang="ts">
   import type { Conflict, Transform, TransformRuntimeState } from '@shared/types'
+  import {
+    AWAITING_APPROVAL_NOTE,
+    NEEDS_REGENERATING_NOTE,
+    needsRegenerating,
+    toggleOutcome,
+  } from '@shared/transform-state'
   import Toggle from './Toggle.svelte'
   import { WORLD_RESET_NOTICE } from '@shared/world'
+  import RestoredCodeApproval from './RestoredCodeApproval.svelte'
 
   interface Props {
     transform: Transform
@@ -21,6 +28,12 @@
     hasAccess: boolean
     /** Requests the missing origin. Called from the click, before any await. */
     ongrant: () => void
+    /**
+     * Approves the stored code of JavaScript restored from a backup and turns
+     * it on. Called from the click, before any await, because it may need to
+     * request the user scripts permission.
+     */
+    onapprove: () => void
     ontoggle: (enabled: boolean) => void
     onexpand: () => void
     onrename: (name: string) => void
@@ -52,6 +65,7 @@
     dragging,
     hasAccess,
     ongrant,
+    onapprove,
     ontoggle,
     onexpand,
     onrename,
@@ -80,6 +94,28 @@
   }
 
   let broken = $derived(runtime?.status === 'broken')
+  /* An imported transform with no code. Turning it on would run nothing. */
+  let regenerates = $derived(needsRegenerating(transform))
+  /* Set when the user tries to turn such a transform on; the row then says why it stays off. */
+  let explainOff = $state(false)
+  let imported = $derived(transform.origin === 'imported')
+
+  /* Restored JavaScript waits for the user to read its code and approve it. */
+  let approving = $state(false)
+
+  function onToggle(enabled: boolean) {
+    const outcome = toggleOutcome(transform, enabled)
+    if (outcome === 'explain') {
+      explainOff = true
+      return
+    }
+    if (outcome === 'approve') {
+      approving = true
+      return
+    }
+    explainOff = false
+    ontoggle(enabled)
+  }
   /* JS carrying capabilities, or broken, gets the attention treatment. */
   let flagged = $derived(broken || transform.capabilities.length > 0)
 
@@ -163,7 +199,7 @@
     <Toggle
       checked={transform.enabled}
       label="Enable {transform.name}"
-      onchange={ontoggle}
+      onchange={onToggle}
     />
 
     {#if renaming}
@@ -190,6 +226,9 @@
     {/if}
 
     <div class="meta">
+      {#if regenerates}
+        <span class="overridden">needs regenerating</span>
+      {/if}
       {#if overridden.length > 0}
         <!--
           The collapsed row is where someone looks when a transform seems to
@@ -220,10 +259,42 @@
     </div>
   {/if}
 
+  {#if regenerates}
+    <div class="no-access" role="status">
+      <span>
+        {explainOff
+          ? NEEDS_REGENERATING_NOTE
+          : 'Needs regenerating. It has no code, so it cannot run.'}
+      </span>
+      <button type="button" class="secondary" onclick={oneditintent}>Review description</button>
+    </div>
+  {/if}
+
+  {#if transform.awaitsApproval && !regenerates}
+    <div class="no-access" role="status">
+      <span>{approving ? AWAITING_APPROVAL_NOTE : 'Restored from a backup. It stays off until its code is approved.'}</span>
+      {#if !approving}
+        <button type="button" class="secondary" onclick={() => (approving = true)}>
+          Review code
+        </button>
+      {/if}
+    </div>
+    {#if approving}
+      <RestoredCodeApproval
+        {transform}
+        onapprove={() => {
+          approving = false
+          onapprove()
+        }}
+        oncancel={() => (approving = false)}
+      />
+    {/if}
+  {/if}
+
   {#if expanded}
     <div class="body">
       <section>
-        <h3 class="label">You wanted</h3>
+        <h3 class="label">{imported ? 'Description from an imported file' : 'You wanted'}</h3>
         <p>{transform.intent}</p>
       </section>
 
@@ -351,9 +422,11 @@
             <button type="button" class="secondary" onclick={oneditintent}>
               Edit description
             </button>
-            <button type="button" class="secondary" onclick={oneditwithai}>
-              Change with AI
-            </button>
+            {#if !regenerates}
+              <button type="button" class="secondary" onclick={oneditwithai}>
+                Change with AI
+              </button>
+            {/if}
             <button type="button" class="secondary" onclick={onedit}>Edit code</button>
           </div>
           <pre>{transform.code}</pre>
@@ -470,6 +543,7 @@
 
   .no-access {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: 8px;
     padding: 0 var(--gutter-sidebar) 9px var(--indent-expanded);
@@ -481,6 +555,7 @@
     padding: 3px 8px;
     font-weight: 400;
   }
+
 
   .body {
     display: flex;

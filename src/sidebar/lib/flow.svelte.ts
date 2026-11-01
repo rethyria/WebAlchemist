@@ -57,6 +57,7 @@ import {
 import { readCaptureGrant, recordCaptureGrant } from '@shared/capture-grant'
 import type { PickerAction } from '@shared/picker-keys'
 import { BackgroundError, generateOverPort, send } from './messaging.svelte'
+import { screenshotsAvailable } from '@shared/panel-binding'
 import { jsPreviewGate, reviewKey } from './preview-gate'
 
 /** An address without its fragment, so that scrolling to an anchor is not a new page. */
@@ -529,6 +530,27 @@ export class Flow {
    */
   private savedInstruction: string | null = null
   private keptSavedInstruction: string | null = null
+  /**
+   * True when `savedInstruction` came from an imported transform, so the file's
+   * author wrote it (#56). Kept and cleared with `savedInstruction`.
+   */
+  private savedImported = false
+  private keptSavedImported = false
+  /**
+   * The description of an imported transform that began this run, kept for the
+   * whole run once the first follow-up is sent (#56). It is the file author's
+   * text, so it is not put in `history` as a turn: it is sent as a labelled
+   * section on every request and to the review as an imported description.
+   * Null when the run did not begin from an unchanged imported description.
+   */
+  private importedDescription: string | null = null
+  /**
+   * True while `result` is the stored code of an imported transform opened with
+   * Change with AI, whose rationale and intent the file's author wrote. Cleared
+   * when a generation replaces the result. The rationale is then not sent as the
+   * assistant's turn, and the review labels the intent as imported.
+   */
+  private resultFromImport = false
 
   /**
    * The element that was selected when "Change" started a new pick, held so
@@ -566,6 +588,8 @@ export class Flow {
    * await, so the list cannot be read from the background at that point.
    */
   excludedSites: string[] = []
+  /** Called once the page is running the picker; the tab panel uses it to show the page. */
+  onPickStarted: (() => void) | undefined
   /** The page, without its fragment, for which the user chose to send its content. */
   private sensitiveConfirmedFor: string | null = null
 
@@ -573,6 +597,7 @@ export class Flow {
     this.pickPurpose = purpose
     this.keptInstruction = this.step === 'describing' ? this.instruction : null
     this.keptSavedInstruction = this.step === 'describing' ? this.savedInstruction : null
+    this.keptSavedImported = this.step === 'describing' && this.savedImported
     if (this.tabId === null) return
 
     const origin = originPermissionForUrl(this.url)
@@ -630,6 +655,7 @@ export class Flow {
       this.picked = null
       this.step = 'picking'
       await send({ type: 'start-picking', tabId: this.tabId })
+      this.onPickStarted?.()
     } catch (cause) {
       /*
        * A failed re-pick from the describing step goes back there, as a
@@ -701,9 +727,17 @@ export class Flow {
    * unless they come from the tab the run is working on and a run is waiting
    * for one.
    */
-  receive(event: ContentEvent, sender: { tab?: { id?: number | undefined } | undefined }): void {
-    if (sender.tab?.id === undefined || sender.tab.id !== this.tabId) return
-    if (!this.awaitingPageEvent) return
+  receive(
+    event: ContentEvent,
+    sender: { tab?: { id?: number | undefined } | undefined },
+  ): boolean {
+    if (sender.tab?.id === undefined || sender.tab.id !== this.tabId) return false
+    if (!this.awaitingPageEvent) return false
+    this.applyPageEvent(event)
+    return true
+  }
+
+  private applyPageEvent(event: ContentEvent): void {
     switch (event.type) {
       case 'element-hovered':
         if (this.step === 'picking') this.hover = event.target
@@ -734,8 +768,10 @@ export class Flow {
         else {
           const kept = this.keptInstruction
           const keptSaved = this.keptSavedInstruction
+          const keptImported = this.keptSavedImported
           this.keptInstruction = null
           this.keptSavedInstruction = null
+          this.keptSavedImported = false
           this.enterDescribing()
           // Changing the element is not starting a new description, so what
           // was typed stays. The screenshot, scope and references describe the
@@ -743,6 +779,7 @@ export class Flow {
           if (kept !== null) {
             this.instruction = kept
             this.savedInstruction = keptSaved
+            this.savedImported = keptImported
           }
         }
         return
@@ -832,6 +869,9 @@ export class Flow {
     this.scopeContainer = null
     this.instruction = ''
     this.savedInstruction = null
+    this.savedImported = false
+    this.importedDescription = null
+    this.resultFromImport = false
     this.history = []
     this.followUp = ''
     this.references = []
@@ -841,7 +881,8 @@ export class Flow {
 
   private async checkVisionSupport(): Promise<void> {
     try {
-      this.visionSupported = await send<boolean>({ type: 'get-vision-support' })
+      this.visionSupported =
+        (await send<boolean>({ type: 'get-vision-support' })) && screenshotsAvailable()
     } catch {
       // A model whose capabilities cannot be established does not get offered
       // an image. Degrading to no-screenshot is the safe direction.
@@ -969,6 +1010,10 @@ export class Flow {
    */
   async repair(transform: Transform, brokenReason: string): Promise<void> {
     if (this.tabId === null) return
+    // The stored description of an imported transform was written by someone
+    // else, so it is shown for the user to read or change before anything is
+    // sent (#56). Repair would send it at once.
+    if (transform.origin === 'imported') return this.editIntent(transform)
 
     this.producedBy = 'repair'
     const token = ++this.generation
@@ -1139,7 +1184,7 @@ export class Flow {
        * start of a new description and not a continuation of the old one.
        */
       this.enterDescribing()
-      this.prefillInstruction(transform.intent)
+      this.prefillInstruction(transform.intent, transform.origin === 'imported')
       this.intent = transform.intent
       this.intentBaseline = transform.intent
       await this.restoreScopeDepth(transform)
@@ -1202,7 +1247,9 @@ export class Flow {
       this.approvedCssUrls = transform.approvedCssUrls ?? []
       this.intent = transform.intent
       this.intentBaseline = transform.intent
-      this.prefillInstruction(transform.intent)
+      this.prefillInstruction(transform.intent, transform.origin === 'imported')
+      this.importedDescription = null
+      this.resultFromImport = transform.origin === 'imported'
       this.references = []
       this.followUp = ''
       this.draft = transform
@@ -1278,6 +1325,8 @@ export class Flow {
     history: RefinementTurn[]
     instruction: string
     followUp: string
+    importedDescription: string | null
+    resultFromImport: boolean
     /**
      * The result the attempt replaced, set when the new result is stored. The
      * marker has to outlive that point, until the new preview is on the page,
@@ -1297,9 +1346,10 @@ export class Flow {
    * Puts a stored intent in the instruction field and records that it came
    * from storage. Every pre-fill goes through here so none can skip the record.
    */
-  private prefillInstruction(storedIntent: string): void {
+  private prefillInstruction(storedIntent: string, imported = false): void {
     this.instruction = storedIntent
     this.savedInstruction = storedIntent
+    this.savedImported = imported
   }
 
   /**
@@ -1309,16 +1359,22 @@ export class Flow {
    * it. Later ones are follow-ups, which the user always wrote.
    */
   private reviewInstructions(): ReviewInstruction[] {
+    const imported = this.importedDescription
     const texts = [
+      // The imported description is not in the history, so it is added first,
+      // with its own source.
+      ...(imported === null ? [] : [imported]),
       ...this.history.filter((turn) => turn.role === 'user').map((turn) => turn.content),
       this.instruction,
     ]
     return texts.map((text, index): ReviewInstruction => {
+      if (imported !== null && index === 0) return { text, source: 'imported-description' }
       if (index > 0 || this.savedInstruction === null) return { text, source: 'typed' }
-      return {
-        text,
-        source: text === this.savedInstruction ? 'saved-description' : 'saved-description-edited',
+      const unchanged = text === this.savedInstruction
+      if (this.savedImported) {
+        return { text, source: unchanged ? 'imported-description' : 'imported-description-edited' }
       }
+      return { text, source: unchanged ? 'saved-description' : 'saved-description-edited' }
     })
   }
 
@@ -1336,6 +1392,8 @@ export class Flow {
     this.history = held.history
     this.instruction = held.instruction
     this.followUp = held.followUp
+    this.importedDescription = held.importedDescription
+    this.resultFromImport = held.resultFromImport
   }
 
   /**
@@ -1414,6 +1472,14 @@ export class Flow {
         {
           context,
           instruction: this.instruction,
+          // An imported description sent unchanged is the file author's text.
+          // Once the user edits it, the text is theirs.
+          instructionImported:
+            this.savedImported &&
+            this.savedInstruction !== null &&
+            this.instruction === this.savedInstruction &&
+            this.history.length === 0,
+          ...(this.importedDescription === null ? {} : { importedDescription: this.importedDescription }),
           history: this.history,
           scopeDepth: this.scopeDepth,
           scopeContainer: this.scopeContainer,
@@ -1488,6 +1554,7 @@ export class Flow {
         }
       }
       this.result = result
+      this.resultFromImport = false
       this.intent = result.intent
       this.intentBaseline = result.intent
       // Keep the user's scope choice across a regeneration; only seed it once.
@@ -1626,6 +1693,7 @@ export class Flow {
       this.shot = null
       this.sendScreenshot = false
       await send({ type: 'start-picking', tabId: this.tabId, mode: 'region' })
+      this.onPickStarted?.()
     } catch (cause) {
       this.choosingRegion = false
       this.fail(cause, () => this.chooseScreenshotRegion())
@@ -1714,6 +1782,7 @@ export class Flow {
     this.awaitingReference = true
     try {
       await send({ type: 'start-picking', tabId: this.tabId, mode: 'reference' })
+      this.onPickStarted?.()
     } catch (cause) {
       this.awaitingReference = false
       this.fail(cause, () => this.addReference())
@@ -1862,6 +1931,7 @@ export class Flow {
         code: result.code,
         intent: this.intent,
         intentEditedByUser: this.intent !== this.intentBaseline,
+        ...(this.resultFromImport ? { intentImported: true } : {}),
         instructions: this.reviewInstructions(),
         declaredCapabilities: result.capabilities,
         world: result.world,
@@ -2006,11 +2076,27 @@ export class Flow {
       history: this.history,
       instruction: this.instruction,
       followUp: this.followUp,
+      importedDescription: this.importedDescription,
+      resultFromImport: this.resultFromImport,
     }
+    // The first turn of a run that began from an imported description, sent
+    // unchanged, is the file author's text. It is kept for the whole run and
+    // sent fenced and labelled on every request, and it is not put in the
+    // history as the user's turn (#56).
+    const firstTurnImported =
+      this.history.length === 0 &&
+      this.savedImported &&
+      this.savedInstruction !== null &&
+      this.instruction === this.savedInstruction
+    if (firstTurnImported) this.importedDescription = this.instruction
     this.history = [
       ...this.history,
-      { role: 'user', content: this.instruction },
-      { role: 'assistant', content: this.result.rationale.approach },
+      ...(firstTurnImported ? [] : [{ role: 'user' as const, content: this.instruction }]),
+      // The rationale of a stored imported transform is the file author's text
+      // and does not become the assistant's earlier answer.
+      ...(firstTurnImported || this.resultFromImport
+        ? []
+        : [{ role: 'assistant' as const, content: this.result.rationale.approach }]),
     ]
     this.instruction = text
     this.followUp = ''
@@ -2132,6 +2218,7 @@ export class Flow {
         // reviewInstructions).
         intent: this.intent,
         intentEditedByUser: this.intent !== this.intentBaseline,
+        ...(this.resultFromImport ? { intentImported: true } : {}),
         instructions: this.reviewInstructions(),
         declaredCapabilities: result.capabilities,
         world: result.world,
@@ -2546,7 +2633,11 @@ export class Flow {
     this.scopeContainer = null
     this.instruction = ''
     this.savedInstruction = null
+    this.savedImported = false
+    this.importedDescription = null
+    this.resultFromImport = false
     this.keptSavedInstruction = null
+    this.keptSavedImported = false
     this.sendScreenshot = false
     this.history = []
     this.followUp = ''

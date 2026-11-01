@@ -24,20 +24,26 @@ import type {
   PageContext,
   Rect,
   ReviewResult,
+  Settings,
   Transform,
   TransformRuntimeState,
 } from '@shared/types'
+import { AWAITING_APPROVAL_NOTE, NEEDS_REGENERATING_NOTE, needsRegenerating } from '@shared/transform-state'
 import type { RefinementTurn, ReviewInstruction } from './providers/types'
 import { overlayPaletteFor } from '@shared/accents'
 import * as badge from './badge'
-import { recordRunTab, takeRunTabs, windowsWithRunTabs } from './run-tabs'
+import { openPanel } from './open-panel'
+import { panelPageKey, panelPagesFromStorage } from '@shared/panel-binding'
+import { SCREENSHOTS_UNAVAILABLE } from '@shared/android-limits'
+import { ownersWithRunTabs, recordRunTab, takeRunTabs } from './run-tabs'
 import { isUrlOff, setHostOff } from './site-off'
-import { isApproved } from './approvals'
 import { excludedHostOf, getExcludedSites, setExcludedSites } from './excluded-sites'
 import { excludedHostFor, excludedSiteMessage } from '@shared/excluded-sites'
 import { hostOfUrl } from '@shared/site-off'
-import { isSidebarPortName, windowOfSidebarPort } from '@shared/sidebar-port'
-import { blockedStates, runStaticAnalysis } from './code-gate'
+import { isSidebarPortName, ownerOfSidebarPort, panelOwner } from '@shared/sidebar-port'
+import { isApproved, spendApproval } from './approvals'
+import { encryptExport, openExport } from './export-crypto'
+import { blockedStates, runStaticAnalysis, staticProblem } from './code-gate'
 import { checkCssForPage, checkCssTransform, pageUrlFor, sameCssContext } from './css-gate'
 import {
   applyCssTransforms as applyCssTransformsFor,
@@ -106,6 +112,7 @@ import {
   getUsage,
   handleVaultIdleAlarm,
   importTransforms,
+  previewImport,
   lockVault,
   reorderTransforms,
   saveSettings,
@@ -264,9 +271,44 @@ async function removeCssWithoutAccess(): Promise<void> {
   }
 }
 
-/** Clicking the toolbar button opens the sidebar rather than a popup. */
-browser.action.onClicked.addListener(() => {
-  void browser.sidebarAction.open()
+/**
+ * The operating system, read once so that the toolbar handler can decide
+ * without waiting. See open-panel.ts for why the handler must not wait.
+ *
+ * A handler that runs after the event page wakes can run before the read has
+ * finished, and would see undefined, which reads as "not Android". Those
+ * handlers await `platformReady` first. The toolbar handler does not.
+ */
+let platformOs: string | undefined
+const platformReady: Promise<void> = browser.runtime
+  .getPlatformInfo()
+  .then((info) => {
+    platformOs = info.os
+  })
+  .catch(() => {})
+
+/**
+ * Clicking the toolbar button opens the sidebar on desktop, and opens the panel
+ * in a tab bound to the clicked tab on Firefox for Android.
+ */
+browser.action.onClicked.addListener((tab) => {
+  void openPanel(tab, {
+    os: () => platformOs,
+    hasSidebar: () => typeof browser.sidebarAction?.open === 'function',
+    openSidebar: () => browser.sidebarAction.open(),
+    extensionBase: () => browser.runtime.getURL(''),
+    listTabs: () => browser.tabs.query({}),
+    createTab: (url) => browser.tabs.create({ url, active: true }),
+    activateTab: (id) => browser.tabs.update(id, { active: true }),
+    reloadTab: (id) => browser.tabs.reload(id),
+    recordedPage: async (panelTabId) => {
+      const key = panelPageKey(panelTabId)
+      const value = (await browser.storage.session.get(key))[key]
+      return typeof value === 'number' ? value : undefined
+    },
+    recordPanel: (panelTabId, pageTabId) =>
+      browser.storage.session.set({ [panelPageKey(panelTabId)]: pageTabId }),
+  })
 })
 
 /* ------------------------------------------------------------------ */
@@ -621,6 +663,14 @@ async function handle(
       const transforms = await getAllTransforms()
       const existing = transforms.find((t) => t.id === message.transformId)
       if (!existing) throw new Error('That transform no longer exists.')
+      // A repair sends the stored description to the model without showing it.
+      // For an imported transform that description was written by the author
+      // of the file, so it goes through Edit description, which shows it first.
+      if (existing.origin === 'imported') {
+        throw new Error(
+          'This transform came from an imported file. Use Edit description to read its description before it is used.',
+        )
+      }
 
       const usage = createUsageRecorder(existing.id)
       let result: GenerationResult
@@ -743,9 +793,41 @@ async function handle(
       return true
 
     case 'set-enabled': {
+      // Turning on a transform with no code would store enabled: true while
+      // nothing runs, which the list then shows as a working transform.
+      let approvedMain = false
+      if (message.enabled) {
+        const stored = (await getAllTransforms()).find((t) => t.id === message.id)
+        if (stored && needsRegenerating(stored)) throw new Error(NEEDS_REGENERATING_NOTE)
+        // JavaScript restored from a backup runs only after the user approved
+        // this code. The token ties the approval to the stored code, world,
+        // capabilities, id and match pattern, as for a save (#124).
+        if (stored?.awaitsApproval) {
+          const approved = await isApproved(
+            message.approvalToken,
+            stored.code,
+            stored.world,
+            stored.capabilities,
+            { transformId: stored.id, match: stored.match },
+          )
+          if (!approved || !runStaticAnalysis(stored.code, stored.capabilities).passed) {
+            throw new Error(AWAITING_APPROVAL_NOTE)
+          }
+          await spendApproval(message.approvalToken!)
+          // The token is tied to the world, and the panel showed the risks of
+          // MAIN before it was requested, so this is the user's approval of
+          // MAIN. A restored record has no such record until now (#124, #53).
+          approvedMain = stored.world === 'MAIN'
+        }
+      }
       // One queued update rather than a read followed by saveTransform: the
       // read has to be inside the queue or a concurrent save is overwritten.
-      const next = await updateTransform(message.id, { enabled: message.enabled })
+      const next = await updateTransform(message.id, {
+        enabled: message.enabled,
+        // Cleared once the approval has been used.
+        ...(message.enabled ? { awaitsApproval: null } : {}),
+        ...(approvedMain ? { mainApprovedByUser: true } : {}),
+      })
       if (!next) throw new Error('That transform no longer exists.')
       if (next.kind === 'js') {
         await inRegistryQueue(async () => {
@@ -894,7 +976,7 @@ async function handle(
         getSettings,
         tabUrl: tabUrlOf,
         setPreviewCss: async (tabId, css) =>
-          setPreviewCss(tabId, css, await windowOfTab(tabId), checkedDocument),
+          setPreviewCss(tabId, css, await ownerOfTab(tabId), checkedDocument),
       })
     }
 
@@ -958,9 +1040,9 @@ async function handle(
       // has to find the id in storage to restore it. Registration runs in the
       // same queue as the start-up rebuild, so the rebuild cannot remove a
       // preview that is being added (#91).
-      const windowId = await windowOfTab(message.tabId)
+      const owner = await ownerOfTab(message.tabId)
       await inRegistryQueue(async () => {
-        await addPreviewedScript(message.transform.id, windowId)
+        await addPreviewedScript(message.transform.id, owner)
         try {
           await registerPreview(previewTransform)
         } catch (cause) {
@@ -985,6 +1067,7 @@ async function handle(
       return true
 
     case 'start-picking': {
+      await platformReady
       await refuseInPrivateWindow(message.tabId)
       // The panel checks this first so that no permission is requested; this
       // is the check for any other caller of the message.
@@ -1009,6 +1092,8 @@ async function handle(
         type: 'start-picking',
         palette: overlayPaletteFor(settings.accent, dark),
         mode: message.mode ?? 'target',
+        // A finger cannot hover or press keys; the content script switches to taps.
+        touch: platformOs === 'android',
       })
       return true
     }
@@ -1044,7 +1129,7 @@ async function handle(
       // Recorded before applying: every later evaluation of this tab reads the
       // record, so a route change cannot bring the paused version back.
       if (message.id === null) await forgetSuspended(message.tabId)
-      else await writeSuspended(message.tabId, message.id, tab?.windowId)
+      else await writeSuspended(message.tabId, message.id, await ownerOfTab(message.tabId))
       await applyCssTransforms(message.tabId, () => cssTransformsFor(message.tabId, url), url)
       return true
     }
@@ -1127,6 +1212,8 @@ async function handle(
     }
 
     case 'capture-region':
+      await platformReady
+      if (platformOs === 'android') throw new Error(SCREENSHOTS_UNAVAILABLE)
       await refuseInPrivateWindow(message.tabId)
       return captureWithLockDown(
         message.tabId,
@@ -1138,26 +1225,51 @@ async function handle(
       )
 
 
-    case 'export-transforms':
-      return exportTransforms()
+    case 'export-transforms': {
+      const bundle = await exportTransforms(message.mode ?? 'share')
+      return message.passphrase === undefined ? bundle : encryptExport(bundle, message.passphrase)
+    }
+
+    case 'preview-import': {
+      const settings = await getSettings()
+      return previewImport(await openExport(message.bundle, message.passphrase), {
+        cssProblem: (t) => cssProblemOf(t, settings),
+        jsProblem: (t) => staticProblem(t.code, t.capabilities),
+      })
+    }
 
     case 'import-transforms': {
       /*
        * Shared CSS arrives with its code, so it gets the same check as CSS
-       * written here. One that fails is imported without code and disabled,
-       * the way shared JavaScript is, so the row is kept and nothing runs.
-       * The check uses the importer's own settings for the site, so a site
-       * set to allow more is not held to the default.
+       * written here. One that fails is imported without code, the way shared
+       * JavaScript is, so the row is kept and nothing runs. The check uses the
+       * importer's own settings for the site, so a site set to allow more is
+       * not held to the default. Every imported record is disabled (see
+       * sanitiseIncoming).
        */
       const settings = await getSettings()
       const result = await importTransforms(
-        message.bundle as Awaited<ReturnType<typeof exportTransforms>>,
-        (t) => !checkCssTransform(t, settings).passed,
+        await openExport(message.bundle, message.passphrase),
+        {
+          cssProblem: (t) => cssProblemOf(t, settings),
+          jsProblem: (t) => staticProblem(t.code, t.capabilities),
+        },
+        message.restoreSettings === true,
       )
       await reregister()
       return result
     }
   }
+}
+
+/** The first reason CSS fails the check for the settings given, or null when it passes. */
+function cssProblemOf(t: Pick<Transform, 'code' | 'match'>, settings: Settings): string | null {
+  const check = checkCssTransform(t, settings)
+  if (check.passed) return null
+  return (
+    check.static.find((f) => f.severity === 'block')?.explanation ??
+    'It loads addresses outside the site that were not approved.'
+  )
 }
 
 /**
@@ -1235,6 +1347,18 @@ async function windowOfTab(tabId: number): Promise<number | undefined> {
   return (await browser.tabs.get(tabId).catch(() => undefined))?.windowId
 }
 
+/**
+ * The owner of what the panel does to a page tab: the panel tab bound to it
+ * when there is one, and otherwise the window the page is in, whose docked
+ * sidebar is the owner. One window can hold several panel tabs, so a window id
+ * cannot tell their runs apart. Undefined when neither is known.
+ */
+async function ownerOfTab(tabId: number): Promise<number | undefined> {
+  const panels = panelPagesFromStorage(await browser.storage.session.get(null))
+  for (const [panel, page] of panels) if (page === tabId) return panelOwner(panel)
+  return windowOfTab(tabId)
+}
+
 function setPreviewCss(
   tabId: number,
   css: string,
@@ -1294,7 +1418,7 @@ async function clearPreviewsWhere(
   // the pause is used; the tab's current window is only the answer for a pause
   // stored without one.
   for (const tabId of await suspendedTabIds()) {
-    const owner = (await suspendedWindow(tabId)) ?? (await windowOfTab(tabId))
+    const owner = (await suspendedWindow(tabId)) ?? (await ownerOfTab(tabId))
     if (!ownerIsGone(owner)) continue
     await forgetSuspended(tabId)
     await reapply(tabId)
@@ -1371,15 +1495,15 @@ void (async () => {
     (await previewedTabIds()).length > 0 ||
     (await previewedScriptIds()).length > 0 ||
     (await suspendedTabIds()).length > 0 ||
-    (await windowsWithRunTabs()).length > 0
+    (await ownersWithRunTabs()).length > 0
   if (!stored) return
   await new Promise((resolve) => setTimeout(resolve, SIDEBAR_RECONNECT_GRACE_MS))
   await clearPreviewsWhere(ownerIsGone)
   // The picker overlay and the lock outline are in the page, not in storage, so
   // a panel closed during a suspension left them there (#108). A window whose
   // sidebar did not reconnect has no panel to cancel them.
-  for (const windowId of await windowsWithRunTabs()) {
-    if (ownerIsGone(windowId)) await clearPageOverlays(windowId)
+  for (const owner of await ownersWithRunTabs()) {
+    if (ownerIsGone(owner)) await clearPageOverlays(owner)
   }
 })()
 
@@ -1399,18 +1523,23 @@ async function refuseExcludedTab(tabId: number): Promise<void> {
   if (tab?.url) await refuseExcludedUrl(tab.url)
 }
 
-/** Records the tab of a run under the window it is in, so closing that window's sidebar can clean it. */
+/**
+ * Records the tab of a run under its owner, so closing that window's sidebar or
+ * that panel tab can clean it. Nothing is recorded when the owner cannot be
+ * found, which is a page whose window id the browser did not report and that
+ * has no panel tab.
+ */
 async function recordRunTabOf(tabId: number): Promise<void> {
-  const tab = await browser.tabs.get(tabId).catch(() => undefined)
-  if (tab?.windowId !== undefined) await recordRunTab(tab.windowId, tabId).catch(() => {})
+  const owner = await ownerOfTab(tabId)
+  if (owner !== undefined) await recordRunTab(owner, tabId).catch(() => {})
 }
 
 /**
- * Removes the picker and the lock outline from the tabs this window's sidebar
+ * Removes the picker and the lock outline from the tabs this owner's panel
  * used. Both messages are harmless on a page that has neither.
  */
-async function clearPageOverlays(windowId: number): Promise<void> {
-  for (const tabId of await takeRunTabs(windowId)) {
+async function clearPageOverlays(owner: number): Promise<void> {
+  for (const tabId of await takeRunTabs(owner)) {
     await sendToContent(tabId, { type: 'cancel-picking' })
     await sendToContent(tabId, { type: 'clear-lock' })
   }
@@ -1465,7 +1594,9 @@ browser.runtime.onConnect.addListener((port) => {
   }
 
   if (isSidebarPortName(port.name)) {
-    const windowId = windowOfSidebarPort(port.name)
+    // The window id for a docked sidebar, or the panel tab's own key for a
+    // panel open in a tab.
+    const windowId = ownerOfSidebarPort(port.name)
     sidebarPorts.set(port, windowId)
     port.onDisconnect.addListener(() => {
       sidebarPorts.delete(port)
@@ -1512,6 +1643,10 @@ browser.runtime.onConnect.addListener((port) => {
 interface GenerateOverPort {
   context: PageContext
   instruction: string
+  /** True when `instruction` is an imported transform's description, unchanged. See GenerateRequest. */
+  instructionImported?: boolean
+  /** The imported description behind a follow-up. See GenerateRequest. */
+  importedDescription?: string
   history: RefinementTurn[]
   scopeDepth?: number
   scopeContainer?: string | null
@@ -1690,6 +1825,8 @@ browser.tabs.onRemoved.addListener(async (tabId) => {
     await forgetArchive(tabId)
     await browser.storage.session.remove(`wa-last-url-${tabId}`)
     await forgetSuspended(tabId)
+    // A closed panel tab no longer owns the page it was bound to.
+    await browser.storage.session.remove(panelPageKey(tabId))
   })
   evaluations.delete(tabId)
 })
@@ -1712,6 +1849,7 @@ async function runReview(
   instructions: ReviewInstruction[],
   declared: Transform['capabilities'],
   transformId?: string,
+  intentImported = false,
 ): Promise<ReviewResult> {
   const analysis = runStaticAnalysis(code, declared)
   if (!analysis.passed) return analysis
@@ -1727,7 +1865,7 @@ async function runReview(
   // is suspended and the caller is told the receiving end does not exist.
   let model: ModelReview
   try {
-    model = await withKeepalive(() => provider.review({ code, intent, intentEditedByUser, instructions }))
+    model = await withKeepalive(() => provider.review({ code, intent, intentEditedByUser, intentImported, instructions }))
   } finally {
     // In `finally` so a billed response that failed to parse is still counted.
     await usage.settled()

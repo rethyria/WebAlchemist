@@ -23,8 +23,17 @@ export interface RefinementTurn {
  *  - `saved-description-edited`: pre-filled the same way, then changed by the
  *    user before sending. The user read and wrote the final text, so it counts
  *    as theirs, and the reviewer is told how it started.
+ *  - `imported-description`, `imported-description-edited`: the same two cases
+ *    for a transform that came from an imported file, so the text was written
+ *    by the author of that file. The reviewer is told that, which is more than
+ *    "a model or an earlier session wrote it" (#56).
  */
-export type InstructionSource = 'typed' | 'saved-description' | 'saved-description-edited'
+export type InstructionSource =
+  | 'typed'
+  | 'saved-description'
+  | 'saved-description-edited'
+  | 'imported-description'
+  | 'imported-description-edited'
 
 export interface ReviewInstruction {
   text: string
@@ -39,6 +48,12 @@ export interface ReviewArgs {
   /** True when the user changed the intent after the model returned it. */
   intentEditedByUser?: boolean
   /**
+   * True when `intent` is the description from an imported file and has not
+   * been replaced by a generation. The author of the file wrote it, not the
+   * generating model (#56).
+   */
+  intentImported?: boolean
+  /**
    * Every instruction behind this transform, verbatim, in order, each with its
    * source. The message and the background entry point require it; it is
    * optional here only so that adapter tests that exercise transport do not
@@ -51,6 +66,19 @@ export interface GenerateRequest {
   context: PageContext
   /** The user's latest instruction. */
   instruction: string
+  /**
+   * True when `instruction` is the description of an imported transform, sent
+   * as it was imported. The author of the file wrote it, so the prompt says so
+   * and does not present it as the user's request (#56).
+   */
+  instructionImported?: boolean
+  /**
+   * The description of an imported transform, when the run began from one and
+   * `instruction` is a later follow-up. The file's author wrote it, so it is
+   * kept out of `history` and sent in a fenced, labelled section on every
+   * turn (#56).
+   */
+  importedDescription?: string
   /** Distance up the ancestor chain the result should cover. See ScopeDepth. */
   scopeDepth?: number
   /** Selector of the container that depth resolves to, for the prompt. */

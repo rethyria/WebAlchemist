@@ -152,7 +152,7 @@ You provide the model. Web Alchemist works with the Anthropic API and with any p
 
 JavaScript changes need the optional permission to run user scripts, which Web Alchemist requests when you first save one. Access to a site is requested one site at a time.
 
-Web Alchemist is free software under the GPL-3.0-or-later licence. Android support is planned with a tab-based interface (issue 128) and the Android listing should not be published until that work is complete.
+Web Alchemist is free software under the GPL-3.0-or-later licence. On Firefox for Android the panel opens in a tab, and picking works by touch (issue 128). That interface has not been run on a device or an emulator, so the Android listing should not be published before it has been tested. The settings page can export transforms to share, back up and restore them, with optional passphrase encryption; neither file holds credentials or provider settings.
 
 ## Privacy policy draft
 
@@ -195,5 +195,5 @@ These steps can be done only by the owner of the AMO account.
 7. Create the source zip with `git archive --format=zip HEAD` and check that its build matches the package, as described above.
 8. Upload `web-ext-artifacts/web_alchemist-0.1.0.zip` on AMO, attach the source zip, and paste the reviewer notes, permission justifications, summary and description from this document.
 9. Publish the privacy policy at a stable address or paste it into the policy field, with the contact address filled in.
-10. Add screenshots and the icon for the listing. Do not publish an Android listing until issue 128 is complete.
+10. Add screenshots and the icon for the listing. The Android tab interface (issue 128) is implemented but untested on a device or emulator; do not publish an Android listing until it has been tested. Also confirm that the privacy policy and the data collection declaration cover export and backup files, which the user saves to their own computer and which contain page text and addresses.
 11. Choose listed or self-distributed signing, and submit.

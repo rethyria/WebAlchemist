@@ -203,6 +203,8 @@ export interface ReviewDeps {
     declared: Transform['capabilities'],
     /** The transform the call is for, so its cost is added to that transform. */
     transformId?: string,
+    /** True when `intent` came from an imported file. */
+    intentImported?: boolean,
   ) => Promise<ReviewResult>
   recordApproval?: typeof recordApproval
 }
@@ -228,6 +230,7 @@ export async function handleReview(
     message.instructions,
     message.declaredCapabilities,
     message.transformId,
+    message.intentImported ?? false,
   )
   if (result.model && trusted) {
     const verdict: ApprovalVerdict = result.model.verdict

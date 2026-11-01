@@ -19,6 +19,7 @@
   import FirstRunDisclosure from '@sidebar/components/FirstRunDisclosure.svelte'
   import { readDisclosureNeeded, recordDisclosureAck, watchDisclosureNeeded } from '@shared/disclosure-ack'
   import ExcludedSites from './ExcludedSites.svelte'
+  import ExportImport from './ExportImport.svelte'
   import SiteAccess from './SiteAccess.svelte'
   import UsageSettings from './UsageSettings.svelte'
   import VaultSettings from './VaultSettings.svelte'
@@ -224,6 +225,8 @@
     <SiteAccess loadTransforms={() => call<Transform[]>({ type: 'get-all-transforms' })} />
 
     <ExcludedSites />
+
+    <ExportImport {call} />
 
     <section>
       <h2>Accent</h2>

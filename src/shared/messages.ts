@@ -37,6 +37,9 @@ import type { Rule } from './css'
 import type { ScrollOffset } from './region'
 import type { OverlayPalette } from './accents'
 import type { RefinementTurn, ReviewInstruction } from '@background/providers/types'
+import type { ExportBundle, ImportResult } from '@background/storage'
+import type { EncryptedExport } from './export-envelope'
+import type { BackupSettings, ExportMode, PlannedTransform } from '@background/transfer'
 
 /**
  * What a confirmed pick means.
@@ -76,6 +79,8 @@ export type Message =
       intent: string
       /** True when the user changed the intent after the model returned it. */
       intentEditedByUser?: boolean
+      /** True when `intent` is the description from an imported file, not replaced by a generation. */
+      intentImported?: boolean
       /**
        * Every instruction, verbatim and in order, with where it came from. Only
        * the typed ones are the reviewer's yardstick.
@@ -171,7 +176,11 @@ export type Message =
   | { type: 'reapply-everywhere'; id: string }
   /** `tabId` re-applies in the new precedence now rather than on reload. */
   | { type: 'reorder-transforms'; orderedIds: string[]; tabId?: number }
-  | { type: 'set-enabled'; id: string; enabled: boolean; tabId?: number }
+  /**
+   * Turning on JavaScript restored from a backup needs `approvalToken`, from
+   * `approve-code` for the stored code, world, capabilities, id and match pattern.
+   */
+  | { type: 'set-enabled'; id: string; enabled: boolean; tabId?: number; approvalToken?: string }
 
   /* --- settings and credentials ------------------------------------- */
   | { type: 'save-settings'; settings: Settings }
@@ -346,13 +355,21 @@ export type Message =
   | { type: 'clear-csp-probe' }
 
   /* --- portability --------------------------------------------------- */
-  | { type: 'export-transforms' }
-  | { type: 'import-transforms'; bundle: unknown }
+  /**
+   * `mode` defaults to a share, which carries no JavaScript code. With
+   * `passphrase` the reply is the encrypted file instead of the export.
+   */
+  | { type: 'export-transforms'; mode?: ExportMode; passphrase?: string }
+  /** `passphrase` opens an encrypted file and is ignored for any other. */
+  | { type: 'preview-import'; bundle: unknown; passphrase?: string }
+  /** `restoreSettings` applies the accent and health check mode of a backup. */
+  | { type: 'import-transforms'; bundle: unknown; restoreSettings?: boolean; passphrase?: string }
 
 /** Sent from background to content script. */
 export type ContentMessage =
   /** The palette travels with the request: the overlay cannot read our CSS. */
-  | { type: 'start-picking'; palette: OverlayPalette; mode: PickMode }
+  /** `touch` is set on Firefox for Android: tap to select, long press to draw. */
+  | { type: 'start-picking'; palette: OverlayPalette; mode: PickMode; touch?: boolean }
   | { type: 'cancel-picking' }
   | { type: 'picker-key'; action: PickerAction }
   | { type: 'recapture' }
@@ -525,8 +542,9 @@ export interface Responses {
   analyse: ReviewResult
   'preview-js': boolean
   'clear-preview-js': boolean
-  'export-transforms': { schemaVersion: number; exportedAt: number; transforms: Transform[] }
-  'import-transforms': { imported: number; skipped: number; needsRegeneration: string[] }
+  'export-transforms': ExportBundle | EncryptedExport
+  'preview-import': { mode: ExportMode; items: PlannedTransform[]; settings: BackupSettings | null }
+  'import-transforms': ImportResult
   'capture-region': {
     dataUrl: string
     rect: Rect
