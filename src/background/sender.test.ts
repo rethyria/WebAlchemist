@@ -53,7 +53,9 @@ vi.stubGlobal(
           })
         }
         if (prop === 'storage') {
-          return { local: { get: async () => ({}), set: async () => {}, remove: async () => {} } }
+          // `session` is read at start-up to find previews left by a closed sidebar.
+          const empty = { get: async () => ({}), set: async () => {}, remove: async () => {} }
+          return { local: empty, session: empty }
         }
         return base[prop]
       },

@@ -15,6 +15,7 @@
   import { parseRules } from '@shared/css'
   import { activeTab, BackgroundError, send } from './lib/messaging.svelte'
   import { Flow } from './lib/flow.svelte'
+  import { holdSidebarPort } from './lib/sidebar-port'
   import Describing from './components/Describing.svelte'
   import ErrorCard from './components/ErrorCard.svelte'
   import Generating from './components/Generating.svelte'
@@ -428,8 +429,10 @@
 
     // Held open for the lifetime of the panel. The background watches for it
     // to drop, which is how "closing this panel discards it" is kept true —
-    // a closed sidebar gets no chance to run cleanup of its own.
-    const port = browser.runtime.connect({ name: 'wa-sidebar' })
+    // a closed sidebar gets no chance to run cleanup of its own. It is opened
+    // again whenever the background drops it, because a suspension does that
+    // while the panel is still open.
+    const releasePort = holdSidebarPort(() => browser.runtime.connect({ name: 'wa-sidebar' }))
 
     return () => {
       browser.runtime.onMessage.removeListener(onMessage)
@@ -437,7 +440,7 @@
       browser.tabs.onActivated.removeListener(onTabChange)
       browser.tabs.onUpdated.removeListener(onTabUpdated)
       browser.tabs.onRemoved.removeListener(onTabRemoved)
-      port.disconnect()
+      releasePort()
     }
   })
 </script>

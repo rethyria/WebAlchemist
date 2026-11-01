@@ -7,8 +7,8 @@
  * storage, then perform the step that depends on what the first boot knew.
  */
 
-import { beforeEach, describe, expect, it } from 'vitest'
-import { createHarness, cssTransform, type Harness } from './test-browser'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { createHarness, cssTransform, sidebarPort, type Harness } from './test-browser'
 
 const URL = 'https://example.com/page'
 const TAB = 5
@@ -112,6 +112,70 @@ describe('CSS that a preview injected', () => {
 
   it('control: without a suspension a discard removes it', async () => {
     await h.onMessage({ type: 'clear-preview-css', tabId: TAB, css: 'a { color: red }' })
+    expect(h.calls.removeCSS).toEqual([{ tabId: TAB, css: 'a { color: red }' }])
+  })
+})
+
+describe('previews after the sidebar closed during a suspension (#81)', () => {
+  const GRACE = 3000
+  const afterGrace = () => vi.advanceTimersByTimeAsync(GRACE + 100)
+
+  beforeEach(async () => {
+    vi.useFakeTimers()
+    h.hasUserScripts = true
+    await h.boot()
+    await h.onMessage({ type: 'preview-css', tabId: TAB, css: 'a { color: red }' })
+    const r = await h.onMessage({
+      type: 'preview-js',
+      tabId: TAB,
+      transform: {
+        ...cssTransform({ id: 'draft', kind: 'js', code: 'document.title = "x"' }),
+        world: 'USER_SCRIPT',
+      },
+    })
+    expect(r.ok).toBe(true)
+  })
+  afterEach(() => vi.useRealTimers())
+
+  it('are removed when the page starts and no sidebar connects', async () => {
+    await h.boot() // suspension, then a wake for some other reason
+    await afterGrace()
+    expect(h.calls.removeCSS).toEqual([{ tabId: TAB, css: 'a { color: red }' }])
+    expect(h.calls.unregister).toContain('draft')
+    expect(h.session.get(`wa-css-preview-${TAB}`)).toBeUndefined()
+  })
+
+  it('are kept when a sidebar reconnects during start-up', async () => {
+    // Control: the same start-up with an open panel removes nothing, so the
+    // removal above comes from there being no sidebar and not from start-up.
+    await h.boot()
+    h.listeners.get('browser.runtime.onConnect')!(sidebarPort())
+    await afterGrace()
+    expect(h.calls.removeCSS).toEqual([])
+    expect(h.calls.unregister).toEqual([])
+  })
+
+  it('are removed after the reconnected sidebar closes', async () => {
+    await h.boot()
+    const port = sidebarPort()
+    h.listeners.get('browser.runtime.onConnect')!(port)
+    await afterGrace()
+    port.drop()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(h.calls.removeCSS).toEqual([{ tabId: TAB, css: 'a { color: red }' }])
+    expect(h.calls.unregister).toContain('draft')
+  })
+
+  it('are kept while another sidebar window is still connected', async () => {
+    const first = sidebarPort()
+    const second = sidebarPort()
+    h.listeners.get('browser.runtime.onConnect')!(first)
+    h.listeners.get('browser.runtime.onConnect')!(second)
+    first.drop()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(h.calls.removeCSS).toEqual([])
+    second.drop()
+    await vi.advanceTimersByTimeAsync(0)
     expect(h.calls.removeCSS).toEqual([{ tabId: TAB, css: 'a { color: red }' }])
   })
 })

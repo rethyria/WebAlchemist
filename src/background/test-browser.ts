@@ -14,6 +14,9 @@
 
 import { vi } from 'vitest'
 
+/** Captured before a test installs fake timers, so `boot()` can still wait. */
+const realSetTimeout = globalThis.setTimeout
+
 export type Listener = (...args: any[]) => any
 
 export const ORIGIN = 'moz-extension://abc-123/'
@@ -123,7 +126,7 @@ export function createHarness(): Harness {
     vi.stubGlobal('browser', new Proxy({}, { get: (_t, prop: string) => stub(`browser.${prop}`) }))
     await import('./index')
     // Start-up work (content script reconciliation) is fire-and-forget.
-    await new Promise((resolve) => setTimeout(resolve, 0))
+    await new Promise((resolve) => realSetTimeout(resolve, 0))
   }
 
   return h
@@ -142,10 +145,25 @@ export function cssTransform(over: Record<string, unknown> = {}) {
     capabilities: [],
     intent: '',
     rationale: { assumptions: [] },
-    anchor: { selector: 'body' },
+    anchor: { tag: 'body', classes: [], path: 'body', landmarks: [], selector: 'body' },
     code: 'body { color: red }',
     createdAt: 0,
     updatedAt: 0,
     ...over,
+  }
+}
+
+/** A `runtime.Port` as the background sees one connecting from the sidebar. */
+export function sidebarPort() {
+  let onDrop: () => void = () => {}
+  return {
+    name: 'wa-sidebar',
+    sender: extensionPage,
+    disconnect: () => {},
+    postMessage: () => {},
+    onMessage: { addListener: () => {} },
+    onDisconnect: { addListener: (l: () => void) => (onDrop = l) },
+    /** The sidebar closing its end. */
+    drop: () => onDrop(),
   }
 }

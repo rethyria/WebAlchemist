@@ -657,6 +657,32 @@ async function clearAllPreviews(): Promise<void> {
   }
 }
 
+/** Sidebar ports connected to this run of the background page. */
+const sidebarPorts = new Set<browser.runtime.Port>()
+
+/**
+ * How long a freshly started background page waits for a sidebar to connect
+ * before it treats stored previews as abandoned. A sidebar that is still open
+ * reconnects within a fraction of a second of the page starting (see
+ * sidebar-port.ts in the sidebar); a panel closed during a suspension never
+ * does.
+ */
+export const SIDEBAR_RECONNECT_GRACE_MS = 3000
+
+/**
+ * A panel closed while this page was suspended sent no disconnect that anyone
+ * received, so its previews are still in the tabs and in storage.session when
+ * the page next starts. If no sidebar has connected shortly after start-up, no
+ * panel is open to own them, and they are removed.
+ */
+void (async () => {
+  const stored =
+    (await previewedTabIds()).length > 0 || (await previewedScriptIds()).length > 0
+  if (!stored) return
+  await new Promise((resolve) => setTimeout(resolve, SIDEBAR_RECONNECT_GRACE_MS))
+  if (sidebarPorts.size === 0) await clearAllPreviews()
+})()
+
 /**
  * The sidebar holds a port open for exactly as long as it is on screen. Its
  * disconnect is the only reliable signal that the panel closed — which is the
@@ -671,8 +697,12 @@ browser.runtime.onConnect.addListener((port) => {
   }
 
   if (port.name === 'wa-sidebar') {
+    sidebarPorts.add(port)
     port.onDisconnect.addListener(() => {
-      void clearAllPreviews()
+      sidebarPorts.delete(port)
+      // Another window's sidebar may still be open, and previews are not kept
+      // per window, so they are only discarded when the last panel is gone.
+      if (sidebarPorts.size === 0) void clearAllPreviews()
     })
     return
   }
