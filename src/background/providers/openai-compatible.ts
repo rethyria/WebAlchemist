@@ -26,6 +26,7 @@ import {
 } from '../prompts'
 import { TOKEN_REQUEST_TIMEOUT_MS, credentialFrom, needsRefresh, type TokenPayload } from '../oauth'
 import { endpointProblem, isLoopbackHostname } from '@shared/endpoint-policy'
+import { destinationOf } from '@shared/credential-binding'
 import { retryAfterSeconds } from './retry-after'
 import { readCredentialOrProviderError, withCredentialOrProviderError } from './credential'
 import {
@@ -279,14 +280,40 @@ function isLoopback(baseUrl: string): boolean {
 }
 
 /**
- * Refreshes that are running now, one per provider.
+ * Refreshes that are running now, one per provider and destination.
  *
  * Providers rotate refresh tokens, so a second request with the token the first
  * one used is rejected, and a provider that follows RFC 9700 section 4.14.2
  * answers reuse by revoking the whole grant. Callers that arrive while a
  * refresh is running wait for it instead of sending their own.
+ *
+ * The key includes the destination because a provider id survives an edit of
+ * the base URL. Keyed by id alone, a request still in flight to the old address
+ * joined a refresh that had been started for the re-bound credential and was
+ * handed the new token, which it then sent to the old address. Callers for
+ * different destinations now never share a refresh, and a caller that did wait
+ * for one reads the credential again through the binding check instead of
+ * using what the refresh returned.
  */
 const refreshesInFlight = new Map<string, Promise<string>>()
+
+function refreshKey(provider: Provider): string {
+  const destination = destinationOf(provider)
+  return `${provider.id}\n${destination?.type ?? ''}\n${destination?.origin ?? ''}`
+}
+
+/**
+ * The bearer value for this provider after another call's refresh has ended.
+ * Read through the binding check, so a credential that now belongs to a
+ * different destination is refused here and its token is not returned.
+ */
+async function tokenAfterJoining(provider: Provider): Promise<string> {
+  const credential = await readCredentialOrProviderError(provider)
+  if (!credential) {
+    throw new ProviderError('The sign-in for this provider was removed. Reconnect it in settings.', 'no-credential', false)
+  }
+  return credential.kind === 'api_key' ? credential.value : credential.accessToken
+}
 
 type OAuthCredential = Extract<Credential, { kind: 'oauth' }>
 
@@ -296,14 +323,14 @@ function ensureFreshToken(
   /** The access token a server just rejected, when called after a 401. */
   rejected?: string,
 ): Promise<string> {
-  const providerId = provider.id
   // After a 401 the clock is not consulted: the server has said this token is
   // no good, whatever its recorded expiry.
   const stale = (c: OAuthCredential) =>
     rejected !== undefined ? c.accessToken === rejected : needsRefresh(c.expiresAt, Date.now())
   if (!stale(credential)) return Promise.resolve(credential.accessToken)
-  const running = refreshesInFlight.get(providerId)
-  if (running) return running
+  const key = refreshKey(provider)
+  const running = refreshesInFlight.get(key)
+  if (running) return running.then(() => tokenAfterJoining(provider))
 
   /*
    * The credential is read inside the lock, not taken from the caller. The
@@ -340,9 +367,9 @@ function ensureFreshToken(
     }
     return refreshed.accessToken
   }).finally(() => {
-    refreshesInFlight.delete(providerId)
+    refreshesInFlight.delete(key)
   })
-  refreshesInFlight.set(providerId, started)
+  refreshesInFlight.set(key, started)
   return started
 }
 
@@ -354,17 +381,17 @@ function ensureFreshToken(
  * would produce the replacement.
  */
 async function refreshAfterRejection(provider: Provider, rejected: string): Promise<string> {
-  const running = refreshesInFlight.get(provider.id)
-  if (running) {
-    const token = await running
-    if (token !== rejected) return token
-  }
+  // Only waited for. What it returned is not used: the credential is read
+  // again below, through the binding check, and that is what is sent.
+  await refreshesInFlight.get(refreshKey(provider))
   const credential = await readCredentialOrProviderError(provider)
   if (!credential) {
     throw new ProviderError('The sign-in for this provider was removed. Reconnect it in settings.', 'no-credential', false)
   }
   // Replaced by an API key after the rejected request was sent; retry with it.
   if (credential.kind === 'api_key') return credential.value
+  // Replaced by the refresh just waited for, or by another call's.
+  if (credential.accessToken !== rejected) return credential.accessToken
   return ensureFreshToken(provider, credential, rejected)
 }
 
