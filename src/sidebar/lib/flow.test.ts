@@ -1550,3 +1550,75 @@ describe('the review is told whether the user edited the intent (#52)', () => {
     expect(lastReview().intentEditedByUser).toBe(false)
   })
 })
+
+describe('the address that is shown is the address that is sent (#65)', () => {
+  /** Replaces the port so the request the flow posts can be read. */
+  function capturePort() {
+    const posted: any[] = []
+    ;(globalThis as any).browser.runtime.connect = () => {
+      const listeners: ((m: object) => void)[] = []
+      return {
+        onMessage: { addListener: (fn: (m: object) => void) => listeners.push(fn) },
+        onDisconnect: { addListener: () => {} },
+        postMessage: (message: any) => {
+          posted.push(message)
+          queueMicrotask(() => listeners.forEach((fn) => fn({ type: 'error', error: { message: 'stop' } })))
+        },
+        disconnect: () => {},
+      }
+    }
+    return posted
+  }
+  afterEach(() => {
+    ;(globalThis as any).browser.runtime.connect = () => {
+      throw new Error('no port in test')
+    }
+  })
+
+  const picked = { ...context, url: 'https://shop.example/cart' }
+  const recaptured = { ...context, url: 'https://shop.example/cart?step=2' }
+
+  it('sends the address captured at pick time, not the one read at send time', async () => {
+    const posted = capturePort()
+    const flow = newFlow()
+    flow.picked = { ...found, context: picked, cropDrawn: false } as any
+    flow.instruction = 'hide the banner'
+    handler = (m) => (m.type === 'recapture' ? { ok: true, data: recaptured } : { ok: true, data: null })
+    await flow.generate()
+    expect(posted).toHaveLength(1)
+    expect(posted[0].context.url).toBe('https://shop.example/cart')
+  })
+
+  it('control: the other parts of the context are still the freshly captured ones', async () => {
+    const posted = capturePort()
+    const flow = newFlow()
+    flow.picked = { ...found, context: picked, cropDrawn: false } as any
+    flow.instruction = 'hide the banner'
+    handler = (m) =>
+      m.type === 'recapture'
+        ? { ok: true, data: { ...recaptured, target: { ...context.target, selector: 'div.live' } } }
+        : { ok: true, data: null }
+    await flow.generate()
+    expect(posted[0].context.target.selector).toBe('div.live')
+  })
+
+  it('exposes the pinned address for the panels that show it', async () => {
+    const flow = newFlow()
+    expect(flow.sentAddress).toBe('')
+    flow.picked = { ...found, context: picked, cropDrawn: false } as any
+    expect(flow.sentAddress).toBe('https://shop.example/cart')
+  })
+
+  it('has an address to show after Repair, and it is the one the repair message carried', async () => {
+    const flow = newFlow()
+    const repairContext = { ...context, url: 'https://shop.example/repair' }
+    handler = (m) => {
+      if (m.type === 'context-for-anchor') return { ok: true, data: { ...found, context: repairContext } }
+      if (m.type === 'repair') return failure('network')
+      return { ok: true, data: null }
+    }
+    await flow.repair(saved, 'broken')
+    const sent = calls.find((c) => c.type === 'repair')
+    expect(sent.context.url).toBe('https://shop.example/repair')
+  })
+})

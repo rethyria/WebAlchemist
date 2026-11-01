@@ -600,7 +600,7 @@
       shotClipped={flow.shotClipped}
       shotMoved={flow.shotMoved}
       visionSupported={flow.visionSupported}
-      sentAddress={flow.picked.context.url}
+      sentAddress={flow.sentAddress}
       onchange={(value) => (flow.instruction = value)}
       onscreenshot={(value) =>
         value ? void flow.chooseScreenshotRegion() : flow.cancelScreenshot()}
@@ -627,6 +627,7 @@
       withScreenshot={flow.sendScreenshot}
       {contextSize}
       thinkingChars={flow.thinkingChars}
+      sentAddress={flow.sentAddress}
       oncancel={() => flow.cancelGenerating()}
     />
   {:else if flow.step === 'refining' && flow.result}
@@ -644,6 +645,7 @@
       shotClipped={flow.shotClipped}
       shotMoved={flow.shotMoved}
       visionSupported={flow.visionSupported}
+      sentAddress={flow.sentAddress}
       onfollowup={(value) => (flow.followUp = value)}
       onaddreference={() => void flow.addReference()}
       onremovereference={(selector) => flow.removeReference(selector)}

@@ -243,6 +243,14 @@ export class Flow {
 
   intent = $state('')
   /**
+   * The page address the requests of this run carry, as it was when the element
+   * was picked (or found again for Repair and Edit). The panels show this value
+   * and `generate` sends it, so the two cannot differ.
+   */
+  get sentAddress(): string {
+    return this.picked?.context.url ?? ''
+  }
+  /**
    * What `intent` was before the user could edit it: the model's `result.intent`
    * after a generation, or the stored intent after Repair or Edit with AI. The
    * review is told the intent was edited by the user when the two differ.
@@ -1233,6 +1241,11 @@ export class Flow {
     try {
       this.stage = 'context'
       const context: PageContext = { ...(await this.liveContext(picked)) }
+      // Everything else in the context is read again so it matches the page
+      // as it is now, but the address stays the one the panel has been showing.
+      // A page that navigates, or a query string it changes after the pick,
+      // would otherwise put an address in the request that the user never saw.
+      context.url = picked.context.url
       // Cancel can arrive while the page is being read; without this the
       // cancelled run still opened a port and sent the request.
       if (!current()) return

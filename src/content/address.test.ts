@@ -189,8 +189,16 @@ describe('where the address is used', () => {
     expect(source).not.toMatch(/url: location\.href/)
   })
 
+  it('is shown on the generating and refining panels, which cover Repair and Edit with AI', () => {
+    const app = read('sidebar/App.svelte')
+    expect(app).toMatch(/<Generating[\s\S]*?sentAddress=\{flow\.sentAddress\}[\s\S]*?\/>/)
+    expect(app).toMatch(/<Refining[\s\S]*?sentAddress=\{flow\.sentAddress\}[\s\S]*?\/>/)
+    expect(read('sidebar/components/Generating.svelte')).toMatch(/<AddressNote address=\{sentAddress\}/)
+    expect(read('sidebar/components/Refining.svelte')).toMatch(/<AddressNote address=\{sentAddress\}/)
+  })
+
   it('is shown in the describing panel from the context that will be sent', () => {
-    expect(read('sidebar/App.svelte')).toMatch(/sentAddress=\{flow\.picked\.context\.url\}/)
+    expect(read('sidebar/App.svelte')).toMatch(/sentAddress=\{flow\.sentAddress\}/)
     expect(read('sidebar/components/Describing.svelte')).toMatch(/<AddressNote address=\{sentAddress\}/)
     expect(read('sidebar/components/AddressNote.svelte')).toMatch(/\{address\}/)
   })

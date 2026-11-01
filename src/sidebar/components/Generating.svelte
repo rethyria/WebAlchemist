@@ -3,6 +3,7 @@
   import type { TransformKind } from '@shared/types'
   import Button from './Button.svelte'
   import CodeBlock from './CodeBlock.svelte'
+  import AddressNote from './AddressNote.svelte'
 
   interface Props {
     stage: ProgressStage
@@ -13,6 +14,8 @@
     withScreenshot: boolean
     contextSize: number
     thinkingChars: number
+    /** The page address in the request being made, as it is sent. */
+    sentAddress: string
     oncancel: () => void
   }
 
@@ -25,6 +28,7 @@
     withScreenshot,
     contextSize,
     thinkingChars,
+    sentAddress,
     oncancel,
   }: Props = $props()
 
@@ -95,6 +99,8 @@
   {:else}
     <div class="placeholder"></div>
   {/if}
+
+  <AddressNote address={sentAddress} />
 
   <Button full onclick={oncancel}>Cancel</Button>
 </div>
