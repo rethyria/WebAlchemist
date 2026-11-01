@@ -116,13 +116,16 @@ describe('a saved script whose edit is being previewed, at start-up', () => {
 })
 
 describe('the content script at start-up', () => {
+  const A = 'https://example.com/*'
+  const B = 'https://example.org/*'
+  const id = (origin: string) => `wa-content:${origin}`
   beforeEach(() => {
-    h.origins = ['https://example.com/*']
+    h.origins = [A]
   })
 
-  it('is registered when it is missing', async () => {
+  it('is registered when it is missing, without removing anything first', async () => {
     await h.boot()
-    expect(h.calls.registry).toEqual(['unregister-content', 'register-content'])
+    expect(h.calls.registry).toEqual([`register-content:${id(A)}`])
   })
 
   it('is left alone when it already matches the granted origins', async () => {
@@ -132,13 +135,67 @@ describe('the content script at start-up', () => {
     expect(h.calls.registry).toEqual([])
   })
 
-  it('is replaced when a granted origin was added', async () => {
+  it('adds only the registration for a granted origin that was added', async () => {
     await h.boot()
     h.calls.registry.length = 0
-    h.origins = ['https://example.com/*', 'https://example.org/*']
+    h.origins = [A, B]
     await h.boot()
-    expect(h.calls.registry).toEqual(['unregister-content', 'register-content'])
-    expect(h.contentScriptHeld.matches).toHaveLength(2)
+    expect(h.calls.registry).toEqual([`register-content:${id(B)}`])
+    expect([...h.contentScriptsHeld.keys()].sort()).toEqual([id(A), id(B)])
+  })
+
+  it('removes only the registration for an origin that is no longer granted', async () => {
+    h.origins = [A, B]
+    await h.boot()
+    h.calls.registry.length = 0
+    h.origins = [A]
+    await h.boot()
+    expect(h.calls.registry).toEqual([`unregister-content:${id(B)}`])
+  })
+
+  it('replaces the single registration that earlier versions made', async () => {
+    h.contentScriptsHeld.set('wa-content', { id: 'wa-content', matches: [A], js: ['src/content/index.js'] })
+    await h.boot()
+    expect([...h.contentScriptsHeld.keys()]).toEqual([id(A)])
+  })
+})
+
+describe('one origin that cannot be registered (#96)', () => {
+  const good1 = 'https://example.com/*'
+  const bad = 'https://*.[::1]/*'
+  const good2 = 'https://example.org/*'
+
+  it('does not stop the other origins from being registered', async () => {
+    h.origins = [good1, bad, good2]
+    h.rejectContentScript = (script) => script.matches.includes(bad)
+    await h.boot()
+    expect([...h.contentScriptsHeld.keys()].sort()).toEqual([`wa-content:${good1}`, `wa-content:${good2}`])
+  })
+
+  it('records the origin that was rejected', async () => {
+    h.origins = [good1, bad, good2]
+    h.rejectContentScript = (script) => script.matches.includes(bad)
+    await h.boot()
+    expect(h.session.get('wa-content-failed-origins')).toEqual([bad])
+  })
+
+  it('control: with every origin accepted all three are registered and none is recorded', async () => {
+    // Shows the missing registration above comes from the rejected origin and
+    // not from the stub dropping registrations.
+    h.origins = [good1, bad, good2]
+    await h.boot()
+    expect(h.contentScriptsHeld.size).toBe(3)
+    expect(h.session.get('wa-content-failed-origins')).toEqual([])
+  })
+
+  it('tries the rejected origin again on the next start', async () => {
+    h.origins = [good1, bad]
+    h.rejectContentScript = (script) => script.matches.includes(bad)
+    await h.boot()
+    h.rejectContentScript = () => false
+    await h.boot()
+    expect(h.contentScriptsHeld.size).toBe(2)
+    expect(h.session.get('wa-content-failed-origins')).toEqual([])
   })
 })
 

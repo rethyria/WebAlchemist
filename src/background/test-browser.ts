@@ -51,8 +51,10 @@ export interface Harness {
   local: Map<string, unknown>
   /** What `userScripts.getScripts` reports; changed by register, update and unregister. */
   userScriptsHeld: Map<string, any>
-  /** The content script registration, or null. */
-  contentScriptHeld: any
+  /** The content script registrations by id. */
+  contentScriptsHeld: Map<string, any>
+  /** Makes `registerContentScripts` reject a registration for which this returns true. */
+  rejectContentScript: (script: any) => boolean
   /** Origins `permissions.getAll` reports as granted. */
   origins: string[]
   /** The URL `tabs.get` reports for each tab id; `tabs.query` lists these tabs. */
@@ -100,7 +102,8 @@ export function createHarness(): Harness {
     local: new Map(),
     tabUrls: new Map(),
     userScriptsHeld: new Map(),
-    contentScriptHeld: null,
+    contentScriptsHeld: new Map(),
+    rejectContentScript: () => false,
     origins: [],
     tabWindows: new Map(),
     calls: { insertCSS: [], removeCSS: [], unregister: [], registry: [], setBadgeText: [], sendMessage: [], runtimeMessages: [] },
@@ -156,15 +159,22 @@ export function createHarness(): Harness {
     'browser.userScripts.configureWorld': async () => {},
     'browser.userScripts.getScripts': async (filter?: { ids?: string[] }) =>
       [...h.userScriptsHeld.values()].filter((s) => !filter?.ids || filter.ids.includes(s.id)),
-    'browser.scripting.getRegisteredContentScripts': async () =>
-      h.contentScriptHeld ? [structuredClone(h.contentScriptHeld)] : [],
-    'browser.scripting.unregisterContentScripts': async () => {
-      h.calls.registry.push('unregister-content')
-      h.contentScriptHeld = null
+    'browser.scripting.getRegisteredContentScripts': async (filter?: { ids?: string[] }) =>
+      [...h.contentScriptsHeld.values()]
+        .filter((s) => !filter?.ids || filter.ids.includes(s.id))
+        .map((s) => structuredClone(s)),
+    'browser.scripting.unregisterContentScripts': async (filter?: { ids?: string[] }) => {
+      const ids = filter?.ids ?? [...h.contentScriptsHeld.keys()]
+      h.calls.registry.push(`unregister-content:${ids.join(',')}`)
+      for (const id of ids) h.contentScriptsHeld.delete(id)
     },
     'browser.scripting.registerContentScripts': async (scripts: any[]) => {
-      h.calls.registry.push('register-content')
-      h.contentScriptHeld = structuredClone(scripts[0])
+      for (const script of scripts) {
+        if (h.rejectContentScript(script)) throw new Error('Invalid match pattern')
+        if (h.contentScriptsHeld.has(script.id)) throw new Error('Duplicate script ID')
+        h.calls.registry.push(`register-content:${script.id}`)
+        h.contentScriptsHeld.set(script.id, structuredClone(script))
+      }
     },
     'browser.runtime.sendMessage': async (message: unknown) => {
       h.calls.runtimeMessages.push(message)

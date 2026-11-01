@@ -216,6 +216,21 @@ describe('trailing slashes and query strings (#95)', () => {
   })
 })
 
+describe('presets for an IP address (#96)', () => {
+  for (const url of ['http://[::1]:8080/a/b', 'http://192.168.0.10:3000/a', 'http://127.0.0.1/']) {
+    it(`offers no subdomain pattern on ${url}`, () => {
+      const patterns = matchPresetsFor(url).map((p) => p.pattern)
+      expect(patterns.some((p) => p.includes('*.'))).toBe(false)
+      expect(patterns.length).toBeGreaterThan(0)
+    })
+  }
+
+  it('control: a name that only looks like an address still gets the subdomain pattern', () => {
+    const patterns = matchPresetsFor('https://192.example.com/').map((p) => p.pattern)
+    expect(patterns).toContain('https://*.192.example.com/*')
+  })
+})
+
 describe('originPermissionFor', () => {
   it('derives the origin permission a pattern requires', () => {
     expect(originPermissionFor('reddit.com/r/programming/*')).toBe('*://reddit.com/*')

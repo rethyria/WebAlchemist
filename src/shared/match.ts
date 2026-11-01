@@ -41,6 +41,11 @@ export interface MatchPreset {
   recommended?: boolean
 }
 
+/** An IPv4 address, or an IPv6 address, which `URL.hostname` writes in brackets. */
+function isIpAddress(host: string): boolean {
+  return host.startsWith('[') || /^\d{1,3}(\.\d{1,3}){3}$/.test(host)
+}
+
 /** Builds the choices offered at save time for a given page URL. */
 export function matchPresetsFor(rawUrl: string): MatchPreset[] {
   let url: URL
@@ -73,10 +78,15 @@ export function matchPresetsFor(rawUrl: string): MatchPreset[] {
    * youtube.com and www.youtube.com alike. A bare `registrable/*` would not
    * match its own page on a www host, which is why the `*.` form is used.
    */
-  presets.push({
-    label: `${registrable} and all its subdomains`,
-    pattern: `${scheme}*.${registrable}/*`,
-  })
+  // Not offered for an IP address: `*.` in front of one is not a valid match
+  // pattern, and a pattern the browser rejects can stop content script
+  // registration for an origin.
+  if (!isIpAddress(host)) {
+    presets.push({
+      label: `${registrable} and all its subdomains`,
+      pattern: `${scheme}*.${registrable}/*`,
+    })
+  }
 
   // First meaningful path segment, e.g. reddit.com/r/programming*
   const segments = url.pathname.split('/').filter(Boolean)
