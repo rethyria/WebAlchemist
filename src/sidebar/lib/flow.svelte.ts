@@ -33,6 +33,7 @@ import {
 import type {
   Anchor,
   ElementContext,
+  ExecutionWorld,
   GenerationResult,
   HoverTarget,
   PageContext,
@@ -1146,7 +1147,10 @@ export class Flow {
       this.result = {
         name: transform.name,
         kind: transform.kind,
+        // A stored MAIN transform keeps running as MAIN, and the panel shows it.
         world: transform.world ?? 'USER_SCRIPT',
+        requestedWorld: transform.world ?? 'USER_SCRIPT',
+        worldReason: '',
         capabilities: transform.capabilities,
         code: transform.code,
         rationale: transform.rationale,
@@ -1967,6 +1971,22 @@ export class Flow {
       this.step = 'saving'
       this.fail(cause, () => this.toReview())
     }
+  }
+
+  /**
+   * Sets the world the code will run in, from the user's choice in the
+   * approval panel. The model's request never reaches here on its own.
+   *
+   * The approval token is bound to the world, so the review is run again and
+   * the save uses the token issued for the new world. The earlier token stays
+   * in the background, bound to the other world, and cannot save this one.
+   */
+  async setWorld(world: ExecutionWorld): Promise<void> {
+    const result = this.result
+    if (!result || result.kind !== 'js' || result.world === world) return
+    this.result = { ...result, world }
+    if (this.draft) this.draft = { ...this.draft, world }
+    await this.toReview()
   }
 
   /**

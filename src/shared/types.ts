@@ -704,10 +704,37 @@ export interface PageContext {
 export interface GenerationResult {
   name: string
   kind: TransformKind
+  /**
+   * The world the code will run in. The model does not choose it: adapters set
+   * it to USER_SCRIPT, and only the user's approval in the approval panel (or
+   * the editor) changes it to MAIN. See `requestedWorld`.
+   */
   world: ExecutionWorld
+  /** The world the model asked for. Has no effect until the user approves it. */
+  requestedWorld: ExecutionWorld
+  /** The model's reason for the request. Empty unless MAIN was requested. */
+  worldReason: string
   capabilities: Capability[]
   code: string
   rationale: Rationale
   /** Model's consolidation of the conversation into a single end-state intent. */
   intent: string
+}
+
+/**
+ * Turns what a model returned into a GenerationResult whose `world` is always
+ * USER_SCRIPT. The model's request is kept as `requestedWorld` with its
+ * reason, and nothing here lets a request take effect: the world changes only
+ * when the user approves it. A `world` field in the response (an older prompt,
+ * or a model that adds one) is ignored.
+ */
+export function toGenerationResult(raw: Record<string, unknown>): GenerationResult {
+  const { world: _ignored, requestedWorld, worldReason, ...rest } = raw
+  const wantsMain = requestedWorld === 'MAIN' && rest['kind'] === 'js'
+  return {
+    ...(rest as unknown as Omit<GenerationResult, 'world' | 'requestedWorld' | 'worldReason'>),
+    world: 'USER_SCRIPT',
+    requestedWorld: wantsMain ? 'MAIN' : 'USER_SCRIPT',
+    worldReason: wantsMain && typeof worldReason === 'string' ? worldReason.trim() : '',
+  }
 }

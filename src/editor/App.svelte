@@ -2,6 +2,7 @@
   import '@shared/tokens.css'
   import type {
     CssUrlMode,
+    ExecutionWorld,
     ReviewResult,
     Settings,
     Transform,
@@ -13,6 +14,7 @@
   import { send } from '@shared/messaging.svelte'
 import { editorOriginToRequest, permissionRequestsFor, requestAll } from '@shared/permissions'
 import { excludedAccessMessage, excludedHostForPattern } from '@shared/excluded-sites'
+  import { MAIN_WORLD_RISKS, WORLD_NAMES, worldOf } from '@shared/world'
   import CodeArea from './CodeArea.svelte'
   import { shouldConfirmLeaving } from './unload'
 
@@ -42,6 +44,9 @@ import { excludedAccessMessage, excludedHostForPattern } from '@shared/excluded-
   let saved = $state('')
   let match = $state('')
   let savedMatch = $state('')
+  /** The world a JavaScript transform runs in. Only the user changes it. */
+  let world = $state<ExecutionWorld>('USER_SCRIPT')
+  let savedWorld = $state<ExecutionWorld>('USER_SCRIPT')
   let loadError = $state<string | null>(null)
   let findings = $state<string[]>([])
   let saving = $state(false)
@@ -99,7 +104,7 @@ import { excludedAccessMessage, excludedHostForPattern } from '@shared/excluded-
     transform !== null &&
       (creating
         ? code.trim().length > 0 && name.trim().length > 0
-        : code !== saved || match !== savedMatch),
+        : code !== saved || match !== savedMatch || world !== savedWorld),
   )
 
   /*
@@ -201,6 +206,8 @@ import { excludedAccessMessage, excludedHostForPattern } from '@shared/excluded-
       saved = found.code
       match = found.match
       savedMatch = found.match
+      world = worldOf(found)
+      savedWorld = world
       document.title = `${found.name} — Web Alchemist`
       await loadVersions()
     } catch (cause) {
@@ -279,6 +286,8 @@ import { excludedAccessMessage, excludedHostForPattern } from '@shared/excluded-
         saved = found.code
         match = found.match
         savedMatch = found.match
+        world = worldOf(found)
+        savedWorld = world
       }
       await loadVersions()
       reviewing = null
@@ -359,7 +368,7 @@ import { excludedAccessMessage, excludedHostForPattern } from '@shared/excluded-
             type: 'approve-code',
             code,
             declaredCapabilities: current.capabilities,
-            ...(current.world ? { world: current.world } : {}),
+            world,
             transformId: current.id,
             match: wanted,
           })
@@ -401,6 +410,7 @@ import { excludedAccessMessage, excludedHostForPattern } from '@shared/excluded-
             match: wanted,
             kind,
             name: name.trim(),
+            ...(kind === 'js' ? { world } : {}),
             ...(approvedCssUrls ? { approvedCssUrls } : {}),
             updatedAt: Date.now(),
           }
@@ -408,6 +418,7 @@ import { excludedAccessMessage, excludedHostForPattern } from '@shared/excluded-
             ...current,
             code,
             match: wanted,
+            ...(current.kind === 'js' ? { world } : {}),
             ...(approvedCssUrls ? { approvedCssUrls } : {}),
             rationale: {
               targets: current.rationale.targets,
@@ -436,6 +447,7 @@ import { excludedAccessMessage, excludedHostForPattern } from '@shared/excluded-
       saved = code
       savedMatch = wanted
       match = wanted
+      savedWorld = world
       justSaved = true
       setTimeout(() => (justSaved = false), 2000)
 
@@ -620,6 +632,34 @@ import { excludedAccessMessage, excludedHostForPattern } from '@shared/excluded-
         </p>
       {/if}
     </section>
+
+    {#if (creating ? kind : transform.kind) === 'js'}
+      <section class="where">
+        <span class="label">World</span>
+        <p class="hint">
+          Now: {WORLD_NAMES[world]}.
+          {#if world === 'MAIN' && savedWorld === 'MAIN'}
+            This transform was saved to run in the page's own world and keeps doing so.
+          {/if}
+        </p>
+        <label>
+          <input
+            type="checkbox"
+            checked={world === 'MAIN'}
+            onchange={(event) => (world = event.currentTarget.checked ? 'MAIN' : 'USER_SCRIPT')}
+          />
+          Run in the page's own world (MAIN)
+        </label>
+        {#if world === 'MAIN'}
+          <p class="warn">Running in the page's own world has these risks:</p>
+          <ul class="hint">
+            {#each MAIN_WORLD_RISKS as risk}
+              <li>{risk}</li>
+            {/each}
+          </ul>
+        {/if}
+      </section>
+    {/if}
 
     {#if (creating ? kind : transform.kind) === 'css'}
       <details class="advanced">

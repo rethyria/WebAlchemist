@@ -775,6 +775,7 @@
       onrefuse={() => void flow.refuseCapabilities()}
       onapproveurls={() => void flow.approveCssUrls()}
       onsave={() => void flow.save()}
+      onworld={(world) => void flow.setWorld(world)}
       onback={() => flow.toSaving()}
     />
     <UsageLine report={flow.lastUsage} />

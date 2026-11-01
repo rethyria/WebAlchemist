@@ -4,6 +4,8 @@
   import Button from './Button.svelte'
   import CodeBlock from './CodeBlock.svelte'
   import Label from './Label.svelte'
+  import { MAIN_WORLD_RISKS, WORLD_NAMES, worldState } from '@shared/world'
+  import type { ExecutionWorld } from '@shared/types'
 
   /**
    * Treatment A: a clean review collapses to a single quiet line, expandable
@@ -23,6 +25,8 @@
     onrefuse: () => void
     onapproveurls: () => void
     onsave: () => void
+    /** The user's choice of world. The model's request does not call this. */
+    onworld: (world: ExecutionWorld) => void
     onback: () => void
   }
 
@@ -35,6 +39,7 @@
     onrefuse,
     onapproveurls,
     onsave,
+    onworld,
     onback,
   }: Props = $props()
 
@@ -58,6 +63,8 @@
       !mismatch,
   )
 
+  let world = $derived(worldState(result))
+
   let flaggedLines = $derived([...blocking, ...warnings].map((f) => f.line))
   let lineCount = $derived(result.code.split('\n').length)
 
@@ -79,6 +86,54 @@
   {#if review === null}
     <p class="waiting">Reading the code…</p>
   {:else}
+    {#if result.kind === 'js'}
+      <div class="card" class:attention={world.showRisks}>
+        <div class="card-head">
+          {#if world.showRisks}<span class="dot attention" aria-hidden="true"></span>{/if}
+          <div class="card-body">
+            <span class="card-title">Runs in: {WORLD_NAMES[world.world]}</span>
+            {#if world.requestPending}
+              <p class="finding">
+                The model asked to run this code in the page's own world. It stays in the
+                isolated world until you allow it here.
+              </p>
+              <p class="finding">
+                {world.reason ? `Reason given: ${world.reason}` : 'No reason was given.'}
+              </p>
+            {:else if world.runsInMain}
+              <p class="finding">
+                This code runs in the page's own world.
+                {#if world.reason}Reason given: {world.reason}{/if}
+              </p>
+            {:else}
+              <p class="finding">
+                The code runs apart from the page's own scripts, and the page cannot change it.
+              </p>
+            {/if}
+          </div>
+        </div>
+        {#if world.showRisks}
+          <p class="finding">Running in the page's own world has these risks:</p>
+          <ul class="risks">
+            {#each MAIN_WORLD_RISKS as risk}
+              <li>{risk}</li>
+            {/each}
+          </ul>
+          <div>
+            {#if world.runsInMain}
+              <Button small full onclick={() => onworld('USER_SCRIPT')}>
+                Run in the isolated world instead
+              </Button>
+            {:else}
+              <Button small full onclick={() => onworld('MAIN')}>
+                Allow the page's own world
+              </Button>
+            {/if}
+          </div>
+        {/if}
+      </div>
+    {/if}
+
     {#if blocking.length > 0}
       <div class="card block">
         <div class="card-head">
@@ -508,6 +563,13 @@
 
   .submit {
     margin-top: auto;
+  }
+
+  .risks {
+    margin: 0;
+    padding-left: 16px;
+    font: 11.5px/1.6 var(--font-ui);
+    color: var(--text-dim);
   }
 
   .urls {

@@ -1842,3 +1842,50 @@ describe('saving for a site on the excluded list (#131)', () => {
     expect(flow.error).toMatchObject({ kind: 'request-failed' })
   })
 })
+
+describe('the world a script runs in (issue 53)', () => {
+  const review = { static: [], undeclaredCapabilities: [], passed: true }
+
+  it('reviews and approves in the isolated world when the model asked for MAIN', async () => {
+    const flow = flowAtApprove()
+    flow.result = { ...jsResult, requestedWorld: 'MAIN', worldReason: 'needs a page global' }
+    handler = (m) => ({ ok: true, data: m.type === 'review' ? review : null })
+    await flow.toReview()
+    const sent = calls.filter((c) => c.type === 'review')
+    expect(sent.map((c) => c.world)).toEqual(['USER_SCRIPT'])
+  })
+
+  it('asks for a new review in MAIN when the user allows it, so the token is for that world', async () => {
+    const flow = flowAtApprove()
+    flow.result = { ...jsResult, requestedWorld: 'MAIN', worldReason: 'r' }
+    handler = (m) => ({ ok: true, data: m.type === 'review' ? review : null })
+    await flow.toReview()
+    await flow.setWorld('MAIN')
+    expect(calls.filter((c) => c.type === 'review').map((c) => c.world)).toEqual(['USER_SCRIPT', 'MAIN'])
+    expect(flow.result?.world).toBe('MAIN')
+  })
+
+  it('goes back to the isolated world when the user withdraws the approval', async () => {
+    const flow = flowAtApprove()
+    handler = (m) => ({ ok: true, data: m.type === 'review' ? review : null })
+    await flow.setWorld('MAIN')
+    await flow.setWorld('USER_SCRIPT')
+    expect(calls.filter((c) => c.type === 'review').map((c) => c.world)).toEqual(['MAIN', 'USER_SCRIPT'])
+  })
+
+  it('control: choosing the world it already has sends no new review', async () => {
+    const flow = flowAtApprove()
+    await flow.setWorld('USER_SCRIPT')
+    expect(calls.filter((c) => c.type === 'review')).toEqual([])
+  })
+
+  it('keeps a stored MAIN transform as MAIN when it is opened for an AI edit', async () => {
+    const flow = newFlow()
+    handler = (m) =>
+      m.type === 'context-for-anchor'
+        ? { ok: true, data: found }
+        : { ok: true, data: m.type === 'analyse' ? review : null }
+    await flow.editWithAi({ ...saved, kind: 'js', world: 'MAIN', code: 'x' })
+    expect(flow.result?.world).toBe('MAIN')
+  })
+})
