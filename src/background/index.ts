@@ -609,8 +609,7 @@ async function handle(
       return true
 
     case 'disable-vault':
-      await disableVault(message.passphrase)
-      return true
+      return disableVault(message.passphrase)
 
     case 'unlock-vault':
       return unlockVault(message.passphrase)

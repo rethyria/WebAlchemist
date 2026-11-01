@@ -442,3 +442,45 @@ describe('unlocking when the binding pass fails', () => {
     expect((await storage.vaultState()).unlocked).toBe(false)
   })
 })
+
+describe('turning the vault off', () => {
+  async function sealedWithUnboundKey() {
+    const settings = await storage.getSettings()
+    await storage.saveSettings({ ...settings, providers: [remote()], activeProviderId: 'p1' })
+    await storage.setCredential('p1', KEY)
+    await storage.enableVault('correct horse battery')
+  }
+
+  it('binds keys that were stored before bindings existed', async () => {
+    await sealedWithUnboundKey()
+
+    expect(await storage.disableVault('correct horse battery')).toEqual({ bindingError: null })
+
+    expect(localArea.raw()['credentialBindingPassDone']).toBe(true)
+    expect((localArea.raw()['credentials'] as Record<string, { boundTo?: unknown }>)['p1']?.boundTo).toMatchObject({
+      origin: 'https://api.example.com',
+    })
+  })
+
+  // Control: a pass that fails is reported and does not undo the removal.
+  it('reports a failed pass separately and leaves the vault off', async () => {
+    await sealedWithUnboundKey()
+    const original = localArea.set.bind(localArea)
+    let writes = 0
+    localArea.set = (async (values: Record<string, unknown>) => {
+      // The first credentials write is the plaintext map; the pass is the second.
+      if ('credentials' in values && (writes += 1) > 1) throw new Error('storage write failed')
+      return original(values)
+    }) as typeof localArea.set
+    const quiet = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      const result = await storage.disableVault('correct horse battery')
+      expect(result.bindingError).toBe('storage write failed')
+    } finally {
+      localArea.set = original as typeof localArea.set
+      quiet.mockRestore()
+    }
+    expect((await storage.vaultState()).sealed).toBe(false)
+    expect(await storage.readStoredCredential('p1')).toMatchObject({ value: 'sk-secret' })
+  })
+})

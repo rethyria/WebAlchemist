@@ -640,10 +640,10 @@ export async function enableVault(passphrase: string): Promise<void> {
  * what set it — and since a wrong passphrase fails the AES-GCM tag check, this
  * verifies without anything to compare against.
  */
-export async function disableVault(passphrase: string): Promise<void> {
+export async function disableVault(passphrase: string): Promise<{ bindingError: string | null }> {
   const stored = await browser.storage.local.get(KEY_CREDENTIALS)
   const existing = stored[KEY_CREDENTIALS]
-  if (!isSealed(existing)) return
+  if (!isSealed(existing)) return { bindingError: null }
 
   const key = await deriveKey(passphrase, saltOf(existing))
   await unseal(key, existing)
@@ -657,6 +657,11 @@ export async function disableVault(passphrase: string): Promise<void> {
     await browser.storage.local.set({ [KEY_CREDENTIALS]: map })
     await forgetKey()
   })
+  // Turning the vault off is the other way the map becomes writable, so keys
+  // stored before bindings existed are bound here as well as at unlock. The
+  // pass takes the credential lock itself, so it runs after the block above.
+  // Its failure is returned and not thrown, because the vault is already off.
+  return runBindingPass()
 }
 
 /**
@@ -681,6 +686,11 @@ export async function unlockVault(passphrase: string): Promise<{ bindingError: s
   await armIdleLock()
   // The first moment the map can be written after an upgrade, so this is where
   // keys stored before bindings existed are bound; see bindStoredCredentials.
+  return runBindingPass()
+}
+
+/** Runs the binding pass and returns its failure message, or null. */
+async function runBindingPass(): Promise<{ bindingError: string | null }> {
   try {
     await bindStoredCredentials()
     return { bindingError: null }
