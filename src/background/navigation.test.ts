@@ -28,20 +28,69 @@ const commit = (qualifiers?: string[]) =>
   })
 
 describe('a preview when the page is shown again from the back-forward cache (#80)', () => {
-  beforeEach(async () => {
-    await h.onMessage({ type: 'preview-css', tabId: TAB, css: 'a { color: red }' })
-  })
+  const OTHER = 'https://example.com/elsewhere'
+  const commitUrl = (url: string, qualifiers?: string[]) =>
+    h.listeners.get('browser.webNavigation.onCommitted')!({
+      frameId: 0,
+      tabId: TAB,
+      url,
+      ...(qualifiers ? { transitionQualifiers: qualifiers } : {}),
+    })
+  const preview = () => h.onMessage({ type: 'preview-css', tabId: TAB, css: 'a { color: red }' })
+  const stored = () => h.session.get(`wa-css-preview-${TAB}`)
 
-  it('keeps the preview string so the preview can still be removed', async () => {
-    await commit(['forward_back'])
-    expect(h.session.get(`wa-css-preview-${TAB}`)).toBe('a { color: red }')
-    await h.onMessage({ type: 'clear-preview-css', tabId: TAB, css: 'a { color: red }' })
+  it('gives the preview back to the document that had it, so it can still be removed', async () => {
+    await commitUrl(PAGE)
+    await preview()
+    await commitUrl(OTHER) // the tab leaves the page; its document goes to the cache
+    expect(stored()).toBeUndefined()
+    await commitUrl(PAGE, ['forward_back'])
+    expect(stored()).toBe('a { color: red }')
+    await h.onMessage({ type: 'clear-preview-css', tabId: TAB })
     expect(h.calls.removeCSS).toEqual([{ tabId: TAB, css: 'a { color: red }' }])
   })
 
-  it('control: an ordinary load forgets it', async () => {
-    await commit()
-    expect(h.session.get(`wa-css-preview-${TAB}`)).toBeUndefined()
+  it('does not give a preview made on one document to a different one that is restored', async () => {
+    // The page A has no preview. B has one. Going back to A must not leave B's
+    // string as the tab's preview: A's document does not hold that stylesheet.
+    await commitUrl(PAGE)
+    await commitUrl(OTHER)
+    await preview()
+    await commitUrl(PAGE, ['forward_back'])
+    expect(stored()).toBeUndefined()
+  })
+
+  it('gives B its preview again when the tab goes forward to it', async () => {
+    await commitUrl(PAGE)
+    await commitUrl(OTHER)
+    await preview()
+    await commitUrl(PAGE, ['forward_back'])
+    await commitUrl(OTHER, ['forward_back'])
+    expect(stored()).toBe('a { color: red }')
+  })
+
+  it('keeps the string when the same document is committed again from the cache', async () => {
+    await commitUrl(PAGE)
+    await preview()
+    await commitUrl(PAGE, ['forward_back'])
+    expect(stored()).toBe('a { color: red }')
+  })
+
+  it('control: an ordinary load of the same URL does not restore it', async () => {
+    await commitUrl(PAGE)
+    await preview()
+    await commitUrl(OTHER)
+    await commitUrl(PAGE)
+    expect(stored()).toBeUndefined()
+  })
+
+  it('discards the filed strings when the tab closes', async () => {
+    await commitUrl(PAGE)
+    await preview()
+    await commitUrl(OTHER)
+    expect(h.session.get(`wa-preview-archive-${TAB}`)).toBeDefined()
+    await h.listeners.get('browser.tabs.onRemoved')!(TAB)
+    expect(h.session.get(`wa-preview-archive-${TAB}`)).toBeUndefined()
   })
 
   it('still forgets the applied string, so the CSS is inserted again', async () => {

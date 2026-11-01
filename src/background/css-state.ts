@@ -128,3 +128,56 @@ export async function writeSuspended(tabId: number, id: string): Promise<void> {
 export async function forgetSuspended(tabId: number): Promise<void> {
   await browser.storage.session.remove(`${SUSPENDED_PREFIX}${tabId}`)
 }
+
+/*
+ * Previews that belong to a document the tab has left but may return to. A page
+ * restored from the back-forward cache comes back exactly as it was, with the
+ * preview's stylesheet still in it, so the string that removes it has to be
+ * kept for as long as that document can come back. The string is filed under
+ * the URL the document had when the tab left it, and handed back when a
+ * forward_back navigation commits that URL.
+ *
+ * Matching by URL is an approximation: two documents with the same URL in one
+ * tab's history share an entry, and the newer one wins. It is cheaper than
+ * tracking the browser's own history entries, which an extension cannot read.
+ */
+const ARCHIVE_PREFIX = 'wa-preview-archive-'
+const ARCHIVE_LIMIT = 5
+
+export interface ArchivedPreview {
+  url: string
+  css: string
+  windowId?: number | undefined
+}
+
+async function readArchive(tabId: number): Promise<ArchivedPreview[]> {
+  const key = `${ARCHIVE_PREFIX}${tabId}`
+  const value = (await browser.storage.session.get(key))[key]
+  return Array.isArray(value) ? (value as ArchivedPreview[]) : []
+}
+
+/** Files `css` under `url`, replacing an earlier entry for the same URL. */
+export async function archivePreview(tabId: number, entry: ArchivedPreview): Promise<void> {
+  const kept = (await readArchive(tabId)).filter((existing) => existing.url !== entry.url)
+  await browser.storage.session.set({
+    [`${ARCHIVE_PREFIX}${tabId}`]: [...kept, entry].slice(-ARCHIVE_LIMIT),
+  })
+}
+
+/** Removes and returns the entry filed under `url`, if there is one. */
+export async function takeArchivedPreview(
+  tabId: number,
+  url: string,
+): Promise<ArchivedPreview | undefined> {
+  const all = await readArchive(tabId)
+  const found = all.find((entry) => entry.url === url)
+  if (!found) return undefined
+  await browser.storage.session.set({
+    [`${ARCHIVE_PREFIX}${tabId}`]: all.filter((entry) => entry !== found),
+  })
+  return found
+}
+
+export async function forgetArchive(tabId: number): Promise<void> {
+  await browser.storage.session.remove(`${ARCHIVE_PREFIX}${tabId}`)
+}

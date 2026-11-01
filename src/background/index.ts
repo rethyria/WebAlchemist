@@ -31,6 +31,8 @@ import { reconcile as reconcileContentScripts } from './content-scripts'
 import { buildProbeTransform } from './csp-probe'
 import {
   addPreviewedScript,
+  archivePreview,
+  forgetArchive,
   forgetCss,
   forgetSuspended,
   previewedScriptIds,
@@ -38,6 +40,7 @@ import {
   previewScriptWindow,
   previewWindow,
   suspendedTabIds,
+  takeArchivedPreview,
   readCss,
   readSuspended,
   removePreviewedScript,
@@ -182,28 +185,53 @@ browser.webNavigation.onCommitted.addListener(async (details) => {
   const restored = details.transitionQualifiers?.includes('forward_back') ?? false
   startDocument(details.tabId)
   /*
+   * Read before the write below replaces it: this is the URL of the document
+   * the tab is leaving, which is what a preview made on it is filed under.
+   */
+  const leftUrlKey = `wa-last-url-${details.tabId}`
+  const leaving = browser.storage.session.get(leftUrlKey)
+  /*
    * Written before the first await. A page can call replaceState while it
    * loads, and that event records its own URL. This write used to come after
    * the queued forget steps, so it could land after the replaceState's and
    * overwrite the newer URL with the commit's; a later route back to the
    * commit URL then looked unchanged and was skipped.
    */
-  const recorded = browser.storage.session.set({ [`wa-last-url-${details.tabId}`]: details.url })
+  const recorded = browser.storage.session.set({ [leftUrlKey]: details.url })
   await inTabQueue(details.tabId, async () => {
     await forgetCss('applied', details.tabId)
     /*
-     * The same goes for a preview, except when the document came back from the
-     * back-forward cache: that document is restored as it was, with the
-     * preview's stylesheet still in it, and forgetting the string would leave
-     * nothing that can remove it. The applied string is forgotten either way.
-     * If it is still stored for a document that was loaded afresh, a later
-     * removal finds nothing to remove and the next preview replaces it, so
-     * keeping it is the harmless mistake. Forgetting it for a restored document
-     * is not harmless, and applied CSS cannot be kept the same way: its
-     * comparison with the stored string would skip inserting into a document
-     * that does not have it.
+     * A preview belongs to the document it was inserted into. When the tab
+     * leaves that document its string is filed under the document's URL
+     * instead of being kept as the tab's current preview, because the stored
+     * string is only useful for removal if the document that has the stylesheet
+     * is the one the tab shows.
+     *
+     * A document that returns from the back-forward cache is restored as it
+     * was, preview stylesheet included, so its filed string becomes the tab's
+     * preview again and can still be removed. For a document loaded afresh
+     * nothing is restored and the filed string is never used. The applied
+     * string cannot be handled this way: it is forgotten on every commit so the
+     * CSS is inserted again, since comparing with the stored string would skip
+     * inserting into a document that does not have it.
      */
-    if (!restored) await forgetCss('preview', details.tabId)
+    const url = (await leaving)[leftUrlKey]
+    const css = await readCss('preview', details.tabId)
+    if (css !== undefined && typeof url === 'string') {
+      await archivePreview(details.tabId, {
+        url,
+        css,
+        windowId: await previewWindow(details.tabId),
+      })
+    }
+    await forgetCss('preview', details.tabId)
+    if (restored) {
+      const back = await takeArchivedPreview(details.tabId, details.url)
+      if (back) {
+        await writeCss('preview', details.tabId, back.css)
+        await writePreviewWindow(details.tabId, back.windowId)
+      }
+    }
   })
   await recorded
   await evaluateTab(details.tabId, details.url, { navigated: true })
@@ -1089,6 +1117,7 @@ browser.tabs.onRemoved.addListener(async (tabId) => {
     await forgetCss('preview', tabId)
     await forgetCss('applied', tabId)
     forgetTab(tabId)
+    await forgetArchive(tabId)
     await browser.storage.session.remove(`wa-last-url-${tabId}`)
     await forgetSuspended(tabId)
   })
