@@ -530,6 +530,25 @@ async function handle(
   message: Message,
   sender: browser.runtime.MessageSender,
 ): Promise<unknown> {
+  // The CSP probe messages are handled only in a probe build. The condition is
+  // a build-time constant, so a release build contains neither the message
+  // names nor the probe's code, and answers these messages like any message
+  // that has no handler (#60). They are not cases of the switch below, because
+  // a case label would keep the message name in the release build.
+  if (import.meta.env.VITE_CSP_PROBE === '1') {
+    if (message.type === 'clear-csp-probe') {
+      await unregisterTransform('wa-csp-probe')
+      return true
+    }
+    if (message.type === 'run-csp-probe') {
+      // Registered, never saved. It must not appear in the user's transform
+      // list, and it must come back out when the run is over.
+      const { buildProbeTransform } = await import('./csp-probe')
+      await registerTransform(buildProbeTransform(), { skipAnalysis: true })
+      await browser.tabs.update(message.tabId, { url: 'http://localhost:8787/' })
+      return true
+    }
+  }
   switch (message.type) {
     case 'get-settings':
       return getSettings()
@@ -1077,27 +1096,6 @@ async function handle(
       await sendToContent(message.tabId, { type: 'clear-lock' })
       return true
 
-    // Compiled only into a probe build, the same condition as the sidebar
-    // button that sends these. A release build would otherwise register a
-    // script that sends requests to localhost for any sender that asks.
-    case 'run-csp-probe':
-    case 'clear-csp-probe': {
-      if (import.meta.env.VITE_CSP_PROBE !== '1') {
-        throw new Error(`Unknown message type: ${message.type}`)
-      }
-      if (message.type === 'clear-csp-probe') {
-        await unregisterTransform('wa-csp-probe')
-        return true
-      }
-      // Registered, never saved. It must not appear in the user's transform
-      // list, and it must come back out when the run is over.
-      // Imported here, not at the top, so a release build does not bundle the
-      // probe's code once the flag test above is false.
-      const { buildProbeTransform } = await import('./csp-probe')
-      await registerTransform(buildProbeTransform(), { skipAnalysis: true })
-      await browser.tabs.update(message.tabId, { url: 'http://localhost:8787/' })
-      return true
-    }
 
     case 'check-now': {
       // A manual check must actually run, even under once-per-session where

@@ -20,13 +20,17 @@ const ROOT = resolve(__dirname, '..', '..')
 // Under the project root because the extension plugin ignores an outDir outside it.
 const SCRATCH = join(ROOT, '.vite', `csp-probe-build-${process.pid}`)
 
-/** Strings that appear in the probe's code and in no other source file. */
-const PROBE_ONLY = ['localhost:8787', 'wa-csp-probe']
+/** Strings that appear in the probe's code or message handling and in no other source file. */
+const PROBE_ONLY = ['localhost:8787', 'wa-csp-probe', 'run-csp-probe', 'clear-csp-probe']
 
 function build(name: string, flag: string | undefined): string {
   const out = join(SCRATCH, name)
   mkdirSync(SCRATCH, { recursive: true })
   const env: Record<string, string | undefined> = { ...process.env, WA_OUT_DIR: out }
+  // Vitest sets NODE_ENV=test, under which Svelte compiles in development mode and
+  // wraps comparisons in helper calls, so a build-time constant is no longer folded.
+  // `npm run build` and `npm run package` do not run under that setting.
+  env['NODE_ENV'] = 'production'
   delete env['VITE_CSP_PROBE']
   if (flag !== undefined) env['VITE_CSP_PROBE'] = flag
   execFileSync(join(ROOT, 'node_modules', '.bin', 'vite'), ['build'], {
