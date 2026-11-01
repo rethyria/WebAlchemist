@@ -43,6 +43,7 @@ import type {
   TreeRow,
 } from '@shared/types'
 import { extractPartialString } from '@shared/partial-json'
+import { recordCaptureGrant } from '@shared/capture-grant'
 import { BackgroundError, generateOverPort, send } from './messaging.svelte'
 
 export type Step =
@@ -1236,8 +1237,14 @@ export class Flow {
    * from the click that reached here is still live.
    */
   private async requestCaptureAccess(): Promise<boolean> {
+    // Recorded in the same tick as the request and not awaited before it, which
+    // would end the gesture. If the panel closes before the user answers, the
+    // background script finds the record and hands the grant back.
+    const recorded = recordCaptureGrant(true).catch(() => {})
     const granted = await browser.permissions.request({ origins: ['<all_urls>'] })
+    await recorded
     if (!granted) {
+      void recordCaptureGrant(false).catch(() => {})
       this.sendScreenshot = false
       this.show({
         kind: 'request-failed',
@@ -1316,6 +1323,7 @@ export class Flow {
    */
   cancelScreenshot(): void {
     this.clearShot()
+    void recordCaptureGrant(false).catch(() => {})
     // Held deliberately when the user has said so in settings; the point of
     // that setting is not being asked again.
     if (this.keepScreenshotPermission) return

@@ -14,6 +14,7 @@ import type {
   MessageResponse,
 } from '@shared/messages'
 import { matchesUrl } from '@shared/match'
+import { CAPTURE_GRANT_KEY } from '@shared/capture-grant'
 import type {
   Accent,
   PageContext,
@@ -963,6 +964,34 @@ void (async () => {
   await clearPreviewsWhere(ownerIsGone)
 })()
 
+const ALL_SITES = { origins: ['<all_urls>'] }
+
+/**
+ * Hands the all-sites screenshot grant back. The panel does this itself when a
+ * run ends, but a panel that closes mid-run runs no code, and the grant would
+ * stay: while it is held, every per-site permission prompt is satisfied
+ * without asking. The setting that keeps the grant is honoured.
+ */
+async function handBackCaptureGrant(): Promise<void> {
+  await browser.storage.session.set({ [CAPTURE_GRANT_KEY]: false })
+  if ((await getSettings()).keepScreenshotPermission) return
+  await browser.permissions.remove(ALL_SITES).catch(() => {})
+}
+
+/**
+ * After a browser restart the record in storage.session is gone while the
+ * grant is still held, so the record cannot be the test at start-up. If a
+ * panel reconnects within the grace period a run may be in progress and the
+ * grant stays; if none does, nobody is left to use it or give it back.
+ */
+void (async () => {
+  if (!(await browser.permissions.contains(ALL_SITES))) return
+  if ((await getSettings()).keepScreenshotPermission) return
+  await new Promise((resolve) => setTimeout(resolve, SIDEBAR_RECONNECT_GRACE_MS))
+  if (sidebarPorts.size > 0) return
+  await handBackCaptureGrant()
+})()
+
 /**
  * The sidebar holds a port open for exactly as long as it is on screen. Its
  * disconnect is the only reliable signal that the panel closed — which is the
@@ -981,6 +1010,14 @@ browser.runtime.onConnect.addListener((port) => {
     sidebarPorts.set(port, windowId)
     port.onDisconnect.addListener(() => {
       sidebarPorts.delete(port)
+      // The grant is not tied to a window, so it is handed back only when no
+      // panel is left that could be in the middle of a run.
+      if (sidebarPorts.size === 0) {
+        void (async () => {
+          const held = (await browser.storage.session.get(CAPTURE_GRANT_KEY))[CAPTURE_GRANT_KEY]
+          if (held === true) await handBackCaptureGrant()
+        })()
+      }
       // Only what this window's sidebar made. Another window's panel may still
       // be open, and its preview must stay: removing every preview whenever the
       // last panel closed was right for one window and wrong for two. While

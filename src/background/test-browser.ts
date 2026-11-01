@@ -74,6 +74,10 @@ export interface Harness {
   listeners: Map<string, Listener>
   /** Reports whether the userScripts permission is held. Defaults to false. */
   hasUserScripts: boolean
+  /** Whether the `<all_urls>` origin grant is held; `permissions.remove` clears it. */
+  allUrlsGranted: boolean
+  /** Permission sets passed to `permissions.remove`. */
+  permissionsRemoved: unknown[]
   /** Loads index.ts with fresh module state, as after a suspension. */
   boot(): Promise<void>
   onMessage(message: unknown, sender?: unknown): Promise<any>
@@ -102,6 +106,8 @@ export function createHarness(): Harness {
     calls: { insertCSS: [], removeCSS: [], unregister: [], registry: [], setBadgeText: [], sendMessage: [], runtimeMessages: [] },
     listeners: new Map(),
     hasUserScripts: false,
+    allUrlsGranted: false,
+    permissionsRemoved: [],
     contentReply: () => undefined,
     hold: (path, options) => {
       let release: () => void = () => {}
@@ -122,7 +128,13 @@ export function createHarness(): Harness {
     'browser.runtime.getURL': (path: string) => ORIGIN + path,
     'browser.runtime.id': 'wa@test',
     'browser.permissions.getAll': async () => ({ origins: h.origins, permissions: [] }),
-    'browser.permissions.contains': async () => h.hasUserScripts,
+    'browser.permissions.contains': async (p?: { origins?: string[] }) =>
+      p?.origins?.includes('<all_urls>') ? h.allUrlsGranted : h.hasUserScripts,
+    'browser.permissions.remove': async (p: { origins?: string[] }) => {
+      h.permissionsRemoved.push(structuredClone(p))
+      if (p.origins?.includes('<all_urls>')) h.allUrlsGranted = false
+      return true
+    },
     'browser.userScripts.unregister': async (filter?: { ids?: string[] }) => {
       const ids = filter?.ids ?? [...h.userScriptsHeld.keys()]
       h.calls.registry.push(filter?.ids ? `unregister:${ids.join(',')}` : 'unregister:all')
