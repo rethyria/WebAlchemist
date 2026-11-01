@@ -460,3 +460,35 @@ describe('allowlist (#48): legitimate transforms still pass', () => {
     expect(blocks(`document.querySelector('a').innerHTML = 'x'`)).toBe(true)
   })
 })
+
+/**
+ * Gaps found by the audit of 00cc5f7 (#48). Each snippet is the one the
+ * auditor reported, run through the analyser and the capability policy with
+ * no capability declared unless the test says otherwise.
+ */
+describe('audit of 00cc5f7 (#48): logical assignment', () => {
+  const SNIPPETS = [
+    `let k = 0; k ||= 'constructor'; [][k][k]('return 1')()`,
+    `let k; k ??= 'constructor'; [][k][k]('return 1')()`,
+    `let k = 1; k &&= 'constructor'; [][k][k]('return 1')()`,
+  ]
+  for (const snippet of SNIPPETS) {
+    it(`blocks: ${snippet}`, () => {
+      expect(blocks(snippet)).toBe(true)
+    })
+  }
+
+  it('blocks a logical assignment of text to a custom style property', () => {
+    expect(blocks(`const el = document.body; let v = 1; v ||= el.textContent; el.style.setProperty('--u', v)`)).toBe(true)
+    expect(blocks(`const el = document.body; el.style['--u'] ||= el.textContent`)).toBe(true)
+    expect(blocks(`const el = document.body; el.style['--u'] += 'l(https://evil.example/)'`)).toBe(true)
+  })
+
+  it('controls: a logical assignment of a number still counts as numeric', () => {
+    expect(blocks(`let k = 0; k ||= 2; const a = [1, 2, 3]; a[k]`)).toBe(false)
+    expect(blocks(`let k; k ??= 1; const a = [1, 2, 3]; a[k]`)).toBe(false)
+    expect(blocks(`let k = 3; k -= 1; k *= 2; const a = [1, 2, 3]; a[k]`)).toBe(false)
+    expect(blocks(`let k = 0; k += 1; const a = [1, 2]; a[k]`)).toBe(false)
+    expect(blocks(`const el = document.body; let n = 1; n ||= 2; el.style.setProperty('--n', n)`)).toBe(false)
+  })
+})

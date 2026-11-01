@@ -181,6 +181,12 @@ const ALLOWED_GLOBALS = new Set([
   'Event', 'CustomEvent', 'KeyboardEvent', 'MouseEvent', 'FocusEvent', 'InputEvent', 'PointerEvent', 'WheelEvent',
   'clearTimeout', 'clearInterval',
 ])
+/**
+ * Assignment operators whose result can be the right-hand side itself or text
+ * built from it. Every other compound operator (`-=`, `*=`, `<<=` and so on)
+ * converts both sides to numbers.
+ */
+const VALUE_ASSIGN_OPERATORS = new Set(['=', '+=', '||=', '&&=', '??='])
 const ELEMENT_CLASS = /^(HTML|SVG)[A-Za-z]*Element$/
 
 /** Timers: run text as code when given a string, so the first argument is checked. */
@@ -580,8 +586,11 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
         if (visiting.has(binding)) return true
         visiting.add(binding)
         const ok = binding.sources.every((src) => {
-          if (src.op === '=') return isNumeric(src.value, src.scope, visiting)
-          if (src.op === '+=') return isNumeric(src.value, src.scope, visiting)
+          // Only the operators that always produce a number may skip the check
+          // of the right-hand side. The logical forms `||=`, `&&=` and `??=`
+          // assign the right-hand side unchanged, so `k ||= 'constructor'`
+          // makes `k` a string, and a `+=` can concatenate text.
+          if (VALUE_ASSIGN_OPERATORS.has(src.op)) return isNumeric(src.value, src.scope, visiting)
           return true
         })
         visiting.delete(binding)
@@ -689,7 +698,7 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
    * URL requests it; a style property that can carry a URL is accepted only
    * with a literal value that does not contain one.
    */
-  function checkWrite(target: N, name: string, value: N | null, scope: Scope): void {
+  function checkWrite(target: N, name: string, value: N | null, scope: Scope, append = false): void {
     const refused = WRITE_REFUSED.get(name)
     if (refused) block(target, name, refused)
     if (WRITE_URL.has(name)) {
@@ -697,8 +706,11 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
     }
     // Text written out is checked whatever the property, because a custom
     // property or a text node can carry CSS that another rule then applies.
-    const texts = literalTexts(value)
-    if (texts) for (const text of texts) checkText(target, text)
+    const written = literalTexts(value)
+    if (written) for (const text of written) checkText(target, text)
+    // `+=` appends to a value that may already hold part of an address, so the
+    // right-hand side alone proves nothing about the result.
+    const texts = append ? null : written
 
     if (isUrlBearingStyleName(name)) {
       if (texts === null) {
@@ -1156,7 +1168,14 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
         } else if (left.type === 'MemberExpression') {
           visit(left, ctx, node)
           const name = staticName(left)
-          if (name !== null) checkWrite(left, name, node['operator'] === '=' ? node['right'] : null, ctx.scope)
+          if (name !== null) {
+            const op = node['operator'] as string
+            // The logical operators assign the right-hand side as it is, so it
+            // is checked like a plain `=`; `+=` appends; the arithmetic
+            // operators produce a number and have no value to check.
+            const assigns = op === '=' || op === '||=' || op === '&&=' || op === '??='
+            checkWrite(left, name, assigns || op === '+=' ? node['right'] : null, ctx.scope, op === '+=')
+          }
         } else {
           visitPattern(left, ctx, 'assign')
         }
