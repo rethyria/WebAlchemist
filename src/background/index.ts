@@ -672,9 +672,6 @@ async function handle(
       )
     }
 
-    case 'save-transform':
-      return handleSaveTransform(message, saveDeps)
-
     case 'delete-transform': {
       const doomed = (await getAllTransforms()).find((t) => t.id === message.id)
       // Both steps in one queued task: a rebuild that ran between them would
