@@ -524,6 +524,9 @@ export async function unlockVault(passphrase: string): Promise<void> {
   await unseal(key, existing)
   await rememberKey(key)
   await armIdleLock()
+  // The first moment the map can be written after an upgrade, so this is where
+  // keys stored before bindings existed are bound; see bindStoredCredentials.
+  await bindStoredCredentials()
 }
 
 /**
@@ -625,6 +628,36 @@ function checkedForProvider(provider: Provider, credential: Credential): Credent
     )
   }
   return credential.boundTo ? credential : { ...credential, boundTo: destination }
+}
+
+/**
+ * Binds every stored credential that has no binding to its provider's current
+ * destination, in one pass.
+ *
+ * Without this a key stored before bindings existed was bound by whichever
+ * request read it first, which could be months after the upgrade and after the
+ * base URL had been edited, so the key was bound to an address it was never
+ * entered for. Doing it once, at the first point the extension runs after the
+ * upgrade (a plaintext store) or the first point the sealed map can be written
+ * (unlock), keeps that window short. A credential whose provider has been
+ * removed, or has no valid address, is left unbound and is refused on use.
+ * Throws LockedError for a sealed vault that is locked.
+ */
+export async function bindStoredCredentials(): Promise<void> {
+  await withCredentialLock(async () => {
+    const map = await readCredentialMap()
+    const providers = (await getSettings()).providers
+    let changed = false
+    for (const [providerId, credential] of Object.entries(map)) {
+      if (credential.boundTo) continue
+      const provider = providers.find((p) => p.id === providerId)
+      const destination = provider ? destinationOf(provider) : null
+      if (!destination) continue
+      map[providerId] = { ...credential, boundTo: destination }
+      changed = true
+    }
+    if (changed) await writeCredentialMap(map)
+  })
 }
 
 /**

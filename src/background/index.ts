@@ -63,6 +63,7 @@ import {
 } from './registry'
 import {
   assertValidTransform,
+  bindStoredCredentials,
   clearCredential,
   deleteTransform,
   disableVault,
@@ -104,6 +105,10 @@ browser.runtime.onInstalled.addListener(async (details) => {
     await reregister()
     await reconcileContentScripts()
   }
+  // Keys stored before bindings existed are bound now, while the settings are
+  // still the ones they were entered under. A sealed vault is locked after a
+  // restart; its keys are bound when it is unlocked.
+  if (details.reason === 'update') await bindStoredCredentials().catch(() => {})
 })
 
 /*

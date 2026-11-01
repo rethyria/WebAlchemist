@@ -230,3 +230,64 @@ describe('credential status after the provider changes', () => {
     expect((await storage.getAllCredentialStatuses())[0]!.needsReentry).toBeUndefined()
   })
 })
+
+describe('binding keys stored before bindings existed, in one pass', () => {
+  async function withProvider(provider: Provider) {
+    const settings = await storage.getSettings()
+    await storage.saveSettings({ ...settings, providers: [provider], activeProviderId: provider.id })
+  }
+
+  it('binds an unbound key to the settings as they are now, so a later edit is refused', async () => {
+    await withProvider(remote())
+    await storage.setCredential('p1', KEY)
+
+    await storage.bindStoredCredentials()
+    expect(await storage.readStoredCredential('p1')).toMatchObject({
+      boundTo: { type: 'openai-compatible', origin: 'https://api.example.com' },
+    })
+
+    // The edit after the pass is refused. Without the pass this read would
+    // have bound the key to the edited address, which is the finding.
+    await expect(
+      storage.readCredentialForRequest(remote({ baseUrl: 'https://evil.example.net/v1' })),
+    ).rejects.toBeInstanceOf(storage.CredentialOriginError)
+  })
+
+  // Control: with no pass, the first read after an edit binds the key to the
+  // edited address. This is the behaviour the pass exists to shorten.
+  it('without the pass, the first read after an edit binds the key to the edited address', async () => {
+    await withProvider(remote())
+    await storage.setCredential('p1', KEY)
+
+    const edited = remote({ baseUrl: 'https://evil.example.net/v1' })
+    expect(await storage.readCredentialForRequest(edited)).toMatchObject({
+      boundTo: { origin: 'https://evil.example.net' },
+    })
+  })
+
+  it('leaves a bound key alone and skips a key whose provider is gone', async () => {
+    await withProvider(remote())
+    await storage.saveCredentialFor(remote(), KEY)
+    await storage.setCredential('gone', KEY)
+    const before = await storage.readStoredCredential('p1')
+
+    await storage.bindStoredCredentials()
+
+    expect(await storage.readStoredCredential('p1')).toEqual(before)
+    expect((await storage.readStoredCredential('gone'))?.boundTo).toBeUndefined()
+  })
+
+  it('binds keys in a sealed vault when it is unlocked, not before', async () => {
+    await withProvider(remote())
+    await storage.setCredential('p1', KEY)
+    await storage.enableVault('correct horse battery')
+    await storage.lockVault()
+    await expect(storage.bindStoredCredentials()).rejects.toThrow()
+
+    await storage.unlockVault('correct horse battery')
+
+    expect(await storage.readStoredCredential('p1')).toMatchObject({
+      boundTo: { origin: 'https://api.example.com' },
+    })
+  })
+})
