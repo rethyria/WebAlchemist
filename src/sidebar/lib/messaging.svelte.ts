@@ -34,6 +34,10 @@ export function generateOverPort(
     instructionImported?: boolean
     /** The imported description behind a follow-up, sent fenced on every turn. */
     importedDescription?: string
+    /** True when `instruction` is a saved description, unchanged. */
+    instructionSaved?: boolean
+    /** The saved description behind a follow-up, sent fenced on every turn. */
+    savedDescription?: string
     history: unknown[]
     scopeDepth?: number
     scopeContainer?: string | null

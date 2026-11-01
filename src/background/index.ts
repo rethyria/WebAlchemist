@@ -44,7 +44,7 @@ import { isSidebarPortName, ownerOfSidebarPort, panelOwner } from '@shared/sideb
 import { isApproved, spendApproval } from './approvals'
 import { encryptExport, openExport } from './export-crypto'
 import { blockedStates, runStaticAnalysis, staticProblem } from './code-gate'
-import { checkCssForPage, checkCssTransform, pageUrlFor, sameCssContext } from './css-gate'
+import { assertPreviewable, checkCssForPage, checkCssTransform, pageUrlFor, sameCssContext } from './css-gate'
 import {
   applyCssTransforms as applyCssTransformsFor,
   fromExtensionPage,
@@ -52,7 +52,7 @@ import {
   handleBlockedCount,
   handlePreviewCss,
   handleReview,
-  handleSaveSettings,
+  cssPolicyChanged,
   handleSaveTransform,
   type CssApplyDeps,
   type SaveDeps,
@@ -115,7 +115,6 @@ import {
   previewImport,
   lockVault,
   reorderTransforms,
-  saveSettings,
   changeSettings,
   foldUnsavedUsage,
   resetModelChosenMain,
@@ -432,6 +431,10 @@ browser.webNavigation.onCommitted.addListener(async (details) => {
         // preview again would leave a preview nothing owns, so it is removed
         // below, outside this task because removal is queued too (#80).
         orphaned = back.css
+      } else if (back && (await restoredPreviewRefused(details.tabId, details.url, back.css))) {
+        // The kill switch, the site's off switch, the excluded list or the CSS
+        // setting refuses it now, as it would refuse a new preview (#146).
+        orphaned = back.css
       } else if (back) {
         await writeCss('preview', details.tabId, back.css)
         await writePreviewWindow(details.tabId, back.windowId)
@@ -573,6 +576,25 @@ async function handle(
   message: Message,
   sender: browser.runtime.MessageSender,
 ): Promise<unknown> {
+  // The CSP probe messages are handled only in a probe build. The condition is
+  // a build-time constant, so a release build contains neither the message
+  // names nor the probe's code, and answers these messages like any message
+  // that has no handler (#60). They are not cases of the switch below, because
+  // a case label would keep the message name in the release build.
+  if (import.meta.env.VITE_CSP_PROBE === '1') {
+    if (message.type === 'clear-csp-probe') {
+      await unregisterTransform('wa-csp-probe')
+      return true
+    }
+    if (message.type === 'run-csp-probe') {
+      // Registered, never saved. It must not appear in the user's transform
+      // list, and it must come back out when the run is over.
+      const { buildProbeTransform } = await import('./csp-probe')
+      await registerTransform(buildProbeTransform(), { skipAnalysis: true })
+      await browser.tabs.update(message.tabId, { url: 'http://localhost:8787/' })
+      return true
+    }
+  }
   switch (message.type) {
     case 'get-settings':
       return getSettings()
@@ -604,8 +626,10 @@ async function handle(
         // re-registered; the page picks it up on its next load either way.
         // Queued with the start-up rebuild so the two cannot interleave (#91).
         await inRegistryQueue(async () => {
-          if (saved.enabled) await registerTransform(saved)
-          else await unregisterTransform(saved.id)
+          // A script with a preview stays unregistered while the preview runs,
+          // as in reregisterAllNow, or the page would run both (#150).
+          if (saved.enabled && !(await previewedScriptIds()).includes(saved.id)) await registerTransform(saved)
+          else if (!saved.enabled) await unregisterTransform(saved.id)
         })
       }
 
@@ -813,21 +837,14 @@ async function handle(
       if (!next) throw new Error(t('bgThatTransformNoLongerExists'))
       if (next.kind === 'js') {
         await inRegistryQueue(async () => {
-          if (next.enabled) await registerTransform(next)
-          else await unregisterTransform(next.id)
+          // See reapply-everywhere: a previewed script is not registered again.
+          if (next.enabled && !(await previewedScriptIds()).includes(next.id)) await registerTransform(next)
+          else if (!next.enabled) await unregisterTransform(next.id)
         })
       }
       // A toggle that takes effect on the next reload is not a toggle.
       await reapply(message.tabId)
       return true
-    }
-
-    case 'save-settings': {
-      return handleSaveSettings(message, {
-        saveSettings,
-        reregisterAll: (before) => afterSettingsWritten(before.aiJsKillSwitch),
-        reapplyAllTabs,
-      })
     }
 
     case 'count-js-tabs':
@@ -881,10 +898,17 @@ async function handle(
       // Read inside the settings queue, so this change keeps its place there
       // relative to a save sent at the same time (#85).
       let switchBefore = false
+      let policyBefore: Settings['cssUrlPolicy'] = {}
       const saved = await changeSettings(message.change, (before) => {
         switchBefore = before.aiJsKillSwitch
+        policyBefore = before.cssUrlPolicy
       })
       if (message.change.kind === 'fields') await afterSettingsWritten(switchBefore)
+      // A tab keeps the CSS that was inserted under the old setting until
+      // something reapplies it, so a changed site setting reapplies every tab.
+      if (message.change.kind === 'css-site-mode' && cssPolicyChanged(policyBefore, saved.cssUrlPolicy)) {
+        await reapplyAllTabs()
+      }
       return saved
     }
 
@@ -1163,27 +1187,6 @@ async function handle(
       await sendToContent(message.tabId, { type: 'clear-lock' })
       return true
 
-    // Compiled only into a probe build, the same condition as the sidebar
-    // button that sends these. A release build would otherwise register a
-    // script that sends requests to localhost for any sender that asks.
-    case 'run-csp-probe':
-    case 'clear-csp-probe': {
-      if (import.meta.env.VITE_CSP_PROBE !== '1') {
-        throw new Error(`Unknown message type: ${message.type}`)
-      }
-      if (message.type === 'clear-csp-probe') {
-        await unregisterTransform('wa-csp-probe')
-        return true
-      }
-      // Registered, never saved. It must not appear in the user's transform
-      // list, and it must come back out when the run is over.
-      // Imported here, not at the top, so a release build does not bundle the
-      // probe's code once the flag test above is false.
-      const { buildProbeTransform } = await import('./csp-probe')
-      await registerTransform(buildProbeTransform(), { skipAnalysis: true })
-      await browser.tabs.update(message.tabId, { url: 'http://localhost:8787/' })
-      return true
-    }
 
     case 'check-now': {
       // A manual check must actually run, even under once-per-session where
@@ -1441,6 +1444,23 @@ async function clearCssPreviewsOn(include: (url: string) => boolean): Promise<vo
 }
 
 /**
+ * Whether a preview restored from the back-forward cache would be refused as a
+ * new preview for the same page: the switches, the excluded list, and the CSS
+ * check for the page and its site setting. Approvals given for the original
+ * preview are not kept in the archive, so CSS that needs approved addresses is
+ * refused here too.
+ */
+async function restoredPreviewRefused(tabId: number, url: string, css: string): Promise<boolean> {
+  try {
+    await refuseWhenOff(tabId)
+    assertPreviewable(css, await getSettings(), url, undefined)
+    return false
+  } catch {
+    return true
+  }
+}
+
+/**
  * Throws when the switches say nothing may run on the tab's page, so that a
  * preview is refused instead of being shown on a site the user turned off.
  */
@@ -1650,6 +1670,10 @@ interface GenerateOverPort {
   instructionImported?: boolean
   /** The imported description behind a follow-up. See GenerateRequest. */
   importedDescription?: string
+  /** True when `instruction` is a saved description, unchanged. See GenerateRequest. */
+  instructionSaved?: boolean
+  /** The saved description behind a follow-up. See GenerateRequest. */
+  savedDescription?: string
   history: RefinementTurn[]
   scopeDepth?: number
   scopeContainer?: string | null

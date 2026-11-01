@@ -546,6 +546,14 @@ export class Flow {
    */
   private importedDescription: string | null = null
   /**
+   * The saved description of a stored transform that began this run, when it
+   * was sent unchanged as the first turn. A model or an earlier session wrote
+   * it, so it is sent fenced and labelled as a saved description on every
+   * request and is not put in `history` as the user's turn. The stored
+   * rationale is not sent as an assistant turn either. Null otherwise.
+   */
+  private savedDescription: string | null = null
+  /**
    * True while `result` is the stored code of an imported transform opened with
    * Change with AI, whose rationale and intent the file's author wrote. Cleared
    * when a generation replaces the result. The rationale is then not sent as the
@@ -872,6 +880,7 @@ export class Flow {
     this.savedInstruction = null
     this.savedImported = false
     this.importedDescription = null
+    this.savedDescription = null
     this.resultFromImport = false
     this.history = []
     this.followUp = ''
@@ -1250,6 +1259,7 @@ export class Flow {
       this.intentBaseline = transform.intent
       this.prefillInstruction(transform.intent, transform.origin === 'imported')
       this.importedDescription = null
+      this.savedDescription = null
       this.resultFromImport = transform.origin === 'imported'
       this.references = []
       this.followUp = ''
@@ -1327,6 +1337,7 @@ export class Flow {
     instruction: string
     followUp: string
     importedDescription: string | null
+    savedDescription: string | null
     resultFromImport: boolean
     /**
      * The result the attempt replaced, set when the new result is stored. The
@@ -1361,15 +1372,17 @@ export class Flow {
    */
   private reviewInstructions(): ReviewInstruction[] {
     const imported = this.importedDescription
+    const held = this.savedDescription
     const texts = [
-      // The imported description is not in the history, so it is added first,
-      // with its own source.
-      ...(imported === null ? [] : [imported]),
+      // The imported or saved description is not in the history, so it is added
+      // first, with its own source.
+      ...(imported !== null ? [imported] : held !== null ? [held] : []),
       ...this.history.filter((turn) => turn.role === 'user').map((turn) => turn.content),
       this.instruction,
     ]
     return texts.map((text, index): ReviewInstruction => {
       if (imported !== null && index === 0) return { text, source: 'imported-description' }
+      if (held !== null && index === 0) return { text, source: 'saved-description' }
       if (index > 0 || this.savedInstruction === null) return { text, source: 'typed' }
       const unchanged = text === this.savedInstruction
       if (this.savedImported) {
@@ -1394,6 +1407,7 @@ export class Flow {
     this.instruction = held.instruction
     this.followUp = held.followUp
     this.importedDescription = held.importedDescription
+    this.savedDescription = held.savedDescription
     this.resultFromImport = held.resultFromImport
   }
 
@@ -1480,7 +1494,15 @@ export class Flow {
             this.savedInstruction !== null &&
             this.instruction === this.savedInstruction &&
             this.history.length === 0,
+          // The same for a saved description that was not typed or edited in
+          // this session.
+          instructionSaved:
+            !this.savedImported &&
+            this.savedInstruction !== null &&
+            this.instruction === this.savedInstruction &&
+            this.history.length === 0,
           ...(this.importedDescription === null ? {} : { importedDescription: this.importedDescription }),
+          ...(this.savedDescription === null ? {} : { savedDescription: this.savedDescription }),
           history: this.history,
           scopeDepth: this.scopeDepth,
           scopeContainer: this.scopeContainer,
@@ -2078,6 +2100,7 @@ export class Flow {
       instruction: this.instruction,
       followUp: this.followUp,
       importedDescription: this.importedDescription,
+      savedDescription: this.savedDescription,
       resultFromImport: this.resultFromImport,
     }
     // The first turn of a run that began from an imported description, sent
@@ -2090,12 +2113,21 @@ export class Flow {
       this.savedInstruction !== null &&
       this.instruction === this.savedInstruction
     if (firstTurnImported) this.importedDescription = this.instruction
+    // The same for a saved description that the user did not type in this
+    // session: a model or an earlier session wrote it, so it is sent fenced and
+    // labelled and not as the user's turn.
+    const firstTurnSaved =
+      this.history.length === 0 &&
+      !this.savedImported &&
+      this.savedInstruction !== null &&
+      this.instruction === this.savedInstruction
+    if (firstTurnSaved) this.savedDescription = this.instruction
     this.history = [
       ...this.history,
-      ...(firstTurnImported ? [] : [{ role: 'user' as const, content: this.instruction }]),
-      // The rationale of a stored imported transform is the file author's text
-      // and does not become the assistant's earlier answer.
-      ...(firstTurnImported || this.resultFromImport
+      ...(firstTurnImported || firstTurnSaved ? [] : [{ role: 'user' as const, content: this.instruction }]),
+      // The rationale of a stored transform is text a model or a file wrote and
+      // does not become the assistant's earlier answer.
+      ...(firstTurnImported || firstTurnSaved || this.resultFromImport
         ? []
         : [{ role: 'assistant' as const, content: this.result.rationale.approach }]),
     ]
@@ -2255,8 +2287,10 @@ export class Flow {
 
   /**
    * Drops every declared capability, per "Refuse storage". The code is saved
-   * unchanged — the transform's world CSP is built from this list, so removing
-   * an entry is what actually stops the call at runtime.
+   * unchanged. The capabilities are what the approval covers and what the user
+   * is shown. Firefox does not enforce them at runtime (see registry.ts), so
+   * removing an entry means that the static analysis refuses code that uses it
+   * when the code is saved or registered.
    *
    * Only static analysis is re-run. The model was asked whether the code
    * matches the intent; neither has changed, so asking again would be a second
@@ -2634,6 +2668,7 @@ export class Flow {
     this.savedInstruction = null
     this.savedImported = false
     this.importedDescription = null
+    this.savedDescription = null
     this.resultFromImport = false
     this.keptSavedInstruction = null
     this.keptSavedImported = false

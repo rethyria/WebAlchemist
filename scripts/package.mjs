@@ -39,24 +39,21 @@ run('npx', ['vite', 'build'])
 
 // A release build must contain neither the CSP probe nor any source map.
 const problems = []
-const warnings = []
 for (const file of filesUnder(dist)) {
   if (file.endsWith('.map')) problems.push(`${file} is a source map`)
   else if (/\.(js|html|json)$/.test(file)) {
     const text = readFileSync(file, 'utf8')
     if (text.includes('localhost:8787')) problems.push(`${file} contains "localhost:8787"`)
-    // The message names of the probe are still in the release build, behind a
-    // check that rejects them (issue 60). Remove this warning, and make the
-    // marker an error, when issue 60 removes the names from the build.
-    if (text.includes('run-csp-probe')) warnings.push(`${file} contains "run-csp-probe"`)
+    // The probe's message names are compiled only into a probe build (issue 60).
+    for (const name of ['run-csp-probe', 'clear-csp-probe', 'wa-csp-probe']) {
+      if (text.includes(name)) problems.push(`${file} contains "${name}"`)
+    }
   }
 }
 if (problems.length > 0) {
   console.error(`The build is not a release build:\n${problems.join('\n')}`)
   process.exit(1)
 }
-
-if (warnings.length > 0) console.warn(`Warnings:\n${warnings.join('\n')}`)
 
 run('npx', [
   'web-ext', 'build',

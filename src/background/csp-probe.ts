@@ -93,7 +93,7 @@ export function buildProbeTransform(): Transform {
     world: 'USER_SCRIPT',
     // The whole point. Nothing declared means nothing permitted.
     capabilities: [],
-    intent: 'Attempt every form of network egress, to prove the world CSP blocks them.',
+    intent: 'Attempt every form of network egress, to measure which of them the world CSP blocks.',
     rationale: {
       targets: 'The probe page at localhost:8787.',
       approach: 'Fires fetch, XHR, WebSocket, sendBeacon, EventSource and an image load.',

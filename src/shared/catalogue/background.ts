@@ -471,4 +471,16 @@ export const backgroundMessages = defineMessages({
     message: 'Unnamed record',
     description: 'Name shown for an imported record that has no name.',
   },
+  bgSetToRunInMainNotApproved: {
+    message: 'It is set to run in the page\'s own world, which the user has not approved, so it is not running.',
+    description: 'Reason shown for a transform that is set to run in the page\'s own world without the user\'s approval.',
+  },
+  bgNotSiteNameCssSetting: {
+    message: 'That is not a site name, so its CSS setting was not changed.',
+    description: 'Error shown when a site name for a CSS setting is not valid.',
+  },
+  bgNotCssSetting: {
+    message: 'That is not a CSS setting, so it was not changed.',
+    description: 'Error shown when a CSS setting value is not valid.',
+  },
 })

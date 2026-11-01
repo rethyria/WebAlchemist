@@ -235,6 +235,19 @@ export function changeSettings(
         }
         break
       }
+      case 'css-site-mode': {
+        if (!/^(\*\.)?[a-z0-9.-]{1,253}$/.test(change.key)) {
+          throw new Error(t('bgNotSiteNameCssSetting'))
+        }
+        if (!['block', 'same-origin', 'list-external'].includes(change.mode)) {
+          throw new Error(t('bgNotCssSetting'))
+        }
+        const policy = { ...current.cssUrlPolicy }
+        if (change.mode === 'block') delete policy[change.key]
+        else policy[change.key] = change.mode
+        next = { ...current, cssUrlPolicy: policy }
+        break
+      }
       case 'fields': {
         const fields: Record<string, unknown> = {}
         for (const key of SETTINGS_FIELDS) {

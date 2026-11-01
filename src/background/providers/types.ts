@@ -79,6 +79,19 @@ export interface GenerateRequest {
    * turn (#56).
    */
   importedDescription?: string
+  /**
+   * True when `instruction` is the saved description of a stored transform,
+   * sent as it was stored. A model or an earlier session wrote it, so the
+   * prompt says so and does not present it as the user's request.
+   */
+  instructionSaved?: boolean
+  /**
+   * The saved description of a stored transform, when the run began from it
+   * unchanged and `instruction` is a later follow-up. A model or an earlier
+   * session wrote it, so it is kept out of `history` and sent in a fenced,
+   * labelled section on every turn.
+   */
+  savedDescription?: string
   /** Distance up the ancestor chain the result should cover. See ScopeDepth. */
   scopeDepth?: number
   /** Selector of the container that depth resolves to, for the prompt. */

@@ -11,7 +11,7 @@ import { createHarness, cssTransform, type Harness } from './test-browser'
 
 const TAB = 3
 const app = cssTransform({ match: 'example.com/app/*', code: 'body { color: red }' })
-const stamped = `/* ${app.name} */\n${app.code}`
+const stamped = `/* transform 1 */\n${app.code}`
 const ON_APP = 'https://example.com/app/one'
 const ELSEWHERE = 'https://example.com/about'
 

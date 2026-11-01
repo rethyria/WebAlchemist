@@ -149,3 +149,29 @@ describe('blockedStates', () => {
     expect(states[0]?.brokenReason).toBeTruthy()
   })
 })
+
+describe('code in the MAIN world without the record of approval (#151)', () => {
+  it('is not registered, and is unregistered as blocked', async () => {
+    expect(await registerTransform(base({ id: 'main', code: GOOD_JS, world: 'MAIN' }))).toBe(false)
+    expect(registered).toEqual([])
+  })
+
+  it('control: the same code registers with the record, and in the isolated world without it', async () => {
+    expect(await registerTransform(base({ id: 'ok', code: GOOD_JS, world: 'MAIN', mainApprovedByUser: true }))).toBe(true)
+    expect(await registerTransform(base({ id: 'iso', code: GOOD_JS, world: 'USER_SCRIPT' }))).toBe(true)
+    expect(await registerTransform(base({ id: 'none', code: GOOD_JS }))).toBe(true)
+    expect(registered).toEqual(['ok', 'iso', 'none'])
+  })
+
+  it('is reported as broken with a plain reason, and the rebuild skips it', async () => {
+    const records = [
+      base({ id: 'main', code: GOOD_JS, world: 'MAIN' }),
+      base({ id: 'ok', code: GOOD_JS, world: 'MAIN', mainApprovedByUser: true }),
+    ]
+    expect(blockedStates(records, settings).map((s) => [s.id, s.status])).toEqual([['main', 'broken']])
+    expect(problemWithStoredCode(records[0]!, settings)).toMatch(/not approved/)
+    stored = records
+    expect(await reregisterAll()).toMatchObject({ registered: 1, skipped: 1 })
+    expect(registered).toEqual(['ok'])
+  })
+})

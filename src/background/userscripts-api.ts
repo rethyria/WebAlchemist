@@ -39,8 +39,10 @@ export interface WorldProperties {
   /** Omit to configure the default USER_SCRIPT world. */
   worldId?: string
   /**
-   * Content Security Policy for the world. This is the runtime enforcement
-   * boundary on what injected code can connect to — see registry.ts.
+   * Content Security Policy for the world. Firefox applies the directives for
+   * images, but it does not apply `connect-src` to fetch, XMLHttpRequest,
+   * WebSocket, sendBeacon or EventSource in a user script world, so this is
+   * not a limit on what injected code can connect to. See registry.ts.
    */
   csp?: string
   /** Whether scripts in this world may message the extension. */

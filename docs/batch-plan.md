@@ -1,5 +1,7 @@
 # Batch plan
 
+This document describes the batch of August 2026. Later issues changed the design, and where the text below disagrees with the README, the code or the comments in the code, those are correct. Two examples are the per-world content security policy, which a measurement showed is not a security boundary, and the model's choice of execution world, which now needs the user's approval.
+
 Written to be executed in one run by a coordinator agent handing work to
 subagents. Every item below says what to build, which files it touches, how it
 gets verified, and what it is blocked on.

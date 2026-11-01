@@ -339,22 +339,25 @@
   }
 
   /*
-   * Development affordance for the one claim in the safety model that cannot
-   * be established by reading code: whether the world CSP actually contains
-   * network egress. Behind a build flag so it never reaches a release.
+   * Development affordance that repeats the measurement of #21: whether the
+   * world CSP stops network requests from a user script world. It is not part
+   * of a release. The condition is a build-time constant, so a release build
+   * contains neither the button nor the message name (#60).
    */
-  const cspProbeEnabled = import.meta.env['VITE_CSP_PROBE'] === '1'
+  const cspProbeEnabled = import.meta.env.VITE_CSP_PROBE === '1'
 
   async function runCspProbe() {
-    const tab = await activeTab()
-    if (tab?.id === undefined) return
-    // Both grants, from this click while the gesture is still live.
-    const granted = await browser.permissions.request({
-      origins: ['http://localhost/*'],
-      permissions: ['userScripts'],
-    } as unknown as browser.permissions.Permissions)
-    if (!granted) return
-    await send({ type: 'run-csp-probe', tabId: tab.id })
+    if (import.meta.env.VITE_CSP_PROBE === '1') {
+      const tab = await activeTab()
+      if (tab?.id === undefined) return
+      // Both grants, from this click while the gesture is still live.
+      const granted = await browser.permissions.request({
+        origins: ['http://localhost/*'],
+        permissions: ['userScripts'],
+      } as unknown as browser.permissions.Permissions)
+      if (!granted) return
+      await send({ type: 'run-csp-probe', tabId: tab.id })
+    }
   }
 
   async function checkNow() {

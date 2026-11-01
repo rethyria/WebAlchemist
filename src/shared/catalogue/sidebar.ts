@@ -949,7 +949,7 @@ export const sidebarMessages = defineMessages({
     description: 'Link that opens the full settings page.',
   },
   settingsFullNote: {
-    message: 'Adding providers, and export / import, live there.',
+    message: 'Adding providers lives there.',
     description: 'Says what is only on the full settings page.',
   },
   trAnotherTransform: {

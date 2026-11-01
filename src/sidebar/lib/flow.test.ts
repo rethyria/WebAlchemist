@@ -1700,17 +1700,60 @@ describe('a follow-up on an imported transform (#56)', () => {
       expect(lastReview().intentImported).toBeUndefined()
     })
 
-    it('control: a transform the user saved keeps its turns in the history and sends no imported description', async () => {
+    it('sends an unchanged saved description fenced and not the stored rationale (#149)', async () => {
       const flow = newFlow()
       await flow.editWithAi({ ...importedWithCode, origin: 'ai' })
       flow.followUp = 'make it blue'
+      const run = flow.regenerate()
+      const port = await nextPort(1)
+      expect(port.request.history).toEqual([])
+      expect(port.request.savedDescription).toBe('IMPORTED INTENT')
+      expect(port.request.importedDescription).toBeUndefined()
+      expect(JSON.stringify(port.request)).not.toContain('FILE APPROACH')
+      port.emit({ type: 'done', result: cssResult('MODEL APPROACH') })
+      await run
+
+      // The next turn still carries the description, and the history holds what
+      // the user typed and what the model answered.
+      flow.followUp = 'and bigger'
+      const next = flow.regenerate()
+      const second = await nextPort(2)
+      expect(second.request.savedDescription).toBe('IMPORTED INTENT')
+      expect(second.request.history).toEqual([
+        { role: 'user', content: 'make it blue' },
+        { role: 'assistant', content: 'MODEL APPROACH' },
+      ])
+      second.emit({ type: 'done', result: cssResult('A3') })
+      await next
+    })
+
+    it('labels the saved description as saved in the review, not as typed', async () => {
+      const flow = newFlow()
+      await flow.editWithAi({ ...importedWithCode, origin: 'ai' })
+      flow.followUp = 'make it blue'
+      const run = flow.regenerate()
+      ;(await nextPort(1)).emit({ type: 'done', result: { ...cssResult('A2'), kind: 'js', code: 'x()' } })
+      await run
+      flow.result = { ...jsResultBase, code: 'x()' } as any
+      await flow.toReview()
+      expect(lastReview().instructions).toEqual([
+        { text: 'IMPORTED INTENT', source: 'saved-description' },
+        { text: 'make it blue', source: 'typed' },
+      ])
+    })
+
+    it('control: a saved description the user changed is theirs and keeps its turns in the history', async () => {
+      const flow = newFlow()
+      await flow.editWithAi({ ...importedWithCode, origin: 'ai' })
+      flow.instruction = 'IMPORTED INTENT, but smaller'
+      flow.followUp = 'make it blue'
       void flow.regenerate()
       const port = await nextPort(1)
+      expect(port.request.savedDescription).toBeUndefined()
       expect(port.request.history).toEqual([
-        { role: 'user', content: 'IMPORTED INTENT' },
+        { role: 'user', content: 'IMPORTED INTENT, but smaller' },
         { role: 'assistant', content: 'FILE APPROACH' },
       ])
-      expect(port.request.importedDescription).toBeUndefined()
     })
 
     it('puts the history back when the follow-up fails, so the description is still sent next time', async () => {
@@ -1757,6 +1800,29 @@ describe('a follow-up on an imported transform (#56)', () => {
         { text: 'IMPORTED INTENT', source: 'imported-description' },
         { text: 'only the banner', source: 'typed' },
       ])
+    })
+
+    it('sends an unchanged saved description fenced on the first run (#149)', async () => {
+      const flow = newFlow()
+      await flow.editIntent({ ...importedJs, origin: 'ai' })
+      const first = flow.generate()
+      const port = await nextPort(1)
+      expect(port.request.instructionSaved).toBe(true)
+      expect(port.request.instructionImported).toBe(false)
+      port.emit({ type: 'done', result: cssResult('A1') })
+      await first
+    })
+
+    it('control: an edited saved description is sent as the user instruction on the first run (#149)', async () => {
+      const flow = newFlow()
+      await flow.editIntent({ ...importedJs, origin: 'ai' })
+      flow.instruction = 'IMPORTED INTENT, only the banner'
+      const first = flow.generate()
+      const port = await nextPort(1)
+      expect(port.request.instructionSaved).toBe(false)
+      expect(port.request.instruction).toBe('IMPORTED INTENT, only the banner')
+      port.emit({ type: 'done', result: cssResult('A1') })
+      await first
     })
 
     it('control: a description the user changed is theirs and goes into the history', async () => {

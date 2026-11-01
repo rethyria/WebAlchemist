@@ -7,7 +7,7 @@
 
 import { beforeEach, describe, expect, it } from 'vitest'
 import { DEFAULT_SETTINGS } from '@shared/types'
-import { createHarness, cssTransform, type Harness } from './test-browser'
+import { createHarness, cssTransform, sidebarPort, type Harness } from './test-browser'
 
 const TAB = 1
 const SHOP = 'https://shop.example.com/cart'
@@ -93,5 +93,53 @@ describe('a page restored from the back-forward cache after its site setting was
     expect(h.session.get(`wa-applied-archive-${TAB}`)).toBeDefined()
     await h.listeners.get('browser.tabs.onRemoved')!(TAB)
     expect(h.session.get(`wa-applied-archive-${TAB}`)).toBeUndefined()
+  })
+})
+
+describe('a preview restored from the back-forward cache (#146)', () => {
+  const ELSEWHERE = 'https://elsewhere.example.org/'
+  const PREVIEW = 'a { background: url(/preview.png) }'
+
+  /** Previews on the shop page under same-origin, then leaves the page. */
+  async function previewThenLeave() {
+    await start([], sameOrigin)
+    h.listeners.get('browser.runtime.onConnect')!(sidebarPort(1)) // a sidebar owns the preview
+    await commit(SHOP)
+    await ask({ type: 'preview-css', tabId: TAB, css: PREVIEW })
+    expect(inserted('url(/preview.png)')).toHaveLength(1)
+    await commit(ELSEWHERE)
+  }
+
+  it('control: keeps the preview when nothing changed', async () => {
+    await previewThenLeave()
+    await commit(SHOP, ['forward_back'])
+    expect(removed('url(/preview.png)')).toHaveLength(0)
+    expect(h.session.get(`wa-css-preview-${TAB}`)).toBeDefined()
+  })
+
+  it('removes it when the kill switch was turned on while the page was cached', async () => {
+    await previewThenLeave()
+    h.local.set('settings', { ...sameOrigin, aiJsKillSwitch: true })
+    await commit(SHOP, ['forward_back'])
+    await settle()
+    expect(removed('url(/preview.png)')).toHaveLength(1)
+    expect(h.session.get(`wa-css-preview-${TAB}`)).toBeUndefined()
+  })
+
+  it('removes it when the site setting no longer allows its CSS', async () => {
+    await previewThenLeave()
+    h.local.set('settings', DEFAULT_SETTINGS)
+    await commit(SHOP, ['forward_back'])
+    await settle()
+    expect(removed('url(/preview.png)')).toHaveLength(1)
+    expect(h.session.get(`wa-css-preview-${TAB}`)).toBeUndefined()
+  })
+
+  it('removes it when the site was added to the excluded list', async () => {
+    await previewThenLeave()
+    await ask({ type: 'set-excluded-sites', sites: ['shop.example.com'] })
+    await commit(SHOP, ['forward_back'])
+    await settle()
+    expect(removed('url(/preview.png)')).toHaveLength(1)
   })
 })

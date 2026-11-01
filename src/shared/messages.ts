@@ -183,7 +183,6 @@ export type Message =
   | { type: 'set-enabled'; id: string; enabled: boolean; tabId?: number; approvalToken?: string }
 
   /* --- settings and credentials ------------------------------------- */
-  | { type: 'save-settings'; settings: Settings }
   /** Applies one change to the stored settings and returns the settings as saved. */
   | { type: 'patch-settings'; change: SettingsChange }
   /* The per-site off switch, by the host of `url`. */

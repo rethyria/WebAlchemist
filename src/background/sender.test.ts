@@ -79,7 +79,7 @@ const contentScript = { url: 'https://example.com/page', id: 'wa@test', tab: { i
 describe('privileged messages', () => {
   // A representative message from each group listed in #68.
   const privileged: Record<string, unknown>[] = [
-    { type: 'save-settings', settings: {} },
+    { type: 'patch-settings', change: { kind: 'fields', fields: {} } },
     { type: 'set-credential', providerId: 'anthropic', credential: { kind: 'api_key', value: 'k' } },
     { type: 'discard-vault' },
     { type: 'delete-transform', id: 'x' },

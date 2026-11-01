@@ -12,7 +12,7 @@ import { createHarness, cssTransform, extensionPage, sidebarPort, type Harness }
 
 const URL = 'https://example.com/page'
 const TAB = 5
-const stamped = (t: ReturnType<typeof cssTransform>) => `/* ${t.name} */\n${t.code}`
+const stamped = (t: ReturnType<typeof cssTransform>) => `/* transform 1 */\n${t.code}`
 
 let h: Harness
 beforeEach(() => {

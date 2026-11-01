@@ -50,11 +50,6 @@ const SKIPPED_DIRECTORIES: Record<string, string> = {
 const ALLOWED_TEXT: Array<{ file: string; text: string; reason: string }> = [
   {
     file: 'background/index.ts',
-    text: 'Unknown message type:',
-    reason: 'A programming error reported to the developer, not shown in the interface.',
-  },
-  {
-    file: 'background/index.ts',
     text: 'Resetting the world of transforms failed:',
     reason: 'A line written to the browser console for the developer.',
   },

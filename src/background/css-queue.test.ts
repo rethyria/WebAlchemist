@@ -14,7 +14,7 @@ import { createHarness, cssTransform, type Harness } from './test-browser'
 const TAB = 3
 const a = cssTransform({ id: 'a', name: 'A', match: 'example.com/a*', code: 'a { color: red }' })
 const b = cssTransform({ id: 'b', name: 'B', match: 'example.com/b*', code: 'b { color: blue }' })
-const stamped = (t: typeof a) => `/* ${t.name} */\n${t.code}`
+const stamped = (t: typeof a) => `/* transform 1 */\n${t.code}`
 
 let h: Harness
 beforeEach(async () => {

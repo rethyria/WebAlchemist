@@ -119,13 +119,11 @@ describe('the tab address in the CSS checks (#50, #62)', () => {
 })
 
 describe('a change to the per-site CSS setting (#50)', () => {
-  const tighten = { ...DEFAULT_SETTINGS, cssUrlPolicy: {} }
-
-  it('save-settings takes CSS the new setting refuses out of open tabs', async () => {
+  it('css-site-mode takes CSS the new setting refuses out of open tabs', async () => {
     await start([shopCss], sameOrigin)
     await commit(SHOP)
     expect(inserted('url(/bg.png)')).toHaveLength(1)
-    await ask({ type: 'save-settings', settings: tighten })
+    await ask({ type: 'patch-settings', change: { kind: 'css-site-mode', key: 'shop.example.com', mode: 'block' } })
     expect(removed('url(/bg.png)')).toHaveLength(1)
   })
 
@@ -142,7 +140,7 @@ describe('a change to the per-site CSS setting (#50)', () => {
   it('leaves the CSS in place when a setting that does not affect CSS changes (control)', async () => {
     await start([shopCss], sameOrigin)
     await commit(SHOP)
-    await ask({ type: 'save-settings', settings: { ...sameOrigin, accent: 'ember' } })
+    await ask({ type: 'patch-settings', change: { kind: 'fields', fields: { accent: 'ember' } } })
     expect(removed('url(/bg.png)')).toHaveLength(0)
   })
 })

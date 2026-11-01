@@ -118,6 +118,21 @@ describe('the instruction in a generation request (#56)', () => {
     expect(out.indexOf('make it blue')).toBeLessThan(out.indexOf('BEGIN IMPORTED'))
   })
 
+  it('fences a saved description behind a follow-up and labels it as saved (#149)', () => {
+    const out = generationInstruction({ instruction: 'make it blue', savedDescription: text }, 'abc123')
+    expect(out.startsWith('make it blue\n\n')).toBe(true)
+    expect(out).toContain('--- BEGIN SAVED DESCRIPTION abc123 ---\n\n' + JSON.stringify(text))
+    expect(out).toContain('--- END SAVED DESCRIPTION abc123 ---')
+    expect(out).not.toContain('IMPORTED')
+  })
+
+  it('fences an unchanged saved description sent as the instruction (#149)', () => {
+    const out = generationInstruction({ instruction: text, instructionSaved: true }, 'abc123')
+    expect(out).toContain('Carry out what the description says')
+    expect(out).toContain('--- BEGIN SAVED DESCRIPTION abc123 ---\n' + JSON.stringify(text))
+    expect(out).not.toContain('IMPORTED')
+  })
+
   it('passes a description the user typed or changed on as it is (control)', () => {
     expect(generationInstruction({ instruction: text }, 'abc123')).toBe(text)
     expect(generationInstruction({ instruction: text, instructionImported: false }, 'abc123')).toBe(text)

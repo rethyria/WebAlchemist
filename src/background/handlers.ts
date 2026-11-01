@@ -20,7 +20,7 @@ import type { ReviewInstruction } from './providers/types'
 import type { ReviewResult, Settings, Transform } from '@shared/types'
 import { isApproved, mayBeSaved, recordApproval, spendApproval, type ApprovalVerdict } from './approvals'
 import { blockedStates, problemWithStoredCode, runStaticAnalysis } from './code-gate'
-import { assertPreviewable, checkCssTransform } from './css-gate'
+import { assertPreviewable, checkCssForPage, checkCssTransform } from './css-gate'
 import { t } from '@shared/i18n'
 
 type Of<T extends Message['type']> = Extract<Message, { type: T }>
@@ -298,39 +298,22 @@ export async function handleBlockedCount(deps: {
 /* Saving settings                                                     */
 /* ------------------------------------------------------------------ */
 
-export interface SettingsDeps {
-  /**
-   * Stores the settings and returns the ones that were stored before. The read
-   * is made inside the settings queue, not before it: a read made first would
-   * delay this save behind a change that was sent after it (#85).
-   */
-  saveSettings: (settings: Settings) => Promise<Settings>
-  /** Re-registers every script, which applies the kill switch. `before` is what was stored before the save. */
-  reregisterAll: (before: Settings) => Promise<unknown>
-  /** Recomputes the CSS and scripts of every open tab. */
-  reapplyAllTabs: () => Promise<void>
-}
-
 /** The per-site CSS settings as one string, so two tables compare equal whatever their key order. */
 function policyFingerprint(policy: Settings['cssUrlPolicy'] | undefined): string {
   return JSON.stringify(Object.entries(policy ?? {}).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
 }
 
 /**
- * Saves settings. When the per-site CSS settings changed, every open tab is
- * reapplied: a tab keeps the CSS that was injected under the old settings
- * until something reapplies it, so tightening a site's setting left the CSS
- * that the new setting refuses on other open tabs of that site (found in the
- * review of 4dab39a). Other settings do not change what CSS is injected.
+ * Whether the per-site CSS settings differ. A tab keeps the CSS that was
+ * injected under the old settings until something reapplies it, so tightening
+ * a site's setting left the CSS that the new setting refuses on other open tabs
+ * of that site (found in the review of 4dab39a).
  */
-export async function handleSaveSettings(message: Of<'save-settings'>, deps: SettingsDeps): Promise<true> {
-  const previous = await deps.saveSettings(message.settings)
-  // The kill switch changes which scripts may run.
-  await deps.reregisterAll(previous)
-  if (policyFingerprint(message.settings.cssUrlPolicy) !== policyFingerprint(previous.cssUrlPolicy)) {
-    await deps.reapplyAllTabs()
-  }
-  return true
+export function cssPolicyChanged(
+  before: Settings['cssUrlPolicy'] | undefined,
+  after: Settings['cssUrlPolicy'] | undefined,
+): boolean {
+  return policyFingerprint(before) !== policyFingerprint(after)
 }
 
 /* ------------------------------------------------------------------ */
@@ -388,13 +371,23 @@ export async function applyCssTransforms(
   // restricted transform is left out when the container is unknown.
   const restricted = transforms.some((t) => t.kind === 'css' && t.cookieStoreId !== undefined)
   const tabStore = restricted ? await deps.tabCookieStore(tabId) : undefined
-  const css = transforms
+  const included = transforms
     .filter((t) => t.kind === 'css' && t.enabled)
     .filter((t) => appliesInContainer(t, tabStore))
     .filter((t) => problemWithStoredCode(t, settings, tabUrl) === null)
     .sort((a, b) => a.order - b.order)
-    .map((t) => `/* ${t.name} */\n${t.code}`)
-    .join('\n\n')
+  // The separator carries the position only. A transform's name is not put in
+  // the CSS, because a name containing a comment terminator would end the
+  // comment and let the rest of the name be read as CSS (#145).
+  let css = included.map((t, i) => `/* transform ${i + 1} */\n${t.code}`).join('\n\n')
+
+  // Second barrier: the joined string is what the page receives, so it is
+  // checked as a whole, for this page and its site mode. A failure refuses the
+  // whole insert.
+  if (css) {
+    const approved = included.flatMap((t) => t.approvedCssUrls ?? [])
+    if (!checkCssForPage(css, settings, tabUrl, approved).passed) css = ''
+  }
 
   const previous = await deps.applied.read(tabId)
   if (previous !== undefined && previous !== css) {

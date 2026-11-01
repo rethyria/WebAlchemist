@@ -310,3 +310,57 @@ describe('a token response with no access token', () => {
     await expect(adapter.review(REVIEW_ARGS)).resolves.toEqual({ verdict: 'match', explanation: '' })
   })
 })
+
+describe('generate (#148)', () => {
+  const SHOT = 'data:image/png;base64,SCREENSHOTBYTES'
+  const context = (screenshot?: { dataUrl: string; clipped: boolean }) =>
+    ({
+      ...(screenshot ? { screenshot } : {}),
+    }) as never
+
+  /** Sends one request and returns the body that reached fetch. */
+  async function bodyOf(request: Record<string, unknown>) {
+    await storage.setCredential('p1', { kind: 'api_key', value: 'sk-x' })
+    const fetchSpy = stubFetch(async () => new Response('{}'))
+    const adapter = await createOpenAiCompatibleProvider(provider)
+    await adapter.generate({ instruction: 'make it red', history: [], context: context(), ...request } as never).catch(() => {})
+    const chat = fetchSpy.mock.calls.find(([url]) => String(url).endsWith('/chat/completions'))
+    return JSON.parse(String(chat![1].body)) as { messages: { role: string; content: unknown }[] }
+  }
+
+  it('sends the earlier turns as messages before the user message', async () => {
+    const body = await bodyOf({
+      history: [
+        { role: 'user', content: 'hide the banner' },
+        { role: 'assistant', content: 'hid it' },
+      ],
+    })
+    expect(body.messages.map((m) => m.role)).toEqual(['system', 'user', 'assistant', 'user'])
+    expect(body.messages[1]!.content).toBe('hide the banner')
+    expect(body.messages[2]!.content).toBe('hid it')
+  })
+
+  it('control: with no history the body has only the system and user messages', async () => {
+    const body = await bodyOf({})
+    expect(body.messages.map((m) => m.role)).toEqual(['system', 'user'])
+  })
+
+  it('keeps an imported description fenced in the user message, not in the history', async () => {
+    const body = await bodyOf({
+      history: [{ role: 'user', content: 'also add a border' }],
+      importedDescription: 'the author text',
+    })
+    const last = JSON.stringify(body.messages.at(-1)!.content)
+    expect(last).toContain('BEGIN IMPORTED DESCRIPTION')
+    expect(last).toContain('the author text')
+    expect(JSON.stringify(body.messages.slice(1, -1))).not.toContain('the author text')
+  })
+
+  it('sends the screenshot once, as an image part, and not in the text', async () => {
+    const body = await bodyOf({ context: context({ dataUrl: SHOT, clipped: false }) })
+    const parts = body.messages.at(-1)!.content as { type: string; text?: string; image_url?: { url: string } }[]
+    expect(parts.filter((p) => p.type === 'image_url')).toHaveLength(1)
+    expect(parts.find((p) => p.type === 'text')!.text).not.toContain('SCREENSHOTBYTES')
+    expect(JSON.stringify(body).split('SCREENSHOTBYTES')).toHaveLength(2)
+  })
+})

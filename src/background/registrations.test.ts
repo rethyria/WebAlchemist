@@ -257,7 +257,7 @@ describe('a preview that starts while the registrations are being rebuilt (#91)'
     await h.boot()
     const settings = (await h.onMessage({ type: 'get-settings' })).data
     const release = h.hold('browser.userScripts.getScripts', { firstCallOnly: true })
-    const rebuilt = h.onMessage({ type: 'save-settings', settings })
+    const rebuilt = h.onMessage({ type: 'patch-settings', change: { kind: 'fields', fields: { accent: settings.accent } } })
     await settle()
     const previewed = h.onMessage(await h.approvedPreview({ type: 'preview-js', tabId: 3, transform: draft() }))
     await settle()
@@ -277,7 +277,7 @@ describe('a preview that starts while the registrations are being rebuilt (#91)'
     // the test above is about the overlap.
     await h.boot()
     const settings = (await h.onMessage({ type: 'get-settings' })).data
-    await h.onMessage({ type: 'save-settings', settings })
+    await h.onMessage({ type: 'patch-settings', change: { kind: 'fields', fields: { accent: settings.accent } } })
     await h.onMessage(await h.approvedPreview({ type: 'preview-js', tabId: 3, transform: draft() }))
     expect(h.userScriptsHeld.has('preview-draft')).toBe(true)
   })
@@ -295,7 +295,7 @@ describe('a preview that ends while the registrations are being rebuilt (#91)', 
     expect(h.userScriptsHeld.has('preview-script-1')).toBe(true)
     const settings = (await h.onMessage({ type: 'get-settings' })).data
     const release = h.hold('browser.userScripts.getScripts', { firstCallOnly: true })
-    const rebuilt = h.onMessage({ type: 'save-settings', settings })
+    const rebuilt = h.onMessage({ type: 'patch-settings', change: { kind: 'fields', fields: { accent: settings.accent } } })
     await settle()
     const ended = end()
     await settle()
@@ -332,7 +332,7 @@ describe('a delete that overlaps a rebuild (#91)', () => {
     // read the script from storage by then.
     h.userScriptsHeld.delete('script-1')
     const release = h.hold('browser.userScripts.register')
-    const rebuilt = h.onMessage({ type: 'save-settings', settings })
+    const rebuilt = h.onMessage({ type: 'patch-settings', change: { kind: 'fields', fields: { accent: settings.accent } } })
     await settle()
     const deleted = h.onMessage({ type: 'delete-transform', id: 'script-1' })
     await settle()
@@ -348,5 +348,50 @@ describe('a delete that overlaps a rebuild (#91)', () => {
     expect(h.userScriptsHeld.has('script-1')).toBe(true)
     await h.onMessage({ type: 'delete-transform', id: 'script-1' })
     expect(h.userScriptsHeld.has('script-1')).toBe(false)
+  })
+})
+
+describe('enabling or saving a script that has a preview (#150)', () => {
+  const draft = () => ({ ...js(), code: 'document.title = "draft"' })
+
+  /** The saved script is stored and off, and a preview of it is running. */
+  async function previewing(enabled: boolean) {
+    h.local.set('transforms', [js({ enabled })])
+    await h.boot()
+    await h.onMessage(await h.approvedPreview({ type: 'preview-js', tabId: 3, transform: draft() }))
+    expect(h.userScriptsHeld.has('preview-script-1')).toBe(true)
+    expect(h.userScriptsHeld.has('script-1')).toBe(false)
+  }
+
+  it('does not register the saved script when set-enabled turns it on', async () => {
+    await previewing(false)
+    await h.onMessage({ type: 'set-enabled', id: 'script-1', enabled: true, tabId: 3 })
+    expect(h.userScriptsHeld.has('script-1')).toBe(false)
+    expect(h.userScriptsHeld.has('preview-script-1')).toBe(true)
+  })
+
+  it('does not register the saved script when reapply-everywhere saves it', async () => {
+    await previewing(true)
+    await h.onMessage({ type: 'reapply-everywhere', id: 'script-1' })
+    expect(h.userScriptsHeld.has('script-1')).toBe(false)
+    expect(h.userScriptsHeld.has('preview-script-1')).toBe(true)
+  })
+
+  it('control: with no preview running both handlers register the saved script', async () => {
+    h.local.set('transforms', [js({ enabled: false })])
+    await h.boot()
+    await h.onMessage({ type: 'set-enabled', id: 'script-1', enabled: true, tabId: 3 })
+    expect(h.userScriptsHeld.has('script-1')).toBe(true)
+    h.userScriptsHeld.delete('script-1')
+    await h.onMessage({ type: 'reapply-everywhere', id: 'script-1' })
+    expect(h.userScriptsHeld.has('script-1')).toBe(true)
+  })
+
+  it('registers the saved script again when the preview ends', async () => {
+    await previewing(false)
+    await h.onMessage({ type: 'set-enabled', id: 'script-1', enabled: true, tabId: 3 })
+    await h.onMessage({ type: 'clear-preview-js', id: 'script-1' })
+    expect(h.userScriptsHeld.has('script-1')).toBe(true)
+    expect(h.userScriptsHeld.has('preview-script-1')).toBe(false)
   })
 })
