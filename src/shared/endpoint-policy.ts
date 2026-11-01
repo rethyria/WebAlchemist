@@ -1,3 +1,4 @@
+import { t } from './i18n'
 /**
  * Which URLs the extension may send a credential to.
  *
@@ -29,14 +30,14 @@ export function endpointProblem(value: string): string | null {
   try {
     url = new URL(value)
   } catch {
-    return 'The address is not a valid URL.'
+    return t('endpointInvalid')
   }
   if (url.protocol === 'https:') return null
   if (url.protocol === 'http:') {
     if (isLoopbackHostname(url.hostname)) return null
-    return 'The address must use https. Plain http is allowed only for localhost and other loopback addresses.'
+    return t('endpointNeedsHttps')
   }
-  return 'The address must start with https:// (or http:// for localhost).'
+  return t('endpointNeedsScheme')
 }
 
 /** Throws with the reason and the name of the setting, for the background. */

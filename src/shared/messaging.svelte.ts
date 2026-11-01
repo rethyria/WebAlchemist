@@ -1,3 +1,4 @@
+import { t } from './i18n'
 /**
  * Typed wrapper over runtime messaging, for every extension page.
  *
@@ -47,7 +48,7 @@ export async function send<T>(message: Message): Promise<T> {
   const response = (await browser.runtime.sendMessage(payload)) as MessageResponse<T>
   if (!response?.ok) {
     throw new BackgroundError(
-      response?.error?.message ?? 'Something went wrong.',
+      response?.error?.message ?? t('somethingWentWrong'),
       response?.error?.kind,
       response?.error?.retryable ?? false,
       response?.error?.retryInSeconds,

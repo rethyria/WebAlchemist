@@ -1,3 +1,4 @@
+import { t } from './i18n'
 /**
  * Which page tab the authoring panel works on when it is open in a tab.
  *
@@ -90,18 +91,18 @@ export async function resolveBinding(
   const id = boundTabFromSearch(search)
   if (id === null) return { kind: 'docked' }
   const reopen =
-    'Open Web Alchemist from the toolbar menu on the page that should be changed.'
+    t('panelReopen')
   if (Number.isNaN(id)) {
-    return { kind: 'refused', message: `This panel was opened without a valid page. ${reopen}` }
+    return { kind: 'refused', message: t('panelNoValidPage', reopen) }
   }
   const tab = await getTab(id).catch(() => undefined)
   if (!tab || tab.id !== id) {
-    return { kind: 'refused', message: `The page this panel was opened for is closed. ${reopen}` }
+    return { kind: 'refused', message: t('panelPageClosed', reopen) }
   }
   if (typeof tab.url === 'string' && tab.url.startsWith(extensionBase)) {
     return {
       kind: 'refused',
-      message: `This panel cannot work on a page of Web Alchemist. ${reopen}`,
+      message: t('panelOwnPage', reopen),
     }
   }
   const own = await link.ownTabId().catch(() => undefined)
@@ -116,7 +117,7 @@ export async function resolveBinding(
   if (recorded !== id) {
     return {
       kind: 'refused',
-      message: `This panel is not linked to that page, which can happen when Firefox restores a tab after a restart. ${reopen}`,
+      message: t('panelNotLinked', reopen),
     }
   }
   return { kind: 'bound', tabId: id }

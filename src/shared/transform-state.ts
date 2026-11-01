@@ -1,3 +1,4 @@
+import { t } from './i18n'
 /**
  * States of a stored transform that the list and the background both need to
  * agree on.
@@ -17,11 +18,11 @@ export function needsRegenerating(transform: Pick<Transform, 'code'>): boolean {
 
 /** What the list says when the user tries to turn on a transform that needs regenerating. */
 export const NEEDS_REGENERATING_NOTE =
-  'This transform has no code. It came from an imported file, and its description has to be used to write code again before it can run. Open it and choose Edit description on a page it applies to.'
+  t('needsRegeneratingNote')
 
 /** Why a restored script stays off, shown when it is refused for want of approval. */
 export const AWAITING_APPROVAL_NOTE =
-  'This JavaScript was restored from a backup and has not been approved. Read its code, then approve it to turn it on.'
+  t('awaitingApprovalNote')
 
 /**
  * What the list does when its switch for a transform is pressed. Turning on a

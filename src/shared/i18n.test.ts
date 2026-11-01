@@ -38,6 +38,11 @@ describe('t', () => {
     expect(t('sidebarTitle')).toBe('Web Alchemist')
   })
 
+  it('falls back to English when the browser returns something other than a string', () => {
+    g.browser = { i18n: { getMessage: () => Promise.resolve('x') } }
+    expect(t('sidebarTitle')).toBe('Web Alchemist')
+  })
+
   it('passes substitutions to the browser as strings', () => {
     let seen: unknown
     g.browser = {

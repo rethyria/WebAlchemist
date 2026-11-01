@@ -105,7 +105,7 @@ describe('the channels sent to the provider', () => {
   it('shows one line for each member in the text', () => {
     const all = text()
     for (const line of Object.values(SENT_CHANNELS)) {
-      expect(all).toContain(line.charAt(0).toUpperCase() + line.slice(1))
+      expect(all).toContain(line)
     }
   })
 })

@@ -1,3 +1,4 @@
+import { t } from './i18n'
 /**
  * What the approval panel and the editor say about the world a script runs in.
  *
@@ -10,15 +11,15 @@ import type { ExecutionWorld, GenerationResult, Transform } from './types'
 
 /** The risks of the MAIN world, in the order they are shown. */
 export const MAIN_WORLD_RISKS: readonly string[] = [
-  'The page can change this code while it runs, because the page and the code share one set of objects.',
-  'The code can read what the page keeps in memory, including data that is not visible on screen.',
-  'The static analysis cannot see what the page\'s own functions do when the code calls them.',
-  'The restriction that blocks image requests in the isolated world does not apply, so the code can send information out through an image address.',
+  t('mainRisk1'),
+  t('mainRisk2'),
+  t('mainRisk3'),
+  t('mainRisk4'),
 ]
 
 export const WORLD_NAMES: Record<ExecutionWorld, string> = {
-  USER_SCRIPT: 'Isolated world (USER_SCRIPT)',
-  MAIN: "The page's own world (MAIN)",
+  USER_SCRIPT: t('worldNameIsolated'),
+  MAIN: t('worldNameMain'),
 }
 
 export interface WorldState {
@@ -63,4 +64,4 @@ export function worldOf(transform: Pick<Transform, 'world'>): ExecutionWorld {
  * isolated world, because nothing recorded that the user had chosen MAIN.
  */
 export const WORLD_RESET_NOTICE =
-  "This transform used to run in the page's own JavaScript environment because the model chose it. It now runs in its isolated environment. Turn on the page's environment only if the change needs it."
+  t('worldResetNotice')

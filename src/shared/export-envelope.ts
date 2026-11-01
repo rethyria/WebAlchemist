@@ -1,3 +1,4 @@
+import { t } from './i18n'
 /**
  * The shape of an export file that is encrypted with a passphrase (#132).
  *
@@ -44,13 +45,13 @@ export const MAX_IMPORT_RECORDS = 1000
 /** What the settings page says about a file that is larger than the limit, or null when the size is allowed. */
 export function importSizeProblem(bytes: number): string | null {
   return bytes > MAX_IMPORT_BYTES
-    ? 'This file is larger than 5 MB, which is more than a Web Alchemist export holds, so it was not read.'
+    ? t('importTooLarge')
     : null
 }
 
 /** What the importer says about a file with too many records, or null when the count is allowed. */
 export function importCountProblem(records: number): string | null {
   return records > MAX_IMPORT_RECORDS
-    ? `This file holds ${records} records. An import takes at most ${MAX_IMPORT_RECORDS}, so it was not read.`
+    ? t('importTooManyRecords', records, MAX_IMPORT_RECORDS)
     : null
 }

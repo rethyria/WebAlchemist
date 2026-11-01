@@ -1,3 +1,4 @@
+import { t } from './i18n'
 /**
  * What the extension tells a person about how their credentials are stored.
  *
@@ -16,11 +17,9 @@ export interface VaultView {
   unlocked: boolean
 }
 
-export const DISCLOSURE_PLAIN =
-  "Keys are stored as plain text in this browser profile's directory. Browsers offer extensions no access to the operating system keychain, so this data is protected by file permissions and nothing else. Anyone who can read your profile directory can read these keys."
+export const DISCLOSURE_PLAIN = t('disclosurePlain')
 
-export const DISCLOSURE_SEALED =
-  'Keys are encrypted with your passphrase. What sits in this browser profile is ciphertext, and nothing stored on this machine decrypts it — the key is derived from your passphrase when you unlock, and kept in memory for the session only.'
+export const DISCLOSURE_SEALED = t('disclosureSealed')
 
 /**
  * True with and without a passphrase: the passphrase protects credentials and
@@ -28,18 +27,17 @@ export const DISCLOSURE_SEALED =
  * address pattern of the pages it applies to, and the description the person
  * typed, and all of that is stored as plain text in the browser profile.
  */
-export const DISCLOSURE_TRANSFORMS =
-  'Transforms are never encrypted, with or without a passphrase. Each saved transform stores text from the page element it changes, the addresses of the pages it applies to, and your description of it, as plain text in this browser profile. Exported files hold the same text.'
+export const DISCLOSURE_TRANSFORMS = t('disclosureTransforms')
 
-export const STATUS_UNLOCKED = 'Unlocked for this session.'
-export const STATUS_LOCKED = 'Locked.'
-export const LOCKED_CONSEQUENCE = 'Generating anything will fail until you unlock.'
+export const STATUS_UNLOCKED = t('statusUnlocked')
+export const STATUS_LOCKED = t('statusLocked')
+export const LOCKED_CONSEQUENCE = t('lockedConsequence')
 
 /** The disclosure for the current state, and the lock status when sealed. */
 export function credentialDisclosure(vault: VaultView): { text: string; status: string | null } {
   if (!vault.sealed) return { text: DISCLOSURE_PLAIN, status: null }
   return {
     text: DISCLOSURE_SEALED,
-    status: vault.unlocked ? STATUS_UNLOCKED : `${STATUS_LOCKED} ${LOCKED_CONSEQUENCE}`,
+    status: vault.unlocked ? STATUS_UNLOCKED : t('statusLockedFull'),
   }
 }

@@ -1,5 +1,7 @@
 import type { CatalogueEntry } from './define'
+import { disclosureMessages } from './disclosure'
 import { manifestMessages } from './manifest'
+import { sharedMessages } from './shared'
 
 /**
  * The English message catalogue, the single source of user-facing text.
@@ -10,7 +12,9 @@ import { manifestMessages } from './manifest'
  * in this directory.
  */
 export const EN_CATALOGUE = {
+  ...disclosureMessages,
   ...manifestMessages,
+  ...sharedMessages,
 } as const satisfies Record<string, CatalogueEntry>
 
 export type MessageKey = keyof typeof EN_CATALOGUE

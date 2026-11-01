@@ -1,3 +1,4 @@
+import { t } from './i18n'
 /**
  * Pure helpers for token usage and cost. No storage and no browser APIs, so
  * the background, the sidebar and the settings page share one implementation
@@ -113,7 +114,10 @@ export function formatCost(usd: number): string {
 
 /** The line shown for one call, in the panel. */
 export function describeUsage(report: { usage: TokenUsage | null; costUsd: number | null }): string {
-  if (!report.usage) return 'Token usage: not reported'
-  const tokens = `${formatTokens(report.usage.inputTokens)} tokens in, ${formatTokens(report.usage.outputTokens)} out`
-  return report.costUsd === null ? tokens : `${tokens}, ${formatCost(report.costUsd)}`
+  if (!report.usage) return t('usageNotReported')
+  const tokens = formatTokens(report.usage.inputTokens)
+  const out = formatTokens(report.usage.outputTokens)
+  return report.costUsd === null
+    ? t('usageTokens', tokens, out)
+    : t('usageTokensWithCost', tokens, out, formatCost(report.costUsd))
 }

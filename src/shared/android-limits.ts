@@ -1,3 +1,4 @@
+import { t } from './i18n'
 /**
  * Features that Firefox for Android does not provide, and the plain messages
  * shown in their place (#128).
@@ -9,10 +10,10 @@
  */
 
 export const SCREENSHOTS_UNAVAILABLE =
-  'Screenshots cannot be taken in Firefox for Android. The request can still be sent without one.'
+  t('screenshotsUnavailable')
 
 export const ACCOUNT_SIGN_IN_UNAVAILABLE =
-  'Signing in with a provider account is not available in this browser. Use an API key instead.'
+  t('accountSignInUnavailable')
 
 /** Whether the browser provides the sign-in flow that `identity.launchWebAuthFlow` runs. */
 export function hasAccountSignIn(api: { identity?: { launchWebAuthFlow?: unknown } | undefined }): boolean {

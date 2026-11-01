@@ -1,3 +1,4 @@
+import { t } from './i18n'
 /**
  * Restricting a transform to the container of one tab (#127).
  *
@@ -26,12 +27,12 @@ import type { Transform } from './types'
 export const DEFAULT_COOKIE_STORE = 'firefox-default'
 
 /** The two choices the editor offers. */
-export const EVERY_TAB_LABEL = 'Every tab'
-export const TAB_CONTAINER_LABEL = 'Only in the container of the tab this transform was made in'
+export const EVERY_TAB_LABEL = t('containerEveryTab')
+export const TAB_CONTAINER_LABEL = t('containerTabContainer')
 
 /** The sentence the editor shows next to the restriction. */
 export const CONTAINER_SCOPE_NOTE =
-  'Applies to CSS transforms only. A JavaScript transform runs in every container, because Firefox cannot limit a registered user script to one. The container is read from the tab the sidebar was showing when this editor opened, and reading it needs the cookies permission, which is requested when this is saved.'
+  t('containerScopeNote')
 
 /** The permission that lets the extension read a tab's container. */
 export const COOKIES_PERMISSION = {
@@ -40,10 +41,10 @@ export const COOKIES_PERMISSION = {
 
 /** Shown next to a restriction that cannot be checked because the permission is gone. */
 export const CONTAINER_UNREADABLE_NOTE =
-  'This transform is restricted to a container, but the cookies permission is not granted, so Firefox does not report which container a tab is in and the transform does not apply in any tab. Saving it with the cookies permission, or choosing "Every tab", fixes this.'
+  t('containerUnreadableNote')
 
 export const CONTAINER_TAB_UNKNOWN =
-  'The tab this editor was opened from has closed or cannot be read, so its container is not known. Open the editor again from the sidebar.'
+  t('containerTabUnknown')
 
 export type ContainerChoice = 'every-tab' | 'tab-container'
 

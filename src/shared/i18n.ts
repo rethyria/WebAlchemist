@@ -23,7 +23,8 @@ function browserMessage(key: string, values: string[]): string {
   const i18n = (globalThis as { browser?: { i18n?: typeof browser.i18n } }).browser?.i18n
   if (!i18n || typeof i18n.getMessage !== 'function') return ''
   try {
-    return i18n.getMessage(key, values) ?? ''
+    const text: unknown = i18n.getMessage(key, values)
+    return typeof text === 'string' ? text : ''
   } catch {
     return ''
   }

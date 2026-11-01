@@ -1,3 +1,4 @@
+import { t } from './i18n'
 /**
  * What is removed from a page address before it is sent to the model provider
  * (#65). The limits live here, apart from the content script that applies them,
@@ -43,9 +44,4 @@ export function mustRemovePart(text: string): boolean {
  * The sentence the panel shows next to the address. It names every removal
  * `addressForModel` makes, so what the user reads matches what is sent.
  */
-export const ADDRESS_REMOVAL_NOTE =
-  `Page address sent to your AI provider. Removed from it: the fragment, the user name and password, ` +
-  `query values, query keys with no value, query keys and path segments longer than ${ADDRESS_PART_LIMIT} characters ` +
-  `or that look like tokens (a long run of digits, or a long run of letters and digits), and path parameters ` +
-  `(everything after a semicolon in a path segment). Removed path segments are shown as ${ADDRESS_PLACEHOLDER}. ` +
-  `For file, blob, data and other addresses that are not http or https, only the scheme is sent.`
+export const ADDRESS_REMOVAL_NOTE = t('addressRemovalNote', ADDRESS_PART_LIMIT, ADDRESS_PLACEHOLDER)

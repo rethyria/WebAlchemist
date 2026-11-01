@@ -1,3 +1,4 @@
+import { t } from './i18n'
 /**
  * The user's list of sites on which picking and generation are refused (#131).
  *
@@ -35,13 +36,13 @@ export function excludedHostFor(entries: readonly string[], rawUrl: string): str
 
 /** What the panel says when it refuses to start on an excluded site. */
 export function excludedSiteMessage(host: string): string {
-  return `${host} is on your list of excluded sites, so picking and generating are turned off there. Remove it from the list in the settings to use Web Alchemist on it.`
+  return t('excludedSiteMessage', host)
 }
 
 /** What the panel says before sending a page that has password or payment fields. */
-export const SENSITIVE_PAGE_TITLE = 'This page has password or payment fields'
+export const SENSITIVE_PAGE_TITLE = t('sensitivePageTitle')
 export const SENSITIVE_PAGE_MESSAGE =
-  'Generating sends text from this page to your model provider, and the page may show private information. Send the page content only if that is acceptable.'
+  t('sensitivePageMessage')
 
 /**
  * The excluded host that a match pattern would give access to, or null.

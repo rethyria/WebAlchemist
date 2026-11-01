@@ -1,3 +1,4 @@
+import { t } from './i18n'
 /**
  * Checks of the match patterns in an imported file, and a description of the
  * sites a pattern covers in plain words (#56).
@@ -48,13 +49,13 @@ export type MatchAssessment =
  */
 export function assessMatch(pattern: string): MatchAssessment {
   const trimmed = pattern.trim()
-  if (trimmed === '') return { ok: false, reason: 'The match pattern is empty.' }
+  if (trimmed === '') return { ok: false, reason: t('importMatchEmpty') }
   if (trimmed === '<all_urls>' || /^[a-z*]+:\/\/\*\/\*$/i.test(trimmed)) {
-    return { ok: false, reason: 'The match pattern covers every site.' }
+    return { ok: false, reason: t('importMatchAllSites') }
   }
   const scheme = /^([a-z][a-z0-9+.-]*|\*):\/\//i.exec(trimmed)?.[1]
   if (scheme !== undefined && scheme !== '*' && scheme !== 'http' && scheme !== 'https') {
-    return { ok: false, reason: `The match pattern uses the scheme ${scheme}, which is not supported.` }
+    return { ok: false, reason: t('importMatchScheme', scheme) }
   }
 
   const parsed = parsePattern(trimmed)
@@ -62,47 +63,46 @@ export function assessMatch(pattern: string): MatchAssessment {
   // Compared in lower case, because host names are not case sensitive.
   const host = parsed.host.toLowerCase()
   if (host === '' || host === '*') {
-    return { ok: false, reason: 'The match pattern covers every site.' }
+    return { ok: false, reason: t('importMatchAllSites') }
   }
   if (host.startsWith('*.')) {
     return {
       ok: false,
-      reason: `The host "${parsed.host}" covers every subdomain of ${host.slice(2)}. An import takes only a pattern that names one host.`,
+      reason: t('importMatchSubdomains', parsed.host, host.slice(2)),
     }
   }
   const labels = host.split('.')
   const isIp = IPV4.test(host)
   if (!isIp && !labels.every((label) => HOST_LABEL.test(label))) {
-    return { ok: false, reason: `The host "${parsed.host}" is not a plain host name.` }
+    return { ok: false, reason: t('importMatchNotPlainHost', parsed.host) }
   }
   // A last label made of digits, or written in hexadecimal, makes the browser
   // read the host as an address in a form this check does not parse.
   const last = labels[labels.length - 1]!
   if (!isIp && /^(\d+|0x[0-9a-f]*)$/.test(last)) {
-    return { ok: false, reason: `The host "${parsed.host}" is not a plain host name.` }
+    return { ok: false, reason: t('importMatchNotPlainHost', parsed.host) }
   }
   if (isIp && labels.some((label) => Number(label) > 255 || (label.length > 1 && label.startsWith('0')))) {
-    return { ok: false, reason: `The host "${parsed.host}" is not a plain address.` }
+    return { ok: false, reason: t('importMatchNotPlainAddress', parsed.host) }
   }
   if (isIp ? isPrivateIpv4(host) : LOCAL_SUFFIXES.some((suffix) => host === suffix || host.endsWith(`.${suffix}`))) {
     return {
       ok: false,
-      reason: `The host "${parsed.host}" is on this computer or on a private network. An import does not take patterns for those.`,
+      reason: t('importMatchPrivate', parsed.host),
     }
   }
-  if (!isIp && labels.length < 2) return { ok: false, reason: `"${host}" is not a site address.` }
-  if (!path.startsWith('/')) return { ok: false, reason: 'The match pattern has no valid path.' }
+  if (!isIp && labels.length < 2) return { ok: false, reason: t('importMatchNotSite', host) }
+  if (!path.startsWith('/')) return { ok: false, reason: t('importMatchNoPath') }
 
-  const how =
-    scheme === 'https' ? 'over https only' : scheme === 'http' ? 'over plain http only' : 'over http and https'
-  return { ok: true, sites: `${describePath(path)} on ${host}, ${how}` }
+  const how = scheme === 'https' ? 'Https' : scheme === 'http' ? 'Http' : 'Both'
+  return { ok: true, sites: t(`importMatchSites${how}`, describePath(path), host) }
 }
 
 function describePath(path: string): string {
-  if (path === '/*') return 'Every page'
+  if (path === '/*') return t('importPagesAll')
   if (path.endsWith('*') && !path.slice(0, -1).includes('*')) {
-    return `Pages whose address starts with ${path.slice(0, -1)}`
+    return t('importPagesPrefix', path.slice(0, -1))
   }
-  if (path.includes('*')) return `Pages whose address matches ${path}`
-  return `The page ${path}`
+  if (path.includes('*')) return t('importPagesMatch', path)
+  return t('importPageOne', path)
 }

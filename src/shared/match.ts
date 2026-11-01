@@ -1,3 +1,4 @@
+import { t } from './i18n'
 /**
  * URL matching for transform records.
  *
@@ -106,7 +107,7 @@ export function matchPresetsFor(rawUrl: string): MatchPreset[] {
   // video and not the page the label names. Browser match patterns compare the
   // path together with the query, so the registered script and the CSS agree.
   presets.push({
-    label: 'This exact page',
+    label: t('matchPresetExactPage'),
     pattern: `${scheme}${host}${url.pathname}${url.search}`,
   })
 
@@ -127,19 +128,19 @@ export function describeMatch(pattern: string): {
 } {
   const { scheme, host, path } = parsePattern(pattern)
   const schemes =
-    scheme === 'https' ? 'https pages' : scheme === 'http' ? 'http pages' : 'http and https pages'
+    scheme === 'https' ? t('matchSchemeHttps') : scheme === 'http' ? t('matchSchemeHttp') : t('matchSchemeBoth')
   let sites: string
-  if (host === '*' || host === '') sites = 'every site'
+  if (host === '*' || host === '') sites = t('matchSitesAll')
   else if (host.startsWith('*.')) {
     const domain = host.slice(2)
-    sites = `${domain} and every subdomain of ${domain}`
-  } else sites = `${host} (this host only, no subdomains)`
+    sites = t('matchSitesWithSubdomains', domain)
+  } else sites = t('matchSitesOneHost', host)
   let pages: string
-  if (path === '/*' || path === '*') pages = 'every page'
+  if (path === '/*' || path === '*') pages = t('matchPagesAll')
   else if (path.endsWith('*') && !path.slice(0, -1).includes('*')) {
-    pages = `pages whose path starts with ${path.slice(0, -1)}`
-  } else if (path.includes('*')) pages = `pages whose path fits ${path}`
-  else pages = `only the page ${path}`
+    pages = t('matchPagesPrefix', path.slice(0, -1))
+  } else if (path.includes('*')) pages = t('matchPagesFits', path)
+  else pages = t('matchPagesOne', path)
   /*
    * What the registration adds to a path that names one page (see pathsFor in
    * registry.ts): the form with and the form without a trailing slash, and,
@@ -148,8 +149,8 @@ export function describeMatch(pattern: string): {
   let variants: string | undefined
   if (!path.includes('*')) {
     variants = path.includes('?')
-      ? 'It also covers the same page with a trailing slash.'
-      : 'It also covers the same page with any query string, and with or without a trailing slash.'
+      ? t('matchVariantSlash')
+      : t('matchVariantQuery')
   }
   return variants === undefined ? { schemes, sites, pages } : { schemes, sites, pages, variants }
 }

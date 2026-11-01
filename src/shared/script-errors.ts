@@ -1,3 +1,4 @@
+import { t } from './i18n'
 /**
  * Reporting the errors of JavaScript transforms (#123).
  *
@@ -22,7 +23,7 @@ import type { Transform, TransformRuntimeState } from './types'
 const MAX_MESSAGE = 200
 
 /** The reason a repair request carries for a script that threw. Never varies. */
-export const SCRIPT_ERROR_REASON = 'The script threw an error when it ran.'
+export const SCRIPT_ERROR_REASON = t('scriptErrorReason')
 
 /**
  * The attribute that holds the last error of one registered script. The token
