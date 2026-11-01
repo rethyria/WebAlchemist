@@ -9,6 +9,15 @@
 
 import type { PickerAction } from '@shared/picker-keys'
 
+/**
+ * Whether an event came from the user or the browser. A script on the page can
+ * dispatch `keydown` and `mousedown` events of its own, and the picker must not
+ * confirm a selection because a page script asked it to.
+ */
+export function isUserEvent(event: { isTrusted: boolean }): boolean {
+  return event.isTrusted
+}
+
 export interface PickerInputState {
   /** Whether a pick is running. */
   picking: boolean

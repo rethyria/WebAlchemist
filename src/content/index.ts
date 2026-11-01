@@ -13,7 +13,7 @@ import { pageHasSensitiveFields } from './sensitive'
 import type { ConflictSpec, ContentEvent, ContentMessage, PickMode } from '@shared/messages'
 import type { OverlayPalette } from '@shared/accents'
 import { moveFrom, pickerActionFor, type PickerAction } from '@shared/picker-keys'
-import { decideKey, relayPickerKey } from './picker-input'
+import { decideKey, isUserEvent, relayPickerKey } from './picker-input'
 import type {
   Conflict,
   HoverTarget,
@@ -530,6 +530,8 @@ function elementUnder(x: number, y: number): Element | null {
 }
 
 function onMouseMove(event: MouseEvent): void {
+  // Events that a page script dispatches are not the user's (#118).
+  if (!isUserEvent(event)) return
   if (dragOrigin) {
     crop = {
       x: Math.min(dragOrigin.x, event.clientX),
@@ -554,6 +556,7 @@ function onMouseMove(event: MouseEvent): void {
 }
 
 function onMouseDown(event: MouseEvent): void {
+  if (!isUserEvent(event)) return
   dragOrigin = { x: event.clientX, y: event.clientY }
   crop = null
   overlay.hideCrop()
@@ -562,6 +565,7 @@ function onMouseDown(event: MouseEvent): void {
 }
 
 function onMouseUp(event: MouseEvent): void {
+  if (!isUserEvent(event)) return
   event.preventDefault()
   event.stopPropagation()
 
@@ -665,6 +669,7 @@ function applyPickerAction(action: PickerAction): boolean {
 
 function onKeyDown(event: KeyboardEvent): void {
   if (!picking) return
+  if (!isUserEvent(event)) return
 
   const handled = () => {
     event.preventDefault()

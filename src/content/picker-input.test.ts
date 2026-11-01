@@ -9,7 +9,7 @@
 
 import { readFileSync } from 'node:fs'
 import { describe, expect, it, vi } from 'vitest'
-import { decideKey, relayPickerKey } from './picker-input'
+import { decideKey, isUserEvent, relayPickerKey } from './picker-input'
 
 describe('a key forwarded by the sidebar', () => {
   it('does nothing when no pick is running', () => {
@@ -52,6 +52,16 @@ describe('Enter', () => {
   })
 })
 
+describe('events from a page script', () => {
+  it('accepts an event the browser made', () => {
+    expect(isUserEvent({ isTrusted: true })).toBe(true)
+  })
+
+  it('refuses an event that a script dispatched', () => {
+    expect(isUserEvent({ isTrusted: false })).toBe(false)
+  })
+})
+
 describe('the handlers in index.ts use these decisions', () => {
   // The handlers cannot be run here, so this reads their source. It fails if a
   // handler stops asking for the decision, which the tests above cannot see.
@@ -60,5 +70,10 @@ describe('the handlers in index.ts use these decisions', () => {
   it('decides a forwarded key with relayPickerKey and a page key with decideKey, both told where the selection started', () => {
     expect(source).toContain('relayPickerKey({ picking, atSeed }, message.action, applyPickerAction)')
     expect(source).toContain('decideKey({ picking, atSeed }, action, event.repeat)')
+  })
+
+  it.each(['onMouseMove', 'onMouseDown', 'onMouseUp', 'onKeyDown'])('%s returns early on an untrusted event', (name) => {
+    const body = new RegExp(`function ${name}\\(event: [A-Za-z]+\\): void \\{([\\s\\S]*?)\\n\\}\\n`).exec(source)?.[1] ?? ''
+    expect(body).toContain('if (!isUserEvent(event)) return')
   })
 })
