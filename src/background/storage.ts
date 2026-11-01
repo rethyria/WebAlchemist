@@ -602,6 +602,19 @@ export async function clearCredential(providerId: string): Promise<void> {
   })
 }
 
+function oauthStatus(
+  providerId: string,
+  credential: Extract<Credential, { kind: 'oauth' }>,
+): CredentialStatus {
+  return {
+    providerId,
+    configured: true,
+    kind: 'oauth',
+    ...(credential.expiresAt !== undefined ? { expiresAt: credential.expiresAt } : {}),
+    renewable: Boolean(credential.refreshToken),
+  }
+}
+
 /** The only credential shape any other context is allowed to see. */
 export async function getCredentialStatus(
   providerId: string,
@@ -609,7 +622,7 @@ export async function getCredentialStatus(
   const credential = (await readCredentialMap())[providerId]
   if (!credential) return { providerId, configured: false }
   return credential.kind === 'oauth'
-    ? { providerId, configured: true, kind: 'oauth', expiresAt: credential.expiresAt }
+    ? oauthStatus(providerId, credential)
     : { providerId, configured: true, kind: 'api_key' }
 }
 
@@ -620,12 +633,7 @@ export async function getAllCredentialStatuses(): Promise<CredentialStatus[]> {
     const credential = map[provider.id]
     if (!credential) return { providerId: provider.id, configured: false }
     return credential.kind === 'oauth'
-      ? {
-          providerId: provider.id,
-          configured: true,
-          kind: 'oauth' as const,
-          expiresAt: credential.expiresAt,
-        }
+      ? oauthStatus(provider.id, credential)
       : { providerId: provider.id, configured: true, kind: 'api_key' as const }
   })
 }

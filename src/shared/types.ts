@@ -204,9 +204,18 @@ export type Credential =
       kind: 'oauth'
       boundTo?: CredentialBinding
       accessToken: string
-      refreshToken: string
-      /** Epoch ms. Refresh is attempted ahead of this. */
-      expiresAt: number
+      /**
+       * Absent when the provider issued none, for example because no
+       * `offline_access` scope was requested. The sign-in then ends when the
+       * access token does.
+       */
+      refreshToken?: string
+      /**
+       * Epoch ms. Refresh is attempted ahead of this. Absent when the provider
+       * sent no `expires_in` and issued no refresh token, so that no lifetime
+       * has to be guessed for a token that cannot be renewed.
+       */
+      expiresAt?: number
       tokenEndpoint: string
       clientId: string
     }
@@ -292,6 +301,8 @@ export interface CredentialStatus {
   kind?: Credential['kind']
   /** Epoch ms, oauth only. Lets the UI warn before a hard expiry. */
   expiresAt?: number
+  /** Oauth only. False when there is no refresh token and sign-in must be repeated at expiry. */
+  renewable?: boolean
 }
 
 /* ------------------------------------------------------------------ */

@@ -155,7 +155,9 @@ export function expiryFrom(payload: TokenPayload, now: number): number {
 /** Refresh this far ahead of expiry, so a request in flight does not expire. */
 export const REFRESH_MARGIN_MS = 60_000
 
-export function needsRefresh(expiresAt: number, now: number): boolean {
+export function needsRefresh(expiresAt: number | undefined, now: number): boolean {
+  // An unknown expiry is not treated as an expired one; a 401 settles it.
+  if (expiresAt === undefined) return false
   return expiresAt - REFRESH_MARGIN_MS <= now
 }
 
@@ -166,14 +168,28 @@ export function credentialFrom(
   previousRefreshToken?: string,
 ): Extract<Credential, { kind: 'oauth' }> {
   const refreshToken = payload.refresh_token ?? previousRefreshToken
-  if (!payload.access_token || !refreshToken) {
+  if (!payload.access_token) {
     throw new Error('The provider did not return a usable token.')
   }
+  /*
+   * A missing refresh token is accepted. Some providers issue one only when an
+   * `offline_access` scope is requested and others never do, and refusing the
+   * response discarded an access token that was valid. The sign-in then lasts
+   * until that token ends, and the adapter says so when it does.
+   *
+   * With no refresh token and no `expires_in` the lifetime is left unknown
+   * rather than assumed to be an hour: an assumed expiry that is too short
+   * would refuse a working token, and a 401 reports a dead one anyway.
+   */
+  const expiresAt =
+    payload.expires_in !== undefined || refreshToken
+      ? expiryFrom(payload, now)
+      : undefined
   return {
     kind: 'oauth',
     accessToken: payload.access_token,
-    refreshToken,
-    expiresAt: expiryFrom(payload, now),
+    ...(refreshToken ? { refreshToken } : {}),
+    ...(expiresAt !== undefined ? { expiresAt } : {}),
     tokenEndpoint: config.tokenEndpoint,
     clientId: config.clientId,
   }

@@ -297,7 +297,17 @@ function ensureFreshToken(
       throw new ProviderError('The sign-in for this provider was removed. Reconnect it in settings.', 'no-credential', false)
     }
     if (!stale(latest)) return latest.accessToken
-    return refreshToken(providerId, latest)
+    if (!latest.refreshToken) {
+      // The provider issued no refresh token, so there is nothing to renew
+      // with. Saying so is the point: the generic expiry message tells the
+      // person to reconnect without saying that this is how it will always be.
+      throw new ProviderError(
+        'The sign-in has ended and this provider issued no way to renew it. Sign in again in settings.',
+        'auth',
+        false,
+      )
+    }
+    return refreshToken(providerId, { ...latest, refreshToken: latest.refreshToken })
   })().finally(() => {
     refreshesInFlight.delete(providerId)
   })
@@ -328,7 +338,7 @@ async function refreshAfterRejection(provider: Provider, rejected: string): Prom
 /** Refreshes an OAuth token a minute ahead of expiry and persists the result. */
 async function refreshToken(
   providerId: string,
-  credential: OAuthCredential,
+  credential: OAuthCredential & { refreshToken: string },
 ): Promise<string> {
   /*
    * The header call no longer sits inside the chat request's `try`, so a

@@ -304,7 +304,13 @@
                     date is here so an expiry that cannot be refreshed does not
                     arrive as an unexplained failure mid-generation.
                   -->
-                  <span class="expiry">until {new Date(status.expiresAt).toLocaleString()}</span>
+                  <span class="expiry">
+                    until {new Date(status.expiresAt).toLocaleString()}{status.renewable === false
+                      ? ', then sign in again'
+                      : ''}
+                  </span>
+                {:else if status.renewable === false}
+                  <span class="expiry">no refresh token; sign in again when it ends</span>
                 {/if}
               {:else if status?.configured}
                 <span class="configured">Key configured</span>
