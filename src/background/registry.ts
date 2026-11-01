@@ -86,11 +86,12 @@ export function cspForCapabilities(capabilities: Capability[]): string {
  * so explicitly.
  *
  * A pattern with no scheme was stored before the scheme was recorded, and the
- * page it was saved on is not known. It is registered for https only, so such a
- * script stops running on an http site until its pattern is saved again with
- * a scheme. Keeping both would keep the exposure for every transform that
- * already exists. ftp: and file: are never included, which is why the pattern
- * is not passed through as `*://`.
+ * page it was saved on is not known. It is registered for both schemes, as it
+ * was before, so that old transforms keep working, including those saved on an
+ * http-only site such as local development. The scheme restriction applies from
+ * the next save of the transform, which records the page's scheme. ftp: and
+ * file: are never included, which is why the pattern is not passed through as
+ * `*://`.
  */
 export function matchPatternsFor(transform: Transform): string[] {
   const { scheme, host, path } = parsePattern(transform.match)
@@ -102,8 +103,9 @@ export function matchPatternsFor(transform: Transform): string[] {
     case '*':
       return [...forScheme('https'), ...forScheme('http')]
     case 'https':
-    case undefined:
       return forScheme('https')
+    case undefined:
+      return [...forScheme('https'), ...forScheme('http')]
   }
 }
 

@@ -160,8 +160,16 @@ describe('the schemes a script is registered for (#59)', () => {
     ])
   })
 
-  it('is https only for a stored pattern with no scheme, which was saved before schemes were recorded', async () => {
-    expect(await patternsFor('example.com/docs*')).toEqual(['https://example.com/docs*'])
+  it('is both for a stored pattern with no scheme, so a transform saved before schemes were recorded keeps running on http', async () => {
+    expect(await patternsFor('example.com/docs*')).toEqual([
+      'https://example.com/docs*',
+      'http://example.com/docs*',
+    ])
+  })
+
+  it('control: a pattern saved with a scheme is not widened to both', async () => {
+    expect(await patternsFor('https://example.com/docs*')).toEqual(['https://example.com/docs*'])
+    expect(await patternsFor('http://example.com/docs*')).toEqual(['http://example.com/docs*'])
   })
 
   it('never registers a scheme other than http or https', () => {
