@@ -34,8 +34,16 @@
  * runs code in the page, with the page's `fetch`. It is closed by defining
  * `constructor` on the page's Function.prototype as the world sees it.
  *
- * This is not a complete defence and the module does not claim that. What stays
- * reachable is recorded in test/runtime-guard/README.md.
+ * Windows reached by index (`window[0]`) cannot be hidden, because no property
+ * can be defined on an index of the window. The guard instead refuses to create
+ * an element with a browsing context of its own (iframe, frame, frameset,
+ * object, embed), through every API that makes elements. The frames that the
+ * page already had stay reachable by index.
+ *
+ * This is not a complete defence and the module does not claim that. The Xray
+ * waiver on elements, events and collections stays open, and so do several
+ * loads that are made by attributes of inserted elements. What stays reachable
+ * is recorded in test/runtime-guard/README.md.
  *
  * This file imports nothing at run time, so the live probe can load it directly.
  */
@@ -81,6 +89,110 @@ const WINDOW_FEATURES: Feature[] = [
   { name: 'frames', capability: null },
 ]
 
+/**
+ * The part of the guard that refuses to create an element that has a browsing
+ * context of its own: `iframe`, `frame`, `frameset`, `object` and `embed`. It
+ * is text for the guard's function, which supplies `failed` and `refuse`.
+ *
+ * A window reached by index (`window[0]`) is the window of a frame, and no
+ * definition on the window can hide an index (test/runtime-guard/README.md), so
+ * the frame is refused at the point where it is made, by every API that makes
+ * elements from a name or from markup. The wrappers are built to resist what a
+ * transform can do to them:
+ *
+ *  - Every native function they depend on is read once, here, before the
+ *    transform runs, because a transform can redefine the methods of a
+ *    prototype it can see. The regular expression, the string conversion and the
+ *    call are the captured ones.
+ *  - An argument that is an object is converted to a string once, and the
+ *    string is what is checked and what is passed on, so an object whose
+ *    `toString` returns something else the second time cannot pass the check.
+ *  - A tag name is compared whole, after removing a namespace prefix, so
+ *    `createElementNS(ns, 'x:iframe')` is refused as well.
+ *  - Markup is refused when it holds an opening tag of one of the five
+ *    elements, whatever the case, namespace prefix or attributes.
+ */
+const FRAME_BLOCK = String.raw`
+  const call = Reflect.apply;
+  const execRegExp = RegExp.prototype.exec;
+  const toText = String;
+  const FRAME_NAME = /^(?:[^:]*:)?(?:iframe|frameset|frame|object|embed)$/i;
+  const FRAME_MARKUP = /<(?:[a-z][a-z0-9_.-]*:)?(?:iframe|frameset|frame|object|embed)(?![a-z0-9_.:-])/i;
+  const matches = (pattern, text) => call(execRegExp, pattern, [text]) !== null;
+  // A string stays as it is, and so do null and undefined, which some setters
+  // treat as an empty string. An object is converted once.
+  const plain = (value) => (value !== null && (typeof value === 'object' || typeof value === 'function') ? toText(value) : value);
+  const refuseName = (name) => { if (matches(FRAME_NAME, toText(name))) refuse(); };
+  const refuseMarkup = (markup) => { if (markup !== undefined && matches(FRAME_MARKUP, toText(markup))) refuse(); };
+  // Replaces a method with one that checks the arguments, converts each checked
+  // argument once, and then calls the original.
+  const wrapMethod = (owner, name, indexes, check) => {
+    try {
+      const original = Object.getOwnPropertyDescriptor(owner, name).value;
+      if (typeof original !== 'function') throw new TypeError(name);
+      Object.defineProperty(owner, name, {
+        value: function (...args) {
+          for (let i = 0; i < indexes.length; i += 1) if (indexes[i] < args.length) args[indexes[i]] = plain(args[indexes[i]]);
+          check(args);
+          return call(original, this, args);
+        },
+        configurable: false,
+        writable: false,
+      });
+    } catch (_) { failed.push(name); }
+  };
+  const wrapSetter = (owner, name, check) => {
+    try {
+      const descriptor = Object.getOwnPropertyDescriptor(owner, name);
+      const original = descriptor.set;
+      if (typeof original !== 'function') throw new TypeError(name);
+      Object.defineProperty(owner, name, {
+        get: descriptor.get,
+        set: function (value) {
+          const text = plain(value);
+          check(text);
+          call(original, this, [text]);
+        },
+        configurable: false,
+      });
+    } catch (_) { failed.push(name); }
+  };
+  wrapMethod(Document.prototype, 'createElement', [0], (a) => refuseName(a[0]));
+  wrapMethod(Document.prototype, 'createElementNS', [1], (a) => refuseName(a[1]));
+  wrapMethod(DOMImplementation.prototype, 'createDocument', [1], (a) => refuseName(a[1]));
+  // A customized built-in element is made by calling the class that extends the
+  // built-in one, so an option that extends a frame element is refused. The
+  // option is read once and a new options object is passed on.
+  wrapMethod(CustomElementRegistry.prototype, 'define', [], (a) => {
+    if (a.length > 2 && a[2] !== null && typeof a[2] === 'object') {
+      const extended = a[2].extends;
+      const options = {};
+      if (extended !== undefined) {
+        const name = toText(extended);
+        refuseName(name);
+        options.extends = name;
+      }
+      a[2] = options;
+    }
+  });
+  wrapMethod(Element.prototype, 'insertAdjacentHTML', [1], (a) => refuseMarkup(a[1]));
+  wrapMethod(Element.prototype, 'setHTMLUnsafe', [0], (a) => refuseMarkup(a[0]));
+  wrapMethod(Element.prototype, 'setHTML', [0], (a) => refuseMarkup(a[0]));
+  wrapMethod(ShadowRoot.prototype, 'setHTMLUnsafe', [0], (a) => refuseMarkup(a[0]));
+  wrapMethod(ShadowRoot.prototype, 'setHTML', [0], (a) => refuseMarkup(a[0]));
+  wrapMethod(Document, 'parseHTMLUnsafe', [0], (a) => refuseMarkup(a[0]));
+  wrapMethod(Range.prototype, 'createContextualFragment', [0], (a) => refuseMarkup(a[0]));
+  wrapMethod(DOMParser.prototype, 'parseFromString', [0], (a) => refuseMarkup(a[0]));
+  // Markup given to write can be split over calls, and a call after the page
+  // has loaded replaces the whole document, so write is refused outright.
+  hide(Document.prototype, 'write');
+  hide(Document.prototype, 'writeln');
+  wrapMethod(Document.prototype, 'execCommand', [2], (a) => refuseMarkup(a[2]));
+  wrapSetter(Element.prototype, 'innerHTML', refuseMarkup);
+  wrapSetter(Element.prototype, 'outerHTML', refuseMarkup);
+  wrapSetter(ShadowRoot.prototype, 'innerHTML', refuseMarkup);
+`
+
 /** The names a transform with these capabilities cannot reach on the window. */
 export function guardedWindowNames(capabilities: Capability[]): string[] {
   return WINDOW_FEATURES.filter((f) => f.capability === null || !capabilities.includes(f.capability)).map(
@@ -92,9 +204,15 @@ export function guardedWindowNames(capabilities: Capability[]): string[] {
  * The text of a script that hides the features, to run in the world before the
  * transform. It throws, after writing the marker named by `errorName`, when a
  * definition fails, so that a transform never runs with a feature that was meant
- * to be hidden. `errorName` is the attribute of script-errors.ts.
+ * to be hidden. `errorName` is the attribute of script-errors.ts. `blockFrames`
+ * is false only in the probe that measures what the refusal of frame creation
+ * adds, and is true otherwise.
  */
-export function runtimeGuardSource(capabilities: Capability[], errorName: string): string {
+export function runtimeGuardSource(
+  capabilities: Capability[],
+  errorName: string,
+  options: { blockFrames?: boolean } = {},
+): string {
   const windowNames = guardedWindowNames(capabilities)
   const network = capabilities.includes('network')
   const cookies = capabilities.includes('cookies')
@@ -129,6 +247,7 @@ export function runtimeGuardSource(capabilities: Capability[], errorName: string
   // first step is an interface object, and its prototype is the page's
   // Function.prototype, whose constructor builds code that runs in the page.
   hide(Object.getPrototypeOf(EventTarget), 'constructor');
+  ${options.blockFrames === false ? '' : FRAME_BLOCK}
   for (const proto of [HTMLIFrameElement.prototype, HTMLFrameElement.prototype, HTMLObjectElement.prototype, HTMLEmbedElement.prototype]) {
     hide(proto, 'contentWindow');
     hide(proto, 'contentDocument');

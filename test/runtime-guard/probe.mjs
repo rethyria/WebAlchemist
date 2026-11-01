@@ -141,9 +141,10 @@ const NETWORK = ['fetch', 'xhr', 'websocket', 'beacon', 'eventsource', 'rtc']
 const STORAGE = ['indexeddb', 'localstorage', 'sessionstorage', 'caches']
 const COOKIES = ['cookiestore', 'cookie']
 const NEVER = ['open', 'worker', 'sharedworker', 'eval', 'function', 'serviceworker']
-// Routes to a window that the guard does not close. They are measured and
-// reported as reachable, so that the README and this list cannot drift apart.
-const RESIDUAL_ROUTES = ['window0', 'window1']
+// Routes to a window that the guard does not close. There are none for frames
+// the transform creates: the guard refuses to create them (see frames.mjs for
+// the routes and for the frames that the page already had).
+const RESIDUAL_ROUTES = []
 
 /** Routes that produced a window, as [name, features] pairs. */
 const windows = (report) => Object.entries(report.routes).filter(([, r]) => typeof r === 'object')
@@ -228,8 +229,9 @@ try {
     rows.push(['control (open world CSP, page without a policy): the four loads that a strict world CSP does not stop all arrive', Boolean(a) && names.every((n) => a.has(`dom.${n}`))])
     const pageGoverned = ['styleElementUrl', 'styleElementImport', 'fontFace']
     rows.push(["with an open world CSP and a page policy that refuses them, the stylesheet url(), the stylesheet import and the font do not arrive, so the page's policy governs those", Boolean(b) && pageGoverned.every((n) => !b.has(`dom.${n}`))])
-    rows.push(['the iframe src request arrives under a strict world CSP and under a refusing page policy, so neither governs it (reported; the control is the open run)', Boolean(strictFor('guarded-nothing')) && strictFor('guarded-nothing').has('dom.iframeSrc') && Boolean(b) && b.has('dom.iframeSrc') && Boolean(a) && a.has('dom.iframeSrc')])
-    const strict = strictFor('guarded-nothing')
+    rows.push(['the iframe src request arrives under a strict world CSP and under a refusing page policy, so neither governs it (reported; the control is the open run)', Boolean(strictFor('baseline')) && strictFor('baseline').has('dom.iframeSrc') && Boolean(b) && b.has('dom.iframeSrc') && Boolean(a) && a.has('dom.iframeSrc')])
+    // The baseline has the strict world CSP and no guard, so it shows what the world's policy governs.
+    const strict = strictFor('baseline')
     rows.push(["with the strict world CSP, images, links, audio, scripts and an inline style property do not arrive (the world's policy governs them)", Boolean(strict) && ['newImageDetached', 'imgInDocument', 'linkStylesheet', 'inlineStyleUrl', 'audioSrc', 'scriptSrc'].every((n) => !strict.has(`dom.${n}`)) && Boolean(a) && ['newImageDetached', 'imgInDocument', 'linkStylesheet', 'inlineStyleUrl', 'audioSrc', 'scriptSrc'].every((n) => a.has(`dom.${n}`))])
     rows.push(["with the strict world CSP, the four loads in the page's remit do arrive (not stopped by the world)", Boolean(strict) && names.every((n) => strict.has(`dom.${n}`))])
   }
@@ -261,8 +263,12 @@ try {
     ])
     rows.push(['guarded, nothing declared: timers given functions still work, with their arguments', g.other['data-wa-fn-timer'] === 'ran' && g.other['data-wa-timer-args'] === 'xy'])
     rows.push([
-      'guarded, nothing declared: the numbered window routes stay reachable (documented as residual)',
-      RESIDUAL_ROUTES.every((r) => reached(g, r, 'fetch') && arrivedFrom('guarded-nothing', r, 'fetch')),
+      'guarded, nothing declared: the numbered window routes give no window, because the guard refused to create the frames',
+      ['window0', 'window1'].every((r) => typeof g.routes[r] === 'string') && g.other.iframeCreate?.startsWith('blocked'),
+    ])
+    rows.push([
+      'guarded, nothing declared: the iframe with an src made no request, and the server saw no request from the numbered routes',
+      !run('guarded-nothing').arrived.has('dom.iframeSrc') && ![...run('guarded-nothing').arrived].some((v) => /^window[01]\./.test(v)),
     ])
   }
   if (has('guarded-network')) {

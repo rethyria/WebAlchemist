@@ -8,13 +8,24 @@
  */
 export const REPORT_ATTRIBUTE = 'data-wa-rg'
 
-export const FRAME_MEASURE = `(() => {
+/** Redefinitions of built-ins that a guard could rely on, made before the routes run. */
+export const TAMPER = `
+try { RegExp.prototype.exec = () => null; RegExp.prototype.test = () => false } catch (e) {}
+try { Function.prototype.apply = function () { return undefined }; Function.prototype.call = function () { return undefined } } catch (e) {}
+try { Reflect.apply = () => undefined } catch (e) {}
+try { Array.prototype.join = () => ''; Array.prototype[Symbol.iterator] = function* () {} } catch (e) {}
+try { String.prototype.toString = () => 'x'; window.String = () => 'x' } catch (e) {}
+`
+
+export const frameMeasure = (prefix = '') => `(() => {
+${prefix}
 const out = { create: {}, index: {}, existing: {}, meta: {} };
 const BASE = 'http://localhost:8791/egress?via=';
 const XHTML = 'http://www.w3.org/1999/xhtml';
 const len = () => { try { return window.length } catch (e) { return 'threw ' + e.name } };
 const describe = (e) => (e && e.name) + ': ' + String(e && e.message).slice(0, 50);
 out.meta.lengthAtStart = len();
+out.meta.writeReadable = (() => { try { return typeof document.write } catch (e) { return 'refused' } })();
 const reachIndex = (i, tag) => {
   try {
     const W = window[i];
@@ -60,6 +71,16 @@ route('cloneNode of a frame the page had', () => { const f = document.querySelec
 route('importNode of a frame the page had', () => { const f = document.querySelector('iframe'); if (!f) throw new Error('no page frame'); document.body.appendChild(document.importNode(f, true)) });
 route('cloneNode of a subtree holding a frame the page had', () => { document.body.appendChild(document.querySelector('main').cloneNode(true)) });
 route('Range cloneContents of a frame the page had', () => { const r = document.createRange(); r.selectNodeContents(document.querySelector('main')); document.body.appendChild(r.cloneContents()) });
+route('customized built-in iframe made with new', () => { class F extends HTMLIFrameElement {} customElements.define('wa-f', F, { extends: 'iframe' }); document.body.appendChild(new F()) });
+route('createDocument with an iframe root, adopted', () => { const d = document.implementation.createDocument(XHTML, 'iframe'); document.body.appendChild(d.documentElement) });
+route('tag name given as an object whose toString changes', () => { let n = 0; const tag = { toString() { n += 1; return n === 1 ? 'div' : 'iframe' } }; document.body.appendChild(document.createElement(tag)) });
+route('tag name given as an array', () => { document.body.appendChild(document.createElement(['iframe'])) });
+route('markup given as an object whose toString changes', () => { let n = 0; const html = { toString() { n += 1; return n === 1 ? '<p>x</p>' : '<iframe></iframe>' } }; host().insertAdjacentHTML('beforeend', html) });
+route('innerHTML set to an object whose toString changes', () => { let n = 0; const html = { toString() { n += 1; return n === 1 ? '<p>x</p>' : '<iframe></iframe>' } }; host().innerHTML = html });
+route('markup split over two writes', () => { const d = host(); d.innerHTML = '<ifr'; d.innerHTML += 'ame></iframe>' });
+route('markup with a leading space in the tag name (text, not a tag)', () => { host().innerHTML = '< iframe></iframe>' });
+route('createElement from the prototype descriptor', () => { const f = Object.getOwnPropertyDescriptor(Document.prototype, 'createElement').value; document.body.appendChild(f.call(document, 'iframe')) });
+route('createElement from a document made by createHTMLDocument', () => { const d = document.implementation.createHTMLDocument('x'); document.body.appendChild(d.createElement('iframe')) });
 route('document.write in a new document, adopted', () => { const d = document.implementation.createHTMLDocument('x'); d.write('<iframe></iframe>'); document.body.appendChild(d.querySelector('iframe')) });
 
 // Windows of frames that the page had, with nothing created.

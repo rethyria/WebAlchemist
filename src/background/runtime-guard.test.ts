@@ -14,8 +14,15 @@ import { guardedWindowNames, runtimeGuardSource } from './runtime-guard'
 const MARKER = 'data-wa-error-test'
 
 /** Stand-ins for the objects the guard defines properties on. */
-function world(options: { frozenWindow?: boolean } = {}) {
+function world(options: { frozenWindow?: boolean; without?: string } = {}) {
   const timerCalls: unknown[][] = []
+  // Every call that reaches a stand-in for a method that makes elements: its name, this, and the arguments.
+  const calls: Array<{ name: string; self: unknown; args: unknown[] }> = []
+  const recorder = (name: string) =>
+    function (this: unknown, ...args: unknown[]) {
+      calls.push({ name, self: this, args })
+      return `made by ${name}`
+    }
   const win: Record<string, unknown> = {
     setTimeout: function (this: unknown, ...args: unknown[]) {
       timerCalls.push([this, ...args])
@@ -35,7 +42,10 @@ function world(options: { frozenWindow?: boolean } = {}) {
 
   const navigatorPrototype = { sendBeacon: () => true, serviceWorker: 'real serviceWorker', storage: 'real storage' }
   const navigator = Object.create(navigatorPrototype)
-  const documentPrototype = {}
+  const documentPrototype: Record<string, unknown> = {}
+  for (const name of ['createElement', 'createElementNS', 'write', 'writeln', 'execCommand']) {
+    documentPrototype[name] = recorder(name)
+  }
   Object.defineProperty(documentPrototype, 'cookie', { value: 'a=1', configurable: true, writable: true })
   const attributes = new Map<string, string>()
   const doc = Object.create(documentPrototype)
@@ -72,8 +82,39 @@ function world(options: { frozenWindow?: boolean } = {}) {
       prototype.submit = () => 'submitted'
       prototype.requestSubmit = () => 'submitted'
     }
+    if (name === 'Element') {
+      for (const method of ['insertAdjacentHTML', 'setHTMLUnsafe', 'setHTML']) prototype[method] = recorder(method)
+      for (const accessor of ['innerHTML', 'outerHTML']) {
+        Object.defineProperty(prototype, accessor, {
+          get: () => 'current markup',
+          set: function (this: unknown, value: unknown) {
+            calls.push({ name: accessor, self: this, args: [value] })
+          },
+          configurable: true,
+        })
+      }
+    }
     return { prototype }
   }
+  // Interfaces that make or parse elements: a constructor with a prototype of recorded methods.
+  const interfaceWith = (methods: string[]) => {
+    const ctor = function () {} as unknown as { prototype: Record<string, unknown> }
+    for (const method of methods) if (method !== options.without) ctor.prototype[method] = recorder(method)
+    return ctor
+  }
+  const shadowRoot = interfaceWith(['setHTMLUnsafe', 'setHTML'])
+  Object.defineProperty(shadowRoot.prototype, 'innerHTML', {
+    get: () => 'current markup',
+    set: function (this: unknown, value: unknown) {
+      calls.push({ name: 'shadowInnerHTML', self: this, args: [value] })
+    },
+    configurable: true,
+  })
+  const range = interfaceWith(['createContextualFragment'])
+  const domParser = interfaceWith(['parseFromString'])
+  const domImplementation = interfaceWith(['createDocument'])
+  const customElementRegistry = interfaceWith(['define'])
+  const documentInterface = { prototype: documentPrototype, parseHTMLUnsafe: recorder('parseHTMLUnsafe') }
   const prototypes = {
     Node: makePrototype('Node'),
     Element: makePrototype('Element'),
@@ -95,18 +136,21 @@ function world(options: { frozenWindow?: boolean } = {}) {
       'window', 'navigator', 'Navigator', 'document', 'Document', 'EventTarget',
       'HTMLIFrameElement', 'HTMLFrameElement', 'HTMLObjectElement', 'HTMLEmbedElement',
       'location', 'history', 'globalThis', 'Node', 'Element', 'HTMLElement', 'Location', 'History',
-      'BaseAudioContext', 'HTMLFormElement',
+      'BaseAudioContext', 'HTMLFormElement', 'ShadowRoot', 'Range', 'DOMParser', 'DOMImplementation',
+      'CustomElementRegistry',
       source,
     )(
-      win, navigator, { prototype: navigatorPrototype }, doc, { prototype: documentPrototype }, eventTarget,
+      win, navigator, { prototype: navigatorPrototype }, doc, documentInterface, eventTarget,
       ...frames.map(([, ctor]) => ctor),
       location, history, sandbox, prototypes.Node, prototypes.Element, prototypes.HTMLElement,
       prototypes.Location, prototypes.History, prototypes.BaseAudioContext, prototypes.HTMLFormElement,
+      shadowRoot, range, domParser, domImplementation, customElementRegistry,
     )
   }
   return {
     win, navigator, doc, attributes, timerCalls, pageFunctionPrototype, frames, run, navigatorPrototype,
-    documentPrototype, location, history, prototypes, sandbox, eventTarget,
+    documentPrototype, location, history, prototypes, sandbox, eventTarget, calls, documentInterface,
+    shadowRoot, range, domParser, domImplementation, customElementRegistry,
   }
 }
 
@@ -281,5 +325,165 @@ describe('the guard run against stand-in objects', () => {
     const w = world()
     expect(() => w.run([])).not.toThrow()
     expect(w.attributes.has(MARKER)).toBe(false)
+  })
+})
+
+
+describe('the refusal to create an element with a browsing context', () => {
+  const PROTOTYPE_OF = (w: ReturnType<typeof world>) => ({
+    createElement: w.documentPrototype.createElement as (...a: unknown[]) => unknown,
+    createElementNS: w.documentPrototype.createElementNS as (...a: unknown[]) => unknown,
+  })
+  const FRAME_TAGS = ['iframe', 'IFRAME', 'IFrame', 'frame', 'frameset', 'object', 'embed']
+  const FRAME_MARKUP = ['<iframe></iframe>', '<IFRAME src=x>', '<p>x</p><iframe>', '<x:iframe/>', '<object data=y>', '<embed src=z>', '<frame>', '<frameset>', '<iframe\nsrc=a>', '<iframe/>']
+  const PLAIN_MARKUP = ['<p>x</p>', '< iframe>', '<iframes>', '<objectx>', 'iframe', '&lt;iframe&gt;', '<span class="iframe">']
+
+  // Control for every refusal below: before the guard runs, each stand-in is called.
+  it('control: before the guard runs, the stand-ins make an element for every tag and every markup', () => {
+    const w = world()
+    const { createElement, createElementNS } = PROTOTYPE_OF(w)
+    for (const tag of FRAME_TAGS) expect(createElement.call(w.doc, tag)).toBe('made by createElement')
+    expect(createElementNS.call(w.doc, 'ns', 'x:iframe')).toBe('made by createElementNS')
+    const insert = w.prototypes.Element.prototype.insertAdjacentHTML as (...a: unknown[]) => unknown
+    for (const markup of FRAME_MARKUP) expect(insert.call({}, 'beforeend', markup)).toBe('made by insertAdjacentHTML')
+  })
+
+  it('refuses a frame tag name in createElement, createElementNS and createDocument, whatever its case or prefix', () => {
+    const w = world()
+    w.run([])
+    const { createElement, createElementNS } = PROTOTYPE_OF(w)
+    const createDocument = w.domImplementation.prototype.createDocument as (...a: unknown[]) => unknown
+    for (const tag of FRAME_TAGS) {
+      expect(() => createElement.call(w.doc, tag), tag).toThrow(/not declared/)
+      expect(() => createElementNS.call(w.doc, 'http://www.w3.org/1999/xhtml', tag), tag).toThrow(/not declared/)
+      expect(() => createElementNS.call(w.doc, 'http://www.w3.org/1999/xhtml', `x:${tag}`), tag).toThrow(/not declared/)
+      expect(() => createDocument.call({}, 'http://www.w3.org/1999/xhtml', tag), tag).toThrow(/not declared/)
+    }
+    expect(() => createElement.call(w.doc, ['iframe'])).toThrow(/not declared/)
+    expect(w.calls.filter((c) => /^create/.test(c.name))).toEqual([])
+  })
+
+  it('passes other tag names through with the same this and arguments', () => {
+    const w = world()
+    w.run([])
+    const { createElement, createElementNS } = PROTOTYPE_OF(w)
+    for (const tag of ['div', 'style', 'iframes', 'my-iframe', 'img', 'a']) {
+      expect(createElement.call(w.doc, tag, { is: 'x' }), tag).toBe('made by createElement')
+    }
+    expect(createElementNS.call(w.doc, 'ns', 'svg:rect')).toBe('made by createElementNS')
+    expect(w.calls[0]).toEqual({ name: 'createElement', self: w.doc, args: ['div', { is: 'x' }] })
+    expect(w.calls.at(-1)).toEqual({ name: 'createElementNS', self: w.doc, args: ['ns', 'svg:rect'] })
+  })
+
+  it('refuses markup with a frame tag in every method and setter that parses markup', () => {
+    const w = world()
+    w.run([])
+    const element = w.prototypes.Element.prototype
+    const sinks: Array<[string, (markup: string) => unknown]> = [
+      ['insertAdjacentHTML', (m) => (element.insertAdjacentHTML as (...a: unknown[]) => unknown).call({}, 'beforeend', m)],
+      ['setHTMLUnsafe', (m) => (element.setHTMLUnsafe as (...a: unknown[]) => unknown).call({}, m)],
+      ['setHTML', (m) => (element.setHTML as (...a: unknown[]) => unknown).call({}, m, {})],
+      ['shadow setHTMLUnsafe', (m) => (w.shadowRoot.prototype.setHTMLUnsafe as (...a: unknown[]) => unknown).call({}, m)],
+      ['shadow setHTML', (m) => (w.shadowRoot.prototype.setHTML as (...a: unknown[]) => unknown).call({}, m)],
+      ['parseHTMLUnsafe', (m) => (w.documentInterface.parseHTMLUnsafe as (...a: unknown[]) => unknown)(m)],
+      ['createContextualFragment', (m) => (w.range.prototype.createContextualFragment as (...a: unknown[]) => unknown).call({}, m)],
+      ['parseFromString', (m) => (w.domParser.prototype.parseFromString as (...a: unknown[]) => unknown).call({}, m, 'text/html')],
+      ['execCommand', (m) => (w.documentPrototype.execCommand as (...a: unknown[]) => unknown).call(w.doc, 'insertHTML', false, m)],
+      ['innerHTML', (m) => { (element as { innerHTML: string }).innerHTML = m }],
+      ['outerHTML', (m) => { (element as { outerHTML: string }).outerHTML = m }],
+      ['shadow innerHTML', (m) => { (w.shadowRoot.prototype as { innerHTML: string }).innerHTML = m }],
+    ]
+    for (const [name, call] of sinks) {
+      for (const markup of FRAME_MARKUP) expect(() => call(markup), `${name}: ${markup}`).toThrow(/not declared/)
+    }
+    expect(w.calls).toEqual([])
+    // Control: the same sinks accept markup that has no frame tag.
+    for (const [name, call] of sinks) {
+      for (const markup of PLAIN_MARKUP) expect(() => call(markup), `${name}: ${markup}`).not.toThrow()
+    }
+    expect(w.calls.length).toBe(sinks.length * PLAIN_MARKUP.length)
+  })
+
+  it('converts an object argument once, checks that string, and passes that string on', () => {
+    const w = world()
+    w.run([])
+    let conversions = 0
+    const changing = { toString: () => (++conversions === 1 ? 'div' : 'iframe') }
+    const { createElement } = PROTOTYPE_OF(w)
+    createElement.call(w.doc, changing)
+    expect(conversions).toBe(1)
+    expect(w.calls[0]?.args).toEqual(['div'])
+    const changingMarkup = () => {
+      let count = 0
+      return { count: () => count, toString: () => (++count === 1 ? '<p>x</p>' : '<iframe>') }
+    }
+    const first = changingMarkup()
+    const second = changingMarkup()
+    ;(w.prototypes.Element.prototype.insertAdjacentHTML as (...a: unknown[]) => unknown).call({}, 'beforeend', first)
+    ;(w.prototypes.Element.prototype as { innerHTML: unknown }).innerHTML = second
+    expect([first.count(), second.count()]).toEqual([1, 1])
+    expect(w.calls.at(-2)?.args).toEqual(['beforeend', '<p>x</p>'])
+    expect(w.calls.at(-1)?.args).toEqual(['<p>x</p>'])
+  })
+
+  it('passes null and undefined to a markup setter unchanged', () => {
+    const w = world()
+    w.run([])
+    ;(w.prototypes.Element.prototype as { innerHTML: unknown }).innerHTML = null
+    expect(w.calls.at(-1)?.args).toEqual([null])
+  })
+
+  it('refuses a customized built-in element that extends a frame element, and passes the other definitions with a copy of the options', () => {
+    const w = world()
+    w.run([])
+    const define = w.customElementRegistry.prototype.define as (...a: unknown[]) => unknown
+    class Anything {}
+    for (const tag of ['iframe', 'IFRAME', 'object', 'embed', 'frame']) {
+      expect(() => define.call({}, 'x-a', Anything, { extends: tag }), tag).toThrow(/not declared/)
+    }
+    let reads = 0
+    const options = { get extends() { reads += 1; return 'button' } }
+    define.call({}, 'x-b', Anything, options)
+    define.call({}, 'x-c', Anything)
+    define.call({}, 'x-d', Anything, {})
+    expect(reads).toBe(1)
+    expect(w.calls.map((c) => c.args.slice(2))).toEqual([[{ extends: 'button' }], [], [{}]])
+  })
+
+  it('hides document.write and document.writeln', () => {
+    const w = world()
+    w.run([])
+    expect(() => w.documentPrototype.write).toThrow()
+    expect(() => w.documentPrototype.writeln).toThrow()
+  })
+
+  it('cannot be undone by the code that runs after it', () => {
+    const w = world()
+    w.run([])
+    expect(() => Object.defineProperty(w.documentPrototype, 'createElement', { value: () => 1 })).toThrow(TypeError)
+    expect(() => Object.defineProperty(w.prototypes.Element.prototype, 'innerHTML', { set: () => {} })).toThrow(TypeError)
+    expect(() => {
+      ;(w.documentPrototype as { createElement: unknown }).createElement = () => 1
+    }).toThrow(TypeError)
+  })
+
+  it('applies whatever capabilities were declared', () => {
+    const w = world()
+    w.run(['network', 'storage', 'cookies'])
+    expect(() => PROTOTYPE_OF(w).createElement.call(w.doc, 'iframe')).toThrow(/not declared/)
+  })
+
+  it('stops the transform, and writes the marker, when a method it has to wrap is missing', () => {
+    const w = world({ without: 'createContextualFragment' })
+    expect(() => w.run([])).toThrow(/could not restrict createContextualFragment/)
+    expect(w.attributes.get(MARKER)).toMatch(/createContextualFragment/)
+  })
+
+  it('leaves the frame wrappers out when asked, for the probe that measures their effect', () => {
+    const w = world()
+    const source = runtimeGuardSource([], MARKER, { blockFrames: false })
+    expect(source).not.toContain('FRAME_MARKUP')
+    expect(runtimeGuardSource([], MARKER)).toContain('FRAME_MARKUP')
+    void w
   })
 })

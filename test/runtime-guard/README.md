@@ -8,7 +8,7 @@ Measured on 2026-11-01 in Firefox 159.0 (flatpak build, SteamOS), with Firefox s
 
 The guard hides the listed features from every route to the window that the issue names: the bare name, `window`, `self`, `top`, `parent`, `document.defaultView`, `getRootNode()`, `parentNode`, `Object.getPrototypeOf(globalThis)`, `this` in a timer callback, the target of an event on `window` or on `document`, `frames[0]`, and the `contentWindow` of a created iframe. It also hides two routes that the issue did not list and that the measurements found: `window.wrappedJSObject` (the page's real window) and `element.constructor.constructor` (the page's `Function`). A transform that declared a capability keeps the features of that capability. The page's own use of every feature is unaffected.
 
-One route stays open: a window reached by numeric index, `window[0]` and `window[1]` for the iframes a transform has created. It reaches every feature. The acceptance criterion of #139 asks for each feature to be unreachable from a transform that declared nothing, through every route, so it is not met in full, and the commit refers to the issue and does not close it. The static analysis refuses code that creates an iframe, which is the only protection against this route today.
+The guard refuses to create an element with a browsing context of its own, which closes the windows reached by index (`window[0]`) for frames that the transform creates. The frames that the page already had stay reachable by index and have every feature. The Xray waiver on any element, event or collection stays open (see the sections below), so the guard is a second protection and not a boundary against a transform written to evade the static analysis. The acceptance criterion of #139 asks for each feature to be unreachable from a transform that declared nothing, through every route, so it is not met in full.
 
 ## What was measured
 
@@ -33,7 +33,8 @@ The control that explains the table: in a USER_SCRIPT world the global object th
 | Configuration | Result |
 |---|---|
 | Baseline, no guard (control) | All 19 routes reach all 18 features. Calling the bare-name `eval` and `Function` fails with an EvalError from the world CSP. The server sees every request from every route. |
-| Guard, nothing declared | Of the 19 routes, 12 give a window with none of the 18 features, 5 throw instead of giving a window (`wrappedJSObject`, `contentWindow`, `contentDocument.defaultView`, the `contentWindow` getter taken from the prototype, and `frames[0]`), and 2 (`window[0]` and `window[1]`) give a window with all 18. The server sees no request from the first 17 routes. |
+| Guard of commit 76d9244, nothing declared | Of the 19 routes, 12 give a window with none of the 18 features, 5 throw instead of giving a window (`wrappedJSObject`, `contentWindow`, `contentDocument.defaultView`, the `contentWindow` getter taken from the prototype, and `frames[0]`), and 2 (`window[0]` and `window[1]`) give a window with all 18. The server sees no request from the first 17 routes. |
+| Guard with the refusal of frame creation, nothing declared | The same 12 routes give a window with none of the 18 features. The iframes are not created, so `window[0]`, `window[1]` and the named frame give no window, and the other routes that need a frame throw. The server sees no request from any route. |
 | Guard, `network` declared | `fetch`, `XMLHttpRequest`, `WebSocket`, `sendBeacon`, `EventSource` and `RTCPeerConnection` work and the server sees the requests; storage, cookies, workers, `open` and `serviceWorker` stay hidden |
 | Guard, `storage` and `cookies` declared | `localStorage`, `sessionStorage`, `indexedDB`, `caches`, `cookieStore` and `document.cookie` work; network features stay hidden and the server sees none |
 
@@ -83,6 +84,32 @@ The guard was not applied to a world other than USER_SCRIPT. In the MAIN world t
 
 For the rows marked Page: with an open world CSP and a page that sends `default-src 'none'; style-src 'unsafe-inline'; img-src 'none'; font-src 'none'; frame-src 'none'`, the three style loads do not arrive. For the rows marked World: with an open world CSP and the page policy above, those elements still arrive, so the page policy does not govern them. For the iframe: the request arrives under a strict world policy and under that page policy, which has `frame-src 'none'`, so neither policy stopped it. The image route that #21 found closed for `new Image()` is closed for inserted `img` elements as well. The four routes marked Page or Neither are open to a transform, and the guard does not change them. The static analysis refuses an address written to an element or to a style that can load a resource, so these routes depend on that check.
 
+### Windows reached by index
+
+`window[0]` is the window of the first frame, and a window reached this way has every feature, so it was the one route of the first version that stayed open. `frames.mjs` measures three ways to close it, on 2026-11-01 in Firefox 159.0 on the page `/page-frames` (which has two frames of its own), with nothing declared. Each creation route inserts an element, reads `window.length` before and after, and when it grew, makes a `fetch` through `window[length - 1]` so that the server shows whether the request left.
+
+| Way to close it | Result |
+|---|---|
+| Throwing getters for `contentWindow` and `contentDocument` on the prototypes of `HTMLIFrameElement`, `HTMLFrameElement`, `HTMLObjectElement` and `HTMLEmbedElement` (the guard of commit 3da7cb7) | Does not close it. 28 of 38 creation routes made a frame and the server saw the request through `window[n]` for each of them, the same as with no guard. The getters hide the element's property and not the index. |
+| Hiding the index and `length` on the window | Does not work for the index. `Object.defineProperty(window, '0', ...)` and the same for `1` succeed as calls, and the read still returns the frame's window; `delete window[0]` returns true and the read still works. `length` can be hidden (a throwing getter defined on it makes the read throw), but the index is reachable without reading it. `frames` was already hidden. A `Proxy` around the window does not help, because other routes give the real window. |
+| Refusing the creation of the element in the world | Closes it for the frames the transform creates. 28 of 38 routes were refused, 6 made no frame because the markup was not a frame tag or an object was converted once, and 4 made a frame: the clone routes (`cloneNode`, `importNode`, `cloneContents`) applied to a frame that the page already had. |
+
+The 38 routes, with the control that shows each can make a frame: with no guard, 28 made a frame. The routes are `createElement` and `createElementNS` (also in upper case, and with a namespace prefix), `object`, `embed` and a `frame` inside a `frameset`, `insertAdjacentHTML`, `innerHTML` and `outerHTML` on an element and on a detached element, `createContextualFragment`, `DOMParser` for HTML and for XML (with the node appended and with `importNode`), a `template`, an element made by `createHTMLDocument`, `setHTMLUnsafe`, `Document.parseHTMLUnsafe`, an `innerHTML` in a shadow root, `createDocument` with a frame as the root element, a customized built-in element (`class extends HTMLIFrameElement`, defined with `extends: 'iframe'` and made with `new`), tag names and markup given as objects, and `document.write` in a new document. `object` and `embed` with `about:blank` did not add to `window.length` even without the guard, and the `frame` in a `frameset` made a frame whose window threw a SecurityError when read; they are refused anyway.
+
+The guard now wraps `createElement`, `createElementNS`, `DOMImplementation.createDocument`, `CustomElementRegistry.define` (the `extends` option), `insertAdjacentHTML`, `setHTML`, `setHTMLUnsafe`, `createContextualFragment`, `parseFromString`, `Document.parseHTMLUnsafe`, `execCommand` and the setters of `innerHTML` and `outerHTML` (and of `innerHTML` on a shadow root), and hides `document.write` and `document.writeln`. A markup string is refused when it holds an opening tag of `iframe`, `frame`, `frameset`, `object` or `embed`, in any case and with any namespace prefix. The clone routes are not wrapped: a cloned frame is a copy of one that the page has, and that frame's window is reachable by `window[0]` without any creation, so wrapping them would not close anything.
+
+Controls and results of the refusal:
+
+| Check | Result |
+|---|---|
+| Naive check (control): a wrapper on `createElement`, `insertAdjacentHTML` and `innerHTML` that converts the argument to a string to test it and then passes the original object on | Refuses a plain `iframe`, and is passed by an object whose `toString` returns `div` or `<p>` first and `iframe` second: a frame is made by each of the three. This shows that the rows below can fail. |
+| The guard with an object whose `toString` changes | No frame. The guard converts an object once and passes the string it checked. |
+| The same, after the code redefined `RegExp.prototype.exec` and `test`, `Function.prototype.apply` and `call`, `Reflect.apply`, `Array.prototype.join` and its iterator, `String.prototype.toString` and `window.String` | The same 28 routes refused and the same 4 clone routes. The guard reads the functions it depends on before the transform runs. Two routes in this run call a redefined built-in themselves, so their refusal is not counted for the guard. |
+| Markup that is not a tag (`< iframe>`, text) | Not refused, and the naive check, which tests the substring, refuses it. |
+| The page, from its own context, in both guarded runs | Creates a frame by `createElement`, `createElementNS`, `insertAdjacentHTML`, `innerHTML`, `outerHTML`, `createContextualFragment`, `DOMParser`, a `template`, `setHTMLUnsafe`, a customized built-in element and `createDocument`, and `window[n].fetch` is a function for each; its `createElement` and `insertAdjacentHTML` and the `innerHTML` setter are native code; `document.write` is a function. |
+
+One route stays open: the windows of frames that the page already had. On `/page-frames`, `window[0]` reaches `fetch` with the guard, and the server sees the request. The page's own frames are not created by the transform and no definition on the window hides an index. A frame of another origin is not reachable this way, because its window is cross-origin; that was not measured.
+
 ### Page objects reached through the Xray waiver
 
 A review of the first version of the guard (commit 76d9244) pointed out that `wrappedJSObject` is not specific to the window: Firefox offers the same waiver on every Xray-wrapped page object, and a waived page object leads back to the page's unmodified window. `resources.mjs` measures this on 2026-11-01 in Firefox 159.0, on the page `/page-frames`, in three configurations: no guard (the control), the guard with nothing declared, and the guard with `network` and `storage` declared.
@@ -130,7 +157,7 @@ The last three routes are attributes of inserted elements, in the same family as
 
 ## What remains reachable
 
-- Windows reached by index. `window[0]`, `window[1]` and so on, for iframes that the transform creates, reach every feature. A property cannot be defined on an index of the window wrapper (the call succeeds and the read is unchanged), so the guard cannot hide them. They could be closed only by refusing the creation of frames at run time through every API that creates elements, which was not attempted.
+- Windows reached by index for frames that the page already had (see the section on windows reached by index). A property cannot be defined on an index of the window wrapper.
 - The Xray waiver on elements, text nodes, events and collections, and `XPCNativeWrapper.unwrap`. They reach the page's window and its `Function` (see the section on the waiver). Only the static analysis refuses them.
 - A `video` poster, `link rel="modulepreload"` and a click on a submit button, which load or send without a feature of the window.
 - Requests made by inserted elements: `style` elements containing `url()`, `@import` or `@font-face`, and `iframe` with `src`, as in the table above.
@@ -156,6 +183,7 @@ The last three routes are attributes of inserted elements, in the same family as
 |---|---|
 | `techniques.mjs` | Which way of removing a feature works, per route |
 | `probe.mjs` | Reachability by route with and without the guard, the page controls and the inserted elements |
+| `frames.mjs`, `frames-code.mjs` | Windows reached by index, and the refusal of frame creation through every API that makes elements |
 | `integration.mjs` | The guard in the registration that the extension makes |
 | `resources.mjs`, `resources-code.mjs` | Page objects reached through the waiver, and loads that the world's CSP does not stop |
 | `world.mjs` | Registers code in a world, opens a page and reads the report; shared by the probes that measure one part of the guard |
@@ -172,6 +200,7 @@ WA_RDP_PORT=<port> node test/runtime-guard/techniques.mjs
 WA_RDP_PORT=<port> node test/runtime-guard/probe.mjs
 WA_RDP_PORT=<port> node test/runtime-guard/integration.mjs
 WA_RDP_PORT=<port> node test/runtime-guard/resources.mjs
+WA_RDP_PORT=<port> node test/runtime-guard/frames.mjs
 ```
 
 `probe.mjs` imports `src/background/runtime-guard.ts` directly, which needs a Node version that strips TypeScript types (22.18 or later). Each probe prints its controls with its results and exits with 1 when a row of its verdict fails.
