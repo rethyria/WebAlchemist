@@ -330,10 +330,32 @@ const WRITE_REFUSED = new Map<string, string>([
   ['srcdoc', 'Sets the page inside a frame from a text string, which can run content.'],
   ['text', 'Sets the source text of an element that may be a script.'],
 ])
-/** Properties that carry a URL. Setting one makes the browser request it. */
+/**
+ * Properties that carry a URL. Setting one makes the browser request it or
+ * follow it. `baseVal` and `animVal` are the value of an SVG `href`, which is
+ * an object, so `el.href.baseVal = '...'` sets the address.
+ */
 const WRITE_URL = new Set([
   'src', 'href', 'srcset', 'action', 'formAction', 'poster', 'ping', 'background', 'codebase', 'lowsrc',
+  'baseVal', 'animVal',
 ])
+/**
+ * The parts of an address on a link or a form. Setting one changes where the
+ * element goes (`a.hostname = 'evil.example'`), so each is network use, but
+ * none can make the address a `javascript:` URL, so the check for that does
+ * not apply. They are ordinary on a `URL` object, which loads nothing.
+ */
+const ADDRESS_PARTS = new Set([
+  'hostname', 'host', 'protocol', 'pathname', 'search', 'hash', 'port', 'username', 'password',
+])
+/**
+ * `data` is the address of an `object` element and also the text of a text
+ * node, so the name alone cannot be refused. It is treated as an address
+ * unless the object is provably a text node or comment made in this code.
+ */
+const DATA_PROPERTY = 'data'
+/** The start of an address that cannot be a `javascript:` URL. */
+const SAFE_URL_START = /^(https?:\/\/|\/|#|\?|\.\.?\/)/i
 /** Attribute names that carry a URL, or run code, when set with setAttribute. */
 const ATTRIBUTE_URL = new Set([
   'src', 'href', 'srcset', 'action', 'formaction', 'poster', 'ping', 'background',
@@ -364,7 +386,16 @@ const SELECTOR_METHODS = new Map([
 /** Functions that resolve to another value later, so a literal using one proves nothing. */
 const CSS_INDIRECT = /\b(var|env|attr)\s*\(/i
 const CSS_LOADING_TEXT = /@import|\burl\s*\(|\bimage-set\s*\(|\bsrc\s*\(/i
-const JAVASCRIPT_URL = /^\s*javascript:/i
+
+/**
+ * True when the text is a `javascript:` address as the browser reads it. A
+ * browser removes tabs and line breaks anywhere in an address and ignores
+ * leading control characters and spaces, so `java\tscript:` and `\n javascript:`
+ * are both `javascript:`.
+ */
+function isJavascriptUrl(text: string): boolean {
+  return /^javascript:/i.test(text.replace(/[\t\n\r]/g, '').replace(/^[\u0000-\u0020]+/, ''))
+}
 
 /**
  * Replaces CSS escapes with the characters they stand for, so that `u\72 l(`
@@ -704,6 +735,86 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
     return ok
   }
 
+  /** True when the object is a name that only ever holds an object literal written in this code. */
+  function isPlainObject(expr: N | null, scope: Scope): boolean {
+    return holdsOnly(expr, scope, (e) => e.type === 'ObjectExpression')
+  }
+
+  /**
+   * True when the expression satisfies `matches`, or is a name that every write
+   * to it satisfies. Used to show what an object is, from where it came.
+   */
+  function holdsOnly(
+    expr: N | null,
+    scope: Scope,
+    matches: (expr: N, scope: Scope) => boolean,
+    visiting = new Set<Binding>(),
+  ): boolean {
+    if (!expr) return false
+    if (matches(expr, scope)) return true
+    if (expr.type !== 'Identifier') return false
+    const binding = scope.lookup(expr['name'])
+    if (!binding || binding.opaque || visiting.has(binding) || binding.sources.length === 0) return false
+    visiting.add(binding)
+    const ok = binding.sources.every((src) => src.op === '=' && holdsOnly(src.value, src.scope, matches, visiting))
+    visiting.delete(binding)
+    return ok
+  }
+
+  /** `new URL(...)`, which loads nothing. */
+  function isNewUrl(expr: N, scope: Scope): boolean {
+    return (
+      expr.type === 'NewExpression' &&
+      expr['callee'].type === 'Identifier' &&
+      expr['callee'].name === 'URL' &&
+      !scope.lookup('URL')
+    )
+  }
+
+  /** A text node or comment made in this code, which holds text and not an address. */
+  function isTextNodeMaker(expr: N, scope: Scope): boolean {
+    if (expr.type === 'NewExpression') {
+      return expr['callee'].type === 'Identifier' && expr['callee'].name === 'Text' && !scope.lookup('Text')
+    }
+    return (
+      expr.type === 'CallExpression' &&
+      expr['callee'].type === 'MemberExpression' &&
+      ['createTextNode', 'createComment'].includes(staticName(expr['callee']) ?? '')
+    )
+  }
+
+  /**
+   * The start of every text a string expression can have, when it is written
+   * out: the whole text of a literal, the first part of a template, and the
+   * left operand of a `+`. Null when any part is not written out.
+   */
+  function leadingTexts(expr: N | null): string[] | null {
+    if (!expr) return null
+    if (expr.type === 'Literal') return typeof expr['value'] === 'string' ? [expr['value']] : null
+    if (expr.type === 'TemplateLiteral') return [((expr['quasis'] as N[])[0] as N)['value'].cooked ?? '']
+    if (expr.type === 'ConditionalExpression') {
+      const yes = leadingTexts(expr['consequent'])
+      const no = leadingTexts(expr['alternate'])
+      return yes && no ? [...yes, ...no] : null
+    }
+    if (expr.type === 'BinaryExpression' && expr['operator'] === '+') return leadingTexts(expr['left'])
+    return null
+  }
+
+  /**
+   * True when an address value cannot be a `javascript:` URL: it is written out
+   * in full and is not one, or its written-out start is `https://`, `http://`,
+   * `/`, `#`, `?` or a relative path. An address built from a variable could be
+   * `'java' + 'script:...'`, which runs code when followed, so it is not proved.
+   */
+  function provablyNotJavascript(expr: N | null): boolean {
+    if (!expr) return false
+    const full = literalTexts(expr)
+    if (full) return full.every((text) => !isJavascriptUrl(text))
+    const start = leadingTexts(expr)
+    return start !== null && start.every((text) => SAFE_URL_START.test(text))
+  }
+
   /**
    * Every text a string expression can have when it is made only of literals,
    * conditionals between literals and `+` between them, or null when any part
@@ -781,9 +892,16 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
     if (CSS_LOADING_TEXT.test(text)) {
       needsNetwork(node, 'url()', 'Contains style text that makes the browser request an address.')
     }
-    if (JAVASCRIPT_URL.test(text)) {
+    if (isJavascriptUrl(text)) {
       block(node, 'javascript:', 'Contains an address that runs code when it is followed.')
     }
+  }
+
+  interface WriteOptions {
+    /** `+=`: the value is added to what is there, so it proves nothing about the result. */
+    append?: boolean
+    /** The object the property is written on, when the code names it. */
+    object?: N | null
   }
 
   /**
@@ -791,11 +909,41 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
    * URL requests it; a style property that can carry a URL is accepted only
    * with a literal value that does not contain one.
    */
-  function checkWrite(target: N, name: string, value: N | null, scope: Scope, append = false): void {
+  function checkWrite(target: N, name: string, value: N | null, scope: Scope, options: WriteOptions = {}): void {
+    const append = options.append === true
+    const object = options.object ?? null
     const refused = WRITE_REFUSED.get(name)
     if (refused) block(target, name, refused)
     if (WRITE_URL.has(name)) {
       needsNetwork(target, name, 'Sets an address on an element, which makes the browser request it or follow it.')
+      // Network use is declared for an address, but `javascript:` is code and
+      // is refused whatever is declared. An address that is not written out
+      // could be one, so it is accepted only when its start is.
+      if (append || !provablyNotJavascript(value)) {
+        // A different api name from the network finding above: findings at the
+        // same position with the same name are merged, and the merge kept the
+        // warning that a declared capability unlocks.
+        block(target, `${name} (javascript: address)`, 'Sets an address that is not written out, or does not start with https://, http:// or a path, so this check cannot tell that it is not a javascript: address, which runs code.')
+      }
+    }
+    if (ADDRESS_PARTS.has(name) || name === DATA_PROPERTY) {
+      // Resolved after the walk, because it depends on what the object holds.
+      deferred.push(() => {
+        const part = ADDRESS_PARTS.has(name)
+        if (isPlainObject(object, scope)) return
+        if (part && holdsOnly(object, scope, isNewUrl)) return
+        if (!part && holdsOnly(object, scope, isTextNodeMaker)) return
+        needsNetwork(
+          target,
+          name,
+          part
+            ? 'Sets part of an address, which changes where a link or form goes.'
+            : 'Sets data, which is an address on an object element and text on a text node, and this check cannot tell which this is.',
+        )
+        if (!part && (append || !provablyNotJavascript(value))) {
+          block(target, `${name} (javascript: address)`, 'Sets data to a value that is not written out, or does not start with https://, http:// or a path, so this check cannot tell that it is not a javascript: address.')
+        }
+      })
     }
     // Text written out is checked whatever the property, because a custom
     // property or a text node can carry CSS that another rule then applies.
@@ -897,7 +1045,7 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
         visit(pattern, ctx, pattern)
         {
           const name = staticName(pattern)
-          if (name !== null) checkWrite(pattern, name, null, ctx.scope)
+          if (name !== null) checkWrite(pattern, name, null, ctx.scope, { object: pattern['object'] })
         }
         return
       case 'ObjectPattern':
@@ -1132,6 +1280,9 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
           block(node, `${name}(srcdoc)`, 'Sets the page inside a frame from a text string, which can run content.')
         } else if (ATTRIBUTE_URL.has(lower)) {
           needsNetwork(node, `${name}(${lower})`, 'Sets an address on an element, which makes the browser request it or follow it.')
+          if (name === 'setAttribute' && !provablyNotJavascript(args[1] ?? null)) {
+            block(node, `setAttribute(${lower}) (javascript: address)`, 'Sets an address that is not written out, or does not start with https://, http:// or a path, so this check cannot tell that it is not a javascript: address, which runs code.')
+          }
         } else if (lower === 'http-equiv') {
           block(node, `${name}(http-equiv)`, 'Redirects the page from a meta element.')
         } else if (name === 'setAttribute' && isUrlBearingStyleName(lower)) {
@@ -1169,7 +1320,7 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
               block(prop, 'Object.assign', 'Copies properties whose names are not written out, so this check cannot tell which properties it sets.')
             } else {
               checkName(key, prop, false)
-              checkWrite(prop, key, prop['value'], ctx.scope)
+              checkWrite(prop, key, prop['value'], ctx.scope, { object: target ?? null })
             }
           }
         }
@@ -1428,7 +1579,10 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
             // is checked like a plain `=`; `+=` appends; the arithmetic
             // operators produce a number and have no value to check.
             const assigns = op === '=' || op === '||=' || op === '&&=' || op === '??='
-            checkWrite(left, name, assigns || op === '+=' ? node['right'] : null, ctx.scope, op === '+=')
+            checkWrite(left, name, assigns || op === '+=' ? node['right'] : null, ctx.scope, {
+              append: op === '+=',
+              object: left['object'],
+            })
           }
         } else {
           visitPattern(left, ctx, 'assign')
@@ -1446,7 +1600,7 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
           visit(arg, ctx, node)
           if (arg.type === 'MemberExpression') {
             const name = staticName(arg)
-            if (name !== null) checkWrite(arg, name, null, ctx.scope)
+            if (name !== null) checkWrite(arg, name, null, ctx.scope, { object: arg['object'] })
           }
         }
         return
