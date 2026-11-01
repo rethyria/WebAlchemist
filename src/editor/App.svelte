@@ -106,12 +106,11 @@
   async function setCssMode(mode: CssUrlMode) {
     if (!cssPolicyKey) return
     try {
-      const fresh = await send<Settings>({ type: 'get-settings' })
-      const next = { ...fresh.cssUrlPolicy }
-      if (mode === 'block') delete next[cssPolicyKey]
-      else next[cssPolicyKey] = mode
-      await send({ type: 'save-settings', settings: { ...fresh, cssUrlPolicy: next } })
-      cssPolicy = next
+      const saved = await send<Settings>({
+        type: 'patch-settings',
+        change: { kind: 'css-site-mode', key: cssPolicyKey, mode },
+      })
+      cssPolicy = saved.cssUrlPolicy
       pendingUrls = []
       approveListed = false
       if (transform && !creating) await send({ type: 'reapply-everywhere', id: transform.id })

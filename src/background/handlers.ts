@@ -297,39 +297,22 @@ export async function handleBlockedCount(deps: {
 /* Saving settings                                                     */
 /* ------------------------------------------------------------------ */
 
-export interface SettingsDeps {
-  /**
-   * Stores the settings and returns the ones that were stored before. The read
-   * is made inside the settings queue, not before it: a read made first would
-   * delay this save behind a change that was sent after it (#85).
-   */
-  saveSettings: (settings: Settings) => Promise<Settings>
-  /** Re-registers every script, which applies the kill switch. `before` is what was stored before the save. */
-  reregisterAll: (before: Settings) => Promise<unknown>
-  /** Recomputes the CSS and scripts of every open tab. */
-  reapplyAllTabs: () => Promise<void>
-}
-
 /** The per-site CSS settings as one string, so two tables compare equal whatever their key order. */
 function policyFingerprint(policy: Settings['cssUrlPolicy'] | undefined): string {
   return JSON.stringify(Object.entries(policy ?? {}).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
 }
 
 /**
- * Saves settings. When the per-site CSS settings changed, every open tab is
- * reapplied: a tab keeps the CSS that was injected under the old settings
- * until something reapplies it, so tightening a site's setting left the CSS
- * that the new setting refuses on other open tabs of that site (found in the
- * review of 4dab39a). Other settings do not change what CSS is injected.
+ * Whether the per-site CSS settings differ. A tab keeps the CSS that was
+ * injected under the old settings until something reapplies it, so tightening
+ * a site's setting left the CSS that the new setting refuses on other open tabs
+ * of that site (found in the review of 4dab39a).
  */
-export async function handleSaveSettings(message: Of<'save-settings'>, deps: SettingsDeps): Promise<true> {
-  const previous = await deps.saveSettings(message.settings)
-  // The kill switch changes which scripts may run.
-  await deps.reregisterAll(previous)
-  if (policyFingerprint(message.settings.cssUrlPolicy) !== policyFingerprint(previous.cssUrlPolicy)) {
-    await deps.reapplyAllTabs()
-  }
-  return true
+export function cssPolicyChanged(
+  before: Settings['cssUrlPolicy'] | undefined,
+  after: Settings['cssUrlPolicy'] | undefined,
+): boolean {
+  return policyFingerprint(before) !== policyFingerprint(after)
 }
 
 /* ------------------------------------------------------------------ */

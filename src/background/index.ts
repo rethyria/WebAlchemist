@@ -52,7 +52,7 @@ import {
   handleBlockedCount,
   handlePreviewCss,
   handleReview,
-  handleSaveSettings,
+  cssPolicyChanged,
   handleSaveTransform,
   type CssApplyDeps,
   type SaveDeps,
@@ -115,7 +115,6 @@ import {
   previewImport,
   lockVault,
   reorderTransforms,
-  saveSettings,
   changeSettings,
   foldUnsavedUsage,
   resetModelChosenMain,
@@ -844,14 +843,6 @@ async function handle(
       return true
     }
 
-    case 'save-settings': {
-      return handleSaveSettings(message, {
-        saveSettings,
-        reregisterAll: (before) => afterSettingsWritten(before.aiJsKillSwitch),
-        reapplyAllTabs,
-      })
-    }
-
     case 'count-js-tabs':
       return countTabsWithJavaScript(() => true)
 
@@ -903,10 +894,17 @@ async function handle(
       // Read inside the settings queue, so this change keeps its place there
       // relative to a save sent at the same time (#85).
       let switchBefore = false
+      let policyBefore: Settings['cssUrlPolicy'] = {}
       const saved = await changeSettings(message.change, (before) => {
         switchBefore = before.aiJsKillSwitch
+        policyBefore = before.cssUrlPolicy
       })
       if (message.change.kind === 'fields') await afterSettingsWritten(switchBefore)
+      // A tab keeps the CSS that was inserted under the old setting until
+      // something reapplies it, so a changed site setting reapplies every tab.
+      if (message.change.kind === 'css-site-mode' && cssPolicyChanged(policyBefore, saved.cssUrlPolicy)) {
+        await reapplyAllTabs()
+      }
       return saved
     }
 

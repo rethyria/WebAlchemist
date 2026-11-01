@@ -40,18 +40,6 @@ describe('adding a provider', () => {
     expect(reply.data).toEqual(stored())
   })
 
-  // Control: the whole-object save the page used before does overwrite it,
-  // which is what the test above would show without the change.
-  it('is overwritten by a save of the whole settings object as loaded earlier', async () => {
-    const loaded = { ...DEFAULT_SETTINGS, providers: [provider('old')], activeProviderId: 'old' }
-    h.local.set('settings', { ...loaded, aiJsKillSwitch: true })
-    await h.onMessage({
-      type: 'save-settings',
-      settings: { ...loaded, providers: [...loaded.providers, provider('new')] },
-    })
-    expect(stored().aiJsKillSwitch).toBe(false)
-  })
-
   it('makes the new provider active when none is', async () => {
     await h.onMessage({ type: 'patch-settings', change: { kind: 'add-provider', provider: provider('first') } })
     expect(stored().activeProviderId).toBe('first')
@@ -299,30 +287,47 @@ describe('a stale active provider', () => {
   })
 })
 
-describe('saving the whole settings object', () => {
-  // A change is queued behind earlier ones; a save that skipped the queue wrote
-  // at once and was then overwritten by the change that was already running,
-  // so the later message lost to the earlier one.
-  it('runs after a change that was sent before it, in 20 of 20 runs', async () => {
+describe('the css-site-mode change (#147)', () => {
+  const change = (key: string, mode: string) =>
+    h.onMessage({ type: 'patch-settings', change: { kind: 'css-site-mode', key, mode } })
+
+  it('sets one site and leaves every other field as stored now', async () => {
+    h.local.set('settings', { ...DEFAULT_SETTINGS, aiJsKillSwitch: true, cssUrlPolicy: { 'b.example': 'same-origin' } })
+    const reply = await change('a.example', 'list-external')
+    expect(reply.ok).toBe(true)
+    expect(stored().cssUrlPolicy).toEqual({ 'b.example': 'same-origin', 'a.example': 'list-external' })
+    expect(stored().aiJsKillSwitch).toBe(true)
+  })
+
+  it('removes the entry for block', async () => {
+    h.local.set('settings', { ...DEFAULT_SETTINGS, cssUrlPolicy: { 'a.example': 'same-origin' } })
+    await change('a.example', 'block')
+    expect(stored().cssUrlPolicy).toEqual({})
+  })
+
+  it('keeps a kill switch turned on by a change sent at the same time, in 20 of 20 runs', async () => {
     for (let run = 0; run < 20; run += 1) {
       h.local.set('settings', { ...DEFAULT_SETTINGS })
       await Promise.all([
-        h.onMessage({ type: 'patch-settings', change: { kind: 'fields', fields: { accent: 'green' } } }),
-        h.onMessage({ type: 'save-settings', settings: { ...DEFAULT_SETTINGS, accent: 'blue' } }),
+        h.onMessage({ type: 'patch-settings', change: { kind: 'fields', fields: { aiJsKillSwitch: true } } }),
+        change('a.example', 'same-origin'),
       ])
-      expect(stored().accent).toBe('blue')
+      expect(stored().aiJsKillSwitch).toBe(true)
+      expect(stored().cssUrlPolicy).toEqual({ 'a.example': 'same-origin' })
     }
   })
 
-  // Control: the same two messages sent in the opposite order end with the
-  // change, so the result above comes from the order and not from one of the
-  // two messages always winning.
-  it('control: the change wins when it is sent after the save', async () => {
+  it('refuses a key that is not a site name and a mode that does not exist, and writes nothing', async () => {
     h.local.set('settings', { ...DEFAULT_SETTINGS })
-    await Promise.all([
-      h.onMessage({ type: 'save-settings', settings: { ...DEFAULT_SETTINGS, accent: 'blue' } }),
-      h.onMessage({ type: 'patch-settings', change: { kind: 'fields', fields: { accent: 'green' } } }),
-    ])
-    expect(stored().accent).toBe('green')
+    expect((await change('not a host', 'same-origin')).ok).toBe(false)
+    expect((await change('__proto__', 'same-origin')).ok).toBe(false)
+    expect((await change('a.example', 'allow-all')).ok).toBe(false)
+    expect(stored().cssUrlPolicy).toEqual({})
+  })
+
+  it('no longer accepts save-settings', async () => {
+    h.local.set('settings', { ...DEFAULT_SETTINGS })
+    await h.onMessage({ type: 'save-settings', settings: { ...DEFAULT_SETTINGS, accent: 'blue' } })
+    expect(stored().accent).toBe(DEFAULT_SETTINGS.accent)
   })
 })

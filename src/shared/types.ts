@@ -535,6 +535,11 @@ export type SettingsChange =
   | { kind: 'add-provider'; provider: Provider }
   /** Removes a provider and repairs the active choice. A missing id is not an error. */
   | { kind: 'remove-provider'; providerId: string }
+  /**
+   * Sets the CSS setting of one site, inside the settings queue. 'block' is the
+   * default and removes the entry. The key is a host name or `*.` and a host name.
+   */
+  | { kind: 'css-site-mode'; key: string; mode: CssUrlMode }
   /** Sets some of the top-level settings. The active provider must exist, or be null. */
   | { kind: 'fields'; fields: SettingsFields }
   /**

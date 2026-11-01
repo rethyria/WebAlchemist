@@ -257,7 +257,7 @@ describe('a preview that starts while the registrations are being rebuilt (#91)'
     await h.boot()
     const settings = (await h.onMessage({ type: 'get-settings' })).data
     const release = h.hold('browser.userScripts.getScripts', { firstCallOnly: true })
-    const rebuilt = h.onMessage({ type: 'save-settings', settings })
+    const rebuilt = h.onMessage({ type: 'patch-settings', change: { kind: 'fields', fields: { accent: settings.accent } } })
     await settle()
     const previewed = h.onMessage(await h.approvedPreview({ type: 'preview-js', tabId: 3, transform: draft() }))
     await settle()
@@ -277,7 +277,7 @@ describe('a preview that starts while the registrations are being rebuilt (#91)'
     // the test above is about the overlap.
     await h.boot()
     const settings = (await h.onMessage({ type: 'get-settings' })).data
-    await h.onMessage({ type: 'save-settings', settings })
+    await h.onMessage({ type: 'patch-settings', change: { kind: 'fields', fields: { accent: settings.accent } } })
     await h.onMessage(await h.approvedPreview({ type: 'preview-js', tabId: 3, transform: draft() }))
     expect(h.userScriptsHeld.has('preview-draft')).toBe(true)
   })
@@ -295,7 +295,7 @@ describe('a preview that ends while the registrations are being rebuilt (#91)', 
     expect(h.userScriptsHeld.has('preview-script-1')).toBe(true)
     const settings = (await h.onMessage({ type: 'get-settings' })).data
     const release = h.hold('browser.userScripts.getScripts', { firstCallOnly: true })
-    const rebuilt = h.onMessage({ type: 'save-settings', settings })
+    const rebuilt = h.onMessage({ type: 'patch-settings', change: { kind: 'fields', fields: { accent: settings.accent } } })
     await settle()
     const ended = end()
     await settle()
@@ -332,7 +332,7 @@ describe('a delete that overlaps a rebuild (#91)', () => {
     // read the script from storage by then.
     h.userScriptsHeld.delete('script-1')
     const release = h.hold('browser.userScripts.register')
-    const rebuilt = h.onMessage({ type: 'save-settings', settings })
+    const rebuilt = h.onMessage({ type: 'patch-settings', change: { kind: 'fields', fields: { accent: settings.accent } } })
     await settle()
     const deleted = h.onMessage({ type: 'delete-transform', id: 'script-1' })
     await settle()
