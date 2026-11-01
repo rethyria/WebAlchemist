@@ -95,3 +95,48 @@ describe('preview changes that overlap', () => {
     expect(h.session.get(`wa-css-preview-${TAB}`)).toBe('p { color: blue }')
   })
 })
+
+describe('an apply queued for a document that is replaced before it runs (#83)', () => {
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 20))
+
+  /**
+   * A preview insert is held so the tab's queue is busy. An apply is queued
+   * behind it for the current document, then a new document commits, and the
+   * queue is released. Returns the stylesheets inserted for the apply's CSS.
+   */
+  async function applyQueuedThenCommit() {
+    h.tabUrls.set(TAB, 'https://example.com/a1')
+    const release = h.hold('browser.scripting.insertCSS')
+    const preview = h.onMessage({ type: 'preview-css', tabId: TAB, css: 'p { color: red }' })
+    await settle()
+    // reapply-everywhere reads the tab, then queues an apply for this document.
+    const reapplied = h.onMessage({ type: 'reapply-everywhere', id: a.id })
+    await settle()
+    const committed = commit('https://example.com/a1')
+    await settle()
+    release()
+    await Promise.all([preview, reapplied, committed])
+    await settle()
+    return h.calls.insertCSS.filter((c) => c.css === stamped(a))
+  }
+
+  it('inserts nothing for the old document', async () => {
+    // The commit's own evaluation inserts the stylesheet once for the new
+    // document; a second insertion would be the stale task running.
+    expect(await applyQueuedThenCommit()).toHaveLength(1)
+    expect(stored()).toBe(stamped(a))
+  })
+
+  it('control: with no commit the queued apply does insert', async () => {
+    h.tabUrls.set(TAB, 'https://example.com/a1')
+    const release = h.hold('browser.scripting.insertCSS')
+    const preview = h.onMessage({ type: 'preview-css', tabId: TAB, css: 'p { color: red }' })
+    await settle()
+    const reapplied = h.onMessage({ type: 'reapply-everywhere', id: a.id })
+    await settle()
+    release()
+    await Promise.all([preview, reapplied])
+    // Shows the stale-task test counts a task that would otherwise run.
+    expect(h.calls.insertCSS.filter((c) => c.css === stamped(a))).toHaveLength(1)
+  })
+})
