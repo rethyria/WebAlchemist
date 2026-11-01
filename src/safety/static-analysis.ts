@@ -270,6 +270,8 @@ deny(
   // An attribute node is written through its own `value`, which skips every
   // check made on setAttribute.
   'getAttributeNode', 'getAttributeNodeNS',
+  // Replaces the keyframes of an animation after element.animate was checked.
+  'setKeyframes',
 )
 deny(
   'Submits a form, which sends its contents to the form address.',
@@ -365,6 +367,25 @@ const CSS_LOADING_TEXT = /@import|\burl\s*\(|\bimage-set\s*\(|\bsrc\s*\(/i
 const JAVASCRIPT_URL = /^\s*javascript:/i
 
 /**
+ * Replaces CSS escapes with the characters they stand for, so that `u\72 l(`
+ * is read as `url(` the way the browser reads it. An escape is a backslash and
+ * one to six hexadecimal digits with one optional space after them, or a
+ * backslash and any other character. The CSS checks run on the raw text and on
+ * this text, because the raw text is what an author sees and the decoded text
+ * is what the browser applies. The CSS tokenizer in css-check.ts decodes the
+ * same way, but it checks stylesheet text and returns urls rather than
+ * answering "does this text load something", so the small decoder is repeated
+ * here instead of importing a tokenizer for one regular expression.
+ */
+function decodeCssEscapes(text: string): string {
+  return text.replace(/\\([0-9a-fA-F]{1,6})[ \t\n\r\f]?|\\([^\n])/g, (_match, hex?: string, other?: string) => {
+    if (other !== undefined) return other
+    const code = parseInt(hex!, 16)
+    return code === 0 || code > 0x10ffff || (code >= 0xd800 && code <= 0xdfff) ? '\ufffd' : String.fromCodePoint(code)
+  })
+}
+
+/**
  * Style properties whose value can load a resource, compared after lowercasing
  * and removing dashes and vendor prefixes, so `backgroundImage`,
  * `background-image` and `-webkit-mask-image` all match. The list is exact
@@ -376,6 +397,9 @@ const URL_STYLE_NAMES = new Set([
   'filter', 'backdropfilter', 'liststyle', 'liststyleimage', 'mask', 'maskimage',
   'maskborder', 'maskbordersource', 'shapeoutside', 'clippath', 'offsetpath',
   'csstext', 'style',
+  // SVG paint and marker properties accept `url(#id)` and a full address, and
+  // `-webkit-box-reflect` accepts an image address.
+  'fill', 'stroke', 'marker', 'markerstart', 'markermid', 'markerend', 'boxreflect',
 ])
 function isUrlBearingStyleName(name: string): boolean {
   return URL_STYLE_NAMES.has(name.toLowerCase().replace(/^-?(webkit|moz)-?/, '').replace(/-/g, ''))
@@ -748,7 +772,12 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
   }
 
   /** Checks a string that appears in the code, wherever it is used. */
-  function checkText(node: N, text: string): void {
+  function checkText(node: N, raw: string): void {
+    const decoded = decodeCssEscapes(raw)
+    for (const text of decoded === raw ? [raw] : [raw, decoded]) checkOneText(node, text)
+  }
+
+  function checkOneText(node: N, text: string): void {
     if (CSS_LOADING_TEXT.test(text)) {
       needsNetwork(node, 'url()', 'Contains style text that makes the browser request an address.')
     }
@@ -779,7 +808,7 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
     if (isUrlBearingStyleName(name)) {
       if (texts === null) {
         needsNetwork(target, name, 'Sets a style that can load an address, and the value is not written out, so this check cannot tell.')
-      } else if (texts.some((text) => CSS_INDIRECT.test(text))) {
+      } else if (texts.some((text) => CSS_INDIRECT.test(text) || CSS_INDIRECT.test(decodeCssEscapes(text)))) {
         needsNetwork(target, name, 'Sets a style from a variable that can hold an address, so this check cannot tell what it loads.')
       }
     } else if (name.startsWith('--') && texts === null) {
@@ -1044,6 +1073,37 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
     visitAll(args, ctx, node)
   }
 
+  /**
+   * Checks the keyframes given to `element.animate`. Each property of a
+   * keyframe sets a style, so it is checked as a style write; keyframes that
+   * are not written out cannot be checked and are refused.
+   */
+  function checkKeyframes(node: N, keyframes: N | null, scope: Scope): void {
+    const notWritten = () =>
+      block(node, 'animate', 'Animates keyframes that are not written out in this code, so this check cannot tell which styles they set, and a style can load an address.')
+    const checkFrame = (frame: N) => {
+      if (frame.type !== 'ObjectExpression') return notWritten()
+      for (const prop of frame['properties'] as N[]) {
+        if (prop.type !== 'Property' || prop['computed'] === true) return notWritten()
+        const key = prop['key'].type === 'Identifier' ? prop['key'].name : String(prop['key'].value)
+        checkName(key, prop, false)
+        // The property form gives a list of values for one style.
+        const values = prop['value'].type === 'ArrayExpression' ? (prop['value']['elements'] as (N | null)[]) : [prop['value']]
+        for (const value of values) {
+          if (!value || value.type === 'SpreadElement') return notWritten()
+          checkWrite(prop, key, value, scope)
+        }
+      }
+    }
+    if (keyframes?.type === 'ArrayExpression') {
+      for (const frame of keyframes['elements'] as (N | null)[]) {
+        if (!frame) continue
+        checkFrame(frame)
+      }
+    } else if (keyframes?.type === 'ObjectExpression') checkFrame(keyframes)
+    else notWritten()
+  }
+
   /** Checks calls to the methods that create elements or set attributes and styles. */
   function checkMethodCall(node: N, callee: N, name: string, args: N[], ctx: Context): void {
     if (name === 'createElement') {
@@ -1115,6 +1175,8 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
         }
       }
     }
+
+    if (name === 'animate') checkKeyframes(node, args[0] ?? null, ctx.scope)
 
     if (
       OBJECT_ENUMERATORS.has(name) &&

