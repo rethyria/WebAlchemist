@@ -13,6 +13,7 @@ import { pageHasSensitiveFields } from './sensitive'
 import type { ConflictSpec, ContentEvent, ContentMessage, PickMode } from '@shared/messages'
 import type { OverlayPalette } from '@shared/accents'
 import { moveFrom, pickerActionFor, type PickerAction } from '@shared/picker-keys'
+import { relayPickerKey } from './picker-input'
 import type {
   Conflict,
   HoverTarget,
@@ -1618,7 +1619,7 @@ async function handleMessage(message: ContentMessage) {
     }
     case 'picker-key':
       // Ignored unless a pick is running, as the page's own listener is.
-      if (picking) applyPickerAction(message.action)
+      relayPickerKey({ picking }, message.action, applyPickerAction)
       return true
     case 'cancel-picking':
       stopPicking()
