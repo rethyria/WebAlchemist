@@ -44,6 +44,12 @@ export interface Harness {
   /** Contents of storage.session and storage.local; they survive `boot()`. */
   session: Map<string, unknown>
   local: Map<string, unknown>
+  /** What `userScripts.getScripts` reports; changed by register, update and unregister. */
+  userScriptsHeld: Map<string, any>
+  /** The content script registration, or null. */
+  contentScriptHeld: any
+  /** Origins `permissions.getAll` reports as granted. */
+  origins: string[]
   /** The URL `tabs.get` reports for each tab id; `tabs.query` lists these tabs. */
   tabUrls: Map<number, string>
   /** The window each tab is in; a tab not listed is in window 1. */
@@ -52,6 +58,8 @@ export interface Harness {
     insertCSS: { tabId: number; css: string }[]
     removeCSS: { tabId: number; css: string }[]
     unregister: string[]
+    /** Every change to the registered user scripts and content script, in order. */
+    registry: string[]
     setBadgeText: { tabId?: number | undefined; text: string | null }[]
     sendMessage: { tabId: number; message: any }[]
     /** Messages the background broadcast with `runtime.sendMessage`. */
@@ -73,8 +81,11 @@ export function createHarness(): Harness {
     session: new Map(),
     local: new Map(),
     tabUrls: new Map(),
+    userScriptsHeld: new Map(),
+    contentScriptHeld: null,
+    origins: [],
     tabWindows: new Map(),
-    calls: { insertCSS: [], removeCSS: [], unregister: [], setBadgeText: [], sendMessage: [], runtimeMessages: [] },
+    calls: { insertCSS: [], removeCSS: [], unregister: [], registry: [], setBadgeText: [], sendMessage: [], runtimeMessages: [] },
     listeners: new Map(),
     hasUserScripts: false,
     contentReply: () => undefined,
@@ -86,12 +97,39 @@ export function createHarness(): Harness {
   const overrides: Record<string, unknown> = {
     'browser.runtime.getURL': (path: string) => ORIGIN + path,
     'browser.runtime.id': 'wa@test',
-    'browser.permissions.getAll': async () => ({ origins: [], permissions: [] }),
+    'browser.permissions.getAll': async () => ({ origins: h.origins, permissions: [] }),
     'browser.permissions.contains': async () => h.hasUserScripts,
-    'browser.userScripts.unregister': async (filter: { ids: string[] }) => {
-      h.calls.unregister.push(...filter.ids)
+    'browser.userScripts.unregister': async (filter?: { ids?: string[] }) => {
+      const ids = filter?.ids ?? [...h.userScriptsHeld.keys()]
+      h.calls.registry.push(filter?.ids ? `unregister:${ids.join(',')}` : 'unregister:all')
+      h.calls.unregister.push(...ids)
+      for (const id of ids) h.userScriptsHeld.delete(id)
     },
-    'browser.userScripts.getScripts': async () => [],
+    'browser.userScripts.register': async (scripts: { id: string }[]) => {
+      for (const script of scripts) {
+        h.calls.registry.push(`register:${script.id}`)
+        h.userScriptsHeld.set(script.id, structuredClone(script))
+      }
+    },
+    'browser.userScripts.update': async (scripts: { id: string }[]) => {
+      for (const script of scripts) {
+        h.calls.registry.push(`update:${script.id}`)
+        h.userScriptsHeld.set(script.id, structuredClone(script))
+      }
+    },
+    'browser.userScripts.configureWorld': async () => {},
+    'browser.userScripts.getScripts': async (filter?: { ids?: string[] }) =>
+      [...h.userScriptsHeld.values()].filter((s) => !filter?.ids || filter.ids.includes(s.id)),
+    'browser.scripting.getRegisteredContentScripts': async () =>
+      h.contentScriptHeld ? [structuredClone(h.contentScriptHeld)] : [],
+    'browser.scripting.unregisterContentScripts': async () => {
+      h.calls.registry.push('unregister-content')
+      h.contentScriptHeld = null
+    },
+    'browser.scripting.registerContentScripts': async (scripts: any[]) => {
+      h.calls.registry.push('register-content')
+      h.contentScriptHeld = structuredClone(scripts[0])
+    },
     'browser.runtime.sendMessage': async (message: unknown) => {
       h.calls.runtimeMessages.push(message)
     },

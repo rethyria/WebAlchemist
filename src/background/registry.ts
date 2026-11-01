@@ -101,32 +101,21 @@ export async function hasUserScriptsPermission(): Promise<boolean> {
  * sidebar calls permissions.request() itself, from the click handler.
  */
 
-export async function registerTransform(transform: Transform): Promise<void> {
-  if (transform.kind !== 'js' || !transform.enabled || !transform.code) return
+/**
+ * What should be registered for a transform, or null when nothing should be:
+ * it is not JavaScript, is disabled, has no code, or is an AI-written script
+ * while the kill switch is on.
+ */
+async function registrationFor(transform: Transform): Promise<Mv3RegisteredUserScript | null> {
+  if (transform.kind !== 'js' || !transform.enabled || !transform.code) return null
 
   const settings = await getSettings()
-  if (settings.aiJsKillSwitch && transform.origin === 'ai') return
-
-  if (!(await hasUserScriptsPermission())) {
-    throw new Error(
-      'Running JavaScript transforms needs an extra permission. Grant it from the sidebar.',
-    )
-  }
+  if (settings.aiJsKillSwitch && transform.origin === 'ai') return null
 
   const worldId = worldIdFor(transform)
   const world = transform.world ?? 'USER_SCRIPT'
 
-  if (world === 'USER_SCRIPT') {
-    await userScripts.configureWorld({
-      worldId,
-      csp: cspForCapabilities(transform.capabilities),
-      // Transforms have no reason to talk back to the extension. Leaving this
-      // off removes a channel rather than leaving one open unused.
-      messaging: false,
-    })
-  }
-
-  const registration: Mv3RegisteredUserScript = {
+  return {
     id: transform.id,
     matches: matchPatternsFor(transform),
     // Wrapped so the transform re-applies after framework re-renders.
@@ -135,6 +124,30 @@ export async function registerTransform(transform: Transform): Promise<void> {
     ...(world === 'USER_SCRIPT' ? { worldId } : {}),
     runAt: 'document_idle',
   }
+}
+
+async function configureWorldFor(transform: Transform): Promise<void> {
+  if ((transform.world ?? 'USER_SCRIPT') !== 'USER_SCRIPT') return
+  await userScripts.configureWorld({
+    worldId: worldIdFor(transform),
+    csp: cspForCapabilities(transform.capabilities),
+    // Transforms have no reason to talk back to the extension. Leaving this
+    // off removes a channel rather than leaving one open unused.
+    messaging: false,
+  })
+}
+
+export async function registerTransform(transform: Transform): Promise<void> {
+  const registration = await registrationFor(transform)
+  if (!registration) return
+
+  if (!(await hasUserScriptsPermission())) {
+    throw new Error(
+      'Running JavaScript transforms needs an extra permission. Grant it from the sidebar.',
+    )
+  }
+
+  await configureWorldFor(transform)
 
   const existing = await userScripts.getScripts({ ids: [transform.id] })
   if (existing.length > 0) {
@@ -153,35 +166,79 @@ export async function unregisterTransform(id: string): Promise<void> {
   }
 }
 
+/** Whether a registration the browser holds is the one that would be made now. */
+function sameRegistration(held: Mv3RegisteredUserScript, wanted: Mv3RegisteredUserScript): boolean {
+  const code = (r: Mv3RegisteredUserScript) => (r.js ?? []).map((source) => source.code ?? source.file)
+  return (
+    JSON.stringify(held.matches ?? []) === JSON.stringify(wanted.matches ?? []) &&
+    JSON.stringify(code(held)) === JSON.stringify(code(wanted)) &&
+    (held.world ?? 'USER_SCRIPT') === (wanted.world ?? 'USER_SCRIPT') &&
+    held.worldId === wanted.worldId &&
+    held.runAt === wanted.runAt
+  )
+}
+
 /**
- * Rebuilds every registration from storage.
+ * Brings the registrations in line with storage by changing only what differs.
  *
  * Called on install, on update (where the platform has wiped registrations),
- * and whenever the kill switch or a transform's enabled state changes.
+ * on every start of the background page, and whenever the kill switch or the
+ * set of transforms changes.
+ *
+ * This used to unregister everything and register the stored scripts again.
+ * The background page starts again after every 30-second idle period, and each
+ * start left a gap in which a page that was loading received no scripts, and
+ * removed the registration of a script that was being previewed. Now a
+ * registration that already matches is left alone, one that differs is updated,
+ * a missing one is added, and one for a transform that is deleted, disabled or
+ * blocked is removed. `keep` lists ids that have no stored transform but must
+ * stay registered, namely preview scripts.
  */
-export async function reregisterAll(): Promise<{ registered: number; skipped: number }> {
+export async function reregisterAll(
+  keep: string[] = [],
+): Promise<{ registered: number; skipped: number }> {
   if (!(await hasUserScriptsPermission())) {
     return { registered: 0, skipped: 0 }
   }
 
-  // Clear first so deleted or disabled transforms do not linger.
+  const held = new Map<string, Mv3RegisteredUserScript>()
   try {
-    await userScripts.unregister({})
+    for (const script of await userScripts.getScripts()) held.set(script.id, script)
   } catch {
-    // No registrations to clear.
+    // Nothing readable, so every wanted script is registered below.
   }
 
   const transforms = await getAllTransforms()
+  const wanted = new Set<string>()
   let registered = 0
   let skipped = 0
 
   for (const transform of transforms) {
     if (transform.kind !== 'js') continue
     try {
-      await registerTransform(transform)
+      const registration = await registrationFor(transform)
+      if (!registration) continue
+      wanted.add(transform.id)
+      const current = held.get(transform.id)
+      if (current && sameRegistration(current, registration)) {
+        // The world's CSP is set again: it is cheap, leaves no gap, and a
+        // changed capability list has to reach it.
+        await configureWorldFor(transform)
+      } else {
+        await registerTransform(transform)
+      }
       registered += 1
     } catch {
       skipped += 1
+    }
+  }
+
+  const stale = [...held.keys()].filter((id) => !wanted.has(id) && !keep.includes(id))
+  if (stale.length > 0) {
+    try {
+      await userScripts.unregister({ ids: stale })
+    } catch {
+      // Already gone.
     }
   }
 

@@ -79,6 +79,11 @@ import {
   vaultState,
 } from './storage'
 
+/** Rebuilds registrations from storage, leaving preview scripts registered. */
+async function reregister(): Promise<void> {
+  await reregisterAll(await previewedScriptIds())
+}
+
 /* ------------------------------------------------------------------ */
 /* Lifecycle                                                           */
 /* ------------------------------------------------------------------ */
@@ -89,7 +94,7 @@ browser.runtime.onInstalled.addListener(async (details) => {
   // working after an extension update — with no error, which is the worst
   // possible failure mode.
   if (details.reason === 'update' || details.reason === 'install') {
-    await reregisterAll()
+    await reregister()
     await reconcileContentScripts()
   }
 })
@@ -103,7 +108,7 @@ browser.runtime.onInstalled.addListener(async (details) => {
  */
 browser.permissions.onAdded.addListener(async (permissions) => {
   const granted = permissions.permissions as string[] | undefined
-  if (granted?.includes('userScripts')) await reregisterAll()
+  if (granted?.includes('userScripts')) await reregister()
   await reconcileContentScripts()
 })
 
@@ -483,7 +488,7 @@ async function handle(
     case 'save-settings':
       await saveSettings(message.settings)
       // The kill switch changes which scripts may run.
-      await reregisterAll()
+      await reregister()
       return true
 
     case 'set-credential':
@@ -704,7 +709,7 @@ async function handle(
       const result = await importTransforms(
         message.bundle as Awaited<ReturnType<typeof exportTransforms>>,
       )
-      await reregisterAll()
+      await reregister()
       return result
     }
   }
@@ -1277,6 +1282,6 @@ export { transformsForUrl, runReview }
 // Registration state can drift if the browser restarted with stale scripts,
 // or if a permission changed while the background script was not alive.
 void (async () => {
-  if (await hasUserScriptsPermission()) await reregisterAll()
+  if (await hasUserScriptsPermission()) await reregister()
   await reconcileContentScripts()
 })()

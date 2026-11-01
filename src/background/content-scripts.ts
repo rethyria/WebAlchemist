@@ -69,16 +69,6 @@ async function grantedOrigins(): Promise<string[]> {
 export async function reconcile(): Promise<{ registered: number }> {
   const origins = await grantedOrigins()
 
-  // Unregister first and unconditionally. Registering over an existing id
-  // throws, and after an update the platform's view and ours disagree.
-  try {
-    await browser.scripting.unregisterContentScripts({ ids: [SCRIPT_ID] })
-  } catch {
-    // Nothing was registered, which is the normal case on a fresh profile.
-  }
-
-  if (origins.length === 0) return { registered: 0 }
-
   const registration: Registration = {
     id: SCRIPT_ID,
     matches: origins,
@@ -91,6 +81,30 @@ export async function reconcile(): Promise<{ registered: number }> {
     persistAcrossSessions: true,
   }
 
+  /*
+   * Left alone when it already matches. This ran on every start of the event
+   * page, which is every 30-second idle period, and it removed the
+   * registration before adding it again: a page that began loading in between
+   * was given no content script, so the picker and the health check had
+   * nothing to talk to on that load.
+   */
+  const held = await registeredContentScript()
+  if (held && origins.length > 0 && sameRegistration(held, registration)) {
+    return { registered: origins.length }
+  }
+
+  if (!held && origins.length === 0) return { registered: 0 }
+
+  // Unregistered whenever one is held and differs. Registering over an existing
+  // id throws, and after an update the platform's view and ours disagree.
+  try {
+    await browser.scripting.unregisterContentScripts({ ids: [SCRIPT_ID] })
+  } catch {
+    // Nothing was registered, which is the normal case on a fresh profile.
+  }
+
+  if (origins.length === 0) return { registered: 0 }
+
   try {
     await browser.scripting.registerContentScripts([
       registration as unknown as browser.scripting.RegisteredContentScript,
@@ -102,4 +116,23 @@ export async function reconcile(): Promise<{ registered: number }> {
     // activeTab, so the user keeps a functioning extension rather than none.
     return { registered: 0 }
   }
+}
+
+async function registeredContentScript(): Promise<Registration | undefined> {
+  try {
+    const found = await browser.scripting.getRegisteredContentScripts({ ids: [SCRIPT_ID] })
+    return (found?.[0] as unknown as Registration | undefined) ?? undefined
+  } catch {
+    return undefined
+  }
+}
+
+function sameRegistration(held: Registration, wanted: Registration): boolean {
+  const sorted = (list: string[] | undefined) => JSON.stringify([...(list ?? [])].sort())
+  return (
+    sorted(held.matches) === sorted(wanted.matches) &&
+    sorted(held.js) === sorted(wanted.js) &&
+    held.runAt === wanted.runAt &&
+    held.persistAcrossSessions === wanted.persistAcrossSessions
+  )
 }
