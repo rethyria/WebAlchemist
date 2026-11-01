@@ -12,9 +12,11 @@ import {
   handleApproveCode,
   handlePreviewCss,
   handleReview,
+  handleSaveSettings,
   handleSaveTransform,
   type CssApplyDeps,
   type SaveDeps,
+  type SettingsDeps,
 } from './handlers'
 
 /*
@@ -367,5 +369,57 @@ describe('applyCssTransforms', () => {
     await applyCssTransforms(deps, 1, t, URL_ON_PAGE)
     await applyCssTransforms(deps, 1, t, URL_ON_PAGE)
     expect(log).toHaveLength(1)
+  })
+})
+
+describe('handleSaveSettings', () => {
+  function settingsDeps(before: Settings) {
+    const calls: string[] = []
+    const deps: SettingsDeps = {
+      getSettings: async () => before,
+      saveSettings: async () => {
+        calls.push('save')
+      },
+      reregisterAll: async () => {
+        calls.push('reregister')
+      },
+      reapplyAllTabs: async () => {
+        calls.push('reapply-all')
+      },
+    }
+    return { deps, calls }
+  }
+  const message = (settings: Settings): Extract<Message, { type: 'save-settings' }> => ({
+    type: 'save-settings',
+    settings,
+  })
+
+  it('reapplies every tab when a site setting is tightened', async () => {
+    const before = { ...DEFAULT_SETTINGS, cssUrlPolicy: { '*.example.com': 'same-origin' as const } }
+    const { deps, calls } = settingsDeps(before)
+    await handleSaveSettings(message({ ...before, cssUrlPolicy: {} }), deps)
+    expect(calls).toEqual(['save', 'reregister', 'reapply-all'])
+  })
+
+  it('reapplies every tab when a site setting is added or changed', async () => {
+    const { deps, calls } = settingsDeps(DEFAULT_SETTINGS)
+    await handleSaveSettings(message({ ...DEFAULT_SETTINGS, cssUrlPolicy: { 'a.example': 'same-origin' } }), deps)
+    expect(calls).toContain('reapply-all')
+  })
+
+  it('control: a change to another setting does not reapply the tabs', async () => {
+    const { deps, calls } = settingsDeps(DEFAULT_SETTINGS)
+    await handleSaveSettings(message({ ...DEFAULT_SETTINGS, aiJsKillSwitch: true }), deps)
+    expect(calls).toEqual(['save', 'reregister'])
+  })
+
+  it('control: the same site settings in another key order do not reapply the tabs', async () => {
+    const before = { ...DEFAULT_SETTINGS, cssUrlPolicy: { a: 'same-origin' as const, b: 'list-external' as const } }
+    const { deps, calls } = settingsDeps(before)
+    await handleSaveSettings(
+      message({ ...before, cssUrlPolicy: { b: 'list-external', a: 'same-origin' } }),
+      deps,
+    )
+    expect(calls).not.toContain('reapply-all')
   })
 })

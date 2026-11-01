@@ -31,6 +31,7 @@ import {
   handleApproveCode,
   handlePreviewCss,
   handleReview,
+  handleSaveSettings,
   handleSaveTransform,
   type CssApplyDeps,
   type SaveDeps,
@@ -345,10 +346,12 @@ async function handle(
     }
 
     case 'save-settings':
-      await saveSettings(message.settings)
-      // The kill switch changes which scripts may run.
-      await reregisterAll()
-      return true
+      return handleSaveSettings(message, {
+        getSettings,
+        saveSettings,
+        reregisterAll,
+        reapplyAllTabs,
+      })
 
     case 'set-credential':
       await setCredential(message.providerId, message.credential)
@@ -855,6 +858,11 @@ async function reapply(tabId: number | undefined): Promise<void> {
   // of the four call sites.
   const settings = await getSettings()
   await badge.transformCountChanged(tabId, transforms.length, settings.accent)
+}
+
+/** Recomputes what runs in every open tab, for a change that is not tied to one transform. */
+async function reapplyAllTabs(): Promise<void> {
+  for (const tab of await browser.tabs.query({})) await reapply(tab.id)
 }
 
 /** The URL of a tab, or undefined when there is no such tab or it has no URL. */

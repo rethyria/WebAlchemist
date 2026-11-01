@@ -204,6 +204,40 @@ export function fromExtensionPage(sender: { url?: string | undefined }, extensio
 }
 
 /* ------------------------------------------------------------------ */
+/* Saving settings                                                     */
+/* ------------------------------------------------------------------ */
+
+export interface SettingsDeps {
+  getSettings: () => Promise<Settings>
+  saveSettings: (settings: Settings) => Promise<void>
+  /** Re-registers every script, which applies the kill switch. */
+  reregisterAll: () => Promise<unknown>
+  /** Recomputes the CSS and scripts of every open tab. */
+  reapplyAllTabs: () => Promise<void>
+}
+
+/** The per-site CSS settings as one string, so two tables compare equal whatever their key order. */
+function policyFingerprint(policy: Settings['cssUrlPolicy'] | undefined): string {
+  return JSON.stringify(Object.entries(policy ?? {}).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
+}
+
+/**
+ * Saves settings. When the per-site CSS settings changed, every open tab is
+ * reapplied: a tab keeps the CSS that was injected under the old settings
+ * until something reapplies it, so tightening a site's setting left the CSS
+ * that the new setting refuses on other open tabs of that site (found in the
+ * review of 4dab39a). Other settings do not change what CSS is injected.
+ */
+export async function handleSaveSettings(message: Of<'save-settings'>, deps: SettingsDeps): Promise<true> {
+  const before = policyFingerprint((await deps.getSettings()).cssUrlPolicy)
+  await deps.saveSettings(message.settings)
+  // The kill switch changes which scripts may run.
+  await deps.reregisterAll()
+  if (policyFingerprint(message.settings.cssUrlPolicy) !== before) await deps.reapplyAllTabs()
+  return true
+}
+
+/* ------------------------------------------------------------------ */
 /* Applying stored CSS                                                 */
 /* ------------------------------------------------------------------ */
 
