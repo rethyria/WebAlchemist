@@ -48,6 +48,7 @@ node test/contrast/probe.mjs
 | `contrast/probe.mjs` | Does every surface meet WCAG in both schemes? (#38) |
 | `csp/server.mjs` | Does the user script world enforce `connect-src`? (#21) |
 | `vault-session/probe.mjs` | Can a content script read `storage.session`? (#79) |
+| `screenshot/probe.mjs` | Does the screenshot path give the drawn region, hand the grant back and send nothing without Generate? (#37) |
 | `runtime-guard/probe.mjs` | Does the runtime guard hide undeclared features from every route to a window, and leave the page alone? (#139) |
 | `runtime-guard/techniques.mjs` | Which way of removing a feature from a world works? (#139) |
 | `runtime-guard/integration.mjs` | Is the guard in the registration the extension makes? (#139) |
