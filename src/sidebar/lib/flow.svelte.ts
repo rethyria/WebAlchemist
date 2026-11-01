@@ -930,7 +930,33 @@ export class Flow {
     }
   }
 
-  async generate(): Promise<void> {
+  /**
+   * What `regenerate` replaced, kept until the attempt it started ends.
+   *
+   * The follow-up, the instruction and the history are changed before the
+   * request is sent, because generate reads them. If the attempt then fails or
+   * is cancelled, the panel returns to refining and these values have to go
+   * back: otherwise the follow-up box is empty, and the next attempt sends the
+   * old result's rationale as the assistant's answer to a request it never
+   * answered.
+   */
+  private refinement: { history: RefinementTurn[]; instruction: string; followUp: string } | null = null
+
+  private undoRefinement(): void {
+    const held = this.refinement
+    this.refinement = null
+    if (!held) return
+    this.history = held.history
+    this.instruction = held.instruction
+    this.followUp = held.followUp
+  }
+
+  /**
+   * `again` is what "Try again" repeats. A refinement passes itself, because
+   * repeating plain generate() would send the restored instruction, not the
+   * follow-up that failed.
+   */
+  async generate(again: () => Promise<void> = () => this.generate()): Promise<void> {
     const picked = this.picked
     if (!picked || !this.instruction.trim()) return
 
@@ -1022,6 +1048,7 @@ export class Flow {
             })
           : { static: [], undeclaredCapabilities: [], passed: true }
       if (!current()) return
+      this.refinement = null
 
       this.stage = 'preview'
       await this.applyPreview(result)
@@ -1032,7 +1059,8 @@ export class Flow {
       // Back where they started, with what they typed intact — a failed
       // request should not cost the user their description.
       this.step = from === 'refining' ? 'refining' : 'describing'
-      this.fail(cause, () => this.generate())
+      this.undoRefinement()
+      this.fail(cause, again)
     } finally {
       this.stopClock()
       /*
@@ -1328,6 +1356,11 @@ export class Flow {
     const text = this.followUp.trim()
     if (!text || !this.result) return
 
+    this.refinement = {
+      history: this.history,
+      instruction: this.instruction,
+      followUp: this.followUp,
+    }
     this.history = [
       ...this.history,
       { role: 'user', content: this.instruction },
@@ -1335,7 +1368,7 @@ export class Flow {
     ]
     this.instruction = text
     this.followUp = ''
-    await this.generate()
+    await this.generate(() => this.regenerate())
   }
 
   /**
@@ -1682,6 +1715,7 @@ export class Flow {
     // did not. A card and a timer that outlive the run it belonged to end by
     // calling retry() with nothing to repeat.
     this.dismissError()
+    this.refinement = null
     this.generation += 1
     // The run is over, so the all-sites grant it may have taken goes back.
     this.cancelScreenshot()

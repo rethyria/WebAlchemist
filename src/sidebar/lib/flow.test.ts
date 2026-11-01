@@ -379,3 +379,128 @@ describe('resetting the flow', () => {
   })
 })
 
+
+/* -------------------------------------------------------------------- */
+/* Refinements                                                           */
+/* -------------------------------------------------------------------- */
+
+type FakePort = {
+  request: any
+  disconnected: boolean
+  emit: (message: any) => void
+}
+const ports: FakePort[] = []
+const realConnect = (globalThis as any).browser.runtime.connect
+
+/** Stands in for the `wa-generate` port: the test decides what it answers. */
+function fakeConnect() {
+  const listeners: ((message: any) => void)[] = []
+  const port: FakePort & Record<string, any> = {
+    request: null,
+    disconnected: false,
+    emit: (message) => listeners.forEach((listener) => listener(message)),
+    onMessage: { addListener: (listener: any) => listeners.push(listener) },
+    onDisconnect: { addListener: () => {} },
+    postMessage: (request: any) => {
+      port.request = request
+    },
+    disconnect: () => {
+      port.disconnected = true
+    },
+  }
+  ports.push(port)
+  return port
+}
+
+const cssResult = (approach: string) =>
+  ({
+    name: 'n',
+    kind: 'css',
+    capabilities: [],
+    code: `/* ${approach} */`,
+    rationale: { targets: '', approach, assumptions: [] },
+    intent: 'model intent',
+  }) as any
+
+function flowAtRefining() {
+  const flow = newFlow()
+  flow.picked = { ...found, cropDrawn: false } as any
+  flow.instruction = 'first'
+  flow.result = cssResult('A1')
+  flow.step = 'refining'
+  return flow
+}
+
+/** Waits until the flow has opened its next port, then returns it. */
+async function nextPort(count: number): Promise<FakePort> {
+  await vi.waitFor(() => expect(ports.length).toBe(count))
+  return ports[count - 1]!
+}
+
+describe('a refinement that does not complete', () => {
+  beforeEach(() => {
+    ports.length = 0
+    ;(globalThis as any).browser.runtime.connect = fakeConnect
+  })
+  afterEach(() => {
+    ;(globalThis as any).browser.runtime.connect = realConnect
+  })
+
+  it('keeps the follow-up and the old conversation when the request fails', async () => {
+    const flow = flowAtRefining()
+    flow.followUp = 'second'
+    const run = flow.regenerate()
+    ;(await nextPort(1)).emit({ type: 'error', error: { message: 'failed', kind: 'network' } })
+    await run
+
+    expect(flow.step).toBe('refining')
+    expect(flow.followUp).toBe('second')
+    expect(flow.instruction).toBe('first')
+    expect(flow.history).toEqual([])
+  })
+
+  it('does not send an assistant turn for a request that was never answered', async () => {
+    const flow = flowAtRefining()
+    flow.followUp = 'second'
+    const failing = flow.regenerate()
+    ;(await nextPort(1)).emit({ type: 'error', error: { message: 'failed', kind: 'network' } })
+    await failing
+
+    flow.followUp = 'third'
+    const next = flow.regenerate()
+    const port = await nextPort(2)
+    expect(port.request.instruction).toBe('third')
+    expect(port.request.history.map((turn: any) => turn.content)).toEqual(['first', 'A1'])
+    port.emit({ type: 'done', result: cssResult('A3') })
+    await next
+    expect(flow.step).toBe('refining')
+  })
+
+  it('repeats the follow-up that failed when "Try again" is used', async () => {
+    const flow = flowAtRefining()
+    flow.followUp = 'second'
+    const failing = flow.regenerate()
+    ;(await nextPort(1)).emit({ type: 'error', error: { message: 'failed', kind: 'network' } })
+    await failing
+
+    const again = flow.retry()
+    const port = await nextPort(2)
+    expect(port.request.instruction).toBe('second')
+    expect(port.request.history.map((turn: any) => turn.content)).toEqual(['first', 'A1'])
+    port.emit({ type: 'done', result: cssResult('A2') })
+    await again
+  })
+
+  it('moves the exchange into the history once the refinement succeeds', async () => {
+    // Guard against the fix undoing a refinement that worked.
+    const flow = flowAtRefining()
+    flow.followUp = 'second'
+    const run = flow.regenerate()
+    ;(await nextPort(1)).emit({ type: 'done', result: cssResult('A2') })
+    await run
+    expect(flow.followUp).toBe('')
+    expect(flow.instruction).toBe('second')
+    expect(flow.history.map((turn) => turn.content)).toEqual(['first', 'A1'])
+    expect(flow.result?.rationale.approach).toBe('A2')
+  })
+})
