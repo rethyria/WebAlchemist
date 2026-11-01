@@ -9,14 +9,17 @@
    * requested in one prompt from the confirm click.
    */
   import type { ExportBundle, ImportResult } from '@background/storage'
+  import { isEncryptedExport, type EncryptedExport } from '@shared/export-envelope'
   import type { BackupSettings, ExportMode, PlannedTransform } from '@background/transfer'
   import Button from '@sidebar/components/Button.svelte'
   import {
+    EXPORT_WARNING,
     describeResult,
     downloadText,
     exportFileName,
     originsToRequest,
     parseBundleText,
+    passphraseProblem,
     requestImportOrigins,
   } from './transfer-ui'
 
@@ -35,22 +38,48 @@
   let previewMode = $state<ExportMode>('share')
   let previewSettings = $state<BackupSettings | null>(null)
   let restoreSettings = $state(false)
+  /** The export waiting for the user to choose between a plain and an encrypted file. */
+  let pendingMode = $state<ExportMode | null>(null)
+  let exportPassphrase = $state('')
+  let exportConfirmation = $state('')
+  /** A chosen file that is encrypted and waits for its passphrase. */
+  let encryptedFile = $state<{ name: string; parsed: unknown } | null>(null)
+  let importPassphrase = $state('')
   let fileInput: HTMLInputElement | undefined = $state()
 
   const importable = $derived(items.filter((item) => item.status === 'import'))
 
-  async function runExport(mode: ExportMode) {
+  function startExport(mode: ExportMode) {
+    error = null
+    notice = null
+    exportPassphrase = ''
+    exportConfirmation = ''
+    pendingMode = mode
+  }
+
+  const exportProblem = $derived(passphraseProblem(exportPassphrase, exportConfirmation))
+
+  async function runExport(mode: ExportMode, encrypt: boolean) {
     error = null
     notice = null
     busy = true
     try {
-      const exported = await call<ExportBundle>({ type: 'export-transforms', mode })
-      downloadText(JSON.stringify(exported, null, 2), exportFileName(mode, new Date()), {
+      const exported = await call<ExportBundle | EncryptedExport>({
+        type: 'export-transforms',
+        mode,
+        ...(encrypt ? { passphrase: exportPassphrase } : {}),
+      })
+      downloadText(JSON.stringify(exported, null, 2), exportFileName(mode, new Date(), encrypt), {
         createObjectURL: (blob) => URL.createObjectURL(blob),
         revokeObjectURL: (url) => URL.revokeObjectURL(url),
         createAnchor: () => document.createElement('a'),
       })
-      notice = `Exported ${exported.transforms.length} ${exported.transforms.length === 1 ? 'transform' : 'transforms'}.`
+      notice = encrypt
+        ? 'Saved an encrypted file. It can be imported only with the passphrase.'
+        : 'Saved a file that is not encrypted.'
+      pendingMode = null
+      exportPassphrase = ''
+      exportConfirmation = ''
     } catch (cause) {
       error = String(cause instanceof Error ? cause.message : cause)
     } finally {
@@ -70,25 +99,48 @@
     busy = true
     try {
       const parsed = parseBundleText(await file.text())
-      const preview = await call<{
-        mode: ExportMode
-        items: PlannedTransform[]
-        settings: BackupSettings | null
-      }>({
-        type: 'preview-import',
-        bundle: parsed,
-      })
-      bundle = parsed
-      items = preview.items
-      previewMode = preview.mode
-      previewSettings = preview.settings
-      restoreSettings = false
-      fileName = file.name
+      if (isEncryptedExport(parsed)) {
+        encryptedFile = { name: file.name, parsed }
+        return
+      }
+      await showPreview(parsed, file.name, undefined)
     } catch (cause) {
       error = String(cause instanceof Error ? cause.message : cause)
     } finally {
       busy = false
     }
+  }
+
+  async function openEncrypted() {
+    if (!encryptedFile) return
+    error = null
+    busy = true
+    try {
+      await showPreview(encryptedFile.parsed, encryptedFile.name, importPassphrase)
+      encryptedFile = null
+    } catch (cause) {
+      error = String(cause instanceof Error ? cause.message : cause)
+    } finally {
+      busy = false
+    }
+  }
+
+  async function showPreview(parsed: unknown, name: string, passphrase: string | undefined) {
+    const preview = await call<{
+      mode: ExportMode
+      items: PlannedTransform[]
+      settings: BackupSettings | null
+    }>({
+      type: 'preview-import',
+      bundle: parsed,
+      ...(passphrase === undefined ? {} : { passphrase }),
+    })
+    bundle = parsed
+    items = preview.items
+    previewMode = preview.mode
+    previewSettings = preview.settings
+    restoreSettings = false
+    fileName = name
   }
 
   function cancel() {
@@ -97,6 +149,8 @@
     fileName = ''
     previewSettings = null
     restoreSettings = false
+    encryptedFile = null
+    importPassphrase = ''
   }
 
   /*
@@ -119,6 +173,7 @@
         type: 'import-transforms',
         bundle,
         restoreSettings: restoreSettings && previewSettings !== null,
+        ...(importPassphrase === '' ? {} : { passphrase: importPassphrase }),
       })
       notice = describeResult(result, granted)
       cancel()
@@ -139,7 +194,8 @@
     JavaScript is saved as its description only, without code. Back up also saves the JavaScript
     code and the accent colour and health check mode, so that the set can be restored on another
     computer. Neither file contains credentials or provider settings. Both files hold text and
-    addresses taken from the pages the transforms were written for, and they are not encrypted.
+    addresses taken from the pages the transforms were written for, and either can be encrypted
+    with a passphrase when it is saved.
   </p>
   <p class="subtitle">
     Import reads such a file and shows what it would add before anything is saved. Imported
@@ -156,8 +212,8 @@
   {/if}
 
   <div class="buttons">
-    <Button disabled={busy} onclick={() => void runExport('share')}>Export to share</Button>
-    <Button disabled={busy} onclick={() => void runExport('backup')}>Back up</Button>
+    <Button disabled={busy} onclick={() => startExport('share')}>Export to share</Button>
+    <Button disabled={busy} onclick={() => startExport('backup')}>Back up</Button>
     <Button disabled={busy} onclick={() => fileInput?.click()}>Import from file</Button>
     <input
       bind:this={fileInput}
@@ -168,6 +224,73 @@
       onchange={(event) => void onFileChosen(event)}
     />
   </div>
+
+  {#if pendingMode !== null}
+    <div class="preview">
+      <h3>{pendingMode === 'backup' ? 'Back up' : 'Export to share'}</h3>
+      <p class="subtitle">{EXPORT_WARNING}</p>
+      <div class="field">
+        <label for="export-passphrase">Passphrase</label>
+        <input
+          id="export-passphrase"
+          type="password"
+          autocomplete="new-password"
+          bind:value={exportPassphrase}
+        />
+      </div>
+      <div class="field">
+        <label for="export-confirmation">Repeat the passphrase</label>
+        <input
+          id="export-confirmation"
+          type="password"
+          autocomplete="new-password"
+          bind:value={exportConfirmation}
+        />
+      </div>
+      {#if exportPassphrase !== '' && exportProblem}
+        <p class="problem" role="status">{exportProblem}</p>
+      {/if}
+      <div class="buttons">
+        <Button
+          variant="primary"
+          disabled={busy || exportProblem !== null}
+          onclick={() => void runExport(pendingMode!, true)}
+        >
+          Save encrypted file
+        </Button>
+        <Button disabled={busy} onclick={() => void runExport(pendingMode!, false)}>
+          Save without encryption
+        </Button>
+        <Button disabled={busy} onclick={() => (pendingMode = null)}>Cancel</Button>
+      </div>
+    </div>
+  {/if}
+
+  {#if encryptedFile !== null}
+    <div class="preview">
+      <h3>{encryptedFile.name} is encrypted</h3>
+      <div class="field">
+        <label for="import-passphrase">Passphrase</label>
+        <input
+          id="import-passphrase"
+          type="password"
+          autocomplete="off"
+          bind:value={importPassphrase}
+          onkeydown={(event) => event.key === 'Enter' && void openEncrypted()}
+        />
+      </div>
+      <div class="buttons">
+        <Button
+          variant="primary"
+          disabled={busy || importPassphrase === ''}
+          onclick={() => void openEncrypted()}
+        >
+          Decrypt and show contents
+        </Button>
+        <Button disabled={busy} onclick={cancel}>Cancel</Button>
+      </div>
+    </div>
+  {/if}
 
   {#if bundle !== null}
     <div class="preview">
@@ -314,6 +437,24 @@
 
   .quiet {
     color: var(--text-faint);
+  }
+
+  .field {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-9);
+    margin: 0 0 var(--sp-9);
+  }
+
+  .field label {
+    min-width: 12em;
+    font: 12px var(--font-ui);
+  }
+
+  .field input {
+    flex: 1;
+    padding: var(--sp-5) var(--sp-9);
+    font: 12px var(--font-mono);
   }
 
   .check {

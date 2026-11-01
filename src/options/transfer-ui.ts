@@ -6,12 +6,13 @@
 
 import type { ImportResult } from '@background/storage'
 import type { PlannedTransform } from '@background/transfer'
+import { MIN_PASSPHRASE_LENGTH } from '@shared/vault-policy'
 
-/** `web-alchemist-share-2026-11-01.json`: the mode and the local date. */
-export function exportFileName(mode: string, now: Date): string {
+/** `web-alchemist-share-2026-11-01.json`: the mode and the local date, with `-encrypted` for an encrypted file. */
+export function exportFileName(mode: string, now: Date, encrypted = false): string {
   const pad = (n: number) => String(n).padStart(2, '0')
   const day = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`
-  return `web-alchemist-${mode}-${day}.json`
+  return `web-alchemist-${mode}-${day}${encrypted ? '-encrypted' : ''}.json`
 }
 
 /**
@@ -70,6 +71,22 @@ export function requestImportOrigins(
   const origins = originsToRequest(items)
   if (origins.length === 0) return Promise.resolve(true)
   return request({ origins }).catch(() => false)
+}
+
+/**
+ * What the export panel says before a file is written. It names what the file
+ * contains, since the user cannot see that from the button.
+ */
+export const EXPORT_WARNING =
+  'The file contains text taken from the pages the transforms were written for (the start of the text of each element they target), the descriptions of the transforms, and the addresses they apply to. On a mail, banking or health site that text can be personal. The file is saved as plain text unless it is encrypted with a passphrase. Anyone with the passphrase and the file can read it, and a forgotten passphrase cannot be recovered.'
+
+/** The reason a passphrase for an export cannot be used yet, or null when it can. */
+export function passphraseProblem(passphrase: string, confirmation: string): string | null {
+  if (passphrase.length < MIN_PASSPHRASE_LENGTH) {
+    return `The passphrase must be at least ${MIN_PASSPHRASE_LENGTH} characters long.`
+  }
+  if (passphrase !== confirmation) return 'The two passphrases are not the same.'
+  return null
 }
 
 /** One sentence for the number of records, such as "3 transforms". */

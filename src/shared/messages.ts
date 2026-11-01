@@ -37,6 +37,7 @@ import type { ScrollOffset } from './region'
 import type { OverlayPalette } from './accents'
 import type { RefinementTurn, ReviewInstruction } from '@background/providers/types'
 import type { ExportBundle, ImportResult } from '@background/storage'
+import type { EncryptedExport } from './export-envelope'
 import type { BackupSettings, ExportMode, PlannedTransform } from '@background/transfer'
 
 /**
@@ -322,11 +323,15 @@ export type Message =
   | { type: 'clear-csp-probe' }
 
   /* --- portability --------------------------------------------------- */
-  /** `mode` defaults to a share, which carries no JavaScript code. */
-  | { type: 'export-transforms'; mode?: ExportMode }
-  | { type: 'preview-import'; bundle: unknown }
+  /**
+   * `mode` defaults to a share, which carries no JavaScript code. With
+   * `passphrase` the reply is the encrypted file instead of the export.
+   */
+  | { type: 'export-transforms'; mode?: ExportMode; passphrase?: string }
+  /** `passphrase` opens an encrypted file and is ignored for any other. */
+  | { type: 'preview-import'; bundle: unknown; passphrase?: string }
   /** `restoreSettings` applies the accent and health check mode of a backup. */
-  | { type: 'import-transforms'; bundle: unknown; restoreSettings?: boolean }
+  | { type: 'import-transforms'; bundle: unknown; restoreSettings?: boolean; passphrase?: string }
 
 /** Sent from background to content script. */
 export type ContentMessage =
@@ -498,7 +503,7 @@ export interface Responses {
   analyse: ReviewResult
   'preview-js': boolean
   'clear-preview-js': boolean
-  'export-transforms': ExportBundle
+  'export-transforms': ExportBundle | EncryptedExport
   'preview-import': { mode: ExportMode; items: PlannedTransform[]; settings: BackupSettings | null }
   'import-transforms': ImportResult
   'capture-region': {

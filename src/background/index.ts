@@ -37,6 +37,7 @@ import { excludedSiteMessage } from '@shared/excluded-sites'
 import { hostOfUrl } from '@shared/site-off'
 import { isSidebarPortName, windowOfSidebarPort } from '@shared/sidebar-port'
 import { isApproved, spendApproval } from './approvals'
+import { encryptExport, openExport } from './export-crypto'
 import { blockedStates, runStaticAnalysis, staticProblem } from './code-gate'
 import { checkCssForPage, checkCssTransform, pageUrlFor, sameCssContext } from './css-gate'
 import {
@@ -1095,12 +1096,14 @@ async function handle(
       )
 
 
-    case 'export-transforms':
-      return exportTransforms(message.mode ?? 'share')
+    case 'export-transforms': {
+      const bundle = await exportTransforms(message.mode ?? 'share')
+      return message.passphrase === undefined ? bundle : encryptExport(bundle, message.passphrase)
+    }
 
     case 'preview-import': {
       const settings = await getSettings()
-      return previewImport(message.bundle, {
+      return previewImport(await openExport(message.bundle, message.passphrase), {
         cssProblem: (t) => cssProblemOf(t, settings),
         jsProblem: (t) => staticProblem(t.code, t.capabilities),
       })
@@ -1117,7 +1120,7 @@ async function handle(
        */
       const settings = await getSettings()
       const result = await importTransforms(
-        message.bundle,
+        await openExport(message.bundle, message.passphrase),
         {
           cssProblem: (t) => cssProblemOf(t, settings),
           jsProblem: (t) => staticProblem(t.code, t.capabilities),

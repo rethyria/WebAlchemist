@@ -29,6 +29,12 @@ describe('the export file', () => {
     expect(exportFileName('share', new Date(2026, 10, 1))).toBe('web-alchemist-share-2026-11-01.json')
   })
 
+  it('is named as encrypted when it is', () => {
+    expect(exportFileName('backup', new Date(2026, 10, 1), true)).toBe(
+      'web-alchemist-backup-2026-11-01-encrypted.json',
+    )
+  })
+
   it('is downloaded through a Blob URL and an anchor, and the URL is released after the click', () => {
     const order: string[] = []
     const anchor = { href: '', download: '', click: () => order.push(`click ${anchor.href} ${anchor.download}`) }

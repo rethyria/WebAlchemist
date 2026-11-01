@@ -67,6 +67,7 @@ import { MIN_PASSPHRASE_LENGTH } from '@shared/vault-policy'
 import { assertEndpoint, endpointsOf } from '@shared/endpoint-policy'
 import { destinationOf, sameBinding } from '@shared/credential-binding'
 import type { Provider, TransformVersion } from '@shared/types'
+import { EXPORT_FORMAT } from '@shared/export-envelope'
 import {
   backupSettingsOf,
   planImport,
@@ -1205,8 +1206,7 @@ export function foldUnsavedUsage(): Promise<void> {
 /* Export / import                                                     */
 /* ------------------------------------------------------------------ */
 
-/** Names the file as one of this extension's exports. */
-export const EXPORT_FORMAT = 'web-alchemist-export'
+export { EXPORT_FORMAT }
 
 export interface ExportBundle {
   /** Absent in files written before the format was named. */
