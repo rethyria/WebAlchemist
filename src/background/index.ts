@@ -1666,6 +1666,8 @@ interface GenerateOverPort {
   instructionImported?: boolean
   /** The imported description behind a follow-up. See GenerateRequest. */
   importedDescription?: string
+  /** The saved description behind a follow-up. See GenerateRequest. */
+  savedDescription?: string
   history: RefinementTurn[]
   scopeDepth?: number
   scopeContainer?: string | null

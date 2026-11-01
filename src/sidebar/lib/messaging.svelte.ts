@@ -33,6 +33,8 @@ export function generateOverPort(
     instructionImported?: boolean
     /** The imported description behind a follow-up, sent fenced on every turn. */
     importedDescription?: string
+    /** The saved description behind a follow-up, sent fenced on every turn. */
+    savedDescription?: string
     history: unknown[]
     scopeDepth?: number
     scopeContainer?: string | null
