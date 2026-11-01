@@ -31,14 +31,14 @@ import type { RefinementTurn, ReviewInstruction } from './providers/types'
 import { overlayPaletteFor } from '@shared/accents'
 import * as badge from './badge'
 import { openPanel } from './open-panel'
-import { panelPageKey } from '@shared/panel-binding'
+import { panelPageKey, panelPagesFromStorage } from '@shared/panel-binding'
 import { SCREENSHOTS_UNAVAILABLE } from '@shared/android-limits'
-import { recordRunTab, takeRunTabs, windowsWithRunTabs } from './run-tabs'
+import { ownersWithRunTabs, recordRunTab, takeRunTabs } from './run-tabs'
 import { isUrlOff, setHostOff } from './site-off'
 import { excludedHostOf, getExcludedSites, setExcludedSites } from './excluded-sites'
 import { excludedHostFor, excludedSiteMessage } from '@shared/excluded-sites'
 import { hostOfUrl } from '@shared/site-off'
-import { isSidebarPortName, windowOfSidebarPort } from '@shared/sidebar-port'
+import { isSidebarPortName, ownerOfSidebarPort, panelOwner } from '@shared/sidebar-port'
 import { blockedStates, runStaticAnalysis } from './code-gate'
 import { checkCssForPage, checkCssTransform, pageUrlFor, sameCssContext } from './css-gate'
 import {
@@ -890,7 +890,7 @@ async function handle(
         getSettings,
         tabUrl: tabUrlOf,
         setPreviewCss: async (tabId, css) =>
-          setPreviewCss(tabId, css, await windowOfTab(tabId), checkedDocument),
+          setPreviewCss(tabId, css, await ownerOfTab(tabId), checkedDocument),
       })
     }
 
@@ -914,9 +914,9 @@ async function handle(
       // has to find the id in storage to restore it. Registration runs in the
       // same queue as the start-up rebuild, so the rebuild cannot remove a
       // preview that is being added (#91).
-      const windowId = await windowOfTab(message.tabId)
+      const owner = await ownerOfTab(message.tabId)
       await inRegistryQueue(async () => {
-        await addPreviewedScript(message.transform.id, windowId)
+        await addPreviewedScript(message.transform.id, owner)
         try {
           await registerPreview(message.transform)
         } catch (cause) {
@@ -1002,7 +1002,7 @@ async function handle(
       // Recorded before applying: every later evaluation of this tab reads the
       // record, so a route change cannot bring the paused version back.
       if (message.id === null) await forgetSuspended(message.tabId)
-      else await writeSuspended(message.tabId, message.id, tab?.windowId)
+      else await writeSuspended(message.tabId, message.id, await ownerOfTab(message.tabId))
       await applyCssTransforms(message.tabId, () => cssTransformsFor(message.tabId, url), url)
       return true
     }
@@ -1215,6 +1215,18 @@ async function windowOfTab(tabId: number): Promise<number | undefined> {
   return (await browser.tabs.get(tabId).catch(() => undefined))?.windowId
 }
 
+/**
+ * The owner of what the panel does to a page tab: the panel tab bound to it
+ * when there is one, and otherwise the window the page is in, whose docked
+ * sidebar is the owner. One window can hold several panel tabs, so a window id
+ * cannot tell their runs apart. Undefined when neither is known.
+ */
+async function ownerOfTab(tabId: number): Promise<number | undefined> {
+  const panels = panelPagesFromStorage(await browser.storage.session.get(null))
+  for (const [panel, page] of panels) if (page === tabId) return panelOwner(panel)
+  return windowOfTab(tabId)
+}
+
 function setPreviewCss(
   tabId: number,
   css: string,
@@ -1274,7 +1286,7 @@ async function clearPreviewsWhere(
   // the pause is used; the tab's current window is only the answer for a pause
   // stored without one.
   for (const tabId of await suspendedTabIds()) {
-    const owner = (await suspendedWindow(tabId)) ?? (await windowOfTab(tabId))
+    const owner = (await suspendedWindow(tabId)) ?? (await ownerOfTab(tabId))
     if (!ownerIsGone(owner)) continue
     await forgetSuspended(tabId)
     await reapply(tabId)
@@ -1351,15 +1363,15 @@ void (async () => {
     (await previewedTabIds()).length > 0 ||
     (await previewedScriptIds()).length > 0 ||
     (await suspendedTabIds()).length > 0 ||
-    (await windowsWithRunTabs()).length > 0
+    (await ownersWithRunTabs()).length > 0
   if (!stored) return
   await new Promise((resolve) => setTimeout(resolve, SIDEBAR_RECONNECT_GRACE_MS))
   await clearPreviewsWhere(ownerIsGone)
   // The picker overlay and the lock outline are in the page, not in storage, so
   // a panel closed during a suspension left them there (#108). A window whose
   // sidebar did not reconnect has no panel to cancel them.
-  for (const windowId of await windowsWithRunTabs()) {
-    if (ownerIsGone(windowId)) await clearPageOverlays(windowId)
+  for (const owner of await ownersWithRunTabs()) {
+    if (ownerIsGone(owner)) await clearPageOverlays(owner)
   }
 })()
 
@@ -1374,18 +1386,23 @@ async function refuseExcludedTab(tabId: number): Promise<void> {
   if (tab?.url) await refuseExcludedUrl(tab.url)
 }
 
-/** Records the tab of a run under the window it is in, so closing that window's sidebar can clean it. */
+/**
+ * Records the tab of a run under its owner, so closing that window's sidebar or
+ * that panel tab can clean it. Nothing is recorded when the owner cannot be
+ * found, which is a page whose window id the browser did not report and that
+ * has no panel tab.
+ */
 async function recordRunTabOf(tabId: number): Promise<void> {
-  const tab = await browser.tabs.get(tabId).catch(() => undefined)
-  if (tab?.windowId !== undefined) await recordRunTab(tab.windowId, tabId).catch(() => {})
+  const owner = await ownerOfTab(tabId)
+  if (owner !== undefined) await recordRunTab(owner, tabId).catch(() => {})
 }
 
 /**
- * Removes the picker and the lock outline from the tabs this window's sidebar
+ * Removes the picker and the lock outline from the tabs this owner's panel
  * used. Both messages are harmless on a page that has neither.
  */
-async function clearPageOverlays(windowId: number): Promise<void> {
-  for (const tabId of await takeRunTabs(windowId)) {
+async function clearPageOverlays(owner: number): Promise<void> {
+  for (const tabId of await takeRunTabs(owner)) {
     await sendToContent(tabId, { type: 'cancel-picking' })
     await sendToContent(tabId, { type: 'clear-lock' })
   }
@@ -1440,7 +1457,9 @@ browser.runtime.onConnect.addListener((port) => {
   }
 
   if (isSidebarPortName(port.name)) {
-    const windowId = windowOfSidebarPort(port.name)
+    // The window id for a docked sidebar, or the panel tab's own key for a
+    // panel open in a tab.
+    const windowId = ownerOfSidebarPort(port.name)
     sidebarPorts.set(port, windowId)
     port.onDisconnect.addListener(() => {
       sidebarPorts.delete(port)
@@ -1665,6 +1684,8 @@ browser.tabs.onRemoved.addListener(async (tabId) => {
     await forgetArchive(tabId)
     await browser.storage.session.remove(`wa-last-url-${tabId}`)
     await forgetSuspended(tabId)
+    // A closed panel tab no longer owns the page it was bound to.
+    await browser.storage.session.remove(panelPageKey(tabId))
   })
   evaluations.delete(tabId)
 })

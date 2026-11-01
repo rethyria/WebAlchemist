@@ -658,6 +658,8 @@
     const releasePort = holdSidebarPortForWindow(
       (name) => browser.runtime.connect({ name }),
       async () => (await browser.windows.getCurrent()).id,
+      // A panel open in a tab is keyed by its own tab, not by the window.
+      boundTab() === null ? undefined : async () => (await browser.tabs.getCurrent())?.id,
     )
 
     return () => {

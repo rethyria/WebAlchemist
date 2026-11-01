@@ -448,3 +448,78 @@ describe('closing the sidebar removes the picker and the lock outline (#108)', (
     expect(overlayMessages()).toEqual([])
   })
 })
+
+describe('panels open in tabs are cleaned up one by one (#128)', () => {
+  // Two panel tabs in one window, one bound to page tab 9 and one to page tab
+  // 12. A window id cannot tell their runs apart.
+  const closePanel = async (panelTabId: number) => {
+    const port = {
+      name: `wa-sidebar:tab:${panelTabId}`,
+      sender: extensionPage,
+      onDisconnect: { addListener: vi.fn() },
+    }
+    onConnect(port)
+    await port.onDisconnect.addListener.mock.calls[0]![0]()
+  }
+  const overlayTabs = () =>
+    sentToTabs
+      .filter((m) => m.message.type === 'cancel-picking' || m.message.type === 'clear-lock')
+      .map((m) => m.tabId)
+  const twoPanels = () => {
+    session.set('wa-panel-page-50', 9)
+    session.set('wa-panel-page-51', 12)
+  }
+
+  it('records the run tab under the panel tab, not under the window', async () => {
+    twoPanels()
+    await onMessage({ type: 'start-picking', tabId: 9 }, extensionPage)
+    expect(session.get('wa-run-tabs--50')).toEqual([9])
+    expect(session.has('wa-run-tabs-3')).toBe(false)
+  })
+
+  it('removes the picker only from the page of the panel that closed', async () => {
+    twoPanels()
+    await onMessage({ type: 'start-picking', tabId: 9 }, extensionPage)
+    await onMessage({ type: 'start-picking', tabId: 12 }, extensionPage)
+    await closePanel(50)
+    await vi.waitFor(() => expect(overlayTabs()).toEqual([9, 9]))
+    await new Promise((r) => setTimeout(r, 20))
+    expect(overlayTabs()).toEqual([9, 9])
+    expect(session.get('wa-run-tabs--51')).toEqual([12])
+  })
+
+  it('removes a script preview only for the panel that closed', async () => {
+    twoPanels()
+    await onMessage({ type: 'preview-js', tabId: 9, transform: { ...saved, code: DRAFT_CODE } }, extensionPage)
+    expect(session.get('wa-preview-script-window-SAVED')).toBe(-50)
+    await closePanel(51)
+    await new Promise((r) => setTimeout(r, 20))
+    expect(holds('preview-SAVED')).toContain(DRAFT_CODE)
+    await closePanel(50)
+    await vi.waitFor(() => expect(registered.has('preview-SAVED')).toBe(false))
+    expect(holds('SAVED')).toContain(SAVED_CODE)
+  })
+
+  it('does not clean a panel tab when the docked sidebar of its window closes (control)', async () => {
+    twoPanels()
+    await onMessage({ type: 'start-picking', tabId: 9 }, extensionPage)
+    const port = { name: 'wa-sidebar:3', sender: extensionPage, onDisconnect: { addListener: vi.fn() } }
+    onConnect(port)
+    await port.onDisconnect.addListener.mock.calls[0]![0]()
+    await new Promise((r) => setTimeout(r, 20))
+    expect(overlayTabs()).toEqual([])
+  })
+
+  it('still records a run for a panel when the browser reports no window id', async () => {
+    twoPanels()
+    tabHooks.tab = (tabId) => ({ id: tabId, active: true, url: 'https://www.example.com/' })
+    await onMessage({ type: 'start-picking', tabId: 9 }, extensionPage)
+    expect(session.get('wa-run-tabs--50')).toEqual([9])
+  })
+
+  it('records nothing, and does not fail, for a docked run when the browser reports no window id', async () => {
+    tabHooks.tab = (tabId) => ({ id: tabId, active: true, url: 'https://www.example.com/' })
+    await expect(onMessage({ type: 'start-picking', tabId: 9 }, extensionPage)).resolves.toBeDefined()
+    expect([...session.keys()].filter((k) => k.startsWith('wa-run-tabs-'))).toEqual([])
+  })
+})
