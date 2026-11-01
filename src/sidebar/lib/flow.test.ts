@@ -1111,6 +1111,38 @@ describe('a re-pick from Edit description', () => {
     return () => (api.request = before)
   }
 
+  it('returns to the description when the permission request throws', async () => {
+    const flow = await describing()
+    const restore = withPermission(async () => {
+      throw new Error('request failed')
+    })
+    try {
+      await flow.startPicking()
+    } finally {
+      restore()
+    }
+    // Control: with the held element recorded after the request, the catch
+    // found nothing to return to and discarded the run (step 'list').
+    expect(flow.step).toBe('describing')
+    expect(flow.draft?.id).toBe('OLD')
+    expect(flow.picked?.anchor.selector).toBe('div.x')
+  })
+
+  it('leaves nothing held when the permission is refused', async () => {
+    const flow = await describing()
+    const restore = withPermission(async () => false)
+    try {
+      await flow.startPicking()
+    } finally {
+      restore()
+    }
+    expect(flow.step).toBe('describing')
+    expect(flow.picked).not.toBeNull()
+    // A later cancel with no pick open must not return from a pick that never started.
+    await flow.cancelPicking()
+    expect(flow.step).toBe('list')
+  })
+
   it('keeps the tree when the page has no element to expand', async () => {
     const flow = await describing()
     flow.tree = [{ label: 'row' }] as any

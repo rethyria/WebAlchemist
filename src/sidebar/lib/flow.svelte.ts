@@ -453,6 +453,17 @@ export class Flow {
     if (!origin) return
 
     /*
+     * Held next to keptInstruction, before the first await. It used to be set
+     * after the permission request, so a request that threw reached the catch
+     * below with nothing held, and the run was discarded instead of returning
+     * to the description.
+     */
+    this.rePickFrom =
+      this.step === 'describing' && this.picked
+        ? { picked: this.picked, tree: this.tree }
+        : null
+
+    /*
      * A new pick from the list starts a new transform. Anything still held
      * from an earlier run would otherwise become part of it, and a draft's id
      * decides which saved transform a save replaces. Synchronous on purpose:
@@ -472,6 +483,8 @@ export class Flow {
       // runJs for why the request is inside the try rather than before it.
       const granted = await browser.permissions.request({ origins: [origin] })
       if (!granted) {
+        // Nothing was started, so there is nothing to return from.
+        this.rePickFrom = null
         this.show({
           kind: 'request-failed',
           message: `Web Alchemist needs permission to read ${this.hostname()} before it can point at anything on it.`,
@@ -481,10 +494,6 @@ export class Flow {
 
       this.error = null
       this.hover = null
-      this.rePickFrom =
-        this.step === 'describing' && this.picked
-          ? { picked: this.picked, tree: this.tree }
-          : null
       this.picked = null
       this.step = 'picking'
       await send({ type: 'start-picking', tabId: this.tabId })
