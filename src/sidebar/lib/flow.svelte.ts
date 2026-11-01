@@ -982,6 +982,7 @@ export class Flow {
     const token = ++this.generation
     const current = () => token === this.generation
 
+    this.stopSecondaryPicker()
     this.step = 'generating'
     this.error = null
     this.startClock()
@@ -1460,6 +1461,7 @@ export class Flow {
   /* ---------------------------------------------------------------- */
 
   toSaving(): void {
+    this.stopSecondaryPicker()
     this.step = 'saving'
   }
 
@@ -1752,7 +1754,28 @@ export class Flow {
     this.timer = null
   }
 
+  /**
+   * Takes the page out of a reference or region pick that the panel started.
+   *
+   * Those picks run in the page while the panel stays on refining or
+   * describing, so acting in the panel (Discard, Keep it, Generate) does not
+   * end them by itself, and the page stayed dimmed and swallowed the next
+   * click. Nothing is sent when no such pick is active, so a stop-picking
+   * message is not sent on every reset. The flags are cleared here as well,
+   * because the page's own "picking-cancelled" event no longer reaches a
+   * panel that has moved on.
+   */
+  private stopSecondaryPicker(): void {
+    const active = this.awaitingReference || this.choosingRegion
+    this.awaitingReference = false
+    this.choosingRegion = false
+    if (active && this.tabId !== null) {
+      void send({ type: 'stop-picking', tabId: this.tabId }).catch(() => {})
+    }
+  }
+
   reset(): void {
+    this.stopSecondaryPicker()
     this.stopClock()
     // The countdown's own comment says resetting the flow stops it, but this
     // did not. A card and a timer that outlive the run it belonged to end by

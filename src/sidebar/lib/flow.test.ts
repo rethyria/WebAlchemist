@@ -601,3 +601,54 @@ describe('changing the element from the describing step', () => {
     expect(flow.instruction).toBe('')
   })
 })
+
+describe('a reference or region pick still running in the page', () => {
+  const stops = () => calls.filter((c) => c.type === 'stop-picking')
+
+  async function refiningWithReferencePick() {
+    const flow = flowAtRefining()
+    await flow.addReference()
+    expect(flow.awaitingReference).toBe(true)
+    calls.length = 0
+    return flow
+  }
+
+  it('is stopped by Discard', async () => {
+    const flow = await refiningWithReferencePick()
+    await flow.discard()
+    expect(stops()).toHaveLength(1)
+    expect(flow.awaitingReference).toBe(false)
+  })
+
+  it('is stopped by Keep it', async () => {
+    const flow = await refiningWithReferencePick()
+    flow.toSaving()
+    expect(stops()).toHaveLength(1)
+    expect(flow.awaitingReference).toBe(false)
+  })
+
+  it('is stopped by Generate', async () => {
+    const flow = await refiningWithReferencePick()
+    flow.followUp = 'again'
+    void flow.regenerate()
+    expect(stops()).toHaveLength(1)
+    expect(flow.awaitingReference).toBe(false)
+    flow.reset()
+  })
+
+  it('is stopped for a screenshot region pick as well', async () => {
+    const flow = flowAtRefining()
+    await flow.chooseScreenshotRegion()
+    expect(flow.choosingRegion).toBe(true)
+    calls.length = 0
+    await flow.discard()
+    expect(stops()).toHaveLength(1)
+    expect(flow.choosingRegion).toBe(false)
+  })
+
+  it('sends nothing when no such pick is active', async () => {
+    const flow = flowAtRefining()
+    await flow.discard()
+    expect(stops()).toHaveLength(0)
+  })
+})
