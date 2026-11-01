@@ -110,6 +110,9 @@ export interface Rationale {
 
 export type TransformStatus = 'ok' | 'broken' | 'disabled'
 
+/** What produced the code a transform holds, recorded when it is saved. */
+export type TransformSource = 'generation' | 'repair' | 'ai-edit' | 'hand-edit'
+
 export interface Transform {
   id: string
   /** Short human-facing name, model-proposed, user-editable. */
@@ -137,8 +140,31 @@ export interface Transform {
    * means none were approved.
    */
   approvedCssUrls?: string[]
+  /**
+   * What produced `code`. Absent on records saved before versions were kept,
+   * and on records whose saving caller did not say.
+   */
+  producedBy?: TransformSource
   createdAt: number
   updatedAt: number
+}
+
+/**
+ * An earlier state of a transform, kept when a save replaced it. The fields
+ * are the ones a save can change and a restore puts back; the name, intent,
+ * anchor and order are not versioned.
+ */
+export interface TransformVersion {
+  /** Names the version in a restore request; the save time alone can repeat. */
+  id: string
+  code: string
+  rationale: Rationale
+  match: string
+  capabilities: Capability[]
+  world?: ExecutionWorld
+  /** When this state was saved, as `updatedAt` of the record it came from. */
+  savedAt: number
+  producedBy?: TransformSource
 }
 
 /** Runtime state, derived per page load. Never persisted. */
@@ -438,7 +464,11 @@ export interface Settings {
    * consent model for not being asked again.
    */
   keepScreenshotPermission: boolean
-  /** Disables execution of every AI-authored JS transform, everywhere. */
+  /**
+   * Stops every transform, CSS and JavaScript, hand-written and AI-written,
+   * on every site. The name predates the wider meaning and is kept so that
+   * saved settings do not need a migration.
+   */
   aiJsKillSwitch: boolean
   /**
    * Per-site CSS URL mode, keyed the way a match pattern names a host. A key

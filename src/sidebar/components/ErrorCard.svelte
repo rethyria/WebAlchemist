@@ -1,6 +1,7 @@
 <script lang="ts">
   import { announcement } from '../lib/countdown'
   import type { FlowError } from '../lib/flow.svelte'
+  import { SENSITIVE_PAGE_TITLE } from '@shared/excluded-sites'
   import Button from './Button.svelte'
 
   /**
@@ -26,7 +27,7 @@
 <div
   class="card"
   class:block={error.kind === 'request-failed' || error.kind === 'billing'}
-  class:attention={error.kind === 'rate-limited'}
+  class:attention={error.kind === 'rate-limited' || error.kind === 'sensitive-page'}
   role={error.kind === 'rate-limited' ? undefined : 'alert'}
 >
   {#if error.kind === 'no-provider'}
@@ -58,6 +59,18 @@
       {/if}
       <Button small onclick={ondismiss}>Dismiss</Button>
     </div>
+  {:else if error.kind === 'sensitive-page'}
+    <div class="head">
+      <span class="dot attention" aria-hidden="true"></span>
+      <span class="title">{SENSITIVE_PAGE_TITLE}</span>
+    </div>
+    <p>{error.message}</p>
+    <div class="actions">
+      {#if onretry}
+        <Button variant="primary" small onclick={onretry}>Send page content</Button>
+      {/if}
+      <Button small onclick={ondismiss}>Cancel</Button>
+    </div>
   {:else if error.kind === 'model-unavailable'}
     <div class="head">
       <span class="dot block" aria-hidden="true"></span>
@@ -69,6 +82,16 @@
       {#if onretry}
         <Button small onclick={onretry}>Try again</Button>
       {/if}
+      <Button small onclick={ondismiss}>Dismiss</Button>
+    </div>
+  {:else if error.kind === 'model-not-permitted'}
+    <div class="head">
+      <span class="dot block" aria-hidden="true"></span>
+      <span class="title">Model not permitted</span>
+    </div>
+    <p>{error.message}{error.descriptionKept ? ' Your description is kept.' : ''}</p>
+    <div class="actions">
+      <Button variant="primary" small onclick={onmodelsettings}>Open model settings</Button>
       <Button small onclick={ondismiss}>Dismiss</Button>
     </div>
   {:else if error.kind === 'billing'}

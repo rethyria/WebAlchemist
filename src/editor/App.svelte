@@ -1,10 +1,18 @@
 <script lang="ts">
   import '@shared/tokens.css'
-  import type { CssUrlMode, ReviewResult, Settings, Transform } from '@shared/types'
+  import type {
+    CssUrlMode,
+    ReviewResult,
+    Settings,
+    Transform,
+    TransformVersion,
+  } from '@shared/types'
   import { hostOfPattern, modeForHost, policyKeyOfPattern } from '@safety/css-check'
+  import { compareWithCurrent, sourceLabel } from '@shared/versions'
   import { matchPresetsFor, matchesUrl, originPermissionFor, parsePattern } from '@shared/match'
   import { send } from '@shared/messaging.svelte'
 import { editorOriginToRequest, permissionRequestsFor, requestAll } from '@shared/permissions'
+import { excludedAccessMessage, excludedHostForPattern } from '@shared/excluded-sites'
   import CodeArea from './CodeArea.svelte'
   import { shouldConfirmLeaving } from './unload'
 
@@ -37,6 +45,17 @@ import { editorOriginToRequest, permissionRequestsFor, requestAll } from '@share
   let loadError = $state<string | null>(null)
   let findings = $state<string[]>([])
   let saving = $state(false)
+  /** Earlier versions of this transform, newest first. Empty while creating. */
+  let versions = $state<TransformVersion[]>([])
+  let restoring = $state(false)
+  /** The version shown for confirmation. Nothing is restored until it is confirmed. */
+  let reviewing = $state<TransformVersion | null>(null)
+  /**
+   * The user's list of excluded sites, loaded when the page opens so that the
+   * save and restore handlers can check it before their first await. An await
+   * before a permission request ends the user gesture (#131).
+   */
+  let excludedSites = $state<string[]>([])
   let justSaved = $state(false)
 
   /*
@@ -183,8 +202,92 @@ import { editorOriginToRequest, permissionRequestsFor, requestAll } from '@share
       match = found.match
       savedMatch = found.match
       document.title = `${found.name} — Web Alchemist`
+      await loadVersions()
     } catch (cause) {
       loadError = String(cause instanceof Error ? cause.message : cause)
+    }
+  }
+
+  async function loadVersions() {
+    versions = await send<TransformVersion[]>({ type: 'get-transform-versions', id })
+  }
+
+  /**
+   * The approval a restored JavaScript version needs before the background
+   * saves it, as fields to add to the restore request. Restore has no
+   * exemption from the approval rules: the version's code, world and
+   * capabilities, the transform id and the version's match are approved
+   * through `approve-code`, as the editor's save does, and the background's
+   * restore case passes the returned token to the same save handler. Code the
+   * user chose to restore after reading it in the confirmation is the approval
+   * here, as typed code is for a save. CSS needs no token.
+   */
+  async function approvalForRestore(
+    current: Transform,
+    version: TransformVersion,
+  ): Promise<{ approvalToken?: string }> {
+    if (current.kind !== 'js') return {}
+    const { approvalToken } = await send<{ approvalToken: string }>({
+      type: 'approve-code',
+      code: version.code,
+      declaredCapabilities: version.capabilities,
+      ...(version.world ? { world: version.world } : {}),
+      transformId: current.id,
+      match: version.match,
+    })
+    return { approvalToken }
+  }
+
+  /*
+   * Goes through the background's save path, which analyses restored
+   * JavaScript again and refuses it if it no longer passes. The permission
+   * requests are made first, as in save(), because a version may apply to a
+   * wider site than the current code does.
+   */
+  async function restore(version: TransformVersion) {
+    const current = transform
+    if (!current || restoring || saving) return
+    // Before the permission request, and with no await since the click.
+    const excluded = excludedHostForPattern(excludedSites, version.match)
+    if (excluded !== null) {
+      findings = [excludedAccessMessage(excluded)]
+      return
+    }
+    restoring = true
+    findings = []
+    try {
+      const granted = await requestAll(
+        (permissions) => browser.permissions.request(permissions),
+        permissionRequestsFor(current.kind, editorOriginToRequest(false, version.match, current.match)),
+      )
+      if (!granted) {
+        findings = ['Web Alchemist needs permission for the site this version applies to before it can restore it.']
+        return
+      }
+      const approval = await approvalForRestore(current, version)
+      await send({
+        type: 'restore-transform-version',
+        id: current.id,
+        versionId: version.id,
+        ...approval,
+      })
+      await send({ type: 'reapply-everywhere', id: current.id })
+      const found = await send<Transform | null>({ type: 'get-transform', id: current.id })
+      if (found) {
+        transform = found
+        code = found.code
+        saved = found.code
+        match = found.match
+        savedMatch = found.match
+      }
+      await loadVersions()
+      reviewing = null
+      justSaved = true
+      setTimeout(() => (justSaved = false), 2000)
+    } catch (cause) {
+      findings = [String(cause instanceof Error ? cause.message : cause)]
+    } finally {
+      restoring = false
     }
   }
 
@@ -193,6 +296,13 @@ import { editorOriginToRequest, permissionRequestsFor, requestAll } from '@share
     if (!current || saving) return
 
     const wanted = match.trim() || current.match
+
+    // Before the permission request, and with no await since the click.
+    const excluded = excludedHostForPattern(excludedSites, wanted)
+    if (excluded !== null) {
+      findings = [excludedAccessMessage(excluded)]
+      return
+    }
 
     saving = true
     findings = []
@@ -316,9 +426,11 @@ import { editorOriginToRequest, permissionRequestsFor, requestAll } from '@share
       await send({
         type: 'save-transform',
         transform: next,
+        source: 'hand-edit',
         ...(approvalToken ? { approvalToken } : {}),
       })
       await send({ type: 'reapply-everywhere', id: current.id })
+      if (!creating) await loadVersions()
 
       transform = next
       saved = code
@@ -368,6 +480,19 @@ import { editorOriginToRequest, permissionRequestsFor, requestAll } from '@share
   }
 
   $effect(() => {
+    void send<string[]>({ type: 'get-excluded-sites' })
+      .then((sites) => (excludedSites = sites))
+      .catch(() => {
+        // Without the list the background still refuses picking and generating
+        // on those sites; only this page's early refusal is missing.
+      })
+    // The list is edited on the settings page while this page is open.
+    const onStored = (changes: Record<string, browser.storage.StorageChange>, area: string) => {
+      if (area === 'local' && changes['wa-excluded-sites']) {
+        excludedSites = (changes['wa-excluded-sites'].newValue as string[] | undefined) ?? []
+      }
+    }
+    browser.storage.onChanged.addListener(onStored)
     void load()
     void send<Settings>({ type: 'get-settings' })
       .then((settings) => {
@@ -377,6 +502,7 @@ import { editorOriginToRequest, permissionRequestsFor, requestAll } from '@share
       .catch(() => {
         // The accent is decoration; failing to read it must not stop editing.
       })
+    return () => browser.storage.onChanged.removeListener(onStored)
   })
 </script>
 
@@ -542,6 +668,74 @@ import { editorOriginToRequest, permissionRequestsFor, requestAll } from '@share
     {/if}
 
     <CodeArea value={code} kind={creating ? kind : transform.kind} onchange={(next) => (code = next)} />
+
+    {#if !creating && versions.length > 0}
+      <details class="versions">
+        <summary>Earlier versions ({versions.length})</summary>
+        <ul>
+          {#each versions as version (version.id)}
+            <li>
+              <span>
+                {new Date(version.savedAt).toLocaleString()} · {sourceLabel(version.producedBy)}
+              </span>
+              <button
+                type="button"
+                class="secondary"
+                disabled={dirty || restoring || saving}
+                onclick={() => (reviewing = version)}
+              >
+                Review this version
+              </button>
+            </li>
+          {/each}
+        </ul>
+        {#if reviewing && transform}
+          {@const differences = compareWithCurrent(transform, reviewing)}
+          <section class="review" aria-labelledby="review-title">
+            <h2 id="review-title">Version from {new Date(reviewing.savedAt).toLocaleString()}</h2>
+            <p class="hint">
+              Restoring replaces the code, match pattern, capabilities and world of this transform
+              with the values of this version. The current state is kept as a version, so a restore
+              can be undone.
+            </p>
+            <table>
+              <caption>Current values and the values of this version</caption>
+              <thead>
+                <tr><th scope="col">Item</th><th scope="col">Current</th><th scope="col">This version</th><th scope="col">Difference</th></tr>
+              </thead>
+              <tbody>
+                {#each differences as row (row.label)}
+                  <tr>
+                    <th scope="row">{row.label}</th>
+                    <td>{row.current}</td>
+                    <td>{row.version}</td>
+                    <td>{row.status}</td>
+                  </tr>
+                {/each}
+                <tr>
+                  <th scope="row">Code</th>
+                  <td colspan="2">Shown below</td>
+                  <td>{reviewing.code === transform.code ? 'Same' : 'Different'}</td>
+                </tr>
+              </tbody>
+            </table>
+            <h3>Code in this version</h3>
+            <pre class="version-code">{reviewing.code}</pre>
+            <div class="actions">
+              <button type="button" disabled={restoring || saving} onclick={() => void restore(reviewing!)}>
+                Restore this version
+              </button>
+              <button type="button" class="secondary" disabled={restoring} onclick={() => (reviewing = null)}>
+                Cancel
+              </button>
+            </div>
+          </section>
+        {/if}
+        {#if dirty}
+          <p class="hint">Save or revert the changes in the editor before restoring a version.</p>
+        {/if}
+      </details>
+    {/if}
 
     <footer>
       <span>
@@ -774,6 +968,70 @@ import { editorOriginToRequest, permissionRequestsFor, requestAll } from '@share
 
   .findings p {
     margin: var(--sp-5) 0 0;
+  }
+
+  .versions ul {
+    margin: var(--sp-5) 0 0;
+    padding: 0;
+    list-style: none;
+  }
+  .versions li {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--sp-13);
+    padding: var(--sp-5) 0;
+    font: 12px var(--font-ui);
+    color: var(--text-dim);
+  }
+  .review {
+    margin-top: var(--sp-9);
+    padding: var(--sp-11) var(--sp-13);
+    border: 1px solid var(--border);
+    border-radius: var(--r-card);
+  }
+  .review h2 {
+    margin: 0;
+    font: 600 13px var(--font-ui);
+  }
+  .review h3 {
+    margin: var(--sp-9) 0 var(--sp-5);
+    font: 600 12px var(--font-ui);
+  }
+  .review table {
+    width: 100%;
+    margin-top: var(--sp-9);
+    border-collapse: collapse;
+    font: 12px var(--font-ui);
+  }
+  .review caption {
+    text-align: left;
+    color: var(--text-faint);
+    padding-bottom: var(--sp-5);
+  }
+  .review th,
+  .review td {
+    padding: var(--sp-5);
+    text-align: left;
+    border-top: 1px solid var(--border);
+    overflow-wrap: anywhere;
+  }
+  .version-code {
+    max-height: 240px;
+    margin: 0;
+    overflow: auto;
+    font: 12px/1.5 var(--font-mono, monospace);
+    white-space: pre-wrap;
+  }
+  .actions {
+    display: flex;
+    gap: var(--sp-9);
+    margin-top: var(--sp-9);
+  }
+  .versions summary {
+    cursor: pointer;
+    font: 12px var(--font-ui);
+    color: var(--text-dim);
   }
 
   footer {

@@ -12,7 +12,7 @@ import type {
   Message,
   MessageResponse,
 } from '@shared/messages'
-import { matchesUrl } from '@shared/match'
+import { matchesUrl, originPermissionForUrl } from '@shared/match'
 import { CAPTURE_GRANT_KEY } from '@shared/capture-grant'
 import { regionAtScroll, viewportChanged, type ScrollOffset, type Viewport } from '@shared/region'
 import type {
@@ -28,6 +28,11 @@ import type {
 import type { RefinementTurn } from './providers/types'
 import { overlayPaletteFor } from '@shared/accents'
 import * as badge from './badge'
+import { recordRunTab, takeRunTabs, windowsWithRunTabs } from './run-tabs'
+import { isUrlOff, setHostOff } from './site-off'
+import { excludedHostOf, getExcludedSites, setExcludedSites } from './excluded-sites'
+import { excludedSiteMessage } from '@shared/excluded-sites'
+import { hostOfUrl } from '@shared/site-off'
 import { isSidebarPortName, windowOfSidebarPort } from '@shared/sidebar-port'
 import { blockedStates, runStaticAnalysis } from './code-gate'
 import { checkCssForPage, checkCssTransform, pageUrlFor } from './css-gate'
@@ -40,6 +45,7 @@ import {
   handleReview,
   handleSaveSettings,
   handleSaveTransform,
+  policyFingerprint,
   type CssApplyDeps,
   type SaveDeps,
 } from './handlers'
@@ -91,6 +97,7 @@ import {
   exportTransforms,
   getAllCredentialStatuses,
   getAllTransforms,
+  getVersions,
   getCredentialStatus,
   getSettings,
   getUsage,
@@ -143,7 +150,8 @@ function endPreviewScript(id: string): Promise<void> {
 /** Rebuilds registrations from storage, leaving preview scripts registered. */
 function reregister(): Promise<void> {
   return inRegistryQueue(async () => {
-    await reregisterAll(await previewedScriptIds())
+    const { endedPreviews } = await reregisterAll(await previewedScriptIds())
+    for (const id of endedPreviews) await removePreviewedScript(id)
   })
 }
 
@@ -205,7 +213,35 @@ browser.permissions.onAdded.addListener(async (permissions) => {
 
 browser.permissions.onRemoved.addListener(async () => {
   await reconcileContentScripts()
+  await removeCssWithoutAccess()
 })
+
+/**
+ * Takes applied CSS out of the open tabs for which the extension no longer has
+ * host access. Reapplying the transforms would not do it: the list is the same
+ * and the CSS already applied equals what would be applied, so nothing changes.
+ * A tab whose removal fails keeps its record, so that the record still says what
+ * is in the page.
+ */
+async function removeCssWithoutAccess(): Promise<void> {
+  for (const tab of await browser.tabs.query({})) {
+    const tabId = tab.id
+    if (tabId === undefined || !tab.url) continue
+    const origin = originPermissionForUrl(tab.url)
+    if (origin === null) continue
+    await inTabQueue(tabId, async () => {
+      const applied = await readCss('applied', tabId)
+      if (applied === undefined) return
+      if (await browser.permissions.contains({ origins: [origin] }).catch(() => true)) return
+      try {
+        await browser.scripting.removeCSS({ target: { tabId }, css: applied, origin: 'USER' })
+        await forgetCss('applied', tabId)
+      } catch {
+        // Still in the page, so the record stays.
+      }
+    })
+  }
+}
 
 /** Clicking the toolbar button opens the sidebar rather than a popup. */
 browser.action.onClicked.addListener(() => {
@@ -522,23 +558,8 @@ async function handle(
       return withKeepalive(() => provider.supportsVision())
     }
 
-    case 'generate': {
-      const usage = createUsageRecorder(message.transformId)
-      try {
-        const provider = await resolveActiveProvider(usage.listener)
-        return await withKeepalive(() =>
-          provider.generate({
-            context: message.context,
-            instruction: message.instruction,
-            history: message.history,
-          }),
-        )
-      } finally {
-        await usage.settled()
-      }
-    }
-
     case 'repair': {
+      await refuseExcludedUrl(message.context.url)
       const transforms = await getAllTransforms()
       const existing = transforms.find((t) => t.id === message.transformId)
       if (!existing) throw new Error('That transform no longer exists.')
@@ -595,6 +616,46 @@ async function handle(
     }
 
     case 'save-transform':
+      return handleSaveTransform(
+        message.source ? { ...message, transform: { ...message.transform, producedBy: message.source } } : message,
+        saveDeps,
+      )
+
+    case 'get-transform-versions':
+      return getVersions(message.id)
+
+    case 'restore-transform-version': {
+      const current = (await getAllTransforms()).find((t) => t.id === message.id)
+      if (!current) throw new Error('That transform no longer exists.')
+      const version = (await getVersions(message.id)).find((v) => v.id === message.versionId)
+      if (!version) throw new Error('That version is no longer kept.')
+      // The same handler as any other save, with no exemption, so a restored
+      // script meets the static analysis as it is now (the rules may have
+      // changed since it was saved) and needs an approval token for its code,
+      // world, capabilities and match. The editor obtains the token from
+      // approve-code. The current state becomes a version in turn, so a
+      // restore can be undone.
+      const { world: _world, producedBy: _producedBy, ...rest } = current
+      return handleSaveTransform(
+        {
+          type: 'save-transform',
+          transform: {
+            ...rest,
+            code: version.code,
+            rationale: version.rationale,
+            match: version.match,
+            capabilities: version.capabilities,
+            ...(version.world === undefined ? {} : { world: version.world }),
+            ...(version.producedBy === undefined ? {} : { producedBy: version.producedBy }),
+          },
+          ...(message.tabId === undefined ? {} : { tabId: message.tabId }),
+          ...(message.approvalToken ? { approvalToken: message.approvalToken } : {}),
+        },
+        saveDeps,
+      )
+    }
+
+    case 'save-transform':
       return handleSaveTransform(message, saveDeps)
 
     case 'delete-transform': {
@@ -640,18 +701,62 @@ async function handle(
       return true
     }
 
-    case 'save-settings':
+    case 'save-settings': {
+      const switchBefore = (await getSettings()).aiJsKillSwitch
       return handleSaveSettings(message, {
         getSettings,
         saveSettings,
-        reregisterAll: reregister,
+        reregisterAll: () => afterSettingsWritten(switchBefore),
         reapplyAllTabs,
       })
+    }
+
+    case 'count-js-tabs':
+      return countTabsWithJavaScript(() => true)
+
+    case 'get-excluded-sites':
+      return getExcludedSites()
+
+    case 'set-excluded-sites':
+      return setExcludedSites(message.sites)
+
+    case 'page-has-sensitive-fields':
+      // Only an answer of false means the page has no such fields. No answer
+      // (no content script, or the page did not reply) is reported as a page
+      // with them, so that the panel asks before sending text it could not check (#131).
+      return (await askContent(message.tabId, { type: 'sensitive-fields' })) !== false
+
+    case 'get-site-off':
+      return isUrlOff(message.url)
+
+    case 'set-site-off': {
+      const host = hostOfUrl(message.url)
+      if (host === null) throw new Error('That page is not a website, so it cannot be turned off.')
+      await setHostOff(host, message.off)
+      await reregister()
+      const onHost = (url: string) => hostOfUrl(url) === host
+      if (message.off) await clearCssPreviewsOn(onHost)
+      await reapplyOpenTabs(onHost)
+      // Only when turning off. The user chose this site, and a page that was
+      // broken by a transform needs the reload to get rid of its scripts. When
+      // turning back on, nothing is reloaded and the tabs are counted.
+      const tabs = await tabsWithJavaScript(onHost)
+      if (message.off) for (const id of tabs) await browser.tabs.reload(id).catch(() => {})
+      return { reloadTabs: message.off ? 0 : tabs.length, reloaded: message.off ? tabs.length : 0 }
+    }
 
     case 'patch-settings': {
+      const before = await getSettings()
       const saved = await changeSettings(message.change)
-      // The kill switch changes which scripts may run.
-      if (message.change.kind === 'fields') await reregister()
+      if (message.change.kind === 'fields') {
+        await afterSettingsWritten(before.aiJsKillSwitch)
+        // A tab keeps the CSS injected under the old per-site settings until
+        // something reapplies it, and the sidebar changes them through this
+        // message.
+        if (policyFingerprint(before.cssUrlPolicy) !== policyFingerprint(saved.cssUrlPolicy)) {
+          await reapplyAllTabs()
+        }
+      }
       return saved
     }
 
@@ -718,6 +823,7 @@ async function handle(
       return true
 
     case 'preview-css':
+      await refuseWhenOff(message.tabId)
       return handlePreviewCss(message, {
         getSettings,
         tabUrl: tabUrlOf,
@@ -771,6 +877,10 @@ async function handle(
       return true
 
     case 'start-picking': {
+      // The panel checks this first so that no permission is requested; this
+      // is the check for any other caller of the message.
+      await refuseExcludedTab(message.tabId)
+      await recordRunTabOf(message.tabId)
       // Inject only when nothing is answering. executeScript re-runs the file
       // unconditionally, and a second instance brings a second overlay and a
       // second set of listeners — see the guard in the content script.
@@ -804,6 +914,7 @@ async function handle(
       return askContent(message.tabId, { type: 'recapture' })
 
     case 'context-for-anchor': {
+      await recordRunTabOf(message.tabId)
       // The page keeps the palette from the last start-picking, and a page
       // that has had no pick has none, so Edit description drew no outline.
       const settings = await getSettings()
@@ -1074,6 +1185,36 @@ async function clearPreviewsWhere(
 }
 
 /**
+ * Takes out the CSS previews in the tabs whose address passes `include`. Used
+ * when a switch that stops transforms changes: a preview is a stylesheet on a
+ * real page, so it is covered by the switch as much as a saved one (#121).
+ */
+async function clearCssPreviewsOn(include: (url: string) => boolean): Promise<void> {
+  for (const tabId of await previewedTabIds()) {
+    const url = (await browser.tabs.get(tabId).catch(() => undefined))?.url
+    if (url && include(url)) await clearPreviewCss(tabId)
+  }
+}
+
+/**
+ * Throws when the switches say nothing may run on the tab's page, so that a
+ * preview is refused instead of being shown on a site the user turned off.
+ */
+async function refuseWhenOff(tabId: number): Promise<void> {
+  if ((await getSettings()).aiJsKillSwitch) {
+    throw new Error(
+      'Running transforms is switched off in the settings, so the preview was not shown. Turn that setting off to preview.',
+    )
+  }
+  const url = (await browser.tabs.get(tabId).catch(() => undefined))?.url
+  if (url && (await isUrlOff(url))) {
+    throw new Error(
+      'Web Alchemist is turned off on this site, so the preview was not shown. Turn it on for this site to preview.',
+    )
+  }
+}
+
+/**
  * Sidebar ports connected to this run of the background page, with the window
  * each one names. A port that names no window maps to undefined.
  */
@@ -1111,11 +1252,46 @@ void (async () => {
   const stored =
     (await previewedTabIds()).length > 0 ||
     (await previewedScriptIds()).length > 0 ||
-    (await suspendedTabIds()).length > 0
+    (await suspendedTabIds()).length > 0 ||
+    (await windowsWithRunTabs()).length > 0
   if (!stored) return
   await new Promise((resolve) => setTimeout(resolve, SIDEBAR_RECONNECT_GRACE_MS))
   await clearPreviewsWhere(ownerIsGone)
+  // The picker overlay and the lock outline are in the page, not in storage, so
+  // a panel closed during a suspension left them there (#108). A window whose
+  // sidebar did not reconnect has no panel to cancel them.
+  for (const windowId of await windowsWithRunTabs()) {
+    if (ownerIsGone(windowId)) await clearPageOverlays(windowId)
+  }
 })()
+
+/** Throws the message to show when the address is on the excluded list. */
+async function refuseExcludedUrl(url: string): Promise<void> {
+  const host = await excludedHostOf(url)
+  if (host !== null) throw new Error(excludedSiteMessage(host))
+}
+
+async function refuseExcludedTab(tabId: number): Promise<void> {
+  const tab = await browser.tabs.get(tabId).catch(() => undefined)
+  if (tab?.url) await refuseExcludedUrl(tab.url)
+}
+
+/** Records the tab of a run under the window it is in, so closing that window's sidebar can clean it. */
+async function recordRunTabOf(tabId: number): Promise<void> {
+  const tab = await browser.tabs.get(tabId).catch(() => undefined)
+  if (tab?.windowId !== undefined) await recordRunTab(tab.windowId, tabId).catch(() => {})
+}
+
+/**
+ * Removes the picker and the lock outline from the tabs this window's sidebar
+ * used. Both messages are harmless on a page that has neither.
+ */
+async function clearPageOverlays(windowId: number): Promise<void> {
+  for (const tabId of await takeRunTabs(windowId)) {
+    await sendToContent(tabId, { type: 'cancel-picking' })
+    await sendToContent(tabId, { type: 'clear-lock' })
+  }
+}
 
 const ALL_SITES = { origins: ['<all_urls>'] }
 
@@ -1189,6 +1365,7 @@ browser.runtime.onConnect.addListener((port) => {
         // at this moment: right after a start-up the other windows' sidebars
         // have not reconnected yet, and they are still open.
         void clearPreviewsWhere((owner) => owner === windowId)
+        void clearPageOverlays(windowId)
       }
     })
     return
@@ -1270,6 +1447,7 @@ async function runGeneration(
   const usage = createUsageRecorder(request.transformId)
 
   try {
+    await refuseExcludedUrl(request.context.url)
     if (signal.aborted) return
     const provider = await resolveActiveProvider(usage.listener)
     if (signal.aborted) return
@@ -1450,7 +1628,55 @@ async function matchingTransforms(url: string): Promise<Transform[]> {
 
 /** The subset that should actually run. */
 async function transformsForUrl(url: string): Promise<Transform[]> {
+  // Nothing runs while the kill switch is on or the site is turned off, so
+  // nothing is applied, counted on the badge or health-checked.
+  if ((await getSettings()).aiJsKillSwitch || (await isUrlOff(url))) return []
   return (await matchingTransforms(url)).filter((t) => t.enabled)
+}
+
+/**
+ * What follows a settings write that may have changed the kill switch. The
+ * switch changes which scripts may run, so registrations are rebuilt. When it
+ * changed, CSS is also taken out of (or put back into) the open tabs.
+ * Unregistering a script does not undo code that already ran in an open tab, so
+ * those tabs are not touched here: the page that changed the setting asks for
+ * their number with count-js-tabs and tells the user to reload them. They are
+ * not reloaded, because that would discard unsaved text on every open site
+ * because of one setting.
+ */
+async function afterSettingsWritten(switchBefore: boolean): Promise<void> {
+  await reregister()
+  const switchNow = (await getSettings()).aiJsKillSwitch
+  if (switchNow && !switchBefore) await clearCssPreviewsOn(() => true)
+  if (switchNow !== switchBefore) await reapplyOpenTabs(() => true)
+}
+
+/** Reapplies CSS and the badge in every open tab whose address passes `include`. */
+async function reapplyOpenTabs(include: (url: string) => boolean): Promise<void> {
+  for (const tab of await browser.tabs.query({})) {
+    if (tab.id === undefined || !tab.url || !include(tab.url)) continue
+    await reapply(tab.id)
+  }
+}
+
+/**
+ * Open tabs, whose address passes `include`, that match an enabled JavaScript
+ * transform and so may have run it. The browser does not report which tabs ran
+ * a script, so this is the set a registered script would have run in.
+ */
+async function tabsWithJavaScript(include: (url: string) => boolean): Promise<number[]> {
+  const scripts = (await getAllTransforms()).filter((t) => t.kind === 'js' && t.enabled && t.code)
+  const ids: number[] = []
+  for (const tab of await browser.tabs.query({})) {
+    if (tab.id === undefined || !tab.url || !include(tab.url)) continue
+    const url = tab.url
+    if (scripts.some((t) => matchesUrl(t.match, url))) ids.push(tab.id)
+  }
+  return ids
+}
+
+async function countTabsWithJavaScript(include: (url: string) => boolean): Promise<number> {
+  return (await tabsWithJavaScript(include)).length
 }
 
 /**
@@ -1672,6 +1898,18 @@ async function captureWithLockDown(
   }
 }
 
+/** True when both addresses have the same origin and path. */
+function samePage(a: string | undefined, b: string | undefined): boolean {
+  if (a === undefined || b === undefined) return false
+  try {
+    const x = new URL(a)
+    const y = new URL(b)
+    return x.origin === y.origin && x.pathname === y.pathname
+  } catch {
+    return a === b
+  }
+}
+
 async function captureRegion(
   tabId: number,
   url: string,
@@ -1691,12 +1929,25 @@ async function captureRegion(
       'The page this run is about is not the tab in front, so nothing was captured. Switch back to it and try again.',
     )
   }
-  if (tab.url !== url) {
+  // Origin and path, not the whole address: a page that changes its fragment or
+  // query while it is in use (scroll-spy navigation, a video player writing the
+  // playback time) is still the same page, and comparing the whole address
+  // refused every capture on such pages.
+  if (!samePage(tab.url, url)) {
     throw new Error(
       'The page this run is about has moved to another address, so nothing was captured.',
     )
   }
   const full = await browser.tabs.captureVisibleTab(tab.windowId, { format: 'png' })
+
+  // The tab can change while the capture runs. The image is dropped if it no
+  // longer shows the page this run is about.
+  const after = await browser.tabs.get(tabId).catch(() => undefined)
+  if (!after?.active || !samePage(after.url, url)) {
+    throw new Error(
+      'The tab changed while the screenshot was being taken, so the image was discarded. Try again.',
+    )
+  }
 
   // Cropping happens here so the full-viewport capture never leaves this scope.
   const blob = await (await fetch(full)).blob()

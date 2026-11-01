@@ -9,6 +9,7 @@
    * 320px column.
    */
   import { REVOKE_KEY_NOTICE } from '@shared/disclosure'
+  import { KILL_SWITCH_LABEL, KILL_SWITCH_NOTE } from '@shared/kill-switch'
   import { ACCENTS, type Accent, type CredentialStatus, type HealthCheckMode, type Settings } from '@shared/types'
   import { ACCENT_COLOURS } from '@shared/accents'
   import { credentialDisclosure, type VaultView } from '@shared/vault-disclosure'
@@ -22,9 +23,11 @@
     vault: VaultView
     onsave: (settings: Settings) => void
     onfullpage: () => void
+    /** What to reload after the stop-all setting changed; empty when nothing. */
+    killNotice?: string
   }
 
-  let { settings, statuses, vault, onsave, onfullpage }: Props = $props()
+  let { settings, statuses, vault, onsave, onfullpage, killNotice = '' }: Props = $props()
 
   let disclosure = $derived(credentialDisclosure(vault))
 
@@ -142,12 +145,13 @@
 
   <div class="kill">
     <div class="kill-text">
-      <span class="card-title">Stop running AI-written JavaScript</span>
-      <span class="note">Immediately, on every site. CSS keeps working.</span>
+      <span class="card-title">{KILL_SWITCH_LABEL}</span>
+      <span class="note">{KILL_SWITCH_NOTE}</span>
+      {#if killNotice}<span class="note" role="status"><strong>{killNotice}</strong></span>{/if}
     </div>
     <Toggle
       checked={settings.aiJsKillSwitch}
-      label="Stop running AI-written JavaScript"
+      label={KILL_SWITCH_LABEL}
       onchange={(checked) => onsave({ ...settings, aiJsKillSwitch: checked })}
     />
   </div>

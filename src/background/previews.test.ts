@@ -313,6 +313,45 @@ describe('capture-region (#135, #119)', () => {
     expect(captureCalls).toEqual([])
   })
 
+  it('still captures when only the fragment or the query changed during the run (#135)', async () => {
+    for (const changed of ['https://www.example.com/#section-2', 'https://www.example.com/?t=42']) {
+      captureCalls.length = 0
+      tabHooks.tab = (tabId) => ({ id: tabId, active: true, windowId: 3, url: changed })
+      expect(((await request()) as any).ok).toBe(true)
+      expect(captureCalls).toHaveLength(1)
+    }
+  })
+
+  it('refuses a different path on the same site (control for the looser comparison)', async () => {
+    tabHooks.tab = (tabId) => ({ id: tabId, active: true, windowId: 3, url: 'https://www.example.com/other' })
+    expect(((await request()) as any).ok).toBe(false)
+    expect(captureCalls).toEqual([])
+  })
+
+  it('discards the image when the tab stopped being active during the capture', async () => {
+    // Active before the capture call, in the background after it.
+    tabHooks.tab = (tabId) => ({
+      id: tabId,
+      active: captureCalls.length === 0,
+      windowId: 3,
+      url: 'https://www.example.com/',
+    })
+    const reply = (await request()) as any
+    expect(reply.ok).toBe(false)
+    expect(reply.error.message).toMatch(/changed while the screenshot/)
+    expect(reply.data).toBeUndefined()
+  })
+
+  it('discards the image when the tab moved to another page during the capture', async () => {
+    tabHooks.tab = (tabId) => ({
+      id: tabId,
+      active: true,
+      windowId: 3,
+      url: captureCalls.length === 0 ? 'https://www.example.com/' : 'https://other.example.org/',
+    })
+    expect(((await request()) as any).ok).toBe(false)
+  })
+
   it('refuses when the run tab is gone', async () => {
     tabHooks.tab = () => {
       throw new Error('no such tab')
@@ -355,5 +394,57 @@ describe('capture-region (#135, #119)', () => {
       expect(((await request({ ...drawnAt, devicePixelRatio: 2 })) as any).ok).toBe(false)
       expect(captureCalls).toEqual([])
     })
+  })
+})
+
+describe('closing the sidebar removes the picker and the lock outline (#108)', () => {
+  const closeSidebar = async (name: string) => {
+    const port = { name, sender: extensionPage, onDisconnect: { addListener: vi.fn() } }
+    onConnect(port)
+    await port.onDisconnect.addListener.mock.calls[0]![0]()
+    return port
+  }
+  const overlayMessages = () =>
+    sentToTabs.filter((m) => m.message.type === 'cancel-picking' || m.message.type === 'clear-lock')
+
+  it('sends cancel-picking and clear-lock to the tab the window used for picking', async () => {
+    await onMessage({ type: 'start-picking', tabId: 9 }, extensionPage)
+    await closeSidebar('wa-sidebar:3')
+    await vi.waitFor(() =>
+      expect(overlayMessages()).toEqual([
+        { tabId: 9, message: { type: 'cancel-picking' } },
+        { tabId: 9, message: { type: 'clear-lock' } },
+      ]),
+    )
+  })
+
+  it('also covers a tab used only to edit a description', async () => {
+    await onMessage({ type: 'context-for-anchor', tabId: 12, anchor: {} }, extensionPage)
+    await closeSidebar('wa-sidebar:3')
+    await vi.waitFor(() => expect(overlayMessages().map((m) => m.tabId)).toEqual([12, 12]))
+  })
+
+  it('leaves the tab of another window alone (control)', async () => {
+    tabHooks.tab = (tabId) => ({ id: tabId, active: true, windowId: 4, url: 'https://www.example.com/' })
+    await onMessage({ type: 'start-picking', tabId: 9 }, extensionPage)
+    await closeSidebar('wa-sidebar:3')
+    await new Promise((r) => setTimeout(r, 20))
+    expect(overlayMessages()).toEqual([])
+  })
+
+  it('sends nothing when the sidebar never started a run (control)', async () => {
+    await closeSidebar('wa-sidebar:3')
+    await new Promise((r) => setTimeout(r, 20))
+    expect(overlayMessages()).toEqual([])
+  })
+
+  it('sends nothing twice for one run', async () => {
+    await onMessage({ type: 'start-picking', tabId: 9 }, extensionPage)
+    await closeSidebar('wa-sidebar:3')
+    await vi.waitFor(() => expect(overlayMessages()).toHaveLength(2))
+    sentToTabs.length = 0
+    await closeSidebar('wa-sidebar:3')
+    await new Promise((r) => setTimeout(r, 20))
+    expect(overlayMessages()).toEqual([])
   })
 })

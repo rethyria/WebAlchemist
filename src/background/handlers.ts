@@ -270,7 +270,7 @@ export interface SettingsDeps {
 }
 
 /** The per-site CSS settings as one string, so two tables compare equal whatever their key order. */
-function policyFingerprint(policy: Settings['cssUrlPolicy'] | undefined): string {
+export function policyFingerprint(policy: Settings['cssUrlPolicy'] | undefined): string {
   return JSON.stringify(Object.entries(policy ?? {}).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
 }
 

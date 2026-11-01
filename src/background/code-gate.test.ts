@@ -14,6 +14,8 @@ vi.mock('./storage', () => ({
   getAllTransforms: async () => stored,
   getSettings: async () => settings,
 }))
+// The per-site off list is read at registration; none is turned off here.
+vi.mock('./site-off', () => ({ getOffHosts: async () => [] }))
 vi.mock('./userscripts-api', () => ({
   userScripts: {
     unregister: async () => {},
@@ -68,7 +70,7 @@ describe('re-registering stored JavaScript', () => {
     ]
     const outcome = await reregisterAll()
     expect(registered).toEqual(['good'])
-    expect(outcome).toEqual({ registered: 1, skipped: 1 })
+    expect(outcome).toEqual({ registered: 1, skipped: 1, endedPreviews: [] })
   })
 
   it('does not register a single failing script either', async () => {

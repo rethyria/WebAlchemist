@@ -28,6 +28,7 @@ import type {
   Conflict,
   Transform,
   TransformRuntimeState,
+  TransformSource,
   TreePath,
   TreeRow,
 } from './types'
@@ -59,15 +60,6 @@ export type Message =
   | { type: 'get-vision-support' }
 
   /* --- generation --------------------------------------------------- */
-  | {
-      type: 'generate'
-      context: PageContext
-      instruction: string
-      history: RefinementTurn[]
-      scopeDepth?: number
-      scopeContainer?: string | null
-      transformId?: string
-    }
   | { type: 'repair'; transformId: string; context: PageContext; brokenReason: string }
   | {
       type: 'review'
@@ -130,7 +122,21 @@ export type Message =
    * is stored is refused without it, and the token is deleted by a successful
    * save. CSS and unchanged code need none.
    */
-  | { type: 'save-transform'; transform: Transform; tabId?: number; approvalToken?: string }
+  | {
+      type: 'save-transform'
+      transform: Transform
+      tabId?: number
+      approvalToken?: string
+      /** What produced the code, kept with the version it replaces. */
+      source?: TransformSource
+    }
+  | { type: 'get-transform-versions'; id: string }
+  /**
+   * `approvalToken` is the one `approve-code` returned for the version's code,
+   * world, capabilities and match, with this transform's id. A restore goes
+   * through the same save as any other, so JavaScript is refused without it.
+   */
+  | { type: 'restore-transform-version'; id: string; versionId: string; tabId?: number; approvalToken?: string }
   /** `tabId` lets the change come off the page now rather than on reload. */
   | { type: 'delete-transform'; id: string; tabId?: number }
   /**
@@ -150,6 +156,16 @@ export type Message =
   | { type: 'save-settings'; settings: Settings }
   /** Applies one change to the stored settings and returns the settings as saved. */
   | { type: 'patch-settings'; change: SettingsChange }
+  /* The per-site off switch, by the host of `url`. */
+  | { type: 'get-site-off'; url: string }
+  | { type: 'set-site-off'; url: string; off: boolean }
+  /** How many open tabs may be running JavaScript that a changed setting does not stop. */
+  | { type: 'count-js-tabs' }
+  /* The sites on which picking and generation are refused (#131). */
+  | { type: 'get-excluded-sites' }
+  | { type: 'set-excluded-sites'; sites: string[] }
+  /** Asks the page in the tab whether it has a password or payment field. */
+  | { type: 'page-has-sensitive-fields'; tabId: number }
   | { type: 'set-credential'; providerId: string; credential: Credential }
   | { type: 'clear-credential'; providerId: string }
   /*
@@ -329,6 +345,8 @@ export type ContentMessage =
   | { type: 'url-changed'; url: string }
   /** Answered only by a live instance; the background uses it to avoid reinjecting. */
   | { type: 'ping' }
+  /** Answers whether the page has a password or payment field. Never reads a value. */
+  | { type: 'sensitive-fields' }
   /** Answers the current scroll offset and viewport size. */
   | { type: 'get-viewport' }
 

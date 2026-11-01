@@ -40,13 +40,25 @@ import type {
   ReviewResult,
   Transform,
   TransformKind,
+  TransformSource,
   TreePath,
   TreeRow,
   UsageReport,
 } from '@shared/types'
 import { extractPartialString } from '@shared/partial-json'
-import { recordCaptureGrant } from '@shared/capture-grant'
+import {
+  excludedAccessMessage,
+  excludedHostFor,
+  excludedHostForPattern,
+  excludedSiteMessage,
+  SENSITIVE_PAGE_MESSAGE,
+} from '@shared/excluded-sites'
+import { readCaptureGrant, recordCaptureGrant } from '@shared/capture-grant'
 import { BackgroundError, generateOverPort, send } from './messaging.svelte'
+
+/** An address without its fragment, so that scrolling to an anchor is not a new page. */
+const pageKey = (url: string): string => url.split('#')[0] ?? url
+
 
 export type Step =
   | 'list'
@@ -89,8 +101,19 @@ export type FlowError =
   | { kind: 'credential-expired'; message: string }
   /** The configured model is unknown or retired. The way out is the model setting. */
   | { kind: 'model-unavailable'; message: string; descriptionKept?: boolean }
+  /**
+   * The model exists but this account may not use it. Like model-unavailable the
+   * way out is another model, but the account setting that blocked it is in the
+   * provider's console, so the card says so and offers no retry.
+   */
+  | { kind: 'model-not-permitted'; message: string; descriptionKept?: boolean }
   /** No credit or a billing problem. Retrying cannot help until the user fixes it. */
   | { kind: 'billing'; message: string; descriptionKept?: boolean }
+  /**
+   * The page has a password or payment field. The retry action of the card is
+   * "send the page content anyway", and dismissing it sends nothing.
+   */
+  | { kind: 'sensitive-page'; message: string }
 
 interface Picked {
   context: PageContext
@@ -196,6 +219,14 @@ export class Flow {
   visionSupported = $state(false)
   /** Mirrors the setting; decides whether the all-sites grant is handed back. */
   keepScreenshotPermission = $state(false)
+  /**
+   * Whether the panel took the all-sites grant for a run, as recorded in
+   * storage.local (see capture-grant.ts). Kept in memory as well because the
+   * save has to decide synchronously: an await before the permission request
+   * would end the user gesture. A save removes the all-sites grant only when
+   * this is true, so a grant the user gave outside the panel is left alone (#134).
+   */
+  captureGrantTaken = false
 
   history = $state<RefinementTurn[]>([])
   followUp = $state('')
@@ -229,6 +260,11 @@ export class Flow {
    * it. An existing transform keeps its own id through `draft`.
    */
   private pendingId: string | null = null
+  /**
+   * What the code being reviewed came from, sent with the save so the version
+   * it replaces is labelled. A refinement keeps the label of the run it refines.
+   */
+  private producedBy: TransformSource = 'generation'
   private transformKey(): string {
     return this.draft?.id ?? (this.pendingId ??= crypto.randomUUID())
   }
@@ -313,6 +349,15 @@ export class Flow {
    * walked away from.
    */
   private generation = 0
+
+  /**
+   * Counts the runs that have started: generate(), repair(), editIntent() and
+   * editWithAi() each add one, and cancelling, discarding and resetting do not.
+   * `generation` cannot answer "has another run started since?", because one
+   * Cancel followed by one Discard raises it twice with no run in between, and
+   * a cleanup that expected exactly one step then never ran (#110).
+   */
+  private runStarts = 0
 
   constructor(private readonly onSaved: () => void) {}
 
@@ -474,6 +519,15 @@ export class Flow {
     return true
   }
 
+  /**
+   * The user's excluded sites, kept here so that startPicking can check them
+   * before its first await. The origin permission request has to be that first
+   * await, so the list cannot be read from the background at that point.
+   */
+  excludedSites: string[] = []
+  /** The page, without its fragment, for which the user chose to send its content. */
+  private sensitiveConfirmedFor: string | null = null
+
   async startPicking(purpose: 'describe' | 'author' = 'describe'): Promise<void> {
     this.pickPurpose = purpose
     this.keptInstruction = this.step === 'describing' ? this.instruction : null
@@ -481,6 +535,13 @@ export class Flow {
 
     const origin = originPermissionForUrl(this.url)
     if (!origin) return
+
+    // Before the permission request: an excluded site is never asked for access.
+    const excluded = excludedHostFor(this.excludedSites, this.url)
+    if (excluded !== null) {
+      this.show({ kind: 'request-failed', message: excludedSiteMessage(excluded) })
+      return
+    }
 
     /*
      * Held next to keptInstruction, before the first await. It used to be set
@@ -848,7 +909,9 @@ export class Flow {
   async repair(transform: Transform, brokenReason: string): Promise<void> {
     if (this.tabId === null) return
 
+    this.producedBy = 'repair'
     const token = ++this.generation
+    const starts = ++this.runStarts
     const current = () => token === this.generation
 
     this.step = 'generating'
@@ -879,6 +942,14 @@ export class Flow {
       this.references = []
       this.draft = transform
       await this.restoreScopeDepth(transform)
+      if (!current()) return
+
+      if (await this.needsSensitiveConfirmation()) {
+        if (!current()) return
+        await this.discard()
+        this.warnAboutSensitivePage(() => this.repair(transform, brokenReason))
+        return
+      }
       if (!current()) return
 
       this.stage = 'sent'
@@ -967,7 +1038,9 @@ export class Flow {
   async editIntent(transform: Transform): Promise<void> {
     if (this.tabId === null) return
 
+    this.producedBy = 'ai-edit'
     const token = ++this.generation
+    const starts = ++this.runStarts
     const current = () => token === this.generation
 
     this.step = 'generating'
@@ -1036,7 +1109,9 @@ export class Flow {
   async editWithAi(transform: Transform): Promise<void> {
     if (this.tabId === null) return
 
+    this.producedBy = 'ai-edit'
     const token = ++this.generation
+    const starts = ++this.runStarts
     const current = () => token === this.generation
 
     this.step = 'generating'
@@ -1168,12 +1243,33 @@ export class Flow {
    * repeating plain generate() would send the restored instruction, not the
    * follow-up that failed.
    */
+  /**
+   * True when the user has to confirm before this page's content is sent: the
+   * page has a password or payment field and has not been confirmed already.
+   * Asked of the page itself, not of the extracted context, so the check adds
+   * nothing to what is sent.
+   */
+  private async needsSensitiveConfirmation(): Promise<boolean> {
+    if (this.tabId === null) return false
+    if (this.sensitiveConfirmedFor === pageKey(this.url)) return false
+    return (await send<boolean>({ type: 'page-has-sensitive-fields', tabId: this.tabId })) === true
+  }
+
+  /** Shows the warning. Confirming it records the page and repeats `again`. */
+  private warnAboutSensitivePage(again: () => Promise<void>): void {
+    this.show({ kind: 'sensitive-page', message: SENSITIVE_PAGE_MESSAGE }, async () => {
+      this.sensitiveConfirmedFor = pageKey(this.url)
+      await again()
+    })
+  }
+
   async generate(again: () => Promise<void> = () => this.generate()): Promise<void> {
     const picked = this.picked
     if (!picked || !this.instruction.trim()) return
 
     const from = this.step
     const token = ++this.generation
+    const starts = ++this.runStarts
     const current = () => token === this.generation
 
     this.stopSecondaryPicker()
@@ -1188,6 +1284,17 @@ export class Flow {
       // cancelled run still opened a port and sent the request.
       if (!current()) return
       if (this.references.length > 0) context.references = [...this.references]
+
+      // Before anything is sent. The step goes back to where the run started,
+      // as a failure does, so the description is kept while the user decides.
+      if (await this.needsSensitiveConfirmation()) {
+        if (!current()) return
+        this.step = from === 'refining' ? 'refining' : 'describing'
+        this.undoRefinement()
+        this.warnAboutSensitivePage(again)
+        return
+      }
+      if (!current()) return
 
       // Already captured and already on screen in the panel; nothing is taken
       // at request time that the user has not seen.
@@ -1291,10 +1398,10 @@ export class Flow {
         // The request to add the new CSS may have been processed after that
         // happened, and nothing else knows about it: discard and reset read
         // previewedCss, which was still empty while the request was in flight.
-        // A cancel, discard or reset bumps the generation once, so token + 1
-        // is the value it left. A larger value means a new run has started on
-        // this flow and tab since, and its preview is not ours to remove.
-        await this.removeLatePreview(token + 1)
+        // Whether a new run has started on this flow since is decided by
+        // runStarts. A cancel followed by a discard raises the generation more
+        // than once without a new run, and the preview still has to come off.
+        await this.removeLatePreview(starts)
         return
       }
       this.refinement = null
@@ -1308,7 +1415,7 @@ export class Flow {
       // previous result's CSS, so it is put back along with the result.
       const replacedResult = this.refinement?.previous !== undefined
       this.undoRefinement()
-      if (replacedResult) await this.removeLatePreview(this.generation)
+      if (replacedResult) await this.removeLatePreview(starts)
       this.fail(cause, again)
     } finally {
       this.stopClock()
@@ -1368,10 +1475,12 @@ export class Flow {
     // Recorded in the same tick as the request and not awaited before it, which
     // would end the gesture. If the panel closes before the user answers, the
     // background script finds the record and hands the grant back.
+    this.captureGrantTaken = true
     const recorded = recordCaptureGrant(true).catch(() => {})
     const granted = await browser.permissions.request({ origins: ['<all_urls>'] })
     await recorded
     if (!granted) {
+      this.captureGrantTaken = false
       void recordCaptureGrant(false).catch(() => {})
       this.sendScreenshot = false
       this.show({
@@ -1381,6 +1490,23 @@ export class Flow {
       })
     }
     return granted
+  }
+
+  /**
+   * Shows the refusal and returns true when the pattern would give access to a
+   * site on the excluded list. Synchronous, so a caller can use it before the
+   * permission request without ending the user gesture (#131).
+   */
+  refuseExcludedAccess(pattern: string): boolean {
+    const excluded = excludedHostForPattern(this.excludedSites, pattern)
+    if (excluded === null) return false
+    this.show({ kind: 'request-failed', message: excludedAccessMessage(excluded) })
+    return true
+  }
+
+  /** Reads the record at start-up, so a panel opened after a grant was taken still knows it. */
+  async loadCaptureGrantRecord(): Promise<void> {
+    this.captureGrantTaken = await readCaptureGrant().catch(() => false)
   }
 
   async chooseScreenshotRegion(): Promise<void> {
@@ -1460,6 +1586,7 @@ export class Flow {
    */
   cancelScreenshot(): void {
     this.clearShot()
+    this.captureGrantTaken = false
     void recordCaptureGrant(false).catch(() => {})
     // Held deliberately when the user has said so in settings; the point of
     // that setting is not being asked again.
@@ -1575,18 +1702,18 @@ export class Flow {
    * for a refinement that went back to its previous result, puts that result's
    * CSS on the page again, since applyPreview had already removed it.
    *
-   * `generation` is the value the cleanup is for. It does nothing once the
-   * flow has moved past it, because the tab and the flow's preview state then
-   * belong to a newer run.
+   * `starts` is the value of `runStarts` when the attempt began. The cleanup
+   * does nothing once another run has started, because the tab and the flow's
+   * preview state then belong to that run.
    */
-  private async removeLatePreview(generation: number): Promise<void> {
-    if (this.tabId === null || this.generation !== generation) return
+  private async removeLatePreview(starts: number): Promise<void> {
+    if (this.tabId === null || this.runStarts !== starts) return
     const tabId = this.tabId
     await send({ type: 'clear-preview-css', tabId, css: '' }).catch(() => {})
     // The request takes time, and a new run may have started while it did.
-    if (this.generation !== generation || this.tabId !== tabId) return
+    if (this.runStarts !== starts || this.tabId !== tabId) return
     this.previewedCss = null
-    const back = this.step === 'refining' ? this.result : null
+    const back = this.step === 'refining' && !this.discarding ? this.result : null
     if (back?.kind === 'css') {
       await send({ type: 'preview-css', tabId: this.tabId, css: back.code }).catch(() => {})
       this.previewedCss = back.code
@@ -1733,11 +1860,25 @@ export class Flow {
   }
 
   async discard(): Promise<void> {
-    await this.clearPreview()
-    await this.resumeSuspended()
-    await this.clearLock()
-    this.reset()
+    // The run ends here, before the first await. The clears below take time,
+    // and a preview reply that lands meanwhile has to see a run that is over:
+    // it then removes what it applied instead of recording it in state that
+    // reset() is about to wipe (#98). `discarding` tells a late cleanup not to
+    // put an earlier result's CSS back while the run is being taken apart.
+    this.generation += 1
+    this.discarding = true
+    try {
+      await this.clearPreview()
+      await this.resumeSuspended()
+      await this.clearLock()
+      this.reset()
+    } finally {
+      this.discarding = false
+    }
   }
+
+  /** True while discard() is clearing the page, before reset() has run. */
+  private discarding = false
 
   /**
    * Puts a suspended transform back on the page.
@@ -1882,16 +2023,37 @@ export class Flow {
    * whose contents are already granted is filtered to nothing and resolves
    * true without a doorhanger.
    */
-  requestFor(kind: TransformKind, match: string): Promise<boolean> {
+  requestFor(kind: TransformKind, match: string, releaseAllSites = false): Promise<boolean> {
     // A blank pattern would yield `*:///*`, which Firefox rejects outright and
     // which would take the whole request down with it.
     const origin = match
       ? originPermissionFor(match)
       : (originPermissionForUrl(this.url) ?? '')
 
+    /*
+     * While the all-sites grant a screenshot needed is still held, Firefox may
+     * answer a request for one site with true without recording that site, and
+     * the transform then loses its access when the run gives `<all_urls>` back.
+     * So the grant is removed first. Both calls are made in the same tick and
+     * not one after the other, because an await between them would spend the
+     * gesture the request needs; the removal is sent first and is expected to
+     * be handled first (not measured, since no browser was run). The origin is
+     * then looked up to confirm it was recorded; if it was not, the save reports
+     * the permission as missing and the next click asks again with nothing held.
+     */
+    const released = releaseAllSites
+      ? browser.permissions.remove({ origins: ['<all_urls>'] }).catch(() => false)
+      : null
+
     const forOrigin = origin
       ? browser.permissions.request({ origins: [origin] })
       : Promise.resolve(true)
+
+    // The grant is gone after the removal above, so the record no longer applies.
+    if (releaseAllSites) {
+      this.captureGrantTaken = false
+      void recordCaptureGrant(false).catch(() => {})
+    }
 
     // 'userScripts' is absent from the OptionalPermission union in
     // @types/firefox-webext-browser, and a union cannot be widened by
@@ -1903,8 +2065,12 @@ export class Flow {
           } as unknown as browser.permissions.Permissions)
         : Promise.resolve(true)
 
-    return Promise.all([forOrigin, forScripts]).then(
-      ([originGranted, scriptsGranted]) => originGranted && scriptsGranted,
+    return Promise.all([forOrigin, forScripts, released]).then(
+      async ([originGranted, scriptsGranted]) => {
+        if (!originGranted || !scriptsGranted) return false
+        if (released === null || !origin) return true
+        return browser.permissions.contains({ origins: [origin] }).catch(() => false)
+      },
     )
   }
 
@@ -1924,8 +2090,13 @@ export class Flow {
      * Requesting something already granted resolves true without prompting,
      * so there is no need to check first.
      */
+    if (this.refuseExcludedAccess(this.matchPattern)) return
     try {
-      const granted = await this.requestFor(draft.kind, this.matchPattern)
+      const granted = await this.requestFor(
+        draft.kind,
+        this.matchPattern,
+        !this.keepScreenshotPermission && this.captureGrantTaken,
+      )
       if (!granted) {
         this.permissionDenied = true
         return
@@ -1955,6 +2126,7 @@ export class Flow {
       await send({
         type: 'save-transform',
         transform,
+        source: this.producedBy,
         // So it applies to the page now, rather than on the next load.
         ...(this.tabId === null ? {} : { tabId: this.tabId }),
         ...(this.review?.approvalToken ? { approvalToken: this.review.approvalToken } : {}),
@@ -1990,6 +2162,7 @@ export class Flow {
     this.error =
       (error.kind === 'request-failed' ||
         error.kind === 'model-unavailable' ||
+        error.kind === 'model-not-permitted' ||
         error.kind === 'billing') &&
       error.descriptionKept === undefined
         ? { ...error, descriptionKept: DESCRIPTION_STEPS.includes(this.step) }
@@ -2027,6 +2200,12 @@ export class Flow {
         // Only the error is set. The description, scope and picked element stay
         // as they are, so choosing another model and retrying needs no retyping.
         this.error = { kind: 'model-unavailable', message: cause.message }
+        return
+      case 'model-not-permitted':
+        // As for model-unavailable: only the error is set, so the description
+        // is kept, and no retry is recorded because repeating the request with
+        // the same model fails the same way.
+        this.error = { kind: 'model-not-permitted', message: cause.message }
         return
       case 'billing':
         this.error = { kind: 'billing', message: cause.message }
@@ -2167,6 +2346,7 @@ export class Flow {
     this.result = null
     this.draft = null
     this.pendingId = null
+    this.producedBy = 'generation'
     this.lastUsage = undefined
     this.previewedCss = null
     this.jsRan = false
