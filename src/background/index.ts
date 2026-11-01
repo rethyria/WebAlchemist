@@ -625,8 +625,10 @@ async function handle(
         // re-registered; the page picks it up on its next load either way.
         // Queued with the start-up rebuild so the two cannot interleave (#91).
         await inRegistryQueue(async () => {
-          if (saved.enabled) await registerTransform(saved)
-          else await unregisterTransform(saved.id)
+          // A script with a preview stays unregistered while the preview runs,
+          // as in reregisterAllNow, or the page would run both (#150).
+          if (saved.enabled && !(await previewedScriptIds()).includes(saved.id)) await registerTransform(saved)
+          else if (!saved.enabled) await unregisterTransform(saved.id)
         })
       }
 
@@ -834,8 +836,9 @@ async function handle(
       if (!next) throw new Error('That transform no longer exists.')
       if (next.kind === 'js') {
         await inRegistryQueue(async () => {
-          if (next.enabled) await registerTransform(next)
-          else await unregisterTransform(next.id)
+          // See reapply-everywhere: a previewed script is not registered again.
+          if (next.enabled && !(await previewedScriptIds()).includes(next.id)) await registerTransform(next)
+          else if (!next.enabled) await unregisterTransform(next.id)
         })
       }
       // A toggle that takes effect on the next reload is not a toggle.
