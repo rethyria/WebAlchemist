@@ -309,6 +309,11 @@ deny('Redirects the page from a meta element.', 'httpEquiv', 'http-equiv')
  */
 const EVENT_TARGET_NAMES = new Set([
   'target', 'currentTarget', 'srcElement', 'originalTarget', 'explicitOriginalTarget', 'composedTarget',
+  // The sender of a message event is a window, the storage area of a storage
+  // event is localStorage or sessionStorage (without the storage capability),
+  // and `view` and `ports` of a UI or message event lead to a window and to a
+  // port that can post messages.
+  'source', 'storageArea', 'ports', 'view',
 ])
 
 /**
@@ -1182,6 +1187,17 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
       // is only a field. The object is known only after the walk.
       deferred.push(() => {
         if (!isPlainObject(object, scope)) block(target, name, refused)
+      })
+    }
+    // An `on` property is an event handler. The handler of some events on
+    // `body` and on frames is called with the window as `this` and as the
+    // target of its event, which puts the window in the code's hands as a
+    // value. `addEventListener` is the allowed way to listen, and it is checked
+    // where the listener is on the window or the document.
+    if (!onStyle && /^on[a-z]/.test(name)) {
+      deferred.push(() => {
+        if (isPlainObject(object, scope)) return
+        block(target, `${name} (event handler property)`, 'Sets an event handler property, which can be called with the window as its `this` or as the target of its event. Use addEventListener instead.')
       })
     }
     if (!onStyle && (SCRIPT_STATE_PROPERTIES.has(name) || name === 'src')) {

