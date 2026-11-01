@@ -10,6 +10,7 @@
     type UsageStore,
   } from '@shared/types'
   import { ACCENT_COLOURS } from '@shared/accents'
+  import { KILL_SWITCH_LABEL, KILL_SWITCH_NOTE, killSwitchNotice, reloadTabsOf } from '@shared/kill-switch'
   import Toggle from '@sidebar/components/Toggle.svelte'
   import ProviderSettings from './ProviderSettings.svelte'
   import SiteAccess from './SiteAccess.svelte'
@@ -19,6 +20,7 @@
   import { loadVaultAndStatuses } from './vault-load'
 
   let settings = $state<Settings | null>(null)
+  let killNotice = $state('')
   let statuses = $state<CredentialStatus[]>([])
   let vault = $state({ sealed: false, unlocked: true })
   /** Set when the credentials could not be read and the vault is not locked. */
@@ -85,9 +87,12 @@
   }
 
   async function save(next: Settings) {
+    const previous = settings?.aiJsKillSwitch
     settings = next
     document.documentElement.dataset['accent'] = next.accent
-    await call({ type: 'save-settings', settings: next })
+    const changed = previous !== next.aiJsKillSwitch
+    const answer = await call({ type: 'save-settings', settings: next })
+    killNotice = changed ? killSwitchNotice(next.aiJsKillSwitch, reloadTabsOf(answer)) : killNotice
   }
 
   async function setKey(providerId: string, key: string) {
@@ -210,14 +215,13 @@
     <section>
       <div class="kill">
         <div>
-          <h2 class="kill-title">Stop running AI-written JavaScript</h2>
-          <p class="subtitle">
-            Takes effect immediately on every site. CSS transforms keep working.
-          </p>
+          <h2 class="kill-title">{KILL_SWITCH_LABEL}</h2>
+          <p class="subtitle">{KILL_SWITCH_NOTE}</p>
+          {#if killNotice}<p class="subtitle" role="status"><strong>{killNotice}</strong></p>{/if}
         </div>
         <Toggle
           checked={settings.aiJsKillSwitch}
-          label="Stop running AI-written JavaScript"
+          label={KILL_SWITCH_LABEL}
           large
           onchange={(checked) => settings && save({ ...settings, aiJsKillSwitch: checked })}
         />

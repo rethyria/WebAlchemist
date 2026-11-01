@@ -29,6 +29,8 @@ import type { RefinementTurn } from './providers/types'
 import { overlayPaletteFor } from '@shared/accents'
 import * as badge from './badge'
 import { recordRunTab, takeRunTabs } from './run-tabs'
+import { isUrlOff, setHostOff } from './site-off'
+import { hostOfUrl } from '@shared/site-off'
 import { isSidebarPortName, windowOfSidebarPort } from '@shared/sidebar-port'
 import { documentOf, forgetTab, inTabQueue, startDocument } from './tab-queue'
 import { reconcile as reconcileContentScripts } from './content-scripts'
@@ -533,11 +535,39 @@ async function handle(
       return true
     }
 
-    case 'save-settings':
+    case 'save-settings': {
+      const switchBefore = (await getSettings()).aiJsKillSwitch
       await saveSettings(message.settings)
       // The kill switch changes which scripts may run.
       await reregister()
-      return true
+      const switchAfter = (await getSettings()).aiJsKillSwitch
+      if (switchBefore === switchAfter) return true
+      // Unregistering a script does not undo code that already ran in an open
+      // tab, so CSS is taken out of (or put back into) the open tabs here, and
+      // the tabs that ran JavaScript are counted so the caller can say that
+      // they need a reload. They are not reloaded: that would discard
+      // unsaved text on every open site because of one setting.
+      await reapplyOpenTabs(() => true)
+      return { reloadTabs: await countTabsWithJavaScript(() => true) }
+    }
+
+    case 'get-site-off':
+      return isUrlOff(message.url)
+
+    case 'set-site-off': {
+      const host = hostOfUrl(message.url)
+      if (host === null) throw new Error('That page is not a website, so it cannot be turned off.')
+      await setHostOff(host, message.off)
+      await reregister()
+      const onHost = (url: string) => hostOfUrl(url) === host
+      await reapplyOpenTabs(onHost)
+      // Only when turning off. The user chose this site, and a page that was
+      // broken by a transform needs the reload to get rid of its scripts. When
+      // turning back on, nothing is reloaded and the tabs are counted.
+      const tabs = await tabsWithJavaScript(onHost)
+      if (message.off) for (const id of tabs) await browser.tabs.reload(id).catch(() => {})
+      return { reloadTabs: message.off ? 0 : tabs.length, reloaded: message.off ? tabs.length : 0 }
+    }
 
     case 'set-credential': {
       // The destination the key is bound to comes from the saved provider, not
@@ -1222,7 +1252,38 @@ async function matchingTransforms(url: string): Promise<Transform[]> {
 
 /** The subset that should actually run. */
 async function transformsForUrl(url: string): Promise<Transform[]> {
+  // Nothing runs while the kill switch is on or the site is turned off, so
+  // nothing is applied, counted on the badge or health-checked.
+  if ((await getSettings()).aiJsKillSwitch || (await isUrlOff(url))) return []
   return (await matchingTransforms(url)).filter((t) => t.enabled)
+}
+
+/** Reapplies CSS and the badge in every open tab whose address passes `include`. */
+async function reapplyOpenTabs(include: (url: string) => boolean): Promise<void> {
+  for (const tab of await browser.tabs.query({})) {
+    if (tab.id === undefined || !tab.url || !include(tab.url)) continue
+    await reapply(tab.id)
+  }
+}
+
+/**
+ * Open tabs, whose address passes `include`, that match an enabled JavaScript
+ * transform and so may have run it. The browser does not report which tabs ran
+ * a script, so this is the set a registered script would have run in.
+ */
+async function tabsWithJavaScript(include: (url: string) => boolean): Promise<number[]> {
+  const scripts = (await getAllTransforms()).filter((t) => t.kind === 'js' && t.enabled && t.code)
+  const ids: number[] = []
+  for (const tab of await browser.tabs.query({})) {
+    if (tab.id === undefined || !tab.url || !include(tab.url)) continue
+    const url = tab.url
+    if (scripts.some((t) => matchesUrl(t.match, url))) ids.push(tab.id)
+  }
+  return ids
+}
+
+async function countTabsWithJavaScript(include: (url: string) => boolean): Promise<number> {
+  return (await tabsWithJavaScript(include)).length
 }
 
 /**

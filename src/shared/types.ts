@@ -422,7 +422,11 @@ export interface Settings {
    * consent model for not being asked again.
    */
   keepScreenshotPermission: boolean
-  /** Disables execution of every AI-authored JS transform, everywhere. */
+  /**
+   * Stops every transform, CSS and JavaScript, hand-written and AI-written,
+   * on every site. The name predates the wider meaning and is kept so that
+   * saved settings do not need a migration.
+   */
   aiJsKillSwitch: boolean
   /**
    * Minutes without a provider call after which an unlocked vault locks

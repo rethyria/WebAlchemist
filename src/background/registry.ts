@@ -35,9 +35,11 @@
  * the user that they are a boundary.
  */
 
+import { excludePatternsFor } from '@shared/site-off'
 import type { Capability, Transform } from '@shared/types'
 import { wrapTransform } from './harness'
 import { userScripts, type ExecutionWorld, type Mv3RegisteredUserScript } from './userscripts-api'
+import { getOffHosts } from './site-off'
 import { getAllTransforms, getSettings } from './storage'
 
 /** Worlds are per-transform so transforms cannot collide with each other. */
@@ -103,21 +105,27 @@ export async function hasUserScriptsPermission(): Promise<boolean> {
 
 /**
  * What should be registered for a transform, or null when nothing should be:
- * it is not JavaScript, is disabled, has no code, or is an AI-written script
- * while the kill switch is on.
+ * it is not JavaScript, is disabled, has no code, or the kill switch is on.
  */
 async function registrationFor(transform: Transform): Promise<Mv3RegisteredUserScript | null> {
   if (transform.kind !== 'js' || !transform.enabled || !transform.code) return null
 
   const settings = await getSettings()
-  if (settings.aiJsKillSwitch && transform.origin === 'ai') return null
+  // The switch covers hand-written scripts too: the user's own code can break
+  // a page as much as the model's, and a switch that leaves some JavaScript
+  // running cannot be relied on as the way to stop all of it.
+  if (settings.aiJsKillSwitch) return null
 
+  const offHosts = await getOffHosts()
   const worldId = worldIdFor(transform)
   const world = transform.world ?? 'USER_SCRIPT'
 
   return {
     id: transform.id,
     matches: matchPatternsFor(transform),
+    // The per-site off switch. The registration stays, so that turning the site
+    // back on needs no re-registration of anything else.
+    ...(offHosts.length > 0 ? { excludeMatches: excludePatternsFor(offHosts) } : {}),
     // Wrapped so the transform re-applies after framework re-renders.
     js: [{ code: wrapTransform(transform) }],
     world: world satisfies ExecutionWorld,
@@ -186,18 +194,17 @@ export function previewIdFor(id: string): string {
  * (a new transform) does nothing.
  */
 export async function registerPreview(transform: Transform): Promise<void> {
-  // The kill switch wins over a preview. A preview of model-written code is
-  // still model-written code running on a real page, and the switch exists to
-  // stop that. The alternative, running it because the user asked, was
+  // The kill switch wins over a preview. A preview is still code running on a
+  // real page, and the switch exists to stop that. The alternative, running it because the user asked, was
   // rejected: a setting that a button next to the code can bypass is not a
   // kill switch. The refusal is thrown, and not returned silently, because
   // registerTransform returns without registering in this case and the caller
   // would then report a run that never happened. It is checked before the saved
   // registration is paused, so a refused preview changes nothing.
   const settings = await getSettings()
-  if (settings.aiJsKillSwitch && transform.origin === 'ai') {
+  if (settings.aiJsKillSwitch) {
     throw new Error(
-      'JavaScript written by the model is switched off in the settings, so it was not run. Turn that setting off to run it.',
+      'Running transforms is switched off in the settings, so the JavaScript was not run. Turn that setting off to run it.',
     )
   }
   await unregisterTransform(transform.id)
@@ -248,6 +255,7 @@ function sameRegistration(held: Mv3RegisteredUserScript, wanted: Mv3RegisteredUs
   const code = (r: Mv3RegisteredUserScript) => (r.js ?? []).map((source) => source.code ?? source.file)
   return (
     JSON.stringify(held.matches ?? []) === JSON.stringify(wanted.matches ?? []) &&
+    JSON.stringify(held.excludeMatches ?? []) === JSON.stringify(wanted.excludeMatches ?? []) &&
     JSON.stringify(code(held)) === JSON.stringify(code(wanted)) &&
     (held.world ?? 'USER_SCRIPT') === (wanted.world ?? 'USER_SCRIPT') &&
     held.worldId === wanted.worldId &&

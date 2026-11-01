@@ -62,6 +62,8 @@ export interface Harness {
     registry: string[]
     setBadgeText: { tabId?: number | undefined; text: string | null }[]
     sendMessage: { tabId: number; message: any }[]
+    /** Ids of tabs passed to `tabs.reload`. */
+    reload: number[]
     /** Messages the background broadcast with `runtime.sendMessage`. */
     runtimeMessages: any[]
   }
@@ -85,7 +87,7 @@ export function createHarness(): Harness {
     contentScriptHeld: null,
     origins: [],
     tabWindows: new Map(),
-    calls: { insertCSS: [], removeCSS: [], unregister: [], registry: [], setBadgeText: [], sendMessage: [], runtimeMessages: [] },
+    calls: { insertCSS: [], removeCSS: [], unregister: [], registry: [], setBadgeText: [], sendMessage: [], reload: [], runtimeMessages: [] },
     listeners: new Map(),
     hasUserScripts: false,
     contentReply: () => undefined,
@@ -139,6 +141,9 @@ export function createHarness(): Harness {
       windowId: h.tabWindows.get(id) ?? 1,
     }),
     'browser.tabs.query': async () => [...h.tabUrls].map(([id, url]) => ({ id, url })),
+    'browser.tabs.reload': async (tabId: number) => {
+      h.calls.reload.push(tabId)
+    },
     'browser.tabs.sendMessage': async (tabId: number, message: unknown) => {
       h.calls.sendMessage.push({ tabId, message })
       return h.contentReply(message)

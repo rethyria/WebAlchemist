@@ -100,7 +100,14 @@ export type Message =
   | { type: 'set-enabled'; id: string; enabled: boolean; tabId?: number }
 
   /* --- settings and credentials ------------------------------------- */
+  /**
+   * Answers true, or `{ reloadTabs }` when the kill switch changed: the number
+   * of open tabs that may have run JavaScript and need a reload to match it.
+   */
   | { type: 'save-settings'; settings: Settings }
+  /* The per-site off switch, by the host of `url`. */
+  | { type: 'get-site-off'; url: string }
+  | { type: 'set-site-off'; url: string; off: boolean }
   | { type: 'set-credential'; providerId: string; credential: Credential }
   | { type: 'clear-credential'; providerId: string }
   /*

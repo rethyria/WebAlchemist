@@ -15,6 +15,7 @@
   import { parseRules } from '@shared/css'
   import { permissionRequestsFor, requestAll } from '@shared/permissions'
   import { hasAccess, requiredOrigin } from '@shared/site-access'
+  import { killSwitchNotice, reloadTabsOf } from '@shared/kill-switch'
   import { activeTab, BackgroundError, send } from './lib/messaging.svelte'
   import { isForTab, type HealthCheckResult } from './lib/health-result'
   import { Flow } from './lib/flow.svelte'
@@ -32,6 +33,10 @@
   import TransformRow from './components/TransformRow.svelte'
 
   let settings = $state<Settings | null>(null)
+  /** What to reload after the stop-all setting changed, shown under that setting. */
+  let killNotice = $state('')
+  /** Whether every transform is turned off for the host of the page in view. */
+  let siteOff = $state(false)
   let statuses = $state<CredentialStatus[]>([])
   let vault = $state<VaultView>({ sealed: false, unlocked: true })
   let transforms = $state<Transform[]>([])
@@ -132,7 +137,29 @@
     }
     await readGrants()
     transforms = await send<Transform[]>({ type: 'get-transforms-for-url', url })
+    siteOff = (await send<boolean>({ type: 'get-site-off', url })) === true
     await findConflicts()
+  }
+
+  /*
+   * The tabs of this site that ran JavaScript are reloaded by the background
+   * when the site is turned off, because a script that is already running is
+   * not stopped by unregistering it. Turning the site back on reloads nothing.
+   */
+  let siteNotice = $state('')
+  async function setSiteOff(off: boolean) {
+    siteNotice = ''
+    try {
+      const answer = (await send({ type: 'set-site-off', url, off })) as { reloadTabs?: number }
+      siteOff = off
+      const waiting = answer?.reloadTabs ?? 0
+      if (!off && waiting > 0) {
+        siteNotice = `Reload ${waiting === 1 ? '1 open tab' : `${waiting} open tabs`} of this site to run JavaScript transforms there again.`
+      }
+      await refresh()
+    } catch (cause) {
+      siteNotice = cause instanceof Error ? cause.message : String(cause)
+    }
   }
 
   async function readGrants() {
@@ -171,8 +198,10 @@
   }
 
   async function saveSettings(next: Settings) {
+    const changed = settings?.aiJsKillSwitch !== next.aiJsKillSwitch
     applySettings(next)
-    await send({ type: 'save-settings', settings: next })
+    const answer = await send({ type: 'save-settings', settings: next })
+    if (changed) killNotice = killSwitchNotice(next.aiJsKillSwitch, reloadTabsOf(answer))
   }
 
   /*
@@ -561,6 +590,7 @@
       {vault}
       onsave={(next: Settings) => void saveSettings(next)}
       onfullpage={openSettingsPage}
+      {killNotice}
     />
   {:else if flow.awayFromOwner}
     <div class="paused">
@@ -734,6 +764,10 @@
       <span class="count">{activeCount} active</span>
     </header>
 
+    {#if siteOff}
+      <p class="hint off-note" role="status">Everything is turned off on this site.</p>
+    {/if}
+
     {#if brokenCount > 0}
       <p class="broken-banner">
         {brokenCount}
@@ -779,6 +813,18 @@
       </button>
       <p class="hint">Order decides conflicts — later wins</p>
     </footer>
+    <div class="site-off">
+      <button type="button" class="link" onclick={() => void setSiteOff(!siteOff)}>
+        {siteOff ? 'Turn everything back on for this site' : 'Turn off everything on this site'}
+      </button>
+      <p class="hint">
+        {siteOff
+          ? 'No transform runs on this site while this is off. They stay saved.'
+          : 'Stops every CSS and JavaScript transform on this site. Open tabs of this site that ran JavaScript are reloaded.'}
+      </p>
+      {#if siteNotice}<p class="hint" role="status">{siteNotice}</p>{/if}
+    </div>
+
   {/if}
 </div>
 
@@ -892,6 +938,16 @@
     margin-top: auto;
     padding: 11px var(--gutter-sidebar);
     border-top: 1px solid var(--border-subtle);
+  }
+
+  .site-off {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 8px 12px 12px;
+  }
+  .off-note {
+    padding: 0 12px;
   }
 
   .idle-foot {
