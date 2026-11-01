@@ -232,3 +232,70 @@ describe('repair of an imported transform', () => {
     expect(reply.error.message).toContain('Edit description')
   })
 })
+
+describe('importing the same file again (#31)', () => {
+  const file = () =>
+    bundle(
+      cssTransform({ id: 'a', name: 'Dark', code: GOOD_CSS }),
+      jsRecord({ id: 'b', code: '', intent: 'Hide the banner' }),
+    )
+
+  it('creates no duplicates the second time and reports them', async () => {
+    const first = await ask({ type: 'import-transforms', bundle: file() })
+    expect(first).toMatchObject({ imported: 2, duplicates: 0 })
+    const second = await ask({ type: 'import-transforms', bundle: file() })
+    expect(second).toMatchObject({ imported: 0, duplicates: 2 })
+    expect(second.items.map((i: any) => i.status)).toEqual(['duplicate', 'duplicate'])
+    expect(stored()).toHaveLength(2)
+  })
+
+  it('shows a file that is already imported as skipped in the preview', async () => {
+    await ask({ type: 'import-transforms', bundle: file() })
+    const { items } = await ask({ type: 'preview-import', bundle: file() })
+    expect(items.map((i: any) => i.status)).toEqual(['duplicate', 'duplicate'])
+  })
+
+  it('treats the same record twice in one file as one', async () => {
+    const one = cssTransform({ id: 'a', name: 'Dark', code: GOOD_CSS })
+    const result = await ask({ type: 'import-transforms', bundle: bundle(one, { ...one, id: 'z' }) })
+    expect(result).toMatchObject({ imported: 1, duplicates: 1 })
+  })
+
+  it('imports a record whose code, name, match or intent differs (control)', async () => {
+    await ask({ type: 'import-transforms', bundle: file() })
+    const changed = bundle(
+      cssTransform({ id: 'a', name: 'Dark', code: 'aside { display: block }' }),
+      cssTransform({ id: 'a2', name: 'Dark 2', code: GOOD_CSS }),
+      cssTransform({ id: 'a3', name: 'Dark', code: GOOD_CSS, match: 'other.example/*' }),
+      jsRecord({ id: 'b', code: '', intent: 'Hide the other banner' }),
+    )
+    const result = await ask({ type: 'import-transforms', bundle: changed })
+    expect(result).toMatchObject({ imported: 4, duplicates: 0 })
+    expect(stored()).toHaveLength(6)
+  })
+
+  it('matches a record of the user\'s own profile, so an export imported back adds nothing', async () => {
+    h.local.set('transforms', [
+      cssTransform({ id: 'mine', name: 'Dark', code: GOOD_CSS, origin: 'manual' }),
+      jsRecord({ id: 'mine-js', intent: 'Hide the banner', code: 'x()', origin: 'ai' }),
+    ])
+    const exported = await ask({ type: 'export-transforms' })
+    const result = await ask({ type: 'import-transforms', bundle: exported })
+    expect(result).toMatchObject({ imported: 0, duplicates: 2 })
+    expect(stored()).toHaveLength(2)
+  })
+})
+
+describe('the shared export', () => {
+  it('holds JavaScript as its description only, and keeps CSS code', async () => {
+    h.local.set('transforms', [
+      cssTransform({ id: 'c', code: GOOD_CSS }),
+      jsRecord({ id: 'j', code: 'SECRET_CODE()' }),
+    ])
+    const exported = await ask({ type: 'export-transforms' })
+    expect(exported.format).toBe('web-alchemist-export')
+    expect(JSON.stringify(exported)).not.toContain('SECRET_CODE')
+    expect(exported.transforms.find((t: any) => t.id === 'c').code).toBe(GOOD_CSS)
+    expect(exported.transforms.find((t: any) => t.id === 'j').intent).toContain('Hide the banner')
+  })
+})

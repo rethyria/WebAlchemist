@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { Conflict, Transform, TransformRuntimeState } from '@shared/types'
+  import { NEEDS_REGENERATING_NOTE, needsRegenerating, toggleOutcome } from '@shared/transform-state'
   import Toggle from './Toggle.svelte'
 
   interface Props {
@@ -79,6 +80,20 @@
   }
 
   let broken = $derived(runtime?.status === 'broken')
+  /* An imported transform with no code. Turning it on would run nothing. */
+  let regenerates = $derived(needsRegenerating(transform))
+  /* Set when the user tries to turn such a transform on; the row then says why it stays off. */
+  let explainOff = $state(false)
+  let imported = $derived(transform.origin === 'imported')
+
+  function onToggle(enabled: boolean) {
+    if (toggleOutcome(transform, enabled) === 'explain') {
+      explainOff = true
+      return
+    }
+    explainOff = false
+    ontoggle(enabled)
+  }
   /* JS carrying capabilities, or broken, gets the attention treatment. */
   let flagged = $derived(broken || transform.capabilities.length > 0)
 
@@ -162,7 +177,7 @@
     <Toggle
       checked={transform.enabled}
       label="Enable {transform.name}"
-      onchange={ontoggle}
+      onchange={onToggle}
     />
 
     {#if renaming}
@@ -189,6 +204,9 @@
     {/if}
 
     <div class="meta">
+      {#if regenerates}
+        <span class="overridden">needs regenerating</span>
+      {/if}
       {#if overridden.length > 0}
         <!--
           The collapsed row is where someone looks when a transform seems to
@@ -219,10 +237,21 @@
     </div>
   {/if}
 
+  {#if regenerates}
+    <div class="no-access" role="status">
+      <span>
+        {explainOff
+          ? NEEDS_REGENERATING_NOTE
+          : 'Needs regenerating. It has no code, so it cannot run.'}
+      </span>
+      <button type="button" class="secondary" onclick={oneditintent}>Review description</button>
+    </div>
+  {/if}
+
   {#if expanded}
     <div class="body">
       <section>
-        <h3 class="label">You wanted</h3>
+        <h3 class="label">{imported ? 'Description from an imported file' : 'You wanted'}</h3>
         <p>{transform.intent}</p>
       </section>
 
@@ -335,9 +364,11 @@
             <button type="button" class="secondary" onclick={oneditintent}>
               Edit description
             </button>
-            <button type="button" class="secondary" onclick={oneditwithai}>
-              Change with AI
-            </button>
+            {#if !regenerates}
+              <button type="button" class="secondary" onclick={oneditwithai}>
+                Change with AI
+              </button>
+            {/if}
             <button type="button" class="secondary" onclick={onedit}>Edit code</button>
           </div>
           <pre>{transform.code}</pre>
@@ -454,6 +485,7 @@
 
   .no-access {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: 8px;
     padding: 0 var(--gutter-sidebar) 9px var(--indent-expanded);
