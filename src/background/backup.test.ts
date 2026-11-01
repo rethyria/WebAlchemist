@@ -447,6 +447,21 @@ describe('what a restore keeps from the record (#124, #53)', () => {
   })
 })
 
+describe('capabilities in a backup (#124)', () => {
+  beforeEach(async () => {
+    await boot([], DEFAULT_SETTINGS)
+  })
+
+  it('keeps the three known names and drops every other value from the file', async () => {
+    const record = jsRecord({ capabilities: ['network', 'root', '__proto__', 'cookies', 42] })
+    await ask({
+      type: 'import-transforms',
+      bundle: { format: 'web-alchemist-export', schemaVersion: 1, exportedAt: 0, mode: 'backup', transforms: [record] },
+    })
+    expect(stored()[0].capabilities).toEqual(['network', 'cookies'])
+  })
+})
+
 describe('invisible characters in restored code (#124)', () => {
   const backup = (code: string) => ({
     format: 'web-alchemist-export',
@@ -476,5 +491,51 @@ describe('invisible characters in restored code (#124)', () => {
   it('is restored without the character (control)', async () => {
     await ask({ type: 'import-transforms', bundle: backup(`// plain\n${GOOD_JS}`) })
     expect(stored()[0]).toMatchObject({ code: `// plain\n${GOOD_JS}`, awaitsApproval: true })
+  })
+})
+
+describe('saving approved new code over restored code (#124)', () => {
+  const NEW_CODE = "document.querySelector('nav').style.display = 'none'"
+  let id: string
+
+  beforeEach(async () => {
+    await boot([], DEFAULT_SETTINGS)
+    await ask({
+      type: 'import-transforms',
+      bundle: {
+        format: 'web-alchemist-export',
+        schemaVersion: 1,
+        exportedAt: 0,
+        mode: 'backup',
+        transforms: [jsRecord({ id: 'good', name: 'Good' })],
+      },
+    })
+    id = stored()[0].id
+  })
+
+  const approveNew = async () =>
+    (
+      await ask({
+        type: 'approve-code',
+        code: NEW_CODE,
+        declaredCapabilities: [],
+        transformId: id,
+        match: 'https://shop.example.com/*',
+      })
+    ).approvalToken as string
+
+  it('clears the waiting flag, because the new code was approved', async () => {
+    await ask({
+      type: 'save-transform',
+      transform: { ...stored()[0], code: NEW_CODE },
+      approvalToken: await approveNew(),
+    })
+    expect(stored()[0].code).toBe(NEW_CODE)
+    expect(stored()[0]).not.toHaveProperty('awaitsApproval')
+  })
+
+  it('keeps the flag when only the name changes (control)', async () => {
+    await ask({ type: 'save-transform', transform: { ...stored()[0], name: 'Renamed' } })
+    expect(stored()[0]).toMatchObject({ name: 'Renamed', awaitsApproval: true })
   })
 })
