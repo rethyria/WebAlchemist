@@ -25,10 +25,12 @@
   import Reviewing from './components/Reviewing.svelte'
   import Saving from './components/Saving.svelte'
   import SettingsPanel from './components/Settings.svelte'
+  import type { VaultView } from '@shared/vault-disclosure'
   import TransformRow from './components/TransformRow.svelte'
 
   let settings = $state<Settings | null>(null)
   let statuses = $state<CredentialStatus[]>([])
+  let vault = $state<VaultView>({ sealed: false, unlocked: true })
   let transforms = $state<Transform[]>([])
   let runtimeStates = $state<TransformRuntimeState[]>([])
   let conflicts = $state<Conflict[]>([])
@@ -139,10 +141,20 @@
     await send({ type: 'save-settings', settings: next })
   }
 
+  /*
+   * Read when the panel loads and each time the settings panel opens, because
+   * the vault can be locked, by the idle timer or by hand, while the sidebar
+   * stays open, and the disclosure there must describe the current state.
+   */
+  async function refreshVault() {
+    vault = await send<VaultView>({ type: 'vault-state' })
+  }
+
   async function load() {
     loadError = null
     try {
       applySettings(await send<Settings>({ type: 'get-settings' }))
+      await refreshVault()
       statuses = await send<CredentialStatus[]>({ type: 'get-credential-statuses' })
 
       const tab = await activeTab()
@@ -461,7 +473,10 @@
     <button
       type="button"
       class="chrome-link"
-      onclick={() => (showSettings = !showSettings)}
+      onclick={() => {
+        showSettings = !showSettings
+        if (showSettings) refreshVault().catch(() => undefined)
+      }}
     >
       {showSettings ? 'Done' : 'Settings'}
     </button>
@@ -492,6 +507,7 @@
     <SettingsPanel
       {settings}
       {statuses}
+      {vault}
       onsave={(next: Settings) => void saveSettings(next)}
       onfullpage={openSettingsPage}
     />
