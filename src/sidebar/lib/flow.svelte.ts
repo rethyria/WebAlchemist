@@ -379,6 +379,21 @@ export class Flow {
     const origin = originPermissionForUrl(this.url)
     if (!origin) return
 
+    /*
+     * A new pick from the list starts a new transform. Anything still held
+     * from an earlier run would otherwise become part of it, and a draft's id
+     * decides which saved transform a save replaces. Synchronous on purpose:
+     * the permission request below has to remain the first await, or the
+     * gesture is spent. Re-picking from Edit description arrives with the step
+     * 'describing' and keeps its draft deliberately.
+     */
+    if (this.step === 'list') {
+      this.draft = null
+      this.result = null
+      this.matchPattern = ''
+      void this.resumeSuspended()
+    }
+
     try {
       // First await — the gesture has to still be live when this runs. See
       // runJs for why the request is inside the try rather than before it.
@@ -413,10 +428,16 @@ export class Flow {
   async cancelPicking(): Promise<void> {
     if (this.tabId !== null) {
       await send({ type: 'stop-picking', tabId: this.tabId }).catch(() => {})
-      await this.clearLock()
     }
-    this.step = 'list'
-    this.hover = null
+    /*
+     * Through discard rather than a bare step change. Picking can start from
+     * "Change" inside Edit description, where a draft, its match pattern and a
+     * suspended saved transform are held. Going back to the list with only the
+     * step changed left all three in place: the suspended transform stayed off
+     * the page, and the next new pick inherited the draft's id and saved over
+     * the saved transform.
+     */
+    await this.discard()
   }
 
   /** Content events arrive here from App's runtime listener. */
@@ -466,7 +487,8 @@ export class Flow {
 
       case 'picking-cancelled':
         this.awaitingReference = false
-        if (this.step === 'picking') this.step = 'list'
+        // Same reason as cancelPicking: the list must not keep the old run.
+        if (this.step === 'picking') void this.discard()
         return
 
       case 'health-check-result':
@@ -711,9 +733,14 @@ export class Flow {
       this.step = 'refining'
     } catch (cause) {
       if (!current()) return
-      // Back to the list, which is where a repair is started from. There is no
-      // half-finished description to preserve here.
-      this.step = 'list'
+      /*
+       * Back to the list, which is where a repair is started from, and there
+       * is no half-finished description to preserve. The draft holds the saved
+       * transform's id, so keeping it let the next new transform save over the
+       * one that was being repaired. The error is recorded after the discard
+       * so that it is still on screen once the list is shown.
+       */
+      await this.discard()
       this.fail(cause)
     } finally {
       this.stopClock()
@@ -884,7 +911,9 @@ export class Flow {
       void this.checkVisionSupport()
     } catch (cause) {
       if (!current()) return
-      this.step = 'list'
+      // As in repair: the draft carries the saved id, and the transform was
+      // suspended above, so both have to be undone before the list is shown.
+      await this.discard()
       this.fail(cause)
     } finally {
       this.stopClock()
