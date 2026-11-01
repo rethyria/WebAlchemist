@@ -71,7 +71,11 @@
           {activeStatus?.kind === 'oauth' ? 'oauth' : 'api key'}
         </span>
         <span class="state">
-          {activeStatus?.configured ? 'Key configured' : 'No credential'}
+          {#if activeStatus?.needsReentry}
+            {activeStatus.kind === 'oauth' ? 'Sign in again' : 'Enter the key again'} for this provider
+          {:else}
+            {activeStatus?.configured ? 'Key configured' : 'No credential'}
+          {/if}
         </span>
       </div>
       <div class="models">

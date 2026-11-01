@@ -305,6 +305,12 @@ export interface CredentialStatus {
   expiresAt?: number
   /** Oauth only. False when there is no refresh token and sign-in must be repeated at expiry. */
   renewable?: boolean
+  /**
+   * True when the stored credential is bound to a different origin or provider
+   * type than the provider now uses, so requests refuse it. `configured` stays
+   * true so the credential can still be replaced or cleared.
+   */
+  needsReentry?: boolean
 }
 
 /* ------------------------------------------------------------------ */

@@ -721,27 +721,50 @@ function oauthStatus(
   }
 }
 
-/** The only credential shape any other context is allowed to see. */
-export async function getCredentialStatus(
+/**
+ * True when requests would refuse this credential because of where it was
+ * entered. A credential with no binding is not a mismatch: it is bound on its
+ * first read, so reporting it here would flag every key stored before binding
+ * existed. Uses the same comparison as the request path so the two cannot
+ * disagree.
+ */
+function refusedForProvider(provider: Provider | undefined, credential: Credential): boolean {
+  if (!provider) return false
+  try {
+    checkedForProvider(provider, credential)
+    return false
+  } catch (error) {
+    if (error instanceof CredentialOriginError) return true
+    throw error
+  }
+}
+
+function statusFor(
   providerId: string,
-): Promise<CredentialStatus> {
-  const credential = (await readCredentialMap())[providerId]
+  provider: Provider | undefined,
+  credential: Credential | undefined,
+): CredentialStatus {
   if (!credential) return { providerId, configured: false }
-  return credential.kind === 'oauth'
-    ? oauthStatus(providerId, credential)
-    : { providerId, configured: true, kind: 'api_key' }
+  const base: CredentialStatus =
+    credential.kind === 'oauth'
+      ? oauthStatus(providerId, credential)
+      : { providerId, configured: true, kind: 'api_key' }
+  return refusedForProvider(provider, credential) ? { ...base, needsReentry: true } : base
+}
+
+/** The only credential shape any other context is allowed to see. */
+export async function getCredentialStatus(providerId: string): Promise<CredentialStatus> {
+  const credential = (await readCredentialMap())[providerId]
+  const provider = credential
+    ? (await getSettings()).providers.find((p) => p.id === providerId)
+    : undefined
+  return statusFor(providerId, provider, credential)
 }
 
 export async function getAllCredentialStatuses(): Promise<CredentialStatus[]> {
   const map = await readCredentialMap()
   const settings = await getSettings()
-  return settings.providers.map((provider) => {
-    const credential = map[provider.id]
-    if (!credential) return { providerId: provider.id, configured: false }
-    return credential.kind === 'oauth'
-      ? oauthStatus(provider.id, credential)
-      : { providerId: provider.id, configured: true, kind: 'api_key' as const }
-  })
+  return settings.providers.map((provider) => statusFor(provider.id, provider, map[provider.id]))
 }
 
 /* ------------------------------------------------------------------ */

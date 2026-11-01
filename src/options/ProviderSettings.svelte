@@ -295,7 +295,16 @@
             </div>
 
             <div class="state">
-              {#if status?.configured && status.kind === 'oauth'}
+              {#if status?.needsReentry}
+                <!--
+                  Checked before the other states because a refused credential
+                  is not usable whatever its kind, and "Key configured" next to
+                  a request that will fail is the misleading state this replaces.
+                -->
+                <span class="missing">
+                  {status.kind === 'oauth' ? 'Sign in again' : 'Enter the key again'} for this provider
+                </span>
+              {:else if status?.configured && status.kind === 'oauth'}
                 <span class="configured">Signed in</span>
                 {#if status.expiresAt}
                   <!--

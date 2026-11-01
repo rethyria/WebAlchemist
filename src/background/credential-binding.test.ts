@@ -183,3 +183,50 @@ describe('the adapters', () => {
     })
   })
 })
+
+describe('credential status after the provider changes', () => {
+  async function withProvider(provider: Provider) {
+    const settings = await storage.getSettings()
+    await storage.saveSettings({ ...settings, providers: [provider], activeProviderId: provider.id })
+  }
+
+  it('says the key must be entered again once the origin differs', async () => {
+    await withProvider(remote())
+    await storage.saveCredentialFor(remote(), KEY)
+    await withProvider(remote({ baseUrl: 'https://evil.example.net/v1' }))
+
+    const status = (await storage.getAllCredentialStatuses())[0]!
+    expect(status).toMatchObject({ configured: true, kind: 'api_key', needsReentry: true })
+    expect(await storage.getCredentialStatus('p1')).toMatchObject({ needsReentry: true })
+  })
+
+  // Control: the same statuses with no change of destination must not be flagged,
+  // and neither must a path-only change or a key stored before bindings existed.
+  it('does not flag a key whose destination is unchanged', async () => {
+    await withProvider(remote())
+    await storage.saveCredentialFor(remote(), KEY)
+    await withProvider(remote({ baseUrl: 'https://API.example.com:443/v2' }))
+
+    const status = (await storage.getAllCredentialStatuses())[0]!
+    expect(status).toMatchObject({ configured: true })
+    expect(status.needsReentry).toBeUndefined()
+  })
+
+  it('does not flag a stored key that has no binding yet', async () => {
+    await withProvider(remote())
+    await storage.setCredential('p1', KEY)
+
+    const status = (await storage.getAllCredentialStatuses())[0]!
+    expect(status.needsReentry).toBeUndefined()
+  })
+
+  it('clears the flag after the key is entered again for the new destination', async () => {
+    await withProvider(remote())
+    await storage.saveCredentialFor(remote(), KEY)
+    const moved = remote({ baseUrl: 'https://evil.example.net/v1' })
+    await withProvider(moved)
+    await storage.saveCredentialFor(moved, KEY)
+
+    expect((await storage.getAllCredentialStatuses())[0]!.needsReentry).toBeUndefined()
+  })
+})
