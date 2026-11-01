@@ -50,6 +50,8 @@ export type Message =
   | { type: 'get-transforms-for-url'; url: string }
   /** One record by id, for the editor page, which has no page URL of its own. */
   | { type: 'get-transform'; id: string }
+  /** Every saved transform, for the settings page's site access list. */
+  | { type: 'get-all-transforms' }
   | { type: 'get-credential-statuses' }
   | { type: 'get-vision-support' }
 
@@ -356,6 +358,7 @@ export interface Responses {
   'get-settings': Settings
   'get-transforms-for-url': Transform[]
   'get-transform': Transform | null
+  'get-all-transforms': Transform[]
   'reapply-everywhere': boolean
   'get-credential-statuses': CredentialStatus[]
   /** The status after signing in, so settings can redraw without a re-fetch. */

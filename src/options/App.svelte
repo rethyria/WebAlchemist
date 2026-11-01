@@ -6,10 +6,12 @@
     type CredentialStatus,
     type HealthCheckMode,
     type Settings,
+    type Transform,
   } from '@shared/types'
   import { ACCENT_COLOURS } from '@shared/accents'
   import Toggle from '@sidebar/components/Toggle.svelte'
   import ProviderSettings from './ProviderSettings.svelte'
+  import SiteAccess from './SiteAccess.svelte'
   import VaultSettings from './VaultSettings.svelte'
   import { loadVaultAndStatuses } from './vault-load'
 
@@ -131,6 +133,8 @@
         await afterVault()
       }}
     />
+
+    <SiteAccess loadTransforms={() => call<Transform[]>({ type: 'get-all-transforms' })} />
 
     <section>
       <h2>Accent</h2>

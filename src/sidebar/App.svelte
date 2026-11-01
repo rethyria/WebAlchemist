@@ -13,6 +13,8 @@
   } from '@shared/types'
   import type { ConflictSpec } from '@shared/messages'
   import { parseRules } from '@shared/css'
+  import { permissionRequestsFor, requestAll } from '@shared/permissions'
+  import { hasAccess, requiredOrigin } from '@shared/site-access'
   import { activeTab, BackgroundError, send } from './lib/messaging.svelte'
   import { Flow } from './lib/flow.svelte'
   import Describing from './components/Describing.svelte'
@@ -31,6 +33,8 @@
   let runtimeStates = $state<TransformRuntimeState[]>([])
   let conflicts = $state<Conflict[]>([])
   let url = $state('')
+  /* Origins currently held, for the rows' "No access to this site" state. */
+  let heldOrigins = $state<string[]>([])
   let expandedId = $state<string | null>(null)
   let loadError = $state<{ message: string; retryable: boolean } | null>(null)
   let checking = $state(false)
@@ -121,8 +125,37 @@
       conflicts = []
       return
     }
+    await readGrants()
     transforms = await send<Transform[]>({ type: 'get-transforms-for-url', url })
     await findConflicts()
+  }
+
+  async function readGrants() {
+    heldOrigins = (await browser.permissions.getAll()).origins ?? []
+  }
+
+  /*
+   * Granting is requested here rather than in the background, which has no
+   * user gesture. Both requests are issued before the first await; see
+   * requestAll. A JavaScript transform also needs userScripts, and one that is
+   * already held resolves without a prompt.
+   */
+  async function grantAccess(transform: Transform) {
+    try {
+      const granted = await requestAll(
+        (permissions) => browser.permissions.request(permissions),
+        permissionRequestsFor(transform.kind, requiredOrigin(transform)),
+      )
+      if (granted) {
+        // CSS is inserted by the background per tab, so tabs already open on the
+        // site need telling; the content script registration follows the grant
+        // by itself through permissions.onAdded.
+        await send({ type: 'reapply-everywhere', id: transform.id })
+        await afterSave()
+      }
+    } catch (cause) {
+      flow.fail(cause)
+    }
   }
 
   function applySettings(next: Settings) {
@@ -400,6 +433,12 @@
     }
     browser.storage.onChanged.addListener(onStored)
 
+    // Access can be removed on the settings page or from about:addons while
+    // this panel is open.
+    const onGrantsChanged = () => void readGrants().catch(() => {})
+    browser.permissions.onAdded.addListener(onGrantsChanged)
+    browser.permissions.onRemoved.addListener(onGrantsChanged)
+
     /*
      * The panel persists while tabs come and go. Bound once, it kept showing
      * the site it opened on — and offered to save transforms against it.
@@ -434,6 +473,8 @@
     return () => {
       browser.runtime.onMessage.removeListener(onMessage)
       browser.storage.onChanged.removeListener(onStored)
+      browser.permissions.onAdded.removeListener(onGrantsChanged)
+      browser.permissions.onRemoved.removeListener(onGrantsChanged)
       browser.tabs.onActivated.removeListener(onTabChange)
       browser.tabs.onUpdated.removeListener(onTabUpdated)
       browser.tabs.onRemoved.removeListener(onTabRemoved)
@@ -663,6 +704,8 @@
           {transform}
           position={index + 1}
           runtime={stateFor(transform.id)}
+          hasAccess={hasAccess(heldOrigins, transform)}
+          ongrant={() => void grantAccess(transform)}
           expanded={expandedId === transform.id}
           ontoggle={(enabled) => void setEnabled(transform, enabled)}
           onexpand={() =>

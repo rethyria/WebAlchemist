@@ -86,7 +86,13 @@ browser.runtime.onInstalled.addListener(async (details) => {
  */
 browser.permissions.onAdded.addListener(async (permissions) => {
   const granted = permissions.permissions as string[] | undefined
-  if (granted?.includes('userScripts')) await reregisterAll()
+  // A JavaScript transform whose origin was revoked is not registered, and
+  // granting the origin again (from the sidebar's "Grant access") is not a
+  // userScripts grant, so it has to trigger registration too. reregisterAll
+  // is idempotent, so running it for an origin that changes nothing is safe.
+  if (granted?.includes('userScripts') || (permissions.origins?.length ?? 0) > 0) {
+    await reregisterAll()
+  }
   await reconcileContentScripts()
 })
 
@@ -208,6 +214,9 @@ async function handle(
 
     case 'get-transforms-for-url':
       return matchingTransforms(message.url)
+
+    case 'get-all-transforms':
+      return getAllTransforms()
 
     case 'get-transform': {
       const all = await getAllTransforms()
