@@ -53,4 +53,21 @@ describe('the error marker', () => {
   it('caps a long message', () => {
     expect(run('throw new Error("x".repeat(5000))').get(NAME)).toHaveLength(500)
   })
+
+  it('clears an earlier error when the code returns early', () => {
+    const attributes = new Map([[NAME, 'old']])
+    expect(run('if (true) return;\nthrow new Error("not reached")', attributes).has(NAME)).toBe(false)
+  })
+
+  // Control: the same early return with a throw before it still records the
+  // error, so the test above is not passing because errors are never recorded.
+  it('control: a throw before an early return is recorded', () => {
+    expect(run('if (true) { throw new Error("boom") }\nreturn', new Map()).get(NAME)).toBe('boom')
+  })
+
+  it('is not affected by code that declares a name the wrapper uses', () => {
+    const attributes = new Map([[NAME, 'old']])
+    expect(run('const ERROR_ATTRIBUTE = "other"; let SCOPES = 1; const NAME = 2', attributes).has(NAME)).toBe(false)
+    expect(run('const ERROR_ATTRIBUTE = "other"; throw new Error("boom")').get(NAME)).toBe('boom')
+  })
 })

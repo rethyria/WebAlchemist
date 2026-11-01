@@ -36,7 +36,12 @@ export function wrapTransform(transform: Transform): string {
 
   const apply = () => {
     try {
-      ${transform.code}
+      // The code runs in its own function so that an early return ends only
+      // the code, not the clearing step below, and so that a top-level let or
+      // const in the code cannot shadow the names this wrapper uses.
+      (() => {
+${transform.code}
+      })();
       // A run that finishes clears an earlier error, so a failure that a later
       // run fixes is not reported.
       try { document.documentElement.removeAttribute(ERROR_ATTRIBUTE); } catch (_) {}
