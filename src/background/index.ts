@@ -181,6 +181,14 @@ browser.webNavigation.onCommitted.addListener(async (details) => {
   // late would store a string for a document that is gone.
   const restored = details.transitionQualifiers?.includes('forward_back') ?? false
   startDocument(details.tabId)
+  /*
+   * Written before the first await. A page can call replaceState while it
+   * loads, and that event records its own URL. This write used to come after
+   * the queued forget steps, so it could land after the replaceState's and
+   * overwrite the newer URL with the commit's; a later route back to the
+   * commit URL then looked unchanged and was skipped.
+   */
+  const recorded = browser.storage.session.set({ [`wa-last-url-${details.tabId}`]: details.url })
   await inTabQueue(details.tabId, async () => {
     await forgetCss('applied', details.tabId)
     /*
@@ -197,7 +205,7 @@ browser.webNavigation.onCommitted.addListener(async (details) => {
      */
     if (!restored) await forgetCss('preview', details.tabId)
   })
-  await browser.storage.session.set({ [`wa-last-url-${details.tabId}`]: details.url })
+  await recorded
   await evaluateTab(details.tabId, details.url, { navigated: true })
 })
 

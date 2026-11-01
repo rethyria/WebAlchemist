@@ -119,3 +119,53 @@ describe('a transform paused for an edit preview (#83)', () => {
     expect(h.calls.removeCSS).toHaveLength(1)
   })
 })
+
+describe('the URL recorded for a page that calls replaceState while loading (#83)', () => {
+  const OTHER = 'https://example.com/app/other'
+  const route = (url: string) =>
+    h.listeners.get('browser.webNavigation.onHistoryStateUpdated')!({ frameId: 0, tabId: TAB, url })
+  const checks = () => h.calls.sendMessage.filter((c) => c.message.type === 'run-health-check')
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 20))
+
+  /**
+   * A commit whose queued steps wait behind a slow task, with a replaceState
+   * arriving while it waits. The held `insertCSS` is the slow task: a preview
+   * being inserted ahead of the commit in the tab's queue.
+   */
+  async function replaceStateWhileCommitWaits() {
+    const release = h.hold('browser.scripting.insertCSS')
+    const preview = h.onMessage({ type: 'preview-css', tabId: TAB, css: 'a { color: red }' })
+    await settle()
+    const committed = commit()
+    const routed = route(OTHER)
+    await settle()
+    release()
+    await Promise.all([preview, committed, routed])
+    await settle()
+  }
+
+  it('is the URL the page replaced it with, not the commit URL', async () => {
+    await replaceStateWhileCommitWaits()
+    expect(h.session.get(`wa-last-url-${TAB}`)).toBe(OTHER)
+  })
+
+  it('lets a later route back to the commit URL be evaluated', async () => {
+    await replaceStateWhileCommitWaits()
+    const before = checks().length
+    await route(PAGE)
+    await settle()
+    expect(checks()).toHaveLength(before + 1)
+  })
+
+  it('control: with no replaceState the commit URL is recorded and a route to it is skipped', async () => {
+    // Shows the two tests above fail because of the replaceState ordering and
+    // not because the commit stopped recording its URL.
+    await commit()
+    await settle()
+    expect(h.session.get(`wa-last-url-${TAB}`)).toBe(PAGE)
+    const before = checks().length
+    await route(PAGE)
+    await settle()
+    expect(checks()).toHaveLength(before)
+  })
+})

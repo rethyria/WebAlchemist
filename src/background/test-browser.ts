@@ -74,9 +74,16 @@ export interface Harness {
   onMessage(message: unknown, sender?: unknown): Promise<any>
   /** Replaces what the content script answers to `tabs.sendMessage`. */
   contentReply: (message: any) => unknown
+  /**
+   * Makes the next calls to the stubbed API at `path` (for example
+   * `browser.userScripts.getScripts`) wait until the returned function is
+   * called. Lets a test place a second event between two steps of one handler.
+   */
+  hold(path: string): () => void
 }
 
 export function createHarness(): Harness {
+  const gates = new Map<string, Promise<void>>()
   const h: Harness = {
     session: new Map(),
     local: new Map(),
@@ -89,6 +96,14 @@ export function createHarness(): Harness {
     listeners: new Map(),
     hasUserScripts: false,
     contentReply: () => undefined,
+    hold: (path) => {
+      let release: () => void = () => {}
+      gates.set(path, new Promise<void>((resolve) => (release = resolve)))
+      return () => {
+        gates.delete(path)
+        release()
+      }
+    },
     boot: async () => {},
     onMessage: async (message, sender = extensionPage) =>
       h.listeners.get('browser.runtime.onMessage')!(message, sender),
@@ -158,7 +173,17 @@ export function createHarness(): Harness {
 
   /** Any unlisted property is another stub; `addListener` records its function. */
   function stub(path: string): any {
-    if (path in overrides) return overrides[path]
+    if (path in overrides) {
+      const real = overrides[path]
+      if (typeof real !== 'function') return real
+      // Looked up at call time, so a gate set after boot still applies.
+      return (...args: unknown[]) => {
+        const gate = gates.get(path)
+        const call = () => (real as (...a: unknown[]) => unknown)(...args)
+        // Unchanged for an ungated call: some of these stubs are synchronous.
+        return gate ? gate.then(call) : call()
+      }
+    }
     const fn = () => Promise.resolve(undefined)
     return new Proxy(fn, {
       get(_target, prop: string) {
