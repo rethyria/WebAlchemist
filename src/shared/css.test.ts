@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest'
-import { parseRules, propertiesIn } from './css'
+import { parseRules, propertiesIn, stripComments } from './css'
 
 describe('parseRules', () => {
   test('reads selectors and properties from an ordinary rule', () => {
@@ -127,5 +127,23 @@ describe('a comment marker inside a string or an unquoted url (#97)', () => {
   test('treats an unterminated comment as running to the end', () => {
     const rules = parseRules('a { color: red } /* b { margin: 0 }')
     expect(rules.map((r) => r.selectors[0])).toEqual(['a'])
+  })
+})
+
+describe('a string with no closing quote (#97)', () => {
+  test('ends at the newline, so a comment on a later line is removed', () => {
+    expect(stripComments('a { content: "oops\n} /* gone */ b { margin: 0 }')).toBe(
+      'a { content: "oops\n}   b { margin: 0 }',
+    )
+  })
+
+  test('control: a backslash before the newline continues the string', () => {
+    // CSS allows an escaped newline inside a string, so the marker stays.
+    const css = 'a { content: "one\\\n/* kept */two" }'
+    expect(stripComments(css)).toBe(css)
+  })
+
+  test('control: a closed string still protects a comment marker', () => {
+    expect(stripComments('a { content: "/* kept */" } /* gone */')).toBe('a { content: "/* kept */" }  ')
   })
 })

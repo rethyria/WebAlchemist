@@ -45,7 +45,7 @@ const NOT_ELEMENT_RULES = /^@(keyframes|-\w+-keyframes|font-face|counter-style|p
  * CSS also does not read comments. An unterminated comment runs to the end of
  * the input, as the CSS specification says.
  */
-function stripComments(css: string): string {
+export function stripComments(css: string): string {
   let out = ''
   let quote: string | null = null
   let i = 0
@@ -59,7 +59,10 @@ function stripComments(css: string): string {
         i += 2
         continue
       }
-      if (c === quote) quote = null
+      // CSS ends a string at an unescaped newline (a bad string), so a quote
+      // that is never closed does not hide what follows on later lines. The
+      // escaped case, a backslash before the newline, is taken above (#97).
+      if (c === quote || c === '\n' || c === '\r' || c === '\f') quote = null
       i += 1
       continue
     }
