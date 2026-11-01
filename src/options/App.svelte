@@ -11,6 +11,7 @@
   import Toggle from '@sidebar/components/Toggle.svelte'
   import ProviderSettings from './ProviderSettings.svelte'
   import VaultSettings from './VaultSettings.svelte'
+  import { loadVaultAndStatuses } from './vault-load'
 
   let settings = $state<Settings | null>(null)
   let statuses = $state<CredentialStatus[]>([])
@@ -36,10 +37,15 @@
   }
 
   async function load() {
-    settings = await call<Settings>({ type: 'get-settings' })
-    document.documentElement.dataset['accent'] = settings.accent
-    statuses = await call<CredentialStatus[]>({ type: 'get-credential-statuses' })
-    vault = await call<{ sealed: boolean; unlocked: boolean }>({ type: 'vault-state' })
+    const loadedSettings = await call<Settings>({ type: 'get-settings' })
+    document.documentElement.dataset['accent'] = loadedSettings.accent
+    // Vault state first: the statuses request fails while the vault is locked.
+    const loaded = await loadVaultAndStatuses(call)
+    vault = loaded.vault
+    statuses = loaded.statuses
+    // Assigned last, so the page never renders with the initial vault value
+    // below, which describes an unsealed vault, before the real one is known.
+    settings = loadedSettings
   }
 
   /*
@@ -49,10 +55,9 @@
    * acted on.
    */
   async function afterVault() {
-    vault = await call<{ sealed: boolean; unlocked: boolean }>({ type: 'vault-state' })
-    statuses = vault.sealed && !vault.unlocked
-      ? []
-      : await call<CredentialStatus[]>({ type: 'get-credential-statuses' })
+    const loaded = await loadVaultAndStatuses(call)
+    vault = loaded.vault
+    statuses = loaded.statuses
   }
 
   async function save(next: Settings) {

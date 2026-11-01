@@ -360,12 +360,23 @@ export async function vaultState(): Promise<{ sealed: boolean; unlocked: boolean
  * The key is remembered for this session immediately, so enabling does not
  * lock the user out of the thing they just set up.
  */
+const ALREADY_SEALED =
+  'The credentials are already protected by a passphrase. Remove that passphrase first to set a different one.'
+
 export async function enableVault(passphrase: string): Promise<void> {
   // Checked here as well as in the settings page: this function is reached by
   // a message that any extension context can send, and the page's check is
   // only a convenience for the person typing.
   if (passphrase.length < MIN_PASSPHRASE_LENGTH) {
     throw new Error(`The passphrase must be at least ${MIN_PASSPHRASE_LENGTH} characters.`)
+  }
+
+  // Refused rather than ignored. Returning silently here let the settings page
+  // show a sealed vault as unencrypted, accept a new passphrase, and discard
+  // it, so the person believed a passphrase was in force that had never been
+  // applied. Checked before deriving so the refusal is immediate.
+  if (isSealed((await browser.storage.local.get(KEY_CREDENTIALS))[KEY_CREDENTIALS])) {
+    throw new Error(ALREADY_SEALED)
   }
 
   // The key is derived before the credential map is read, and the read, seal
@@ -377,7 +388,8 @@ export async function enableVault(passphrase: string): Promise<void> {
 
   await withCredentialLock(async () => {
     const stored = await browser.storage.local.get(KEY_CREDENTIALS)
-    if (isSealed(stored[KEY_CREDENTIALS])) return
+    // Checked again: another enable may have finished during the derivation.
+    if (isSealed(stored[KEY_CREDENTIALS])) throw new Error(ALREADY_SEALED)
 
     const map = (stored[KEY_CREDENTIALS] as CredentialMap | undefined) ?? {}
     await browser.storage.local.set({
@@ -439,9 +451,19 @@ export async function lockVault(): Promise<void> {
  * There is no recovery — that is the property being bought. Discarding the
  * credentials and starting over is the honest alternative to pretending
  * otherwise, and it is destructive enough that the UI asks twice.
+ *
+ * Allowed only when the credentials are sealed and locked, the one state a
+ * forgotten passphrase produces. Without this check the message deleted
+ * plaintext keys when the page's view of the vault was wrong, and deleted
+ * readable keys from an unlocked vault, where "Remove the passphrase" is the
+ * path that keeps them.
  */
 export async function discardVault(): Promise<void> {
   await withCredentialLock(async () => {
+    const state = await vaultState()
+    if (!state.sealed || state.unlocked) {
+      throw new Error('Stored credentials can be discarded only while they are sealed and locked.')
+    }
     await browser.storage.local.remove(KEY_CREDENTIALS)
     await forgetKey()
   })

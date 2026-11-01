@@ -54,6 +54,19 @@
     reset()
   }
 
+  async function discard(): Promise<void> {
+    error = null
+    try {
+      await ondiscard()
+      open(null)
+    } catch (cause) {
+      // Shown, not dropped: the background refuses this from any state but
+      // sealed and locked, and a silent refusal would look like a dead button.
+      error = cause instanceof Error ? cause.message : String(cause)
+      discardArmed = false
+    }
+  }
+
   async function submit(): Promise<void> {
     if (!canSubmit) return
     busy = true
@@ -196,10 +209,14 @@
         <Button small onclick={() => open(null)}>Cancel</Button>
       </div>
 
-      {#if panel === 'unlock'}
+      {#if panel === 'unlock' && vault.sealed && !vault.unlocked}
         <!--
           The only exit from a forgotten passphrase, and it is destructive, so
-          it asks twice and is never the primary action.
+          it asks twice and is never the primary action. It is also tied to the
+          vault state, not only to the open panel: the panel can stay open while
+          the state changes underneath it, for example when another settings tab
+          unlocks the vault, and discarding is wrong from any state but sealed
+          and locked. The background refuses it from other states as well.
         -->
         <div class="forgotten">
           {#if !discardArmed}
@@ -212,7 +229,7 @@
               again; your transforms are not affected.
             </p>
             <div class="actions">
-              <Button small onclick={() => void ondiscard().then(() => open(null))}>
+              <Button small onclick={() => void discard()}>
                 Discard the stored keys
               </Button>
               <Button small onclick={() => (discardArmed = false)}>Keep them</Button>

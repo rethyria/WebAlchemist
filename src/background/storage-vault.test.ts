@@ -94,3 +94,65 @@ describe('credential writes during enabling', () => {
     expect(await storage.readCredentialForRequest('p2')).toMatchObject({ value: 'new' })
   })
 })
+
+describe('enabling a vault that is already sealed', () => {
+  const FIRST = 'correct horse battery'
+
+  it('throws and leaves the sealed data and the unlock state unchanged', async () => {
+    await storage.setCredential('p1', { kind: 'api_key', value: 'sk-x' })
+    await storage.enableVault(FIRST)
+    await storage.lockVault()
+    const before = structuredClone(localArea.raw()['credentials'])
+
+    await expect(storage.enableVault('a different passphrase')).rejects.toThrow(/already/i)
+
+    expect(localArea.raw()['credentials']).toEqual(before)
+    expect(await storage.vaultState()).toEqual({ sealed: true, unlocked: false })
+  })
+
+  it('control: the original passphrase still unlocks after the refused change', async () => {
+    await storage.setCredential('p1', { kind: 'api_key', value: 'sk-x' })
+    await storage.enableVault(FIRST)
+    await storage.lockVault()
+    await storage.enableVault('a different passphrase').catch(() => undefined)
+
+    await storage.unlockVault(FIRST)
+
+    expect(await storage.readCredentialForRequest('p1')).toMatchObject({ value: 'sk-x' })
+  })
+})
+
+describe('discarding the stored credentials', () => {
+  const PASSPHRASE = 'correct horse battery'
+
+  it('refuses when the credentials are not sealed, so plain keys are not deleted', async () => {
+    await storage.setCredential('p1', { kind: 'api_key', value: 'sk-x' })
+
+    await expect(storage.discardVault()).rejects.toThrow(/locked/i)
+
+    expect(await storage.readCredentialForRequest('p1')).toMatchObject({ value: 'sk-x' })
+  })
+
+  it('refuses while the vault is unlocked, because the passphrase is then known', async () => {
+    await storage.setCredential('p1', { kind: 'api_key', value: 'sk-x' })
+    await storage.enableVault(PASSPHRASE)
+
+    await expect(storage.discardVault()).rejects.toThrow(/locked/i)
+
+    expect(await storage.readCredentialForRequest('p1')).toMatchObject({ value: 'sk-x' })
+  })
+
+  // The control: from the one state it exists for, sealed and locked, discard
+  // must work, or the refusals above would pass against a function that
+  // always threw.
+  it('control: discards when the vault is sealed and locked', async () => {
+    await storage.setCredential('p1', { kind: 'api_key', value: 'sk-x' })
+    await storage.enableVault(PASSPHRASE)
+    await storage.lockVault()
+
+    await storage.discardVault()
+
+    expect(await storage.vaultState()).toEqual({ sealed: false, unlocked: true })
+    expect(await storage.readCredentialForRequest('p1')).toBeNull()
+  })
+})
