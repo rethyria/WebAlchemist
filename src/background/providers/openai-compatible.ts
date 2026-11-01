@@ -21,6 +21,7 @@ import {
   GENERATE_SYSTEM_PROMPT,
   REVIEW_SYSTEM_PROMPT,
   fencePageContent,
+  pageDataSections,
   repairPrompt,
   reviewContent,
   scopeInstruction,
@@ -254,7 +255,7 @@ export async function createOpenAiCompatibleProvider(
       const text = [
         instruction,
         scopeInstruction(request.scopeDepth, request.scopeContainer ?? null),
-        fencePageContent(JSON.stringify(request.context, null, 2)),
+        fencePageContent(JSON.stringify(request.context, null, 2) + pageDataSections(request)),
       ].join('\n\n')
 
       const shot = request.context.screenshot

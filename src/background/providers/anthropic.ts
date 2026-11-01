@@ -24,6 +24,7 @@ import {
   GENERATE_SYSTEM_PROMPT,
   REVIEW_SYSTEM_PROMPT,
   fencePageContent,
+  pageDataSections,
   repairPrompt,
   reviewContent,
   scopeInstruction,
@@ -350,7 +351,7 @@ export async function createAnthropicProvider(
   }
 }
 
-function buildGenerationContent(
+export function buildGenerationContent(
   request: GenerateRequest,
 ): Anthropic.MessageParam['content'] {
   const instruction = request.repair
@@ -366,7 +367,7 @@ function buildGenerationContent(
   const text = [
     instruction,
     scopeInstruction(request.scopeDepth, request.scopeContainer ?? null),
-    fencePageContent(describeContext(request.context)),
+    fencePageContent(describeContext(request.context) + pageDataSections(request)),
   ].join('\n\n')
 
   const shot = request.context.screenshot
