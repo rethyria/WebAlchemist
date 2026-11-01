@@ -241,3 +241,71 @@ describe('a preview that starts while the registrations are being rebuilt (#91)'
     expect(h.userScriptsHeld.has('preview-draft')).toBe(true)
   })
 })
+
+describe('a preview that ends while the registrations are being rebuilt (#91)', () => {
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 20))
+  const draft = () => ({ ...js(), code: 'document.title = "draft"' })
+
+  /** Starts a preview of the saved script, then ends it while a rebuild is held. */
+  async function endDuringRebuild(end: () => Promise<unknown>) {
+    h.local.set('transforms', [js()])
+    await h.boot()
+    await h.onMessage({ type: 'preview-js', tabId: 3, transform: draft() })
+    expect(h.userScriptsHeld.has('preview-script-1')).toBe(true)
+    const settings = (await h.onMessage({ type: 'get-settings' })).data
+    const release = h.hold('browser.userScripts.getScripts', { firstCallOnly: true })
+    const rebuilt = h.onMessage({ type: 'save-settings', settings })
+    await settle()
+    const ended = end()
+    await settle()
+    release()
+    await Promise.all([rebuilt, ended])
+    await settle()
+  }
+
+  it('keeps the restored saved script registered after clear-preview-js', async () => {
+    await endDuringRebuild(() => h.onMessage({ type: 'clear-preview-js', id: 'script-1' }))
+    expect(h.userScriptsHeld.has('script-1')).toBe(true)
+    expect(h.userScriptsHeld.has('preview-script-1')).toBe(false)
+    expect(h.session.get('wa-preview-scripts') ?? []).toEqual([])
+  })
+
+  it('control: clear-preview-js with no rebuild running restores the saved script', async () => {
+    h.local.set('transforms', [js()])
+    await h.boot()
+    await h.onMessage({ type: 'preview-js', tabId: 3, transform: draft() })
+    await h.onMessage({ type: 'clear-preview-js', id: 'script-1' })
+    expect(h.userScriptsHeld.has('script-1')).toBe(true)
+  })
+})
+
+describe('a delete that overlaps a rebuild (#91)', () => {
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 20))
+
+  it('leaves the deleted script unregistered', async () => {
+    h.local.set('transforms', [js()])
+    await h.boot()
+    const settings = (await h.onMessage({ type: 'get-settings' })).data
+    // The rebuild has to register the script, so it is missing from the
+    // browser, and the rebuild is held at that registration: it has already
+    // read the script from storage by then.
+    h.userScriptsHeld.delete('script-1')
+    const release = h.hold('browser.userScripts.register')
+    const rebuilt = h.onMessage({ type: 'save-settings', settings })
+    await settle()
+    const deleted = h.onMessage({ type: 'delete-transform', id: 'script-1' })
+    await settle()
+    release()
+    await Promise.all([rebuilt, deleted])
+    await settle()
+    expect(h.userScriptsHeld.has('script-1')).toBe(false)
+  })
+
+  it('control: without a rebuild running the delete unregisters the script', async () => {
+    h.local.set('transforms', [js()])
+    await h.boot()
+    expect(h.userScriptsHeld.has('script-1')).toBe(true)
+    await h.onMessage({ type: 'delete-transform', id: 'script-1' })
+    expect(h.userScriptsHeld.has('script-1')).toBe(false)
+  })
+})

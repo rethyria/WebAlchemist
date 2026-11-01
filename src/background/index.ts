@@ -112,6 +112,19 @@ function inRegistryQueue<T>(task: () => Promise<T>): Promise<T> {
   return run
 }
 
+/**
+ * Ends a script preview: registers the saved script again and drops the id
+ * from the previewed list, in one queued task. Run apart, a rebuild between
+ * the two steps still lists the id as previewed and unregisters the restored
+ * saved script (#91).
+ */
+function endPreviewScript(id: string): Promise<void> {
+  return inRegistryQueue(async () => {
+    await unregisterPreview(id)
+    await removePreviewedScript(id)
+  })
+}
+
 /** Rebuilds registrations from storage, leaving preview scripts registered. */
 function reregister(): Promise<void> {
   return inRegistryQueue(async () => {
@@ -435,8 +448,10 @@ async function handle(
       if (saved.kind === 'js') {
         // Registration carries the code, so a changed script has to be
         // re-registered; the page picks it up on its next load either way.
-        if (saved.enabled) await registerTransform(saved)
-        else await unregisterTransform(saved.id)
+        // Queued with the start-up rebuild so the two cannot interleave (#91).
+        await inRegistryQueue(() =>
+          saved.enabled ? registerTransform(saved) : unregisterTransform(saved.id),
+        )
       }
 
       /*
@@ -550,7 +565,7 @@ async function handle(
       const before = (await getAllTransforms()).find((t) => t.id === message.transform.id)
       const saved = await saveTransform(message.transform)
       if (saved.kind === 'js') {
-        await registerTransform(saved)
+        await inRegistryQueue(() => registerTransform(saved))
       }
       const { accent } = await getSettings()
       await badge.transformEdited(saved.id, accent)
@@ -565,8 +580,12 @@ async function handle(
 
     case 'delete-transform': {
       const doomed = (await getAllTransforms()).find((t) => t.id === message.id)
-      await unregisterTransform(message.id)
-      await deleteTransform(message.id)
+      // Both steps in one queued task: a rebuild that ran between them would
+      // read the script from storage and register it again (#91).
+      await inRegistryQueue(async () => {
+        await unregisterTransform(message.id)
+        await deleteTransform(message.id)
+      })
       const { accent } = await getSettings()
       await badge.transformEdited(message.id, accent)
       await repaintOtherTabs([doomed?.match], accent)
@@ -592,8 +611,9 @@ async function handle(
       const next = await updateTransform(message.id, { enabled: message.enabled })
       if (!next) throw new Error('That transform no longer exists.')
       if (next.kind === 'js') {
-        if (next.enabled) await registerTransform(next)
-        else await unregisterTransform(next.id)
+        await inRegistryQueue(() =>
+          next.enabled ? registerTransform(next) : unregisterTransform(next.id),
+        )
       }
       // A toggle that takes effect on the next reload is not a toggle.
       await reapply(message.tabId)
@@ -709,16 +729,14 @@ async function handle(
         // The preview is registered and the saved script paused, but the
         // sidebar treats a rejected request as "nothing ran" and never sends a
         // clear, so the registration is removed here.
-        await inRegistryQueue(() => unregisterPreview(message.transform.id)).catch(() => {})
-        await removePreviewedScript(message.transform.id)
+        await endPreviewScript(message.transform.id).catch(() => {})
         throw cause
       }
       return true
     }
 
     case 'clear-preview-js':
-      await unregisterPreview(message.id)
-      await removePreviewedScript(message.id)
+      await endPreviewScript(message.id)
       return true
 
     case 'start-picking': {
@@ -980,8 +998,7 @@ async function clearPreviewsWhere(
   }
   for (const id of await previewedScriptIds()) {
     if (!ownerIsGone(await previewScriptWindow(id))) continue
-    await unregisterPreview(id)
-    await removePreviewedScript(id)
+    await endPreviewScript(id)
   }
   // A pause belongs to the window whose sidebar set it: that sidebar is the one
   // that resumes it, and a sidebar that closed cannot. The window stored with
