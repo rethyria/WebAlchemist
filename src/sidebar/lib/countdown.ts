@@ -14,3 +14,13 @@ export function announcedSeconds(seconds: number): number {
   const step = steps.find((s) => s >= seconds)
   return step ?? Math.ceil(seconds / 60) * 60
 }
+
+/**
+ * The sentence a screen reader gets for the wait. "Up to" is used because the
+ * announced value is the real wait rounded up to a step, so the real wait is
+ * at most that long and equals it at each step boundary. "Less than" was wrong
+ * at exactly 30 seconds.
+ */
+export function announcement(seconds: number): string {
+  return `Trying again in up to ${announcedSeconds(seconds)} seconds`
+}

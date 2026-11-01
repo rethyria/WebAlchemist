@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { announcedSeconds } from '../lib/countdown'
+  import { announcement } from '../lib/countdown'
   import type { FlowError } from '../lib/flow.svelte'
   import Button from './Button.svelte'
 
@@ -57,17 +57,20 @@
       <Button small onclick={ondismiss}>Dismiss</Button>
     </div>
   {:else if error.kind === 'rate-limited'}
-    <div class="head">
-      <span class="dot attention" aria-hidden="true"></span>
-      <!--
-        The alert is on the title alone. An alert is an assertive live region,
-        and the countdown below it changes every second, so with the alert on
-        the whole card a screen reader was likely to announce every change
-        (not tested with a screen reader).
-      -->
-      <span class="title" role="alert">Rate limited</span>
+    <!--
+      The alert holds the title and the provider's message, which is what a
+      screen-reader user needs to hear. The countdown below it changes every
+      second, so it stays outside the alert; with the alert on the whole card a
+      screen reader was likely to announce every change (not tested with a
+      screen reader).
+    -->
+    <div class="alert" role="alert">
+      <div class="head">
+        <span class="dot attention" aria-hidden="true"></span>
+        <span class="title">Rate limited</span>
+      </div>
+      <p>{error.message}</p>
     </div>
-    <p>{error.message}</p>
     {#if error.retryInSeconds !== null}
       <!--
         A real countdown, not a label. It reaches zero and the request goes
@@ -83,7 +86,7 @@
       </p>
       <!-- What assistive technology gets instead: a polite region whose text changes at coarse steps. -->
       <p class="hidden" role="status">
-        Trying again in less than {announcedSeconds(error.retryInSeconds)} seconds
+        {announcement(error.retryInSeconds)}
       </p>
       <div class="actions">
         {#if onretry}
@@ -119,6 +122,12 @@
     overflow: hidden;
     clip-path: inset(50%);
     white-space: nowrap;
+  }
+
+  .alert {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
   }
 
   .countdown {
