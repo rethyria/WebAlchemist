@@ -369,7 +369,7 @@ async function armIdleLock(): Promise<void> {
 /** Handles an alarm from the browser; the background registers this at start. */
 export async function handleVaultIdleAlarm(alarm: { name: string }): Promise<void> {
   if (alarm.name !== IDLE_ALARM) return
-  await forgetKey()
+  await lockVault()
 }
 
 /** Writes the map back in whichever form it is currently kept. */
