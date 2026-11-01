@@ -368,7 +368,8 @@ export type Message =
 /** Sent from background to content script. */
 export type ContentMessage =
   /** The palette travels with the request: the overlay cannot read our CSS. */
-  | { type: 'start-picking'; palette: OverlayPalette; mode: PickMode }
+  /** `touch` is set on Firefox for Android: tap to select, long press to draw. */
+  | { type: 'start-picking'; palette: OverlayPalette; mode: PickMode; touch?: boolean }
   | { type: 'cancel-picking' }
   | { type: 'picker-key'; action: PickerAction }
   | { type: 'recapture' }

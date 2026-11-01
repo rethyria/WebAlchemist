@@ -42,6 +42,7 @@ const localStored: Record<string, unknown> = {}
 
 const { Flow } = await import('./flow.svelte')
 const { BackgroundError } = await import('./messaging.svelte')
+const { setBoundTab } = await import('@shared/panel-binding')
 const { reviewKey } = await import('./preview-gate')
 
 const URL_ = 'https://www.example.com/'
@@ -952,6 +953,20 @@ describe('events from the page', () => {
     flow.receive(elementPicked, fromOtherTab)
     expect(flow.step).toBe('picking')
     expect(flow.picked).toBeNull()
+  })
+
+  it('reports whether the event was accepted, which gates showing the panel tab (#128)', async () => {
+    const flow = await flowWaitingForPick()
+    expect(flow.receive(elementPicked, fromOtherTab)).toBe(false)
+    expect(flow.receive(elementPicked, {})).toBe(false)
+    expect(flow.receive({ type: 'picking-cancelled' } as any, fromOtherTab)).toBe(false)
+    expect(flow.receive(elementPicked, fromRunTab)).toBe(true)
+  })
+
+  it('reports an event as not accepted when no run is waiting for the page (#128)', () => {
+    const flow = newFlow()
+    expect(flow.step).toBe('list')
+    expect(flow.receive({ type: 'picking-cancelled' } as any, fromRunTab)).toBe(false)
   })
 
   it('ignores a pick that carries no sender tab', async () => {
@@ -2391,6 +2406,35 @@ describe('saving for a site on the excluded list (#131)', () => {
     const flow = flowFor('*.example.com/*', ['www.example.com'])
     void flow.save()
     expect(flow.error).toMatchObject({ kind: 'request-failed' })
+  })
+})
+
+describe('screenshots in a panel that is bound to a page tab (#128)', () => {
+  afterEach(() => setBoundTab(null))
+
+  /** A run that reaches Describing, with a model that supports images. */
+  async function describingWithVisionModel() {
+    handler = (m) =>
+      m.type === 'get-vision-support' ? { ok: true, data: true } : { ok: true, data: null }
+    const flow = newFlow()
+    await flow.startPicking()
+    pick(flow)
+    expect(flow.step).toBe('describing')
+    // checkVisionSupport is not awaited by the step change.
+    await vi.waitFor(() => expect(calls.some((c) => c.type === 'get-vision-support')).toBe(true))
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    return flow
+  }
+
+  it('does not offer a screenshot when the panel is bound, even if the model supports images', async () => {
+    setBoundTab(5)
+    const flow = await describingWithVisionModel()
+    expect(flow.visionSupported).toBe(false)
+  })
+
+  it('offers a screenshot in the docked sidebar for the same model (control)', async () => {
+    const flow = await describingWithVisionModel()
+    expect(flow.visionSupported).toBe(true)
   })
 })
 

@@ -57,6 +57,7 @@ import {
 import { readCaptureGrant, recordCaptureGrant } from '@shared/capture-grant'
 import type { PickerAction } from '@shared/picker-keys'
 import { BackgroundError, generateOverPort, send } from './messaging.svelte'
+import { screenshotsAvailable } from '@shared/panel-binding'
 import { jsPreviewGate, reviewKey } from './preview-gate'
 
 /** An address without its fragment, so that scrolling to an anchor is not a new page. */
@@ -587,6 +588,8 @@ export class Flow {
    * await, so the list cannot be read from the background at that point.
    */
   excludedSites: string[] = []
+  /** Called once the page is running the picker; the tab panel uses it to show the page. */
+  onPickStarted: (() => void) | undefined
   /** The page, without its fragment, for which the user chose to send its content. */
   private sensitiveConfirmedFor: string | null = null
 
@@ -652,6 +655,7 @@ export class Flow {
       this.picked = null
       this.step = 'picking'
       await send({ type: 'start-picking', tabId: this.tabId })
+      this.onPickStarted?.()
     } catch (cause) {
       /*
        * A failed re-pick from the describing step goes back there, as a
@@ -723,9 +727,17 @@ export class Flow {
    * unless they come from the tab the run is working on and a run is waiting
    * for one.
    */
-  receive(event: ContentEvent, sender: { tab?: { id?: number | undefined } | undefined }): void {
-    if (sender.tab?.id === undefined || sender.tab.id !== this.tabId) return
-    if (!this.awaitingPageEvent) return
+  receive(
+    event: ContentEvent,
+    sender: { tab?: { id?: number | undefined } | undefined },
+  ): boolean {
+    if (sender.tab?.id === undefined || sender.tab.id !== this.tabId) return false
+    if (!this.awaitingPageEvent) return false
+    this.applyPageEvent(event)
+    return true
+  }
+
+  private applyPageEvent(event: ContentEvent): void {
     switch (event.type) {
       case 'element-hovered':
         if (this.step === 'picking') this.hover = event.target
@@ -869,7 +881,8 @@ export class Flow {
 
   private async checkVisionSupport(): Promise<void> {
     try {
-      this.visionSupported = await send<boolean>({ type: 'get-vision-support' })
+      this.visionSupported =
+        (await send<boolean>({ type: 'get-vision-support' })) && screenshotsAvailable()
     } catch {
       // A model whose capabilities cannot be established does not get offered
       // an image. Degrading to no-screenshot is the safe direction.
@@ -1680,6 +1693,7 @@ export class Flow {
       this.shot = null
       this.sendScreenshot = false
       await send({ type: 'start-picking', tabId: this.tabId, mode: 'region' })
+      this.onPickStarted?.()
     } catch (cause) {
       this.choosingRegion = false
       this.fail(cause, () => this.chooseScreenshotRegion())
@@ -1768,6 +1782,7 @@ export class Flow {
     this.awaitingReference = true
     try {
       await send({ type: 'start-picking', tabId: this.tabId, mode: 'reference' })
+      this.onPickStarted?.()
     } catch (cause) {
       this.awaitingReference = false
       this.fail(cause, () => this.addReference())

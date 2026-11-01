@@ -87,10 +87,10 @@
     try {
       return browser.identity.getRedirectURL()
     } catch {
-      // `identity` is a required permission, so this should not happen. Saying
-      // so beats rendering "undefined" next to "register this with your
-      // provider".
-      return 'unavailable — the identity permission is missing'
+      // The identity API is missing in this browser, or its permission was not
+      // granted. Saying so beats rendering "undefined" next to "register this
+      // with your provider".
+      return 'unavailable in this browser'
     }
   })
 

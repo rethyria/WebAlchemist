@@ -84,6 +84,17 @@ describe('the handlers in index.ts use these decisions', () => {
     expect(body).toContain('isUserEvent(event)')
   })
 
+  it.each(['onTouchStart', 'onTouchMove', 'onTouchEnd', 'onTouchCancel'])(
+    '%s returns early on an untrusted event (#128)',
+    async (name) => {
+      const text = await source
+      const body = new RegExp(`function ${name}\\(event: [A-Za-z]+\\): void \\{([\\s\\S]*?)\\n\\}\\n`).exec(text)?.[1] ?? ''
+      expect(body.length).toBeGreaterThan(0)
+      // The check is the first statement, before any state is changed.
+      expect(body.trimStart().startsWith('if (!isUserEvent(event)) return')).toBe(true)
+    },
+  )
+
   it('applies a forwarded key through relayPickerKey and a page key through decideKey', async () => {
     const text = await source
     expect(text).toContain('relayPickerKey({ picking, atSeed }, message.action, applyPickerAction)')
