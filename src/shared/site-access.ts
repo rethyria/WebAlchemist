@@ -1,5 +1,6 @@
 import { originPermissionFor } from './match'
 import type { Transform } from './types'
+import { t } from './i18n'
 
 /**
  * Helpers for showing which sites the extension can read, and which
@@ -76,7 +77,7 @@ export function siteGrants(held: string[], transforms: Pick<Transform, 'match'>[
  */
 export function removeAccessQuestion(grant: SiteGrant): string | null {
   if (grant.transforms === 0) return null
-  const which =
-    grant.transforms === 1 ? '1 saved transform uses' : `${grant.transforms} saved transforms use`
-  return `${which} ${grant.origin}. After the access is removed they stop running there, and CSS they applied is taken out of open tabs. Remove access?`
+  return grant.transforms === 1
+    ? t('removeAccessQuestionOne', grant.origin)
+    : t('removeAccessQuestionMany', grant.transforms, grant.origin)
 }

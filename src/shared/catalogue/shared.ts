@@ -402,4 +402,19 @@ export const sharedMessages = defineMessages({
     message: 'authorization endpoint',
     description: 'Name of a provider setting, used inside a sentence.',
   },
+  removeAccessQuestionOne: {
+    message: '1 saved transform uses $ORIGIN$. After the access is removed they stop running there, and CSS they applied is taken out of open tabs. Remove access?',
+    description: 'Question asked before the permission for a site is removed. $ORIGIN$ is a site address pattern.',
+    placeholders: ['ORIGIN'],
+  },
+  removeAccessQuestionMany: {
+    message: '$COUNT$ saved transforms use $ORIGIN$. After the access is removed they stop running there, and CSS they applied is taken out of open tabs. Remove access?',
+    description: 'Question asked before the permission for a site is removed. $COUNT$ is a number and $ORIGIN$ is a site address pattern.',
+    placeholders: ['COUNT', 'ORIGIN'],
+  },
+  matchPresetSubdomains: {
+    message: '$DOMAIN$ and all its subdomains',
+    description: 'Label of a choice for which pages a transform applies to. $DOMAIN$ is a domain name.',
+    placeholders: ['DOMAIN'],
+  },
 })

@@ -12,6 +12,7 @@
  */
 
 import type { Anchor } from '@shared/types'
+import { t } from '@shared/i18n'
 
 /**
  * Class tokens that look machine-generated. These change on every deploy, so
@@ -202,7 +203,7 @@ function score(anchor: Anchor, element: Element): Resolution {
 
   if (anchor.role) {
     checks.push({
-      name: `it keeps role="${anchor.role}"`,
+      name: t('anchorKeepsRole', anchor.role),
       weight: 0.25,
       holds: element.getAttribute('role') === anchor.role,
     })
@@ -210,7 +211,7 @@ function score(anchor: Anchor, element: Element): Resolution {
 
   if (anchor.id) {
     checks.push({
-      name: `it keeps id="${anchor.id}"`,
+      name: t('anchorKeepsId', anchor.id),
       weight: 0.25,
       holds: element.id === anchor.id,
     })
@@ -219,7 +220,7 @@ function score(anchor: Anchor, element: Element): Resolution {
   if (anchor.classes.length > 0) {
     const present = anchor.classes.filter((c) => element.classList.contains(c))
     checks.push({
-      name: `it keeps the class ${anchor.classes.join(', ')}`,
+      name: t('anchorKeepsClass', anchor.classes.join(', ')),
       weight: 0.2,
       holds: present.length / anchor.classes.length >= 0.5,
     })
@@ -228,7 +229,7 @@ function score(anchor: Anchor, element: Element): Resolution {
   if (anchor.text) {
     const text = (element.textContent ?? '').trim().slice(0, TEXT_SAMPLE_LENGTH)
     checks.push({
-      name: `its text still starts "${anchor.text.slice(0, 24)}…"`,
+      name: t('anchorTextStarts', anchor.text.slice(0, 24)),
       weight: 0.15,
       holds: similarity(text, anchor.text) > 0.6,
     })
@@ -243,7 +244,7 @@ function score(anchor: Anchor, element: Element): Resolution {
       }
     })
     checks.push({
-      name: `it still sits inside ${anchor.landmarks[0]}`,
+      name: t('anchorInside', anchor.landmarks[0] ?? ''),
       weight: 0.2,
       holds: present.length > 0,
     })

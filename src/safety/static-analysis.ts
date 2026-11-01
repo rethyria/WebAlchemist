@@ -674,7 +674,7 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
         {
           line: before.length,
           column: before[before.length - 1]!.length,
-          api: '(hidden character)',
+          api: t('saApiHiddenCharacter'),
           capability: null,
           severity: 'block',
           explanation: t('saThisCodeContainsTheInvisibleOr', code),
@@ -697,7 +697,7 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
         {
           line: 0,
           column: 0,
-          api: '(parse)',
+          api: t('saApiParse'),
           capability: null,
           severity: 'block',
           explanation: t(
@@ -907,7 +907,7 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
       if (isPlainObject(object, scope) || holdsOnly(object, scope, isCreatedElement)) return
       block(
         node,
-        `${api} (existing element)`,
+        t('saApiExistingElement', api),
         t('saChangesWhatDecidesWhetherAnElement'),
       )
     })
@@ -937,7 +937,7 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
       }
       block(
         node,
-        'content (existing element)',
+        t('saApiExistingElement', 'content'),
         t('saReadsTheContentOfAnElement'),
       )
     })
@@ -1375,7 +1375,7 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
     if (!onStyle && /^on[a-z]/.test(name)) {
       deferred.push(() => {
         if (isPlainObject(object, scope)) return
-        block(target, `${name} (event handler property)`, t('saSetsAnEventHandlerPropertyWhich'))
+        block(target, t('saApiEventHandlerProperty', name), t('saSetsAnEventHandlerPropertyWhich'))
       })
     }
     if (!onStyle && (SCRIPT_STATE_PROPERTIES.has(name) || name === 'src')) {
@@ -1395,7 +1395,7 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
           // A different api name from the network finding above: findings at the
           // same position with the same name are merged, and the merge kept the
           // warning that a declared capability unlocks.
-          block(target, `${name} (javascript: address)`, t('saSetsAnAddressThatIsNot'))
+          block(target, t('saApiJavascriptAddress', name), t('saSetsAnAddressThatIsNot'))
         }
       })
     }
@@ -1414,7 +1414,7 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
             : t('saSetsDataWhichIsAnAddress'),
         )
         if (!part && (append || !provablyNotJavascript(value))) {
-          block(target, `${name} (javascript: address)`, t('saSetsDataToAValueThat'))
+          block(target, t('saApiJavascriptAddress', name), t('saSetsDataToAValueThat'))
         }
       })
     }
@@ -1494,7 +1494,7 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
       const first = (fn['params'] as N[])[0]
       if (first?.type === 'Identifier') scope.vars.get(first['name'])!.docEvent = true
       else if (first) {
-        block(first, 'event parameter', t('saTakesTheEventOfAWindow'))
+        block(first, t('saApiEventParameter'), t('saTakesTheEventOfAWindow'))
       }
     }
     if (promiseExecutors.has(fn)) {
@@ -1552,7 +1552,7 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
           if (prop['computed'] === true) {
             const key = literalText(prop['key']) ?? (prop['key'].type === 'Literal' ? String(prop['key'].value) : null)
             if (key === null) {
-              block(prop, '(dynamic property access)', t('saReadsAPropertyWhoseNameIs'))
+              block(prop, t('saApiDynamicProperty'), t('saReadsAPropertyWhoseNameIs'))
               visit(prop['key'], ctx, prop)
             } else checkName(key, prop, false)
           } else {
@@ -1621,7 +1621,7 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
       if (members) {
         acceptedObjects.add(object)
         if (name === null) {
-          block(node, '(dynamic property access)', t('saReadsAPropertyWhoseNameIs'))
+          block(node, t('saApiDynamicProperty'), t('saReadsAPropertyWhoseNameIs'))
         } else if (!members.has(name) && !CAPABILITY_NAMES.has(name)) {
           block(
             node,
@@ -1659,7 +1659,7 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
           if (!isNumeric(property, ctx.scope)) {
             block(
               node,
-              '(dynamic property access)',
+              t('saApiDynamicProperty'),
               t('saReadsAPropertyWhoseNameIs'),
             )
           }
@@ -1839,7 +1839,7 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
         } else if (ATTRIBUTE_URL.has(lower)) {
           needsNetwork(node, `${name}(${lower})`, t('saSetsAnAddressOnAnElement'))
           if (name === 'setAttribute' && !provablyNotJavascript(args[1] ?? null)) {
-            block(node, `setAttribute(${lower}) (javascript: address)`, t('saSetsAnAddressThatIsNot'))
+            block(node, t('saApiJavascriptAddress', `setAttribute(${lower})`), t('saSetsAnAddressThatIsNot'))
           }
         } else if (lower === 'http-equiv') {
           block(node, `${name}(http-equiv)`, t('saRedirectsThePageFromAMeta'))
@@ -1936,7 +1936,7 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
         if (texts === null) {
           block(
             node,
-            `${name}(not written out)`,
+            t('saApiNotWrittenOut', name),
             t('saSelectsElementsWithASelectorOr'),
           )
           return

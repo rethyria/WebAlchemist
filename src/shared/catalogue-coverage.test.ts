@@ -12,9 +12,11 @@ import { EN_CATALOGUE } from './catalogue'
  * alt and label are checked, and so are the string literals inside the
  * expressions of the template. In a TypeScript module and the script of a
  * component, a string literal is checked when it reads like a sentence (it
- * starts with a capital letter and has at least three words) or when it is the
+ * has at least three words once its ${} gaps are removed) or when it is the
  * argument of Error or ProviderError. A literal that is the same as a message
- * of the catalogue is also reported, because it would not be translated.
+ * of the catalogue and starts with a capital letter, such as a button label, is
+ * also reported, because it would not be translated. Text that holds code
+ * characters is never reported.
  *
  * This is a heuristic. It does not find a one- or two-word label in a script,
  * for example, and the allow-list below names what it finds that is not
@@ -24,7 +26,13 @@ import { EN_CATALOGUE } from './catalogue'
 const SRC = resolve(__dirname, '..')
 
 /** Text attributes whose static value a user can see or hear. */
-const TEXT_ATTRIBUTES = ['aria-label', 'title', 'placeholder', 'alt', 'label']
+const TEXT_ATTRIBUTES = ['aria-label', 'aria-description', 'title', 'placeholder', 'alt', 'label']
+
+/**
+ * Attributes that hold text only when the value reads like a sentence or equals
+ * a catalogue message, because they usually hold a code such as an option value.
+ */
+const CONDITIONAL_ATTRIBUTES = ['value']
 
 /**
  * Files that are not checked, with the reason. Paths are relative to src/.
@@ -48,6 +56,27 @@ const SKIPPED_DIRECTORIES: Record<string, string> = {
  * is a file path relative to src/ and the exact text.
  */
 const ALLOWED_TEXT: Array<{ file: string; text: string; reason: string }> = [
+  { file: 'background/health.ts', text: 'wa-health-checked:', reason: 'A storage key.' },
+  { file: 'background/index.ts', text: '(prefers-color-scheme: dark)', reason: 'A CSS media query.' },
+  { file: 'background/providers/anthropic.ts', text: 'Note: the target is taller', reason: 'Text added to the model request, which the model reads.' },
+  { file: 'background/providers/anthropic.ts', text: 'computed styles:', reason: 'The layout of the context sent to the model, which the model reads.' },
+  { file: 'background/providers/anthropic.ts', text: '## Page', reason: 'The layout of the context sent to the model, which the model reads.' },
+  { file: 'background/registry.ts', text: "default-src 'none'", reason: 'A content security policy directive.' },
+  { file: 'background/registry.ts', text: "script-src 'unsafe-inline'", reason: 'A content security policy directive.' },
+  { file: 'background/registry.ts', text: "style-src 'unsafe-inline'", reason: 'A content security policy directive.' },
+  { file: 'background/registry.ts', text: 'connect-src', reason: 'A content security policy directive.' },
+  { file: 'background/registry.ts', text: "img-src 'none'", reason: 'A content security policy directive.' },
+  { file: 'content/anchor.ts', text: ':nth-of-type(', reason: 'A CSS selector.' },
+  { file: 'content/index.ts', text: 'px', reason: 'A CSS value.' },
+  { file: 'options/ProviderSettings.svelte', text: 'Anthropic', reason: 'The product name of a provider is not translated.' },
+  { file: 'options/transfer-ui.ts', text: 'web-alchemist-', reason: 'A file name pattern.' },
+  { file: 'safety/static-analysis.ts', text: 'div span p a button', reason: 'A list of HTML tag names.' },
+  { file: 'safety/static-analysis.ts', text: 'h1 h2 h3', reason: 'A list of HTML tag names.' },
+  { file: 'safety/static-analysis.ts', text: 'table thead', reason: 'A list of HTML tag names.' },
+  { file: 'safety/static-analysis.ts', text: 'summary dialog', reason: 'A list of HTML tag names.' },
+  { file: 'safety/static-analysis.ts', text: 'address fieldset', reason: 'A list of HTML tag names.' },
+  { file: 'safety/static-analysis.ts', text: 'del ins canvas', reason: 'A list of HTML tag names.' },
+  { file: 'sidebar/components/Picking.svelte', text: 'button, a, input', reason: 'A CSS selector.' },
   {
     file: 'background/index.ts',
     text: 'Resetting the world of transforms failed:',
@@ -174,10 +203,16 @@ export function literalsOf(source: string): Array<{ text: string; before: string
 
 const WORDS = /[A-Za-z]{2,}/g
 
+const CATALOGUE_TEXTS = new Set(Object.values(EN_CATALOGUE).map((entry) => entry.message.trim()))
+
+/** True when the text, with its placeholders removed, reads as a sentence or equals a catalogue message. */
 function looksLikeEnglish(text: string, before: string): boolean {
-  const words = text.match(WORDS) ?? []
-  if (words.length >= 3 && /^[A-Z]/.test(text.trim()) && text.includes(' ')) return true
-  return /(?:Error|ProviderError)\(\s*$/.test(before) && words.length >= 2 && text.includes(' ')
+  const trimmed = text.replace(/\s+/g, ' ').trim()
+  const words = trimmed.match(WORDS) ?? []
+  if (/[{};=\[\]<>]/.test(trimmed)) return false
+  if (words.length >= 3 && trimmed.includes(' ')) return true
+  if (/^[A-Z]/.test(trimmed) && CATALOGUE_TEXTS.has(trimmed)) return true
+  return /(?:Error|ProviderError)\(\s*$/.test(before) && words.length >= 2 && trimmed.includes(' ')
 }
 
 function checkScript(file: string, source: string): Violation[] {
@@ -240,6 +275,12 @@ export function checkComponent(file: string, source: string): Violation[] {
     for (const match of rest.matchAll(new RegExp(`\\s${name}="([^"]*)"`, 'g'))) {
       const value = (match[1] ?? '').trim()
       if (/[A-Za-z]{2,}/.test(value)) found.push({ file, text: value })
+    }
+  }
+  for (const name of CONDITIONAL_ATTRIBUTES) {
+    for (const match of rest.matchAll(new RegExp(`\\s${name}="([^"]*)"`, 'g'))) {
+      const value = (match[1] ?? '').trim()
+      if (looksLikeEnglish(value, '')) found.push({ file, text: value })
     }
   }
   const text = rest.replace(/<[^>]*>/g, '\n')
@@ -321,6 +362,30 @@ describe('the check itself (controls)', () => {
     expect(checkComponent('x.svelte', "<p class=\"a\" aria-label={t('k')}>{t('k')}</p><!-- A comment with words -->")).toEqual([])
     expect(checkSource('x.ts', "// This is a comment with words\nconst a = t('key')\nconst b = 'api.anthropic.com'")).toEqual([])
     expect(checkSource('x.ts', "const kind = 'every-load'")).toEqual([])
+  })
+
+  it('reports a template literal that begins with a value', () => {
+    expect(checkSource('x.ts', 'const a = `${host} is on your list of excluded sites now.`')).toHaveLength(1)
+  })
+
+  it('reports a lower-case sentence', () => {
+    expect(checkSource('x.ts', "const a = 'is not allowed on this site'")).toHaveLength(1)
+  })
+
+  it('reports a short label that equals a catalogue message, and not a lower-case code that does', () => {
+    expect(checkSource('x.ts', "const a = 'Save'")).toHaveLength(1)
+    expect(checkSource('x.ts', "const a = 'Never'")).toHaveLength(1)
+    expect(checkSource('x.ts', "const a = 'every-load'")).toEqual([])
+  })
+
+  it('reports the value and aria-description attributes when they hold text', () => {
+    expect(checkComponent('x.svelte', '<div aria-description="Opens the list"></div>')).toHaveLength(1)
+    expect(checkComponent('x.svelte', '<option value="Remove the whole list now"></option>')).toHaveLength(1)
+    expect(checkComponent('x.svelte', '<option value="same-origin"></option>')).toEqual([])
+  })
+
+  it('reports a template-expression string that begins with a value', () => {
+    expect(checkComponent('x.svelte', '<p>{`${host} is blocked here for now`}</p>')).toHaveLength(1)
   })
 
   it('reports a literal string that is added to a real component', () => {

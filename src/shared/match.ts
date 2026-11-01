@@ -84,7 +84,7 @@ export function matchPresetsFor(rawUrl: string): MatchPreset[] {
   // registration for an origin.
   if (!isIpAddress(host)) {
     presets.push({
-      label: `${registrable} and all its subdomains`,
+      label: t('matchPresetSubdomains', registrable),
       pattern: `${scheme}*.${registrable}/*`,
     })
   }

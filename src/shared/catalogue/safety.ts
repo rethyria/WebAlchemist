@@ -420,4 +420,40 @@ export const safetyMessages = defineMessages({
     message: 'By default only data: URLs are allowed.',
     description: 'A finding of the code check, shown to the user before code is saved. This sentence is added to the explanation of a refused address.',
   },
+  saApiHiddenCharacter: {
+    message: '(hidden character)',
+    description: 'Name of the function, property or case that a finding of the code check is about, shown after the words \'Line N uses\'.',
+  },
+  saApiParse: {
+    message: '(parse)',
+    description: 'Name of the function, property or case that a finding of the code check is about, shown after the words \'Line N uses\'.',
+  },
+  saApiExistingElement: {
+    message: '$API$ (existing element)',
+    description: 'Name of the function, property or case that a finding of the code check is about, shown after the words \'Line N uses\'. $API$ is the name of a property.',
+    placeholders: ['API'],
+  },
+  saApiEventHandlerProperty: {
+    message: '$NAME$ (event handler property)',
+    description: 'Name of the function, property or case that a finding of the code check is about, shown after the words \'Line N uses\'. $NAME$ is the name of a property.',
+    placeholders: ['NAME'],
+  },
+  saApiJavascriptAddress: {
+    message: '$NAME$ (javascript: address)',
+    description: 'Name of the function, property or case that a finding of the code check is about, shown after the words \'Line N uses\'. $NAME$ is the name of a property. The words javascript: are a code prefix and stay as written.',
+    placeholders: ['NAME'],
+  },
+  saApiEventParameter: {
+    message: 'event parameter',
+    description: 'Name of the function, property or case that a finding of the code check is about, shown after the words \'Line N uses\'.',
+  },
+  saApiDynamicProperty: {
+    message: '(dynamic property access)',
+    description: 'Name of the function, property or case that a finding of the code check is about, shown after the words \'Line N uses\'.',
+  },
+  saApiNotWrittenOut: {
+    message: '$NAME$(not written out)',
+    description: 'Name of the function, property or case that a finding of the code check is about, shown after the words \'Line N uses\'. $NAME$ is the name of a function.',
+    placeholders: ['NAME'],
+  },
 })

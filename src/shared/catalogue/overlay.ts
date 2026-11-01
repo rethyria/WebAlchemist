@@ -49,4 +49,29 @@ export const overlayMessages = defineMessages({
     description: 'Shown next to the page address. $LIMIT$ is a number of characters; $PLACEHOLDER$ is the text that replaces a removed path segment.',
     placeholders: ['LIMIT', 'PLACEHOLDER'],
   },
+  anchorKeepsRole: {
+    message: 'it keeps role="$ROLE$"',
+    description: 'Names an assumption of a transform that no longer holds. It follows the words \'This transform assumed\'. $ROLE$ is an attribute value.',
+    placeholders: ['ROLE'],
+  },
+  anchorKeepsId: {
+    message: 'it keeps id="$ID$"',
+    description: 'Names an assumption of a transform that no longer holds. It follows the words \'This transform assumed\'. $ID$ is an attribute value.',
+    placeholders: ['ID'],
+  },
+  anchorKeepsClass: {
+    message: 'it keeps the class $CLASSES$',
+    description: 'Names an assumption of a transform that no longer holds. It follows the words \'This transform assumed\'. $CLASSES$ is a list of class names.',
+    placeholders: ['CLASSES'],
+  },
+  anchorTextStarts: {
+    message: 'its text still starts "$TEXT$…"',
+    description: 'Names an assumption of a transform that no longer holds. It follows the words \'This transform assumed\'. $TEXT$ is the start of the element text.',
+    placeholders: ['TEXT'],
+  },
+  anchorInside: {
+    message: 'it still sits inside $LANDMARK$',
+    description: 'Names an assumption of a transform that no longer holds. It follows the words \'This transform assumed\'. $LANDMARK$ is the name of a page region.',
+    placeholders: ['LANDMARK'],
+  },
 })
