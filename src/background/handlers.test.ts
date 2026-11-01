@@ -213,6 +213,23 @@ describe('handleSaveTransform: CSS', () => {
     expect(calls).toContain('save:t')
   })
 
+  it('saves same-origin CSS under a scheme-prefixed pattern with no tab, as the editor does (#50)', async () => {
+    // The editor sends no tab id. The page is then taken from the pattern, and
+    // a pattern with a scheme used to give the address https://https:/.
+    const css = 'a { background: url(/bg.png) }'
+    const settings = { ...DEFAULT_SETTINGS, cssUrlPolicy: { 'shop.example.com': 'same-origin' as const } }
+    const { deps, calls } = saveDeps([], settings)
+    deps.tabUrl = async () => undefined
+    const message = { ...saveMessage(transform({ kind: 'css', code: css, match: 'https://shop.example.com/*' })) }
+    delete (message as { tabId?: number }).tabId
+    await handleSaveTransform(message, deps)
+    expect(calls).toContain('save:t')
+    // Control: the same CSS under a site with no setting is refused.
+    const strict = saveDeps()
+    strict.deps.tabUrl = async () => undefined
+    await expect(handleSaveTransform(message, strict.deps)).rejects.toThrow()
+  })
+
   it('lets unchanged CSS through so a rename is not refused by a rule that was already there', async () => {
     const stored = transform({ kind: 'css', code: BAD_CSS })
     const { deps, calls } = saveDeps([stored])

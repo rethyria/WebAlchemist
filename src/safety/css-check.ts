@@ -39,6 +39,7 @@
  */
 
 import type { CssUrlMode, StaticFinding } from '@shared/types'
+import { parsePattern } from '@shared/match'
 
 /* ------------------------------------------------------------------ */
 /* Tokenizer                                                           */
@@ -572,9 +573,13 @@ export function modeForHost(
   return 'block'
 }
 
-/** The host a match pattern names, without a leading `*.`, or null when it has no fixed host. */
+/**
+ * The host a match pattern names, without a leading `*.`, or null when it has
+ * no fixed host. The scheme is read by parsePattern, so a pattern such as
+ * `https://shop.example.com/*` gives its host and not `https:`.
+ */
 export function hostOfPattern(pattern: string): string | null {
-  const host = (pattern.split('/')[0] ?? '').replace(/^\*\./, '').toLowerCase()
+  const host = parsePattern(pattern).host.replace(/^\*\./, '').toLowerCase()
   if (!host || host.includes('*')) return null
   return host
 }
@@ -587,7 +592,7 @@ export function hostOfPattern(pattern: string): string | null {
 export function policyKeyOfPattern(pattern: string): string | null {
   const host = hostOfPattern(pattern)
   if (host === null) return null
-  const wildcard = (pattern.split('/')[0] ?? '').startsWith('*.')
+  const wildcard = parsePattern(pattern).host.startsWith('*.')
   if (!wildcard) return host
   return isPublicSuffix(host) ? null : `*.${host}`
 }

@@ -279,6 +279,19 @@ describe('per-site mode lookup', () => {
     expect(hostOfPattern('*/foo')).toBeNull()
   })
 
+  it('reads the host and the key from a pattern that starts with a scheme (#50)', () => {
+    // Before the fix the host was the text before the first slash, which is `https:`.
+    expect(hostOfPattern('https://shop.example.com/*')).toBe('shop.example.com')
+    expect(hostOfPattern('*://*.reddit.com/r/x*')).toBe('reddit.com')
+    expect(hostOfPattern('http://localhost/*')).toBe('localhost')
+    expect(hostOfPattern('https://*/foo')).toBeNull()
+    expect(policyKeyOfPattern('https://shop.example.com/*')).toBe('shop.example.com')
+    expect(policyKeyOfPattern('https://*.example.com/*')).toBe('*.example.com')
+    expect(policyKeyOfPattern('*://*.Example.COM/*')).toBe('*.example.com')
+    expect(policyKeyOfPattern('https://*.com/*')).toBeNull()
+    expect(policyKeyOfPattern('https://*.*.example.com/*')).toBeNull()
+  })
+
   it('derives the key from the pattern and keeps whether it covers subdomains', () => {
     expect(policyKeyOfPattern('*.reddit.com/r/x*')).toBe('*.reddit.com')
     expect(policyKeyOfPattern('shop.example.com/*')).toBe('shop.example.com')
