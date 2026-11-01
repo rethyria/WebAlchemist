@@ -8,7 +8,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { createHarness, cssTransform, sidebarPort, type Harness } from './test-browser'
+import { createHarness, cssTransform, extensionPage, sidebarPort, type Harness } from './test-browser'
 
 const URL = 'https://example.com/page'
 const TAB = 5
@@ -177,5 +177,55 @@ describe('previews after the sidebar closed during a suspension (#81)', () => {
     second.drop()
     await vi.advanceTimersByTimeAsync(0)
     expect(h.calls.removeCSS).toEqual([{ tabId: TAB, css: 'a { color: red }' }])
+  })
+})
+
+describe('the badge when a generation starts after a suspension (#92)', () => {
+  const badgeText = () => h.calls.setBadgeText.filter((c) => c.tabId === TAB).map((c) => c.text)
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 20))
+
+  /** A `wa-generate` port that hands the request to the background. */
+  function generatePort() {
+    let onMessage: (message: unknown) => void = () => {}
+    return {
+      name: 'wa-generate',
+      sender: extensionPage,
+      disconnect: () => {},
+      postMessage: () => {},
+      onMessage: { addListener: (l: (message: unknown) => void) => (onMessage = l) },
+      onDisconnect: { addListener: () => {} },
+      send: (message: unknown) => onMessage(message),
+    }
+  }
+
+  async function generate() {
+    const port = generatePort()
+    h.listeners.get('browser.runtime.onConnect')!(port)
+    // No provider is configured, so the request ends in the error path, which
+    // is the same `finally` a finished generation passes through.
+    port.send({ context: {}, instruction: 'x', history: [], tabId: TAB })
+    await settle()
+  }
+
+  beforeEach(async () => {
+    h.local.set('transforms', [cssTransform()])
+    await h.boot()
+    await commit()
+    expect(badgeText().at(-1)).toBe('1')
+  })
+
+  it('shows the count again when the generation ends', async () => {
+    await h.boot() // suspension
+    await generate()
+    expect(badgeText()).toContain('··')
+    expect(badgeText().at(-1)).toBe('1')
+  })
+
+  it('control: without a suspension the badge also ends on the count', async () => {
+    // Shows the final "1" above comes from the generation ending on the right
+    // count and not from the stub leaving an earlier "1" in place.
+    await generate()
+    expect(badgeText()).toContain('··')
+    expect(badgeText().at(-1)).toBe('1')
   })
 })

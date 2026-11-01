@@ -184,6 +184,11 @@ export async function generationEnded(tabId: number, accent: Accent): Promise<vo
   await paint(tabId, accent)
 }
 
+/** Whether anything is known about this tab, which a suspension erases. */
+export function hasFacts(tabId: number): boolean {
+  return facts.has(tabId)
+}
+
 export function tabClosed(tabId: number): void {
   facts.delete(tabId)
 }

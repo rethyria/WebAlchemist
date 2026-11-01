@@ -15,6 +15,7 @@ import type {
 } from '@shared/messages'
 import { matchesUrl } from '@shared/match'
 import type {
+  Accent,
   PageContext,
   Rect,
   ReviewResult,
@@ -823,7 +824,10 @@ async function runGeneration(
 ): Promise<void> {
   const { tabId } = request
   const accent = (await getSettings()).accent
-  if (tabId !== undefined) await badge.generationStarted(tabId, accent)
+  if (tabId !== undefined) {
+    await restoreBadgeFacts(tabId, accent)
+    await badge.generationStarted(tabId, accent)
+  }
 
   try {
     const provider = await resolveActiveProvider()
@@ -862,8 +866,37 @@ async function runGeneration(
   } finally {
     // In `finally` so a failed generation does not leave the tab showing `··`
     // for as long as the tab is open.
-    if (tabId !== undefined) await badge.generationEnded(tabId, accent)
+    if (tabId !== undefined) {
+      await restoreBadgeFacts(tabId, accent)
+      await badge.generationEnded(tabId, accent)
+    }
   }
+}
+
+/**
+ * Rebuilds the matching count for a tab the badge knows nothing about.
+ *
+ * The badge's facts are in memory and a suspension erases them, while the badge
+ * Firefox draws survives. A generation that starts after a suspension would
+ * otherwise get a fresh entry with a count of zero, and when it ended the badge
+ * was repainted from that entry and cleared on a page that still has
+ * transforms. Recounting from the tab's URL is cheap and gives the right count;
+ * persisting every tab's facts in `storage.session` was the other option and
+ * was not taken because the broken set would still be unknown after a
+ * suspension, so the extra storage would not make the badge complete.
+ *
+ * Called at the end as well as the start, in case a suspension falls between
+ * them.
+ */
+async function restoreBadgeFacts(tabId: number, accent: Accent): Promise<void> {
+  if (badge.hasFacts(tabId)) return
+  const tab = await browser.tabs.get(tabId).catch(() => undefined)
+  const transforms = tab?.url ? await transformsForUrl(tab.url) : []
+  await badge.transformCountChanged(
+    tabId,
+    transforms.map((t) => t.id),
+    accent,
+  )
 }
 
 browser.tabs.onRemoved.addListener((tabId) => {
