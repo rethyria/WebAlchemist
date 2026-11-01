@@ -425,15 +425,15 @@ export async function vaultState(): Promise<{ sealed: boolean; unlocked: boolean
   return { sealed: true, unlocked: (await recallKey()) !== null }
 }
 
+const ALREADY_SEALED =
+  'The credentials are already protected by a passphrase. Remove that passphrase first to set a different one.'
+
 /**
  * Turns passphrase mode on, sealing whatever is already stored.
  *
  * The key is remembered for this session immediately, so enabling does not
  * lock the user out of the thing they just set up.
  */
-const ALREADY_SEALED =
-  'The credentials are already protected by a passphrase. Remove that passphrase first to set a different one.'
-
 export async function enableVault(passphrase: string): Promise<void> {
   // Checked here as well as in the settings page: this function is reached by
   // a message that any extension context can send, and the page's check is
