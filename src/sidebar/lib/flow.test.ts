@@ -929,3 +929,37 @@ describe('restoring the saved scope depth', () => {
     expect(types.indexOf('set-lock-scope')).toBeLessThan(types.indexOf('repair'))
   })
 })
+
+describe('regenerating after a script has run', () => {
+  beforeEach(() => {
+    ports.length = 0
+    ;(globalThis as any).browser.runtime.connect = fakeConnect
+  })
+  afterEach(() => {
+    ;(globalThis as any).browser.runtime.connect = realConnect
+  })
+
+  const jsResult = () => ({ ...cssResult('A1'), kind: 'js', world: 'USER_SCRIPT' }) as any
+
+  it('does nothing while the ran script is still on the page', async () => {
+    const flow = flowAtRefining()
+    flow.result = jsResult()
+    flow.jsRan = true
+    flow.followUp = 'make it bigger'
+    await flow.regenerate()
+    expect(ports.length).toBe(0)
+    expect(flow.step).toBe('refining')
+    expect(flow.followUp).toBe('make it bigger')
+    expect(flow.history).toEqual([])
+  })
+
+  it('still regenerates a script that has not run', async () => {
+    // The control for the test above: the refusal depends on jsRan, so the
+    // same call with it false has to reach the model.
+    const flow = flowAtRefining()
+    flow.result = jsResult()
+    flow.followUp = 'make it bigger'
+    void flow.regenerate()
+    await nextPort(1)
+  })
+})

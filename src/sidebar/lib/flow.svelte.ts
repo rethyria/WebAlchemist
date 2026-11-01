@@ -1495,6 +1495,11 @@ export class Flow {
   async regenerate(): Promise<void> {
     const text = this.followUp.trim()
     if (!text || !this.result) return
+    // A script that has run has already altered the page, and a second one
+    // would run on top of it. The panel hides Regenerate in this state, but
+    // Ctrl+Enter in the follow-up field reached this method directly. The
+    // caller has to go through reloadAndRetry, which clears jsRan first.
+    if (this.jsRan && this.result.kind === 'js') return
 
     this.refinement = {
       history: this.history,

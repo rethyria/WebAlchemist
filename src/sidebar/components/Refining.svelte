@@ -81,7 +81,10 @@
   function onKeyDown(event: KeyboardEvent) {
     if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
       event.preventDefault()
-      onregenerate()
+      // The same choice the buttons make: after a script ran, the page has to
+      // be reloaded before another attempt.
+      if (isJs && jsRan) onreload()
+      else onregenerate()
     }
   }
 </script>
