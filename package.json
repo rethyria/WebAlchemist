@@ -13,6 +13,7 @@
     "test:watch": "vitest",
     "start:firefox": "web-ext run --source-dir ./dist --target firefox-desktop --firefox ./scripts/firefox-flatpak --firefox-profile ./.web-ext-profile --profile-create-if-missing --keep-profile-changes",
     "lint:ext": "web-ext lint --source-dir ./dist",
+    "package": "node scripts/package.mjs",
     "check:icons": "node scripts/check-manifest-icons.mjs dist",
     "verify:csp": "VITE_CSP_PROBE=1 vite build && node test/csp/server.mjs",
     "start:firefox:probe": "VITE_CSP_PROBE=1 vite build && web-ext run --source-dir ./dist --target firefox-desktop --firefox ./scripts/firefox-flatpak --firefox-profile ./.web-ext-profile --profile-create-if-missing --keep-profile-changes",
