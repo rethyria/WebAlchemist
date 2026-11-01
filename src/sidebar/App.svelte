@@ -642,7 +642,11 @@
       </p>
     </div>
   {:else if flow.step === 'picking'}
-    <Picking hover={flow.hover} oncancel={() => void flow.cancelPicking()} />
+    <Picking
+      hover={flow.hover}
+      oncancel={() => void flow.cancelPicking()}
+      onkey={(action) => void flow.sendPickerKey(action)}
+    />
   {:else if flow.step === 'describing' && flow.picked}
     <Describing
       target={flow.picked.target}

@@ -12,6 +12,7 @@
 import { pageHasSensitiveFields } from './sensitive'
 import type { ConflictSpec, ContentEvent, ContentMessage, PickMode } from '@shared/messages'
 import type { OverlayPalette } from '@shared/accents'
+import { moveFrom, pickerActionFor, type PickerAction } from '@shared/picker-keys'
 import type {
   Conflict,
   HoverTarget,
@@ -620,6 +621,35 @@ function commonAncestor(elements: Element[]): Element | null {
   return ancestor
 }
 
+/**
+ * Runs one picker action. Shared by the page's key listener and by keys the
+ * sidebar forwards, so both paths behave the same. Returns false when the
+ * action does nothing in the current mode, so the caller can leave the key
+ * to the page.
+ */
+function applyPickerAction(action: PickerAction): boolean {
+  switch (action) {
+    case 'cancel':
+      stopPicking()
+      // The outline came down when a target pick started; put it back.
+      updateLock()
+      void send({ type: 'picking-cancelled' })
+      return true
+    case 'confirm':
+      // Nothing is selected in region mode, so there is nothing to confirm —
+      // the drag itself is the whole act.
+      if (pickMode !== 'region') confirmSelection()
+      return true
+    case 'parent':
+      if (pickMode === 'region') return false
+      setCurrent(moveFrom(action, current))
+      return true
+    default:
+      setCurrent(moveFrom(action, current))
+      return true
+  }
+}
+
 function onKeyDown(event: KeyboardEvent): void {
   if (!picking) return
 
@@ -628,46 +658,18 @@ function onKeyDown(event: KeyboardEvent): void {
     event.stopPropagation()
   }
 
-  switch (event.key) {
-    case 'Escape':
-      handled()
-      stopPicking()
-      // The outline came down when a target pick started; put it back.
-      updateLock()
-      void send({ type: 'picking-cancelled' })
-      return
-    case 'Enter':
-      handled()
-      // Nothing is selected in region mode, so there is nothing to confirm —
-      // the drag itself is the whole act.
-      if (pickMode !== 'region') confirmSelection()
-      return
-    case 'Backspace':
-      if (!crop) return
-      handled()
-      crop = null
-      overlay.hideCrop()
-      overlay.setHint(false)
-      publishTarget()
-      return
-    case 'ArrowUp':
-      if (pickMode === 'region') return
-      handled()
-      setCurrent(current?.parentElement ?? null)
-      return
-    case 'ArrowDown':
-      handled()
-      setCurrent(current?.firstElementChild ?? null)
-      return
-    case 'ArrowLeft':
-      handled()
-      setCurrent(current?.previousElementSibling ?? null)
-      return
-    case 'ArrowRight':
-      handled()
-      setCurrent(current?.nextElementSibling ?? null)
-      return
+  if (event.key === 'Backspace') {
+    if (!crop) return
+    handled()
+    crop = null
+    overlay.hideCrop()
+    overlay.setHint(false)
+    publishTarget()
+    return
   }
+
+  const action = pickerActionFor(event.key)
+  if (action && applyPickerAction(action)) handled()
 }
 
 /**
@@ -1412,6 +1414,10 @@ function startPicking(palette: OverlayPalette): void {
   crop = null
   overlay.mount(palette)
   overlay.setHint(false, pickMode === 'region')
+  // The arrow keys move from the current element, and a pointer has not set
+  // one yet. Starting from the body lets a keyboard user pick without ever
+  // moving the pointer. Region mode has no current element.
+  if (pickMode !== 'region' && document.body) setCurrent(document.body)
 
   // The picker's own handlers first, so they see the event before it is
   // swallowed below.
@@ -1610,6 +1616,10 @@ async function handleMessage(message: ContentMessage) {
         tree: buildTree(element),
       }
     }
+    case 'picker-key':
+      // Ignored unless a pick is running, as the page's own listener is.
+      if (picking) applyPickerAction(message.action)
+      return true
     case 'cancel-picking':
       stopPicking()
       // As with Escape: a cancelled target pick returns to the held element.

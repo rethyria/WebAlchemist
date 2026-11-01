@@ -54,6 +54,7 @@ import {
   SENSITIVE_PAGE_MESSAGE,
 } from '@shared/excluded-sites'
 import { readCaptureGrant, recordCaptureGrant } from '@shared/capture-grant'
+import type { PickerAction } from '@shared/picker-keys'
 import { BackgroundError, generateOverPort, send } from './messaging.svelte'
 
 /** An address without its fragment, so that scrolling to an anchor is not a new page. */
@@ -599,6 +600,17 @@ export class Flow {
     } catch {
       return 'this site'
     }
+  }
+
+  /**
+   * Passes a picker key pressed in the sidebar on to the page. The page's own
+   * listener cannot see keys while the keyboard focus is here.
+   */
+  async sendPickerKey(action: PickerAction): Promise<void> {
+    if (this.tabId === null || this.step !== 'picking') return
+    // A failed delivery means the page went away, which the panel learns of
+    // through its own path; there is nothing useful to show for one key.
+    await send({ type: 'picker-key', tabId: this.tabId, action }).catch(() => {})
   }
 
   async cancelPicking(): Promise<void> {

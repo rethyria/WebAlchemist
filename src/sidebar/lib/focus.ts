@@ -1,0 +1,29 @@
+/**
+ * Keyboard focus when a panel replaces another.
+ *
+ * Each step of the flow is a separate component that the sidebar swaps in. A
+ * swap removes the element that had the focus, so without a move the focus
+ * returns to the top of the document and a keyboard or screen reader user has
+ * to tab through the header again. Each step marks one element, its heading or
+ * its first control, with this action so the focus lands there.
+ */
+
+/** Elements that take focus without a tabindex. */
+const NATIVELY_FOCUSABLE = 'button, a[href], input, textarea, select, summary'
+
+/**
+ * Whether an element needs `tabindex="-1"` before it can take focus from a
+ * script. A heading or a container does; a button or a field does not, and
+ * adding the attribute to them would not change their place in the tab order.
+ */
+export function needsTabindex(element: Pick<Element, 'matches' | 'hasAttribute'>): boolean {
+  return !element.hasAttribute('tabindex') && !element.matches(NATIVELY_FOCUSABLE)
+}
+
+/** Svelte action: moves the focus to the element when it is added to the page. */
+export function focusOnMount(node: HTMLElement): void {
+  if (needsTabindex(node)) node.tabIndex = -1
+  // preventScroll: the panel is already at the top, and a scroll would hide the
+  // header the user has just been looking at.
+  node.focus({ preventScroll: true })
+}

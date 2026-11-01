@@ -890,6 +890,10 @@ async function handle(
       await sendToContent(message.tabId, { type: 'cancel-picking' })
       return true
 
+    case 'picker-key':
+      await sendToContent(message.tabId, { type: 'picker-key', action: message.action })
+      return true
+
     case 'retarget':
       await sendToContent(message.tabId, {
         type: 'retarget',
