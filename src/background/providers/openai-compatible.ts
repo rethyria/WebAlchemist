@@ -112,8 +112,22 @@ export async function createOpenAiCompatibleProvider(
 
     if (!response.ok) throw httpToProviderError(response.status, provider.label, response.headers)
 
-    const payload = (await response.json()) as {
-      choices?: { message?: { content?: string }; finish_reason?: string }[]
+    /*
+     * A proxy, captive portal or misconfigured local server can answer with an
+     * HTML page and status 200. `response.json()` would then raise the
+     * browser's own parser message, which says nothing about what went wrong
+     * or whose fault it is.
+     */
+    let payload: { choices?: { message?: { content?: string }; finish_reason?: string }[] }
+    try {
+      payload = (await response.json()) as typeof payload
+    } catch (error) {
+      throw new ProviderError(
+        `${provider.label} returned a response that is not JSON. Check the base URL in settings.`,
+        'bad-response',
+        true,
+        { cause: error },
+      )
     }
     const text = payload.choices?.[0]?.message?.content
     if (!text) {
@@ -256,8 +270,19 @@ async function ensureFreshToken(
    * `refresh_token` means "keep the one you have" rather than "you no longer
    * have one".
    */
+  let tokens: TokenPayload
+  try {
+    tokens = (await response.json()) as TokenPayload
+  } catch (error) {
+    throw new ProviderError(
+      'The sign-in server returned a response that is not JSON. Reconnect this provider in settings.',
+      'auth',
+      false,
+      { cause: error },
+    )
+  }
   const refreshed = credentialFrom(
-    (await response.json()) as TokenPayload,
+    tokens,
     { authorizationEndpoint: '', tokenEndpoint: credential.tokenEndpoint, clientId: credential.clientId, scopes: [] },
     Date.now(),
     credential.refreshToken,

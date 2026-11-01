@@ -117,3 +117,70 @@ describe('credential errors keep their own kind', () => {
     expect((error as ProviderError).retryable).toBe(true)
   })
 })
+
+describe('a response body that is not JSON', () => {
+  const okReview = JSON.stringify({
+    choices: [{ message: { content: '{"verdict":"match","explanation":""}' } }],
+  })
+
+  it('is reported as a bad response naming the cause, not as a raw parse error', async () => {
+    await storage.setCredential('p1', { kind: 'api_key', value: 'sk-x' })
+    stubFetch(async () => new Response('<html><body>Sign in to the network</body></html>', { status: 200 }))
+    const adapter = await createOpenAiCompatibleProvider(provider)
+
+    const error = await adapter.review(REVIEW_ARGS).catch((e: unknown) => e)
+
+    expect(error).toBeInstanceOf(ProviderError)
+    expect((error as ProviderError).kind).toBe('bad-response')
+    expect((error as ProviderError).message).toMatch(/not JSON/i)
+    // The raw parser message must not be what the user sees.
+    expect((error as ProviderError).message).not.toMatch(/JSON\.parse|unexpected character/i)
+  })
+
+  it('control: a valid JSON body is parsed and returned', async () => {
+    await storage.setCredential('p1', { kind: 'api_key', value: 'sk-x' })
+    stubFetch(async () => new Response(okReview, { status: 200 }))
+    const adapter = await createOpenAiCompatibleProvider(provider)
+
+    await expect(adapter.review(REVIEW_ARGS)).resolves.toEqual({ verdict: 'match', explanation: '' })
+  })
+})
+
+describe('a token endpoint that answers with something that is not JSON', () => {
+  const stale = {
+    kind: 'oauth' as const,
+    accessToken: 'a',
+    refreshToken: 'r',
+    expiresAt: 0,
+    tokenEndpoint: 'https://auth.example.com/token',
+    clientId: 'c',
+  }
+
+  it('is reported as an auth failure that asks for a reconnect', async () => {
+    await storage.setCredential('p1', stale)
+    stubFetch(async () => new Response('<html>portal</html>', { status: 200 }))
+    const adapter = await createOpenAiCompatibleProvider(provider)
+
+    const error = await adapter.review(REVIEW_ARGS).catch((e: unknown) => e)
+
+    expect(error).toBeInstanceOf(ProviderError)
+    expect((error as ProviderError).kind).toBe('auth')
+  })
+
+  it('control: a valid token response refreshes and the chat request goes out with the new token', async () => {
+    await storage.setCredential('p1', stale)
+    const spy = stubFetch(async (url) =>
+      url.includes('/token')
+        ? new Response(JSON.stringify({ access_token: 'a2', refresh_token: 'r2', expires_in: 3600 }))
+        : new Response(
+            JSON.stringify({ choices: [{ message: { content: '{"verdict":"match","explanation":""}' } }] }),
+          ),
+    )
+    const adapter = await createOpenAiCompatibleProvider(provider)
+
+    await adapter.review(REVIEW_ARGS)
+
+    const chat = spy.mock.calls.find(([url]) => url.includes('/chat/completions'))!
+    expect((chat[1].headers as Record<string, string>)['Authorization']).toBe('Bearer a2')
+  })
+})
