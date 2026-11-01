@@ -45,7 +45,6 @@ import {
   handleReview,
   handleSaveSettings,
   handleSaveTransform,
-  policyFingerprint,
   type CssApplyDeps,
   type SaveDeps,
 } from './handlers'
@@ -765,17 +764,9 @@ async function handle(
     }
 
     case 'patch-settings': {
-      const before = await getSettings()
+      const switchBefore = (await getSettings()).aiJsKillSwitch
       const saved = await changeSettings(message.change)
-      if (message.change.kind === 'fields') {
-        await afterSettingsWritten(before.aiJsKillSwitch)
-        // A tab keeps the CSS injected under the old per-site settings until
-        // something reapplies it, and the sidebar changes them through this
-        // message.
-        if (policyFingerprint(before.cssUrlPolicy) !== policyFingerprint(saved.cssUrlPolicy)) {
-          await reapplyAllTabs()
-        }
-      }
+      if (message.change.kind === 'fields') await afterSettingsWritten(switchBefore)
       return saved
     }
 
