@@ -13,6 +13,7 @@
  */
 
 import { vi } from 'vitest'
+import { originCovers } from '@shared/site-access'
 
 /** Captured before a test installs fake timers, so `boot()` can still wait. */
 const realSetTimeout = globalThis.setTimeout
@@ -100,7 +101,8 @@ export function createHarness(): Harness {
     'browser.runtime.getURL': (path: string) => ORIGIN + path,
     'browser.runtime.id': 'wa@test',
     'browser.permissions.getAll': async () => ({ origins: h.origins, permissions: [] }),
-    'browser.permissions.contains': async () => h.hasUserScripts,
+    'browser.permissions.contains': async (p: { origins?: string[] }) =>
+      p.origins ? p.origins.every((o) => h.origins.some((held) => originCovers(held, o))) : h.hasUserScripts,
     'browser.userScripts.unregister': async (filter?: { ids?: string[] }) => {
       const ids = filter?.ids ?? [...h.userScriptsHeld.keys()]
       h.calls.registry.push(filter?.ids ? `unregister:${ids.join(',')}` : 'unregister:all')

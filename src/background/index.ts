@@ -13,7 +13,7 @@ import type {
   Message,
   MessageResponse,
 } from '@shared/messages'
-import { matchesUrl } from '@shared/match'
+import { matchesUrl, originPermissionForUrl } from '@shared/match'
 import { regionAtScroll, viewportChanged, type ScrollOffset, type Viewport } from '@shared/region'
 import type {
   Accent,
@@ -143,7 +143,35 @@ browser.permissions.onAdded.addListener(async (permissions) => {
 
 browser.permissions.onRemoved.addListener(async () => {
   await reconcileContentScripts()
+  await removeCssWithoutAccess()
 })
+
+/**
+ * Takes applied CSS out of the open tabs for which the extension no longer has
+ * host access. Reapplying the transforms would not do it: the list is the same
+ * and the CSS already applied equals what would be applied, so nothing changes.
+ * A tab whose removal fails keeps its record, so that the record still says what
+ * is in the page.
+ */
+async function removeCssWithoutAccess(): Promise<void> {
+  for (const tab of await browser.tabs.query({})) {
+    const tabId = tab.id
+    if (tabId === undefined || !tab.url) continue
+    const origin = originPermissionForUrl(tab.url)
+    if (origin === null) continue
+    await inTabQueue(tabId, async () => {
+      const applied = await readCss('applied', tabId)
+      if (applied === undefined) return
+      if (await browser.permissions.contains({ origins: [origin] }).catch(() => true)) return
+      try {
+        await browser.scripting.removeCSS({ target: { tabId }, css: applied, origin: 'USER' })
+        await forgetCss('applied', tabId)
+      } catch {
+        // Still in the page, so the record stays.
+      }
+    })
+  }
+}
 
 /** Clicking the toolbar button opens the sidebar rather than a popup. */
 browser.action.onClicked.addListener(() => {
