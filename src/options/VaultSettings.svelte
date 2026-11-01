@@ -11,6 +11,7 @@
   import {
     DISCLOSURE_PLAIN,
     DISCLOSURE_SEALED,
+    DISCLOSURE_TRANSFORMS,
     LOCKED_CONSEQUENCE,
     STATUS_LOCKED,
     STATUS_UNLOCKED,
@@ -104,6 +105,7 @@
 
 <section>
   <h2>How your credentials are stored</h2>
+  <p class="body">{DISCLOSURE_TRANSFORMS}</p>
 
   {#if !vault.sealed}
     <p class="body">{DISCLOSURE_PLAIN}</p>

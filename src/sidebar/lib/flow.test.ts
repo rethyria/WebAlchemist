@@ -42,6 +42,7 @@ const localStored: Record<string, unknown> = {}
 
 const { Flow } = await import('./flow.svelte')
 const { BackgroundError } = await import('./messaging.svelte')
+const { reviewKey } = await import('./preview-gate')
 
 const URL_ = 'https://www.example.com/'
 const anchor = { tag: 'div', classes: [], path: 'html>body>div', landmarks: [], selector: 'div.x' }
@@ -88,6 +89,33 @@ function newFlow() {
   const flow = new Flow(() => {})
   flow.bindTab(1, URL_)
   return flow
+}
+
+/**
+ * Marks a flow's JavaScript as read by the second model with a verdict of
+ * match, which the preview requires (issue 55). The review is stored the way
+ * reviewForPreview stores it, without a model call.
+ */
+function reviewedForRun(flow: InstanceType<typeof Flow>) {
+  flow.result = { ...jsResultBase, code: flow.draft?.code ?? 'x' } as any
+  ;(flow as any).previewReview = {
+    static: [],
+    undeclaredCapabilities: [],
+    passed: true,
+    model: { verdict: 'match', explanation: '' },
+    approvalToken: 'preview-token',
+  }
+  ;(flow as any).previewReviewFor = reviewKey(flow.result as any, flow.intent)
+}
+const jsResultBase = {
+  name: 'n',
+  kind: 'js',
+  world: 'USER_SCRIPT',
+  requestedWorld: 'USER_SCRIPT',
+  worldReason: '',
+  capabilities: [],
+  rationale: { targets: '', approach: '', assumptions: [] },
+  intent: 'i',
 }
 
 /** The sender of an event from the tab the flows in these tests are bound to. */
@@ -374,6 +402,7 @@ describe('repeating a failed request', () => {
     const flow = newFlow()
     flow.draft = { ...saved, kind: 'js' }
     flow.analysis = { static: [], undeclaredCapabilities: [], passed: true } as any
+    reviewedForRun(flow)
     ;(globalThis as any).browser.permissions.request = async () => false
     await flow.runJs()
     ;(globalThis as any).browser.permissions.request = async () => true
@@ -852,6 +881,7 @@ describe('whether the error card says the description is kept', () => {
     const flow = flowAtRefining()
     flow.draft = { ...saved, kind: 'js' }
     flow.analysis = { static: [], undeclaredCapabilities: [], passed: true } as any
+    reviewedForRun(flow)
     ;(globalThis as any).browser.permissions.request = async () => false
     await flow.runJs()
     ;(globalThis as any).browser.permissions.request = async () => true
@@ -1331,6 +1361,7 @@ describe('a JavaScript preview that is answered after the run ended (#98)', () =
     const flow = newFlow()
     flow.draft = { ...saved, kind: 'js' }
     flow.analysis = { static: [], undeclaredCapabilities: [], passed: true } as any
+    reviewedForRun(flow)
     return flow
   }
 
@@ -1413,6 +1444,47 @@ describe('reload and try again with a script that has run (#114)', () => {
     expect(reloads).toEqual([1])
     expect(calls.filter((c) => c.type === 'clear-preview-js').map((c) => c.id)).toEqual(['OLD'])
     expect(generate).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('a repair or regeneration of a transform restricted to a container (#127)', () => {
+  const restricted = { ...saved, enabled: true, cookieStoreId: 'firefox-container-3' }
+  const generated = {
+    name: 'New',
+    kind: 'css',
+    code: 'div { color: red }',
+    capabilities: [],
+    rationale: { targets: 't', approach: 'a', assumptions: [] },
+  }
+  const savedCall = () => calls.filter((c) => c.type === 'save-transform').at(-1)
+
+  async function repairAndSave(from: typeof saved) {
+    const flow = newFlow()
+    handler = (m) => {
+      if (m.type === 'context-for-anchor') return { ok: true, data: found }
+      if (m.type === 'repair' || m.type === 'generate') {
+        return { ok: true, data: { result: generated } }
+      }
+      return { ok: true, data: null }
+    }
+    await flow.repair(from, 'broken')
+    expect(flow.step).toBe('refining')
+    return flow
+  }
+
+  it('keeps the restriction in the record that is saved after a repair', async () => {
+    const flow = await repairAndSave(restricted)
+    await flow.save()
+    expect(savedCall()?.transform.cookieStoreId).toBe('firefox-container-3')
+    expect(savedCall()?.transform.code).toBe('div { color: red }')
+  })
+
+  // Control: a transform with no restriction is saved with none, so the field
+  // above comes from the transform that was repaired.
+  it('control: a repair of an unrestricted transform saves no restriction', async () => {
+    const flow = await repairAndSave({ ...restricted, cookieStoreId: undefined })
+    await flow.save()
+    expect(savedCall()?.transform).not.toHaveProperty('cookieStoreId')
   })
 })
 
@@ -1972,6 +2044,7 @@ describe('ending a run that has a preview request in flight (#110, #98)', () => 
     const flow = newFlow()
     flow.draft = { ...saved, kind: 'js' }
     flow.analysis = { static: [], undeclaredCapabilities: [], passed: true } as any
+    reviewedForRun(flow)
     const reply = gateOf()
     const lock = gateOf()
     handler = async (m) => {
@@ -1997,6 +2070,7 @@ describe('ending a run that has a preview request in flight (#110, #98)', () => 
     const flow = newFlow()
     flow.draft = { ...saved, kind: 'js' }
     flow.analysis = { static: [], undeclaredCapabilities: [], passed: true } as any
+    reviewedForRun(flow)
     handler = async () => ({ ok: true, data: null })
     await flow.runJs()
     expect(flow.jsRan).toBe(true)
@@ -2161,5 +2235,186 @@ describe('saving for a site on the excluded list (#131)', () => {
     const flow = flowFor('*.example.com/*', ['www.example.com'])
     void flow.save()
     expect(flow.error).toMatchObject({ kind: 'request-failed' })
+  })
+})
+
+describe('the world a script runs in (issue 53)', () => {
+  const review = { static: [], undeclaredCapabilities: [], passed: true }
+
+  it('reviews and approves in the isolated world when the model asked for MAIN', async () => {
+    const flow = flowAtApprove()
+    flow.result = { ...jsResult, requestedWorld: 'MAIN', worldReason: 'needs a page global' }
+    handler = (m) => ({ ok: true, data: m.type === 'review' ? review : null })
+    await flow.toReview()
+    const sent = calls.filter((c) => c.type === 'review')
+    expect(sent.map((c) => c.world)).toEqual(['USER_SCRIPT'])
+  })
+
+  it('asks for a new review in MAIN when the user allows it, so the token is for that world', async () => {
+    const flow = flowAtApprove()
+    flow.result = { ...jsResult, requestedWorld: 'MAIN', worldReason: 'r' }
+    handler = (m) => ({ ok: true, data: m.type === 'review' ? review : null })
+    await flow.toReview()
+    await flow.setWorld('MAIN')
+    expect(calls.filter((c) => c.type === 'review').map((c) => c.world)).toEqual(['USER_SCRIPT', 'MAIN'])
+    expect(flow.result?.world).toBe('MAIN')
+  })
+
+  it('goes back to the isolated world when the user withdraws the approval', async () => {
+    const flow = flowAtApprove()
+    handler = (m) => ({ ok: true, data: m.type === 'review' ? review : null })
+    await flow.setWorld('MAIN')
+    await flow.setWorld('USER_SCRIPT')
+    expect(calls.filter((c) => c.type === 'review').map((c) => c.world)).toEqual(['MAIN', 'USER_SCRIPT'])
+  })
+
+  it('control: choosing the world it already has sends no new review', async () => {
+    const flow = flowAtApprove()
+    await flow.setWorld('USER_SCRIPT')
+    expect(calls.filter((c) => c.type === 'review')).toEqual([])
+  })
+
+  it('keeps a stored MAIN transform as MAIN when it is opened for an AI edit', async () => {
+    const flow = newFlow()
+    handler = (m) =>
+      m.type === 'context-for-anchor'
+        ? { ok: true, data: found }
+        : { ok: true, data: m.type === 'analyse' ? review : null }
+    await flow.editWithAi({ ...saved, kind: 'js', world: 'MAIN', code: 'x' })
+    expect(flow.result?.world).toBe('MAIN')
+  })
+})
+
+describe('running JavaScript only after the model review (issue 55)', () => {
+  const clean = { static: [], undeclaredCapabilities: [], passed: true }
+  const verdict = (v: string) => ({
+    ...clean,
+    model: { verdict: v, explanation: 'why' },
+    approvalToken: 'review-token',
+  })
+
+  function flowWithUnreviewedScript() {
+    const flow = newFlow()
+    flow.draft = { ...saved, kind: 'js' }
+    flow.result = { ...jsResultBase, code: 'x' } as any
+    flow.analysis = clean as any
+    return flow
+  }
+  const previews = () => calls.filter((c) => c.type === 'preview-js')
+
+  it('does not register the preview before the review has run', async () => {
+    const flow = flowWithUnreviewedScript()
+    await flow.runJs()
+    expect(previews()).toEqual([])
+    expect(flow.jsRan).toBe(false)
+  })
+
+  it('reviews with the draft id and pattern, and then registers the preview', async () => {
+    const flow = flowWithUnreviewedScript()
+    handler = (m) => ({ ok: true, data: m.type === 'review' ? verdict('match') : null })
+    await flow.reviewForPreview()
+    expect(calls.find((c) => c.type === 'review')).toMatchObject({ transformId: 'OLD', match: '*.example.com/*' })
+    expect(flow.jsPreviewAllowed).toBe(true)
+    await flow.runJs()
+    expect(previews().length).toBe(1)
+    expect(flow.jsRan).toBe(true)
+  })
+
+  it('sends the review token and the address the tab was at with the preview (#55)', async () => {
+    const flow = flowWithUnreviewedScript()
+    ;(flow as any).url = 'https://www.example.com/page?x=1'
+    handler = (m) => ({ ok: true, data: m.type === 'review' ? verdict('match') : null })
+    await flow.reviewForPreview()
+    await flow.runJs()
+    expect(previews()[0]).toMatchObject({
+      approvalToken: 'review-token',
+      expectedUrl: 'https://www.example.com/page?x=1',
+    })
+  })
+
+  it('does not register a preview when the review came back without a token (#55)', async () => {
+    const flow = flowWithUnreviewedScript()
+    handler = (m) => ({
+      ok: true,
+      data: m.type === 'review' ? { ...verdict('match'), approvalToken: undefined } : null,
+    })
+    await flow.reviewForPreview()
+    await flow.runJs()
+    expect(previews()).toEqual([])
+    expect(flow.jsRan).toBe(false)
+  })
+
+  it.each(['mismatch', 'uncertain'])('does not register the preview after a verdict of %s', async (v) => {
+    const flow = flowWithUnreviewedScript()
+    handler = (m) => ({ ok: true, data: m.type === 'review' ? verdict(v) : null })
+    await flow.reviewForPreview()
+    await flow.runJs()
+    expect(previews()).toEqual([])
+  })
+
+  it('stops counting a review once the intent changes', async () => {
+    const flow = flowWithUnreviewedScript()
+    handler = (m) => ({ ok: true, data: m.type === 'review' ? verdict('match') : null })
+    await flow.reviewForPreview()
+    flow.intent = 'something else'
+    expect(flow.jsPreviewAllowed).toBe(false)
+    await flow.runJs()
+    expect(previews()).toEqual([])
+  })
+
+  it('does not review code that the local analysis rejected', async () => {
+    const flow = flowWithUnreviewedScript()
+    flow.analysis = { ...clean, passed: false } as any
+    await flow.reviewForPreview()
+    expect(calls.some((c) => c.type === 'review')).toBe(false)
+  })
+})
+
+describe('saving from the approval panel (issue 64)', () => {
+  const review = {
+    static: [],
+    undeclaredCapabilities: [],
+    passed: true,
+    model: { verdict: 'match', explanation: '' },
+    approvalToken: 'tok',
+  }
+  const saves = () => calls.filter((c) => c.type === 'save-transform')
+
+  async function atPanel() {
+    const flow = flowAtApprove()
+    flow.draft = { ...saved, kind: 'js', id: 'OLD' }
+    handler = (m) => ({ ok: true, data: m.type === 'review' ? review : null })
+    await flow.toReview()
+    return flow
+  }
+
+  it('does not save before the panel has reported that it was shown', async () => {
+    const flow = await atPanel()
+    expect(flow.reviewShown).toBe(false)
+    await flow.save()
+    expect(saves()).toEqual([])
+  })
+
+  it('saves with the review token once the panel has been shown', async () => {
+    const flow = await atPanel()
+    flow.markReviewShown()
+    await flow.save()
+    expect(saves().map((c) => c.approvalToken)).toEqual(['tok'])
+  })
+
+  it('needs the panel shown again after a new review, such as a change of world', async () => {
+    const flow = await atPanel()
+    flow.markReviewShown()
+    await flow.setWorld('MAIN')
+    expect(flow.reviewShown).toBe(false)
+    await flow.save()
+    expect(saves()).toEqual([])
+  })
+
+  it('is not marked as shown while the review has not arrived', () => {
+    const flow = flowAtApprove()
+    flow.step = 'reviewing'
+    flow.markReviewShown()
+    expect(flow.reviewShown).toBe(false)
   })
 })

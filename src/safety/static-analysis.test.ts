@@ -448,7 +448,7 @@ describe('allowlist (#48): legitimate transforms still pass', () => {
         match: 'https://example.com/*',
         anchor: { landmarks: ['main', '[role="main"]'] },
         code,
-      } as unknown as Parameters<typeof wrapTransform>[0])
+      } as unknown as Parameters<typeof wrapTransform>[0], 'a1b2c3')
       expect(blocks(wrapped)).toBe(false)
     })
   }
@@ -946,7 +946,7 @@ describe('allowlist (#48): ordinary patterns that pass', () => {
         match: 'https://example.com/*',
         anchor: { landmarks: ['main'] },
         code,
-      } as unknown as Parameters<typeof wrapTransform>[0])
+      } as unknown as Parameters<typeof wrapTransform>[0], 'a1b2c3')
       expect(blocks(wrapped)).toBe(false)
     })
   }

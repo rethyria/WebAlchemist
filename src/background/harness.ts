@@ -14,12 +14,17 @@
 
 import { pathMatcherFor } from '@shared/match'
 import type { Transform } from '@shared/types'
+import { errorAttributeName } from '@shared/script-errors'
 
 function jsString(value: string): string {
   return JSON.stringify(value)
 }
 
-export function wrapTransform(transform: Transform): string {
+/**
+ * `errorToken` is the random part of the error marker's name, made by
+ * error-tokens.ts when the script is registered.
+ */
+export function wrapTransform(transform: Transform, errorToken: string): string {
   const scopeCandidates = [
     ...transform.anchor.landmarks,
     'main',
@@ -36,10 +41,21 @@ export function wrapTransform(transform: Transform): string {
     .join('\n')
 
   const matcher = pathMatcherFor(transform.match)
+  const errorName = jsString(errorAttributeName(errorToken))
 
   return `(() => {
   'use strict';
   const NAME = ${jsString(transform.name)};
+  // The last error is recorded in an attribute for the content script to read.
+  // The page can read and forge it, so it is for diagnostics only (see
+  // script-errors.ts). The attribute name is written out at each use and is
+  // not held in a variable: the static analysis refuses a name that is decided
+  // while running, and this code is checked as well.
+
+  // True only after this script wrote the marker. A successful run touches the
+  // attribute only then: removing it on every run would let a page that
+  // watches removeAttribute see the name on every run.
+  let wroteMarker = false;
 
   /*
    * The path check that matchesUrl makes for the CSS side. A browser match
@@ -61,9 +77,25 @@ export function wrapTransform(transform: Transform): string {
 
   const apply = () => {
     try {
-      ${transform.code}
+      // The code runs in its own function so that an early return ends only
+      // the code, not the clearing step below, and so that a top-level let or
+      // const in the code cannot shadow the names this wrapper uses.
+      (() => {
+${transform.code}
+      })();
+      // A run that finishes clears an earlier error, so a failure that a later
+      // run fixes is not reported.
+      if (wroteMarker) {
+        wroteMarker = false;
+        try { document.documentElement.removeAttribute(${errorName}); } catch (_) {}
+      }
     } catch (error) {
       console.error('[Web Alchemist] transform failed:', NAME, error);
+      try {
+        const text = String((error && error.message) || error);
+        document.documentElement.setAttribute(${errorName}, text.slice(0, 500));
+        wroteMarker = true;
+      } catch (_) { /* the document cannot be written; the console line remains */ }
     }
   };
 

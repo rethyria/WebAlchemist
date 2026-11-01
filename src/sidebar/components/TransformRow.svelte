@@ -7,6 +7,7 @@
     toggleOutcome,
   } from '@shared/transform-state'
   import Toggle from './Toggle.svelte'
+  import { WORLD_RESET_NOTICE } from '@shared/world'
 
   interface Props {
     transform: Transform
@@ -309,6 +310,18 @@
         <p>{transform.intent}</p>
       </section>
 
+      {#if transform.worldResetFromModel}
+        <section class="world-reset">
+          <h3 class="label attention">Environment changed</h3>
+          <p>{WORLD_RESET_NOTICE}</p>
+          <div class="actions">
+            <button type="button" class="secondary" onclick={onedit}>
+              Open the editor to turn on the page's environment
+            </button>
+          </div>
+        </section>
+      {/if}
+
       {#if overridden.length > 0 || overriding.length > 0}
         <section>
           <h3 class="label" class:attention={overridden.length > 0}>
@@ -343,6 +356,9 @@
         <section>
           <h3 class="label attention">What broke</h3>
           <p>{runtime?.brokenReason}</p>
+          {#if runtime?.pageReportedError}
+            <p class="assumption">Error text reported by the page: {runtime.pageReportedError}</p>
+          {/if}
           {#if runtime?.failedAssumption}
             <p class="assumption">This transform assumed {runtime.failedAssumption}.</p>
           {/if}

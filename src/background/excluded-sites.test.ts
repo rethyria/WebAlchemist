@@ -69,6 +69,7 @@ describe('repair', () => {
     await reply({ type: 'set-excluded-sites', sites: ['bank.example'] })
     const out = await reply({
       type: 'repair',
+      tabId: 1,
       transformId: 'x',
       context: { url: 'https://login.bank.example/a' },
       brokenReason: 'b',
@@ -105,7 +106,7 @@ describe('generation over the port', () => {
       onDisconnect: { addListener: () => {} },
     }
     h.listeners.get('browser.runtime.onConnect')!(port)
-    onMessage({ context: { url }, instruction: 'x', history: [] })
+    onMessage({ tabId: 1, context: { url }, instruction: 'x', history: [] })
     await vi.waitFor(() => expect(posted.length).toBeGreaterThan(0))
     return posted
   }

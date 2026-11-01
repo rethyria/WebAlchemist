@@ -14,10 +14,11 @@
  * is replaced.
  */
 
+import { appliesInContainer } from '@shared/container'
 import type { Message } from '@shared/messages'
 import type { ReviewInstruction } from './providers/types'
 import type { ReviewResult, Settings, Transform } from '@shared/types'
-import { mayBeSaved, recordApproval, spendApproval, type ApprovalVerdict } from './approvals'
+import { isApproved, mayBeSaved, recordApproval, spendApproval, type ApprovalVerdict } from './approvals'
 import { blockedStates, problemWithStoredCode, runStaticAnalysis } from './code-gate'
 import { assertPreviewable, checkCssTransform } from './css-gate'
 
@@ -35,7 +36,7 @@ export interface SaveDeps {
   /** Throws a message when a record is not usable, before any other check reads its fields. */
   assertValidTransform: (value: unknown) => void
   /** Stores the transform and returns the record as stored, which is what is registered and applied. */
-  saveTransform: (transform: Transform) => Promise<Transform>
+  saveTransform: (transform: Transform, options?: { clearContainer?: boolean }) => Promise<Transform>
   registerTransform: (transform: Transform) => Promise<unknown>
   /** Refreshes the badge for a transform that was saved. */
   transformEdited: (id: string) => Promise<void>
@@ -123,9 +124,33 @@ export async function handleSaveTransform(message: Of<'save-transform'>, deps: S
     }
   }
 
+  /*
+   * The record of the user's approval of MAIN is decided here and not taken
+   * from the message. It is set when this save carried an approval token for
+   * code in MAIN, which the editor and the panel obtain only after showing the
+   * risks, and it is kept when the stored record already had it. The notice
+   * that the migration reset the world is cleared by any save.
+   */
+  const { mainApprovedByUser: _sent, worldResetFromModel: _notice, ...incoming } = message.transform
+  let outgoing: Transform = incoming
+  if (incoming.kind === 'js' && incoming.world === 'MAIN') {
+    const stored = before
+    const grantedNow = await isApproved(
+      message.approvalToken,
+      incoming.code,
+      incoming.world,
+      incoming.capabilities,
+      { transformId: incoming.id, match: incoming.match },
+    )
+    const keptFromStored = stored?.world === 'MAIN' && stored.mainApprovedByUser === true
+    if (grantedNow || keptFromStored) outgoing = { ...incoming, mainApprovedByUser: true }
+  }
+
   // Register what was stored, not what was sent: a save keeps the stored
   // `enabled`, and the copy that arrived may hold an older value.
-  const saved = await deps.saveTransform(message.transform)
+  const saved = await deps.saveTransform(outgoing, {
+    clearContainer: message.clearContainer === true,
+  })
   if (saved.kind === 'js') {
     await deps.registerTransform(saved)
   }
@@ -270,10 +295,14 @@ export async function handleBlockedCount(deps: {
 /* ------------------------------------------------------------------ */
 
 export interface SettingsDeps {
-  getSettings: () => Promise<Settings>
-  saveSettings: (settings: Settings) => Promise<void>
-  /** Re-registers every script, which applies the kill switch. */
-  reregisterAll: () => Promise<unknown>
+  /**
+   * Stores the settings and returns the ones that were stored before. The read
+   * is made inside the settings queue, not before it: a read made first would
+   * delay this save behind a change that was sent after it (#85).
+   */
+  saveSettings: (settings: Settings) => Promise<Settings>
+  /** Re-registers every script, which applies the kill switch. `before` is what was stored before the save. */
+  reregisterAll: (before: Settings) => Promise<unknown>
   /** Recomputes the CSS and scripts of every open tab. */
   reapplyAllTabs: () => Promise<void>
 }
@@ -291,11 +320,12 @@ function policyFingerprint(policy: Settings['cssUrlPolicy'] | undefined): string
  * review of 4dab39a). Other settings do not change what CSS is injected.
  */
 export async function handleSaveSettings(message: Of<'save-settings'>, deps: SettingsDeps): Promise<true> {
-  const before = policyFingerprint((await deps.getSettings()).cssUrlPolicy)
-  await deps.saveSettings(message.settings)
+  const previous = await deps.saveSettings(message.settings)
   // The kill switch changes which scripts may run.
-  await deps.reregisterAll()
-  if (policyFingerprint(message.settings.cssUrlPolicy) !== before) await deps.reapplyAllTabs()
+  await deps.reregisterAll(previous)
+  if (policyFingerprint(message.settings.cssUrlPolicy) !== policyFingerprint(previous.cssUrlPolicy)) {
+    await deps.reapplyAllTabs()
+  }
   return true
 }
 
@@ -307,6 +337,11 @@ export interface CssApplyDeps {
   getSettings: () => Promise<Settings>
   insertCss: (tabId: number, css: string) => Promise<void>
   removeCss: (tabId: number, css: string) => Promise<void>
+  /**
+   * The cookie store id (container) of a tab, or undefined when it cannot be
+   * read. Used for the per-transform container restriction (#127).
+   */
+  tabCookieStore: (tabId: number) => Promise<string | undefined>
   /**
    * What is currently injected in each tab. Kept because removeCSS matches on
    * content: taking a stylesheet back out requires the exact string that went
@@ -344,8 +379,14 @@ export async function applyCssTransforms(
   stillCurrent: () => Promise<boolean> = async () => true,
 ): Promise<void> {
   const settings = await deps.getSettings()
+  // The container is read only when a CSS transform has a restriction, so a
+  // user with none needs neither the read nor the cookies permission. A
+  // restricted transform is left out when the container is unknown.
+  const restricted = transforms.some((t) => t.kind === 'css' && t.cookieStoreId !== undefined)
+  const tabStore = restricted ? await deps.tabCookieStore(tabId) : undefined
   const css = transforms
     .filter((t) => t.kind === 'css' && t.enabled)
+    .filter((t) => appliesInContainer(t, tabStore))
     .filter((t) => problemWithStoredCode(t, settings, tabUrl) === null)
     .sort((a, b) => a.order - b.order)
     .map((t) => `/* ${t.name} */\n${t.code}`)

@@ -125,14 +125,14 @@ describe('previews after the sidebar closed during a suspension (#81)', () => {
     h.hasUserScripts = true
     await h.boot()
     await h.onMessage({ type: 'preview-css', tabId: TAB, css: 'a { color: red }' })
-    const r = await h.onMessage({
+    const r = await h.onMessage(await h.approvedPreview({
       type: 'preview-js',
       tabId: TAB,
       transform: {
         ...cssTransform({ id: 'draft', kind: 'js', code: 'document.title = "x"' }),
         world: 'USER_SCRIPT',
       },
-    })
+    }))
     expect(r.ok).toBe(true)
     // Registering a preview first unregisters the saved id it edits (pausing
     // it); only the calls made after that belong to the tests below.
@@ -243,15 +243,15 @@ describe('previews with two windows open (#81)', () => {
     return port
   }
   const removed = () => h.calls.removeCSS.map((c) => c.tabId).sort()
-  const jsPreview = (id: string, tabId: number) =>
-    h.onMessage({
+  const jsPreview = async (id: string, tabId: number) =>
+    h.onMessage(await h.approvedPreview({
       type: 'preview-js',
       tabId,
       transform: {
         ...cssTransform({ id, kind: 'js', code: 'document.title = "x"' }),
         world: 'USER_SCRIPT',
       },
-    })
+    }))
 
   beforeEach(async () => {
     vi.useFakeTimers()

@@ -13,9 +13,17 @@ import { describe, expect, it } from 'vitest'
 const store = new Map<string, any>()
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0))
 let stored: unknown[] = []
+// Holds the error tokens that registrations keep in storage.session (#123).
+const sessionStore = new Map<string, unknown>()
 ;(globalThis as unknown as { browser: unknown }).browser = {
   permissions: { contains: async () => true },
   storage: {
+    session: {
+      get: async (key: string) => (sessionStore.has(key) ? { [key]: sessionStore.get(key) } : {}),
+      set: async (items: Record<string, unknown>) => {
+        for (const [key, value] of Object.entries(items)) sessionStore.set(key, value)
+      },
+    },
     local: { get: async () => ({ transforms: stored, settings: {} }), set: async () => {} },
   },
   userScripts: {

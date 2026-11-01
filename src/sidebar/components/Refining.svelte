@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { focusOnMount } from '../lib/focus'
   import type { RefinementTurn } from '@background/providers/types'
   import type { GenerationResult, ReviewResult } from '@shared/types'
   import type { ElementContext } from '@shared/types'
@@ -33,6 +34,12 @@
     onremovereference: (selector: string) => void
     onscreenshot: (value: boolean) => void
     onregenerate: () => void
+    /** The model review run for the preview, or null when none has run for this code. */
+    previewReview: ReviewResult | null
+    previewReviewing: boolean
+    /** True once the review matched and the static analysis passed. */
+    previewAllowed: boolean
+    onreviewfirst: () => void
     onrun: () => void
     onreload: () => void
     ondiscard: () => void
@@ -59,6 +66,10 @@
     onremovereference,
     onscreenshot,
     onregenerate,
+    previewReview,
+    previewReviewing,
+    previewAllowed,
+    onreviewfirst,
     onrun,
     onreload,
     ondiscard,
@@ -99,7 +110,8 @@
 <div class="panel">
   <header>
     <span class="live" class:idle={isJs && !jsRan} aria-hidden="true"></span>
-    <span class="status">
+    <span class="status" role="heading" aria-level="1" use:focusOnMount>
+      <span class="sr-only">Code ready. </span>
       {#if !isJs && blocked}
         Not applied to the page
       {:else if !isJs}
@@ -145,6 +157,24 @@
         would run if you saved it.
       </p>
       <p class="quiet">Nothing is stored. Discarding removes the registration.</p>
+      {#if !previewAllowed}
+        <!--
+          The script runs on the page with the user's session, so it is not
+          offered until a second model has read it (issue 55).
+        -->
+        <p>
+          {#if previewReviewing}
+            A second model is reading the code. It cannot be run until that finishes.
+          {:else if previewReview && previewReview.model && previewReview.model.verdict !== 'match'}
+            The second model did not agree that the code matches your description, so it
+            cannot be run here: {previewReview.model.explanation}
+          {:else if previewReview && !previewReview.passed}
+            The code scan rejected this code, so it cannot be run.
+          {:else}
+            The code has to be read by a second model before it runs on the page.
+          {/if}
+        </p>
+      {/if}
     </div>
   {:else if isJs && jsRan}
     <div class="notice attention">
@@ -276,9 +306,13 @@
 
     <div class="actions">
       <Button grow={1} small onclick={ondiscard}>Discard</Button>
-      {#if isJs && !jsRan && !blocked}
+      {#if isJs && !jsRan && !blocked && previewAllowed}
         <Button variant="primary" grow={1.4} small onclick={onrun}>
           Reload and run it
+        </Button>
+      {:else if isJs && !jsRan && !blocked}
+        <Button variant="primary" grow={1.4} small disabled={previewReviewing} onclick={onreviewfirst}>
+          {previewReviewing ? 'Reading the code…' : 'Read the code first'}
         </Button>
       {:else}
         <Button variant="primary" grow={1.4} small onclick={onkeep} disabled={blocked}>

@@ -222,8 +222,10 @@ describe('turning on a transform that has no code', () => {
 describe('repair of an imported transform', () => {
   it('is refused in the background, because it would send the stored description unseen', async () => {
     h.local.set('transforms', [jsRecord({ origin: 'imported', code: 'x()' })])
+    h.tabUrls.set(1, 'https://example.com/')
     const reply = await h.onMessage({
       type: 'repair',
+      tabId: 1,
       transformId: 'theirs',
       brokenReason: 'x',
       context: { url: 'https://example.com/' },

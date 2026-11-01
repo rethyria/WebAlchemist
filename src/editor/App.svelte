@@ -1,19 +1,33 @@
 <script lang="ts">
+  import { radioGroup } from '@shared/radio-group'
+  import { focusOnMount } from '@sidebar/lib/focus'
   import '@shared/tokens.css'
   import type {
     CssUrlMode,
+    ExecutionWorld,
     ReviewResult,
     Settings,
     Transform,
     TransformVersion,
   } from '@shared/types'
   import { hostOfPattern, modeForHost, policyKeyOfPattern } from '@safety/css-check'
-  import { compareWithCurrent, sourceLabel } from '@shared/versions'
+  import { compareWithCurrent, restoreNeedsMainConfirmation, restoreRefusal, sourceLabel } from '@shared/versions'
   import { matchPresetsFor, matchesUrl, originPermissionFor, parsePattern } from '@shared/match'
   import { send } from '@shared/messaging.svelte'
-import { editorOriginToRequest, permissionRequestsFor, requestAll } from '@shared/permissions'
-import { excludedAccessMessage, excludedHostForPattern } from '@shared/excluded-sites'
+  import {
+    CONTAINER_SCOPE_NOTE,
+    CONTAINER_UNREADABLE_NOTE,
+    COOKIES_PERMISSION,
+    EVERY_TAB_LABEL,
+    TAB_CONTAINER_LABEL,
+    containerForSave,
+    type ContainerChoice,
+  } from '@shared/container'
+  import { editorOriginToRequest, permissionRequestsFor, requestAll } from '@shared/permissions'
+  import { excludedAccessMessage, excludedHostForPattern } from '@shared/excluded-sites'
+  import { MAIN_WORLD_RISKS, WORLD_NAMES, WORLD_RESET_NOTICE, worldOf } from '@shared/world'
   import CodeArea from './CodeArea.svelte'
+  import MainRestoreRisks from './MainRestoreRisks.svelte'
   import { shouldConfirmLeaving } from './unload'
 
   /**
@@ -42,6 +56,21 @@ import { excludedAccessMessage, excludedHostForPattern } from '@shared/excluded-
   let saved = $state('')
   let match = $state('')
   let savedMatch = $state('')
+  /** The world a JavaScript transform runs in. Only the user changes it. */
+  let world = $state<ExecutionWorld>('USER_SCRIPT')
+  let savedWorld = $state<ExecutionWorld>('USER_SCRIPT')
+  /* The container restriction; see shared/container.ts. */
+  let choice = $state<ContainerChoice>('every-tab')
+  let savedChoice = $state<ContainerChoice>('every-tab')
+  /*
+   * The tab the sidebar was showing when it opened this editor. Its container
+   * is what a new restriction records, and it is the only tab this page can
+   * name, because the editor is a tab of its own.
+   */
+  const sourceTabParam = params.get('tab')
+  const sourceTabId = sourceTabParam !== null && /^\d+$/.test(sourceTabParam) ? Number(sourceTabParam) : null
+  /* Whether the cookies permission is held, which reading a container needs. */
+  let hasCookies = $state(true)
   let loadError = $state<string | null>(null)
   let findings = $state<string[]>([])
   let saving = $state(false)
@@ -50,6 +79,8 @@ import { excludedAccessMessage, excludedHostForPattern } from '@shared/excluded-
   let restoring = $state(false)
   /** The version shown for confirmation. Nothing is restored until it is confirmed. */
   let reviewing = $state<TransformVersion | null>(null)
+  /** Whether the user confirmed the risks of restoring a version that runs in MAIN. */
+  let mainRestoreConfirmed = $state(false)
   /**
    * The user's list of excluded sites, loaded when the page opens so that the
    * save and restore handlers can check it before their first await. An await
@@ -99,7 +130,7 @@ import { excludedAccessMessage, excludedHostForPattern } from '@shared/excluded-
     transform !== null &&
       (creating
         ? code.trim().length > 0 && name.trim().length > 0
-        : code !== saved || match !== savedMatch),
+        : code !== saved || match !== savedMatch || world !== savedWorld || choice !== savedChoice),
   )
 
   /*
@@ -179,6 +210,8 @@ import { excludedAccessMessage, excludedHostForPattern } from '@shared/excluded-
     }
     code = ''
     saved = ''
+    choice = 'every-tab'
+    savedChoice = 'every-tab'
     match = draft.match
     savedMatch = draft.match
     name = ''
@@ -201,11 +234,33 @@ import { excludedAccessMessage, excludedHostForPattern } from '@shared/excluded-
       saved = found.code
       match = found.match
       savedMatch = found.match
+      world = worldOf(found)
+      savedWorld = world
+      choice = found.cookieStoreId === undefined ? 'every-tab' : 'tab-container'
+      savedChoice = choice
       document.title = `${found.name} — Web Alchemist`
       await loadVersions()
     } catch (cause) {
       loadError = String(cause instanceof Error ? cause.message : cause)
     }
+  }
+
+  /**
+   * The record with the given container restriction, or with none. JavaScript
+   * transforms never carry one, because the restriction is not enforced for
+   * them and a stored value would say otherwise.
+   */
+  function withContainer(
+    base: Transform,
+    kind: 'css' | 'js',
+    cookieStoreId: string | undefined,
+  ): Transform {
+    const { cookieStoreId: _previous, ...rest } = base
+    return cookieStoreId !== undefined && kind === 'css' ? { ...rest, cookieStoreId } : rest
+  }
+
+  async function loadCookiesPermission() {
+    hasCookies = await browser.permissions.contains(COOKIES_PERMISSION).catch(() => false)
   }
 
   async function loadVersions() {
@@ -247,6 +302,11 @@ import { excludedAccessMessage, excludedHostForPattern } from '@shared/excluded-
   async function restore(version: TransformVersion) {
     const current = transform
     if (!current || restoring || saving) return
+    const refusal = restoreRefusal(current.kind, version, mainRestoreConfirmed)
+    if (refusal !== null) {
+      findings = [refusal]
+      return
+    }
     // Before the permission request, and with no await since the click.
     const excluded = excludedHostForPattern(excludedSites, version.match)
     if (excluded !== null) {
@@ -279,9 +339,12 @@ import { excludedAccessMessage, excludedHostForPattern } from '@shared/excluded-
         saved = found.code
         match = found.match
         savedMatch = found.match
+        world = worldOf(found)
+        savedWorld = world
       }
       await loadVersions()
       reviewing = null
+      mainRestoreConfirmed = false
       justSaved = true
       setTimeout(() => (justSaved = false), 2000)
     } catch (cause) {
@@ -322,17 +385,42 @@ import { excludedAccessMessage, excludedHostForPattern } from '@shared/excluded-
        * outright once a gesture has been spent.
        */
       const origin = editorOriginToRequest(creating, wanted, current.match)
+      // The cookies permission is requested here too, in the same call and
+      // before the first await, and only when a container has to be read: a
+      // new restriction, or an old one whose permission was removed.
+      const needsCookies =
+        (creating ? kind : current.kind) === 'css' &&
+        choice === 'tab-container' &&
+        (savedChoice !== 'tab-container' || !hasCookies)
       const granted = await requestAll(
         (permissions) => browser.permissions.request(permissions),
-        permissionRequestsFor(creating ? kind : current.kind, origin),
+        permissionRequestsFor(creating ? kind : current.kind, origin, needsCookies),
       )
       if (!granted) {
         findings = [
           (creating ? kind : current.kind) === 'js'
             ? 'Web Alchemist needs the permission to run JavaScript transforms, and permission for the site it applies to, before it can save this.'
-            : `Web Alchemist needs permission for ${originPermissionFor(wanted)} before it can apply this there.`,
+            : `Web Alchemist needs permission for ${originPermissionFor(wanted)}${needsCookies ? ' and the cookies permission, to read the container,' : ''} before it can apply this there.`,
         ]
         return
+      }
+      if (needsCookies) hasCookies = true
+
+      // Only a restriction that is new is read from the tab; one that is kept
+      // keeps the stored value.
+      const saveKind = creating ? kind : current.kind
+      let storeId: string | undefined
+      if (saveKind === 'css') {
+        const source =
+          choice === 'tab-container' && current.cookieStoreId === undefined && sourceTabId !== null
+            ? await browser.tabs.get(sourceTabId).catch(() => undefined)
+            : undefined
+        const decided = containerForSave(choice, current.cookieStoreId, source?.cookieStoreId)
+        if ('error' in decided) {
+          findings = [decided.error]
+          return
+        }
+        storeId = decided.cookieStoreId
       }
 
       /*
@@ -359,7 +447,7 @@ import { excludedAccessMessage, excludedHostForPattern } from '@shared/excluded-
             type: 'approve-code',
             code,
             declaredCapabilities: current.capabilities,
-            ...(current.world ? { world: current.world } : {}),
+            world,
             transformId: current.id,
             match: wanted,
           })
@@ -396,18 +484,20 @@ import { excludedAccessMessage, excludedHostForPattern } from '@shared/excluded-
 
       const next: Transform = creating
         ? {
-            ...current,
+            ...withContainer(current, kind, storeId),
             code,
             match: wanted,
             kind,
             name: name.trim(),
+            ...(kind === 'js' ? { world } : {}),
             ...(approvedCssUrls ? { approvedCssUrls } : {}),
             updatedAt: Date.now(),
           }
         : {
-            ...current,
+            ...withContainer(current, current.kind, storeId),
             code,
             match: wanted,
+            ...(current.kind === 'js' ? { world } : {}),
             ...(approvedCssUrls ? { approvedCssUrls } : {}),
             rationale: {
               targets: current.rationale.targets,
@@ -423,9 +513,12 @@ import { excludedAccessMessage, excludedHostForPattern } from '@shared/excluded-
       // Every tab the transform matches, not just one: this page is not on any
       // of them, and a save that only reached the last-focused tab would look
       // like it had not worked.
+      // A record without a container restriction asks for the stored one to be
+      // removed, because the background keeps it when the field is missing.
       await send({
         type: 'save-transform',
         transform: next,
+        clearContainer: next.cookieStoreId === undefined,
         source: 'hand-edit',
         ...(approvalToken ? { approvalToken } : {}),
       })
@@ -436,6 +529,9 @@ import { excludedAccessMessage, excludedHostForPattern } from '@shared/excluded-
       saved = code
       savedMatch = wanted
       match = wanted
+      savedWorld = world
+      savedChoice = next.cookieStoreId === undefined ? 'every-tab' : 'tab-container'
+      choice = savedChoice
       justSaved = true
       setTimeout(() => (justSaved = false), 2000)
 
@@ -461,6 +557,7 @@ import { excludedAccessMessage, excludedHostForPattern } from '@shared/excluded-
   function revert() {
     code = saved
     match = savedMatch
+    choice = savedChoice
     findings = []
   }
 
@@ -494,6 +591,7 @@ import { excludedAccessMessage, excludedHostForPattern } from '@shared/excluded-
     }
     browser.storage.onChanged.addListener(onStored)
     void load()
+    void loadCookiesPermission()
     void send<Settings>({ type: 'get-settings' })
       .then((settings) => {
         document.documentElement.dataset['accent'] = settings.accent
@@ -520,6 +618,7 @@ import { excludedAccessMessage, excludedHostForPattern } from '@shared/excluded-
         {#if creating}
           <input
             class="name-field"
+            use:focusOnMount
             bind:value={name}
             placeholder="Name this transform"
             spellcheck="false"
@@ -530,7 +629,7 @@ import { excludedAccessMessage, excludedHostForPattern } from '@shared/excluded-
             browser.
           </p>
         {:else}
-          <h1>{transform.name}</h1>
+          <h1 use:focusOnMount>{transform.name}</h1>
           <p class="intent">{transform.intent}</p>
         {/if}
         <div class="facts">
@@ -539,7 +638,7 @@ import { excludedAccessMessage, excludedHostForPattern } from '@shared/excluded-
               Only choosable now. Changing the kind of an existing transform
               would leave code that cannot mean anything in its new form.
             -->
-            <div class="kinds" role="radiogroup" aria-label="Transform kind">
+            <div class="kinds" role="radiogroup" aria-label="Transform kind" use:radioGroup>
               {#each ['css', 'js'] as const as option}
                 <button
                   type="button"
@@ -569,6 +668,8 @@ import { excludedAccessMessage, excludedHostForPattern } from '@shared/excluded-
       </div>
 
       <div class="actions">
+        <!-- Persistent, so the confirmation is a change that is read out. -->
+        <span class="sr-only" role="status">{justSaved ? 'Saved.' : ''}</span>
         {#if justSaved}
           <span class="note">Saved</span>
         {:else if dirty}
@@ -621,6 +722,51 @@ import { excludedAccessMessage, excludedHostForPattern } from '@shared/excluded-
       {/if}
     </section>
 
+    {#if (creating ? kind : transform.kind) === 'js'}
+      <section class="where">
+        <span class="label">World</span>
+        {#if transform?.worldResetFromModel}
+          <p class="warn">{WORLD_RESET_NOTICE}</p>
+        {/if}
+        <p class="hint">
+          Now: {WORLD_NAMES[world]}.
+          {#if world === 'MAIN' && savedWorld === 'MAIN'}
+            This transform was saved to run in the page's own world and keeps doing so.
+          {/if}
+        </p>
+        <label>
+          <input
+            type="checkbox"
+            checked={world === 'MAIN'}
+            onchange={(event) => (world = event.currentTarget.checked ? 'MAIN' : 'USER_SCRIPT')}
+          />
+          Run in the page's own world (MAIN)
+        </label>
+        {#if world === 'MAIN'}
+          <p class="warn">Running in the page's own world has these risks:</p>
+          <ul class="hint">
+            {#each MAIN_WORLD_RISKS as risk}
+              <li>{risk}</li>
+            {/each}
+          </ul>
+        {/if}
+      </section>
+    {/if}
+
+    {#if (creating ? kind : transform.kind) === 'css' && (sourceTabId !== null || savedChoice === 'tab-container')}
+      <section class="where">
+        <label for="container">Container</label>
+        <select id="container" bind:value={choice}>
+          <option value="every-tab">{EVERY_TAB_LABEL}</option>
+          <option value="tab-container">{TAB_CONTAINER_LABEL}</option>
+        </select>
+        <p class="hint">{CONTAINER_SCOPE_NOTE}</p>
+        {#if savedChoice === 'tab-container' && !hasCookies}
+          <p class="warn">{CONTAINER_UNREADABLE_NOTE}</p>
+        {/if}
+      </section>
+    {/if}
+
     {#if (creating ? kind : transform.kind) === 'css'}
       <details class="advanced">
         <summary>Advanced: addresses CSS may load</summary>
@@ -659,7 +805,8 @@ import { excludedAccessMessage, excludedHostForPattern } from '@shared/excluded-
     {/if}
 
     {#if findings.length > 0}
-      <div class="findings">
+      <!-- An alert, so a save that fails is read out when the message appears. -->
+      <div class="findings" role="alert">
         <strong>Not saved.</strong>
         {#each findings as finding}
           <p>{finding}</p>
@@ -682,7 +829,10 @@ import { excludedAccessMessage, excludedHostForPattern } from '@shared/excluded-
                 type="button"
                 class="secondary"
                 disabled={dirty || restoring || saving}
-                onclick={() => (reviewing = version)}
+                onclick={() => {
+                  reviewing = version
+                  mainRestoreConfirmed = false
+                }}
               >
                 Review this version
               </button>
@@ -692,7 +842,7 @@ import { excludedAccessMessage, excludedHostForPattern } from '@shared/excluded-
         {#if reviewing && transform}
           {@const differences = compareWithCurrent(transform, reviewing)}
           <section class="review" aria-labelledby="review-title">
-            <h2 id="review-title">Version from {new Date(reviewing.savedAt).toLocaleString()}</h2>
+            <h2 id="review-title" use:focusOnMount>Version from {new Date(reviewing.savedAt).toLocaleString()}</h2>
             <p class="hint">
               Restoring replaces the code, match pattern, capabilities and world of this transform
               with the values of this version. The current state is kept as a version, so a restore
@@ -721,8 +871,14 @@ import { excludedAccessMessage, excludedHostForPattern } from '@shared/excluded-
             </table>
             <h3>Code in this version</h3>
             <pre class="version-code">{reviewing.code}</pre>
+            {#if restoreNeedsMainConfirmation(transform.kind, reviewing)}
+              <MainRestoreRisks bind:confirmed={mainRestoreConfirmed} disabled={restoring} />
+            {/if}
             <div class="actions">
-              <button type="button" disabled={restoring || saving} onclick={() => void restore(reviewing!)}>
+              <button
+                type="button"
+                disabled={restoring || saving || restoreRefusal(transform.kind, reviewing, mainRestoreConfirmed) !== null}
+                onclick={() => void restore(reviewing!)}>
                 Restore this version
               </button>
               <button type="button" class="secondary" disabled={restoring} onclick={() => (reviewing = null)}>
@@ -917,7 +1073,8 @@ import { excludedAccessMessage, excludedHostForPattern } from '@shared/excluded-
     color: var(--text-faint);
   }
 
-  .where input {
+  .where input,
+  .where select {
     flex: 1;
     min-width: 220px;
     padding: 6px 9px;

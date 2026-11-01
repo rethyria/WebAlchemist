@@ -12,8 +12,10 @@ import type {
   Message,
   MessageResponse,
 } from '@shared/messages'
-import { matchesUrl, originPermissionForUrl } from '@shared/match'
+import { exactPagePattern, matchesUrl, originPermissionForUrl } from '@shared/match'
 import { CAPTURE_GRANT_KEY } from '@shared/capture-grant'
+import { appliesInContainer } from '@shared/container'
+import { refuseInPrivateWindow, requireNormalWindow } from './private-window'
 import { regionAtScroll, viewportChanged, type ScrollOffset, type Viewport } from '@shared/region'
 import type {
   Accent,
@@ -33,7 +35,7 @@ import * as badge from './badge'
 import { recordRunTab, takeRunTabs, windowsWithRunTabs } from './run-tabs'
 import { isUrlOff, setHostOff } from './site-off'
 import { excludedHostOf, getExcludedSites, setExcludedSites } from './excluded-sites'
-import { excludedSiteMessage } from '@shared/excluded-sites'
+import { excludedHostFor, excludedSiteMessage } from '@shared/excluded-sites'
 import { hostOfUrl } from '@shared/site-off'
 import { isSidebarPortName, windowOfSidebarPort } from '@shared/sidebar-port'
 import { isApproved, spendApproval } from './approvals'
@@ -113,6 +115,7 @@ import {
   saveSettings,
   changeSettings,
   foldUnsavedUsage,
+  resetModelChosenMain,
   saveTransform,
   saveCredentialFor,
   unlockVault,
@@ -152,6 +155,20 @@ function endPreviewScript(id: string): Promise<void> {
   })
 }
 
+/**
+ * Moves JavaScript transforms that run in MAIN with no record of the user's
+ * approval to the isolated world, once. The caller rebuilds the registrations
+ * afterwards. A failure is logged and does not stop start-up; the flag is set
+ * only after the transforms were written, so the next start tries again.
+ */
+async function migrateModelChosenWorlds(): Promise<void> {
+  try {
+    await resetModelChosenMain()
+  } catch (error) {
+    console.error('Resetting the world of transforms failed:', error instanceof Error ? error.message : 'unknown error')
+  }
+}
+
 /** Rebuilds registrations from storage, leaving preview scripts registered. */
 function reregister(): Promise<void> {
   return inRegistryQueue(async () => {
@@ -180,6 +197,9 @@ browser.runtime.onInstalled.addListener(async (details) => {
     })
   }
   await foldUnsavedUsage().catch(() => undefined)
+  // Before the registrations below are rebuilt, so a moved transform is
+  // registered for the isolated world. Runs once; see resetModelChosenMain.
+  if (details.reason === 'update') await migrateModelChosenWorlds()
   // The platform wipes every userScripts registration on update, and drops
   // dynamic content scripts too. Without this, transforms silently stop
   // working after an extension update — with no error, which is the worst
@@ -403,7 +423,7 @@ async function evaluateTab(
   // evaluation of this tab is already out of date by the time this one reads
   // storage.
   const evaluation = beginEvaluation(tabId)
-  const transforms = await transformsForUrl(url)
+  const transforms = await inTabContainer(tabId, await transformsForUrl(url))
 
   /*
    * Before the early return below, not after. A tab that navigates from a site
@@ -581,6 +601,7 @@ async function handle(
     }
 
     case 'repair': {
+      await requireNormalWindow(message.tabId)
       await refuseExcludedUrl(message.context.url)
       const transforms = await getAllTransforms()
       const existing = transforms.find((t) => t.id === message.transformId)
@@ -646,6 +667,7 @@ async function handle(
     }
 
     case 'save-transform':
+      await refuseInPrivateWindow(message.tabId)
       return handleSaveTransform(
         message.source ? { ...message, transform: { ...message.transform, producedBy: message.source } } : message,
         saveDeps,
@@ -655,6 +677,7 @@ async function handle(
       return getVersions(message.id)
 
     case 'restore-transform-version': {
+      await refuseInPrivateWindow(message.tabId)
       const current = (await getAllTransforms()).find((t) => t.id === message.id)
       if (!current) throw new Error('That transform no longer exists.')
       const version = (await getVersions(message.id)).find((v) => v.id === message.versionId)
@@ -684,9 +707,6 @@ async function handle(
         saveDeps,
       )
     }
-
-    case 'save-transform':
-      return handleSaveTransform(message, saveDeps)
 
     case 'delete-transform': {
       const doomed = (await getAllTransforms()).find((t) => t.id === message.id)
@@ -758,11 +778,9 @@ async function handle(
     }
 
     case 'save-settings': {
-      const switchBefore = (await getSettings()).aiJsKillSwitch
       return handleSaveSettings(message, {
-        getSettings,
         saveSettings,
-        reregisterAll: () => afterSettingsWritten(switchBefore),
+        reregisterAll: (before) => afterSettingsWritten(before.aiJsKillSwitch),
         reapplyAllTabs,
       })
     }
@@ -773,8 +791,21 @@ async function handle(
     case 'get-excluded-sites':
       return getExcludedSites()
 
-    case 'set-excluded-sites':
-      return setExcludedSites(message.sites)
+    case 'set-excluded-sites': {
+      const before = await getExcludedSites()
+      const after = await setExcludedSites(message.sites)
+      // Registrations carry the list in `excludeMatches`, so they are rebuilt,
+      // and the content script registrations with them. Open tabs that the
+      // change covers lose or regain their CSS and badge count (#131).
+      await reregister()
+      await reconcileContentScripts()
+      const changed = (url: string) =>
+        excludedHostFor(before, url) !== excludedHostFor(after, url)
+      const nowExcluded = (url: string) => excludedHostFor(after, url) !== null
+      await clearCssPreviewsOn(nowExcluded)
+      await reapplyOpenTabs(changed)
+      return after
+    }
 
     case 'page-has-sensitive-fields':
       // Only an answer of false means the page has no such fields. No answer
@@ -802,8 +833,12 @@ async function handle(
     }
 
     case 'patch-settings': {
-      const switchBefore = (await getSettings()).aiJsKillSwitch
-      const saved = await changeSettings(message.change)
+      // Read inside the settings queue, so this change keeps its place there
+      // relative to a save sent at the same time (#85).
+      let switchBefore = false
+      const saved = await changeSettings(message.change, (before) => {
+        switchBefore = before.aiJsKillSwitch
+      })
       if (message.change.kind === 'fields') await afterSettingsWritten(switchBefore)
       return saved
     }
@@ -856,8 +891,7 @@ async function handle(
       return true
 
     case 'disable-vault':
-      await disableVault(message.passphrase)
-      return true
+      return disableVault(message.passphrase)
 
     case 'unlock-vault':
       return unlockVault(message.passphrase)
@@ -898,6 +932,46 @@ async function handle(
       if (!analysis.passed) {
         throw new Error('Static analysis rejected this code, so it was not run.')
       }
+      /*
+       * Registered for the page in this tab only. The draft's own match pattern
+       * is usually the whole site with its subdomains, and a preview that used
+       * it ran unreviewed code on every other tab of the site that loaded
+       * while the preview was registered (#55). The address is read from the
+       * tab here and not taken from the message.
+       */
+      const tabUrl = await tabUrlOf(message.tabId)
+      const previewMatch = exactPagePattern(tabUrl)
+      if (tabUrl === undefined || previewMatch === null) {
+        throw new Error('This page cannot be previewed, so the script was not run.')
+      }
+      // The sidebar names the address it showed the user. A tab that has since
+      // moved to another page is not the page the code was reviewed for.
+      if (withoutFragment(message.expectedUrl) !== withoutFragment(tabUrl)) {
+        throw new Error('The tab has moved to another page, so the script was not run.')
+      }
+      // The draft's own pattern says where the code is meant to run, and the
+      // preview is only for a page that pattern covers (#55).
+      if (!matchesUrl(message.transform.match, tabUrl)) {
+        throw new Error("This page is not one that the transform's sites cover, so the script was not run.")
+      }
+      await refuseExcludedUrl(tabUrl)
+      // The model review must have matched this code, world, capabilities, id
+      // and pattern. Static analysis alone is not the review. The token is not
+      // spent: the save that follows uses it.
+      if (
+        !(await isApproved(
+          message.approvalToken,
+          message.transform.code,
+          message.transform.world,
+          message.transform.capabilities,
+          { transformId: message.transform.id, match: message.transform.match },
+          { verdict: 'match' },
+        ))
+      ) {
+        throw new Error('The model review did not match this code, so the script was not run.')
+      }
+      const previewTransform = { ...message.transform, match: previewMatch }
+
       // Recorded before registering: registerPreview pauses the saved script
       // first, so a close of the sidebar during or after a failed registration
       // has to find the id in storage to restore it. Registration runs in the
@@ -907,7 +981,7 @@ async function handle(
       await inRegistryQueue(async () => {
         await addPreviewedScript(message.transform.id, windowId)
         try {
-          await registerPreview(message.transform)
+          await registerPreview(previewTransform)
         } catch (cause) {
           await removePreviewedScript(message.transform.id)
           throw cause
@@ -930,6 +1004,7 @@ async function handle(
       return true
 
     case 'start-picking': {
+      await refuseInPrivateWindow(message.tabId)
       // The panel checks this first so that no permission is requested; this
       // is the check for any other caller of the message.
       await refuseExcludedTab(message.tabId)
@@ -964,9 +1039,11 @@ async function handle(
      * keep the context it already has rather than as a failure.
      */
     case 'recapture':
+      await refuseInPrivateWindow(message.tabId)
       return askContent(message.tabId, { type: 'recapture' })
 
     case 'context-for-anchor': {
+      await refuseInPrivateWindow(message.tabId)
       await recordRunTabOf(message.tabId)
       // The page keeps the palette from the last start-picking, and a page
       // that has had no pick has none, so Edit description drew no outline.
@@ -1001,6 +1078,10 @@ async function handle(
 
     case 'stop-picking':
       await sendToContent(message.tabId, { type: 'cancel-picking' })
+      return true
+
+    case 'picker-key':
+      await sendToContent(message.tabId, { type: 'picker-key', action: message.action })
       return true
 
     case 'retarget':
@@ -1066,7 +1147,7 @@ async function handle(
       // moved to.
       const evaluation = beginEvaluation(message.tabId)
       const isCurrent = () => isLatestEvaluation(message.tabId, evaluation)
-      const transforms = await transformsForUrl(message.url)
+      const transforms = await inTabContainer(message.tabId, await transformsForUrl(message.url))
       await forgetSession(message.url, transforms)
       const settings = await getSettings()
       const health = await runHealthCheck(message.tabId, transforms, isCurrent)
@@ -1086,6 +1167,7 @@ async function handle(
     }
 
     case 'capture-region':
+      await refuseInPrivateWindow(message.tabId)
       return captureWithLockDown(
         message.tabId,
         message.rect,
@@ -1307,6 +1389,7 @@ async function refuseWhenOff(tabId: number): Promise<void> {
     )
   }
   const url = (await browser.tabs.get(tabId).catch(() => undefined))?.url
+  if (url) await refuseExcludedUrl(url)
   if (url && (await isUrlOff(url))) {
     throw new Error(
       'Web Alchemist is turned off on this site, so the preview was not shown. Turn it on for this site to preview.',
@@ -1366,6 +1449,11 @@ void (async () => {
 })()
 
 /** Throws the message to show when the address is on the excluded list. */
+function withoutFragment(url: string): string {
+  const at = url.indexOf('#')
+  return at === -1 ? url : url.slice(0, at)
+}
+
 async function refuseExcludedUrl(url: string): Promise<void> {
   const host = await excludedHostOf(url)
   if (host !== null) throw new Error(excludedSiteMessage(host))
@@ -1524,6 +1612,13 @@ async function runGeneration(
   signal: AbortSignal,
 ): Promise<void> {
   const { tabId } = request
+  // Before the badge changes and before anything is sent to a provider.
+  try {
+    await requireNormalWindow(tabId)
+  } catch (error) {
+    port.postMessage({ type: 'error', error: { message: (error as Error).message } })
+    return
+  }
   const accent = (await getSettings()).accent
 
   /*
@@ -1645,7 +1740,7 @@ async function repaintOtherTabs(
 async function restoreBadgeFacts(tabId: number, accent: Accent): Promise<void> {
   if (badge.hasFacts(tabId)) return
   const tab = await browser.tabs.get(tabId).catch(() => undefined)
-  const transforms = tab?.url ? await transformsForUrl(tab.url) : []
+  const transforms = tab?.url ? await inTabContainer(tabId, await transformsForUrl(tab.url)) : []
   await badge.transformCountChanged(
     tabId,
     transforms.map((t) => t.id),
@@ -1732,9 +1827,16 @@ async function matchingTransforms(url: string): Promise<Transform[]> {
 
 /** The subset that should actually run. */
 async function transformsForUrl(url: string): Promise<Transform[]> {
-  // Nothing runs while the kill switch is on or the site is turned off, so
-  // nothing is applied, counted on the badge or health-checked.
-  if ((await getSettings()).aiJsKillSwitch || (await isUrlOff(url))) return []
+  // Nothing runs while the kill switch is on, the site is turned off or the
+  // site is on the excluded list (#131), so nothing is applied, counted on the
+  // badge or health-checked.
+  if (
+    (await getSettings()).aiJsKillSwitch ||
+    (await isUrlOff(url)) ||
+    (await excludedHostOf(url)) !== null
+  ) {
+    return []
+  }
   return (await matchingTransforms(url)).filter((t) => t.enabled)
 }
 
@@ -1790,6 +1892,19 @@ async function countTabsWithJavaScript(include: (url: string) => boolean): Promi
 async function cssTransformsFor(tabId: number, url: string): Promise<Transform[]> {
   const [all, suspended] = await Promise.all([transformsForUrl(url), readSuspended(tabId)])
   return suspended === undefined ? all : all.filter((t) => t.id !== suspended)
+}
+
+/**
+ * Leaves out the CSS transforms restricted to a container other than the
+ * tab's. JavaScript transforms are kept, because a user script registration
+ * cannot be limited to a container (see shared/container.ts). The CSS apply
+ * path filters by container itself in handlers.ts; this is for the badge and
+ * the health check.
+ */
+async function inTabContainer(tabId: number, transforms: Transform[]): Promise<Transform[]> {
+  if (!transforms.some((t) => t.kind === 'css' && t.cookieStoreId !== undefined)) return transforms
+  const tab = await browser.tabs.get(tabId).catch(() => undefined)
+  return transforms.filter((t) => t.kind !== 'css' || appliesInContainer(t, tab?.cookieStoreId))
 }
 
 /**
@@ -1872,6 +1987,7 @@ const cssApplyDeps: CssApplyDeps = {
   getSettings,
   insertCss: (tabId, css) => browser.scripting.insertCSS({ target: { tabId }, css, origin: 'USER' }),
   removeCss: (tabId, css) => browser.scripting.removeCSS({ target: { tabId }, css, origin: 'USER' }),
+  tabCookieStore: async (tabId) => (await browser.tabs.get(tabId).catch(() => undefined))?.cookieStoreId,
   // Read from storage.session: see css-state.ts for why a module variable is not enough.
   applied: {
     read: (tabId) => readCss('applied', tabId),
@@ -1887,7 +2003,7 @@ async function reapply(tabId: number | undefined): Promise<void> {
   if (!tab?.url) return
   const url = tab.url
   await applyCssTransforms(tabId, () => cssTransformsFor(tabId, url), url)
-  const transforms = await transformsForUrl(url)
+  const transforms = await inTabContainer(tabId, await transformsForUrl(url))
 
   // Every mutation that changes what runs — save, delete, reorder, toggle —
   // reaches here, which is why the count is refreshed here rather than at each
@@ -2118,6 +2234,9 @@ export { transformsForUrl, runReview }
 // Registration state can drift if the browser restarted with stale scripts,
 // or if a permission changed while the background script was not alive.
 void (async () => {
+  // Runs once, and before the rebuild, for an install that never saw an
+  // update event with the migration in it.
+  await migrateModelChosenWorlds()
   if (await hasUserScriptsPermission()) await reregister()
   await reconcileContentScripts()
 })()

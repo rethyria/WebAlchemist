@@ -12,6 +12,8 @@
  * registers are kept in `listeners` and replaced on every boot.
  */
 
+import type { ApprovalVerdict } from './approvals'
+import { approvedPreviewMessage, type PreviewMessageInput } from './test-support/preview-approval'
 import { vi } from 'vitest'
 import { originCovers } from '@shared/site-access'
 
@@ -24,7 +26,12 @@ export const ORIGIN = 'moz-extension://abc-123/'
 export const extensionPage = { url: `${ORIGIN}src/sidebar/index.html`, id: 'wa@test' }
 
 /** A storage area whose contents outlive `boot()`. */
-function area(data: Map<string, unknown>, path: string, gates: Map<string, Promise<void>>) {
+function area(
+  data: Map<string, unknown>,
+  path: string,
+  gates: Map<string, Promise<void>>,
+  gateExceptKeys: Map<string, string[]>,
+) {
   /** Waits for a gate set with `hold(`${path}.set`)` or `.get`, `.remove`. */
   const gated = async (method: string) => {
     await gates.get(`${path}.${method}`)
@@ -37,7 +44,9 @@ function area(data: Map<string, unknown>, path: string, gates: Map<string, Promi
       return out
     },
     set: async (items: Record<string, unknown>) => {
-      await gated('set')
+      // A write whose keys are all in the hold's `exceptKeys` is not held.
+      const except = gateExceptKeys.get(`${path}.set`)
+      if (!except || !Object.keys(items).every((key) => except.includes(key))) await gated('set')
       for (const [key, value] of Object.entries(items)) data.set(key, structuredClone(value))
     },
     remove: async (keys: string | string[]) => {
@@ -62,6 +71,14 @@ export interface Harness {
   tabUrls: Map<number, string>
   /** The window each tab is in; a tab not listed is in window 1. */
   tabWindows: Map<number, number>
+  /** Tabs that `tabs.get` reports as being in a private window. */
+  privateTabs: Set<number>
+  /** Tabs that `tabs.get` rejects for, as it does for a tab that has closed. */
+  closedTabs: Set<number>
+  /** When true `tabs.get` leaves out cookieStoreId, as Firefox does without the cookies permission. */
+  cookiesWithheld: boolean
+  /** The container of each tab; a tab not listed is in 'firefox-default'. */
+  tabContainers: Map<number, string>
   calls: {
     insertCSS: { tabId: number; css: string }[]
     removeCSS: { tabId: number; css: string }[]
@@ -83,6 +100,12 @@ export interface Harness {
   allUrlsGranted: boolean
   /** Permission sets passed to `permissions.remove`. */
   permissionsRemoved: unknown[]
+  /**
+   * Completes a preview-js message with the expected address (the tab's own)
+   * and the token of a recorded review whose verdict is match. Fields the
+   * message already has are kept.
+   */
+  approvedPreview(message: PreviewMessageInput, verdict?: ApprovalVerdict): Promise<any>
   /** Loads index.ts with fresh module state, as after a suspension. */
   boot(): Promise<void>
   onMessage(message: unknown, sender?: unknown): Promise<any>
@@ -93,13 +116,15 @@ export interface Harness {
    * `browser.userScripts.getScripts`) wait until the returned function is
    * called. Lets a test place a second event between two steps of one handler.
    * With `firstCallOnly` only the first call waits and later calls go through.
+   * With `exceptKeys`, a storage `set` whose keys are all listed is not held.
    */
-  hold(path: string, options?: { firstCallOnly?: boolean }): () => void
+  hold(path: string, options?: { firstCallOnly?: boolean; exceptKeys?: string[] }): () => void
 }
 
 export function createHarness(): Harness {
   const gates = new Map<string, Promise<void>>()
   const onceOnly = new Set<string>()
+  const gateExceptKeys = new Map<string, string[]>()
   const h: Harness = {
     session: new Map(),
     local: new Map(),
@@ -109,6 +134,10 @@ export function createHarness(): Harness {
     rejectContentScript: () => false,
     origins: [],
     tabWindows: new Map(),
+    privateTabs: new Set(),
+    closedTabs: new Set(),
+    cookiesWithheld: false,
+    tabContainers: new Map(),
     calls: { insertCSS: [], removeCSS: [], unregister: [], registry: [], setBadgeText: [], sendMessage: [], reload: [], runtimeMessages: [] },
     listeners: new Map(),
     hasUserScripts: false,
@@ -119,13 +148,17 @@ export function createHarness(): Harness {
       let release: () => void = () => {}
       gates.set(path, new Promise<void>((resolve) => (release = resolve)))
       if (options?.firstCallOnly) onceOnly.add(path)
+      if (options?.exceptKeys) gateExceptKeys.set(path, options.exceptKeys)
       return () => {
         gates.delete(path)
         onceOnly.delete(path)
+        gateExceptKeys.delete(path)
         release()
       }
     },
     boot: async () => {},
+    approvedPreview: async (message, verdict) =>
+      approvedPreviewMessage(h.session, message, h.tabUrls.get(message.tabId), verdict),
     onMessage: async (message, sender = extensionPage) =>
       h.listeners.get('browser.runtime.onMessage')!(message, sender),
   }
@@ -186,11 +219,18 @@ export function createHarness(): Harness {
     'browser.runtime.sendMessage': async (message: unknown) => {
       h.calls.runtimeMessages.push(message)
     },
-    'browser.tabs.get': async (id: number) => ({
-      id,
-      url: h.tabUrls.get(id),
-      windowId: h.tabWindows.get(id) ?? 1,
-    }),
+    'browser.tabs.get': async (id: number) => {
+      if (h.closedTabs.has(id)) throw new Error(`Invalid tab ID: ${id}`)
+      return {
+        id,
+        url: h.tabUrls.get(id),
+        windowId: h.tabWindows.get(id) ?? 1,
+        incognito: h.privateTabs.has(id),
+        ...(h.cookiesWithheld
+          ? {}
+          : { cookieStoreId: h.tabContainers.get(id) ?? 'firefox-default' }),
+      }
+    },
     'browser.tabs.query': async () => [...h.tabUrls].map(([id, url]) => ({ id, url })),
     'browser.tabs.reload': async (tabId: number) => {
       h.calls.reload.push(tabId)
@@ -208,8 +248,8 @@ export function createHarness(): Harness {
     'browser.action.setBadgeText': async (o: { tabId?: number; text: string | null }) => {
       h.calls.setBadgeText.push({ tabId: o.tabId, text: o.text })
     },
-    'browser.storage.local': area(h.local, 'browser.storage.local', gates),
-    'browser.storage.session': area(h.session, 'browser.storage.session', gates),
+    'browser.storage.local': area(h.local, 'browser.storage.local', gates, gateExceptKeys),
+    'browser.storage.session': area(h.session, 'browser.storage.session', gates, gateExceptKeys),
   }
 
   /** Any unlisted property is another stub; `addListener` records its function. */

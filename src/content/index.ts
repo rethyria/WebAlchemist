@@ -9,9 +9,12 @@
  * sensitive content.
  */
 
+import { readScriptErrors } from '@shared/script-errors'
 import { pageHasSensitiveFields } from './sensitive'
 import type { ConflictSpec, ContentEvent, ContentMessage, PickMode } from '@shared/messages'
 import type { OverlayPalette } from '@shared/accents'
+import { moveFrom, pickerActionFor, type PickerAction } from '@shared/picker-keys'
+import { decideKey, isUserEvent, relayPickerKey, seedsBody } from './picker-input'
 import type {
   Conflict,
   HoverTarget,
@@ -498,10 +501,17 @@ function publishTarget(): void {
   void send({ type: 'element-hovered', target: describeTarget(current) })
 }
 
+/**
+ * True from the moment the picker selects the body on its own until anything
+ * else moves the selection. Enter does not confirm while it is true (#118).
+ */
+let atSeed = false
+
 function setCurrent(element: Element | null): void {
   if (!element || element === current) return
   // Never let the picker select its own overlay.
   if (element.closest('[data-webalchemist-overlay]')) return
+  atSeed = false
   current = element
   overlay.showElement(element, selectorFor(element))
   publishTarget()
@@ -521,6 +531,8 @@ function elementUnder(x: number, y: number): Element | null {
 }
 
 function onMouseMove(event: MouseEvent): void {
+  // Events that a page script dispatches are not the user's (#118).
+  if (!isUserEvent(event)) return
   if (dragOrigin) {
     crop = {
       x: Math.min(dragOrigin.x, event.clientX),
@@ -537,10 +549,15 @@ function onMouseMove(event: MouseEvent): void {
   // Once a rectangle exists it owns the selection; moving the mouse must not
   // silently retarget underneath it.
   if (crop) return
-  setCurrent(elementUnder(event.clientX, event.clientY))
+  const under = elementUnder(event.clientX, event.clientY)
+  // Pointing at the body is a choice of the body, so it ends the seed state
+  // even though the selection does not change.
+  if (under) atSeed = false
+  setCurrent(under)
 }
 
 function onMouseDown(event: MouseEvent): void {
+  if (!isUserEvent(event)) return
   dragOrigin = { x: event.clientX, y: event.clientY }
   crop = null
   overlay.hideCrop()
@@ -549,6 +566,7 @@ function onMouseDown(event: MouseEvent): void {
 }
 
 function onMouseUp(event: MouseEvent): void {
+  if (!isUserEvent(event)) return
   event.preventDefault()
   event.stopPropagation()
 
@@ -620,54 +638,60 @@ function commonAncestor(elements: Element[]): Element | null {
   return ancestor
 }
 
+/**
+ * Runs one picker action. Shared by the page's key listener and by keys the
+ * sidebar forwards, so both paths behave the same. Returns false when the
+ * action does nothing in the current mode, so the caller can leave the key
+ * to the page.
+ */
+function applyPickerAction(action: PickerAction): boolean {
+  switch (action) {
+    case 'cancel':
+      stopPicking()
+      // The outline came down when a target pick started; put it back.
+      updateLock()
+      void send({ type: 'picking-cancelled' })
+      return true
+    case 'confirm':
+      // Nothing is selected in region mode, so there is nothing to confirm —
+      // the drag itself is the whole act. Whether Enter may confirm at all is
+      // decided before this is called (see decideKey).
+      if (pickMode !== 'region') confirmSelection()
+      return true
+    case 'parent':
+      if (pickMode === 'region') return false
+      setCurrent(moveFrom(action, current))
+      return true
+    default:
+      setCurrent(moveFrom(action, current))
+      return true
+  }
+}
+
 function onKeyDown(event: KeyboardEvent): void {
   if (!picking) return
+  if (!isUserEvent(event)) return
 
   const handled = () => {
     event.preventDefault()
     event.stopPropagation()
   }
 
-  switch (event.key) {
-    case 'Escape':
-      handled()
-      stopPicking()
-      // The outline came down when a target pick started; put it back.
-      updateLock()
-      void send({ type: 'picking-cancelled' })
-      return
-    case 'Enter':
-      handled()
-      // Nothing is selected in region mode, so there is nothing to confirm —
-      // the drag itself is the whole act.
-      if (pickMode !== 'region') confirmSelection()
-      return
-    case 'Backspace':
-      if (!crop) return
-      handled()
-      crop = null
-      overlay.hideCrop()
-      overlay.setHint(false)
-      publishTarget()
-      return
-    case 'ArrowUp':
-      if (pickMode === 'region') return
-      handled()
-      setCurrent(current?.parentElement ?? null)
-      return
-    case 'ArrowDown':
-      handled()
-      setCurrent(current?.firstElementChild ?? null)
-      return
-    case 'ArrowLeft':
-      handled()
-      setCurrent(current?.previousElementSibling ?? null)
-      return
-    case 'ArrowRight':
-      handled()
-      setCurrent(current?.nextElementSibling ?? null)
-      return
+  if (event.key === 'Backspace') {
+    if (!crop) return
+    handled()
+    crop = null
+    overlay.hideCrop()
+    overlay.setHint(false)
+    publishTarget()
+    return
   }
+
+  const action = pickerActionFor(event.key)
+  if (!action) return
+  const decision = decideKey({ picking, atSeed }, action, event.repeat)
+  if (decision === 'consume') handled()
+  else if (decision === 'apply' && applyPickerAction(action)) handled()
 }
 
 /**
@@ -1412,6 +1436,15 @@ function startPicking(palette: OverlayPalette): void {
   crop = null
   overlay.mount(palette)
   overlay.setHint(false, pickMode === 'region')
+  // The arrow keys move from the current element, and a pointer has not set
+  // one yet. Starting from the body lets a keyboard user pick without ever
+  // moving the pointer. Region mode has no current element, and a reference
+  // pick does not show the panel that forwards keys, so neither starts there.
+  atSeed = false
+  if (seedsBody(pickMode) && document.body) {
+    setCurrent(document.body)
+    atSeed = current === document.body
+  }
 
   // The picker's own handlers first, so they see the event before it is
   // swallowed below.
@@ -1430,6 +1463,7 @@ function startPicking(palette: OverlayPalette): void {
 
 function stopPicking(): void {
   picking = false
+  atSeed = false
   current = null
   dragOrigin = null
   crop = null
@@ -1456,7 +1490,10 @@ function stopPicking(): void {
  */
 const GRACE_PERIOD_MS = 3000
 
-async function runHealthCheck(transforms: Transform[]): Promise<TransformRuntimeState[]> {
+async function runHealthCheck(
+  transforms: Transform[],
+  errorTokens: Record<string, string>,
+): Promise<TransformRuntimeState[]> {
   const pending = new Map(transforms.map((t) => [t.id, t]))
   const states: TransformRuntimeState[] = []
 
@@ -1470,8 +1507,12 @@ async function runHealthCheck(transforms: Transform[]): Promise<TransformRuntime
     }
   }
 
+  // Read last, once per check: see script-errors.ts for why this is not trusted.
+  const withErrors = (found: TransformRuntimeState[]) =>
+    readScriptErrors(found, transforms, errorTokens, document.documentElement)
+
   settle()
-  if (pending.size === 0) return states
+  if (pending.size === 0) return withErrors(states)
 
   await new Promise<void>((resolve) => {
     const observer = new MutationObserver(() => {
@@ -1499,7 +1540,7 @@ async function runHealthCheck(transforms: Transform[]): Promise<TransformRuntime
     })
   }
 
-  return states
+  return withErrors(states)
 }
 
 /* ------------------------------------------------------------------ */
@@ -1610,6 +1651,10 @@ async function handleMessage(message: ContentMessage) {
         tree: buildTree(element),
       }
     }
+    case 'picker-key':
+      // Ignored unless a pick is running, as the page's own listener is.
+      relayPickerKey({ picking, atSeed }, message.action, applyPickerAction)
+      return true
     case 'cancel-picking':
       stopPicking()
       // As with Escape: a cancelled target pick returns to the held element.
@@ -1665,7 +1710,7 @@ async function handleMessage(message: ContentMessage) {
       lock.hide()
       return true
     case 'run-health-check':
-      return { type: 'health-check-result', states: await runHealthCheck(message.transforms) }
+      return { type: 'health-check-result', states: await runHealthCheck(message.transforms, message.errorTokens) }
     case 'ping':
       return true
     case 'sensitive-fields':

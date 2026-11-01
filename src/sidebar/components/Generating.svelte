@@ -2,6 +2,8 @@
   import type { ProgressStage } from '../lib/flow.svelte'
   import type { TransformKind } from '@shared/types'
   import Button from './Button.svelte'
+  import { focusOnMount } from '../lib/focus'
+  import { generationAnnouncement } from '../lib/announce'
   import CodeBlock from './CodeBlock.svelte'
   import AddressNote from './AddressNote.svelte'
 
@@ -72,7 +74,7 @@
       Neutral until the model has said which it is writing. Defaulting to CSS
       titled every JavaScript run wrongly for its whole duration.
     -->
-    <span class="title">
+    <span class="title" role="heading" aria-level="1" use:focusOnMount>
       {kind === null ? 'Generating' : kind === 'js' ? 'Writing JavaScript' : 'Writing CSS'}
     </span>
     <span class="elapsed">{elapsed}s</span>
@@ -83,6 +85,12 @@
     model will take, so a filling bar would be inventing a number — which is
     what the previous one did, and it read as meaningless because it was.
   -->
+  <!--
+    One sentence per stage. The checklist below carries counts and the code
+    streams in, and a region around those would be read out on every update.
+  -->
+  <p class="sr-only" role="status">{generationAnnouncement(stage)}</p>
+
   <div class="bar" role="progressbar" aria-label="Working"><div class="sweep"></div></div>
 
   <ol class="steps">

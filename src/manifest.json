@@ -9,6 +9,7 @@
       "strict_min_version": "140.0",
       "data_collection_permissions": {
         "required": [
+          "browsingActivity",
           "websiteContent"
         ]
       }
@@ -27,7 +28,8 @@
     "alarms"
   ],
   "optional_permissions": [
-    "userScripts"
+    "userScripts",
+    "cookies"
   ],
   "optional_host_permissions": [
     "*://*/*",

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { matchPresetsFor, matchesUrl, originPermissionFor, parsePattern } from './match'
+import { describeMatch, exactPagePattern, matchPresetsFor, matchesUrl, originPermissionFor, parsePattern } from './match'
 
 describe('matchesUrl', () => {
   it('matches a whole-site pattern against any path', () => {
@@ -235,5 +235,82 @@ describe('originPermissionFor', () => {
   it('derives the origin permission a pattern requires', () => {
     expect(originPermissionFor('reddit.com/r/programming/*')).toBe('*://reddit.com/*')
     expect(originPermissionFor('*.example.com/*')).toBe('*://*.example.com/*')
+  })
+})
+
+describe('exactPagePattern', () => {
+  it('keeps the scheme, host, path and query and drops the fragment', () => {
+    expect(exactPagePattern('https://www.example.com/a/b?q=1#top')).toBe('https://www.example.com/a/b?q=1')
+    expect(exactPagePattern('https://www.example.com/a/b#top')).toBe('https://www.example.com/a/b')
+  })
+
+  it('does not cover the same path with another query (#55)', () => {
+    const pattern = exactPagePattern('https://www.example.com/watch?v=abc')!
+    expect(matchesUrl(pattern, 'https://www.example.com/watch?v=abc')).toBe(true)
+    expect(matchesUrl(pattern, 'https://www.example.com/watch?v=other')).toBe(false)
+  })
+
+  it('refuses a `*` in the query, which would widen the pattern (#55)', () => {
+    expect(exactPagePattern('https://example.com/a?q=*')).toBeNull()
+  })
+
+  it('does not cover another subdomain or another path', () => {
+    const pattern = exactPagePattern('https://www.example.com/a')!
+    expect(matchesUrl(pattern, 'https://www.example.com/a')).toBe(true)
+    expect(matchesUrl(pattern, 'https://mail.example.com/a')).toBe(false)
+    expect(matchesUrl(pattern, 'https://www.example.com/b')).toBe(false)
+  })
+
+  it('refuses a page that cannot be written as an exact pattern', () => {
+    expect(exactPagePattern(undefined)).toBeNull()
+    expect(exactPagePattern('about:blank')).toBeNull()
+    expect(exactPagePattern('not a url')).toBeNull()
+    // A `*` in the path would be read as a wildcard and widen the pattern.
+    expect(exactPagePattern('https://example.com/a*b')).toBeNull()
+  })
+})
+
+describe('describeMatch variants (#55)', () => {
+  it('says that a pattern without a query also covers any query and the trailing-slash form', () => {
+    expect(describeMatch('https://example.com/a').variants).toMatch(/any query string.*trailing slash/)
+  })
+
+  it('says only the trailing-slash form when the pattern has a query', () => {
+    const variants = describeMatch('https://example.com/a?x=1').variants
+    expect(variants).toMatch(/trailing slash/)
+    expect(variants).not.toMatch(/any query/)
+  })
+
+  it('says nothing for a pattern with a wildcard path', () => {
+    expect(describeMatch('https://example.com/a*').variants).toBeUndefined()
+    expect(describeMatch('https://example.com/*').variants).toBeUndefined()
+  })
+})
+
+describe('describeMatch', () => {
+  it('says a host with its subdomains and every page', () => {
+    expect(describeMatch('https://*.example.com/*')).toEqual({
+      schemes: 'https pages',
+      sites: 'example.com and every subdomain of example.com',
+      pages: 'every page',
+    })
+  })
+
+  it('says one host only, and a path prefix', () => {
+    expect(describeMatch('https://www.example.com/r/news*')).toEqual({
+      schemes: 'https pages',
+      sites: 'www.example.com (this host only, no subdomains)',
+      pages: 'pages whose path starts with /r/news',
+    })
+  })
+
+  it('says both schemes for a pattern with no scheme or with *, and one page for a plain path', () => {
+    expect(describeMatch('example.com/a').schemes).toBe('http and https pages')
+    expect(describeMatch('*://example.com/a').schemes).toBe('http and https pages')
+    expect(describeMatch('http://example.com/a')).toMatchObject({ schemes: 'http pages', pages: 'only the page /a' })
+  })
+
+  it('says every site for a bare wildcard host', () => {
+    expect(describeMatch('*://*/*').sites).toBe('every site')
   })
 })

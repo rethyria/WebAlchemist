@@ -55,7 +55,7 @@ Setting \`src\`, \`href\`, \`srcset\`, \`imageSrcset\`, \`action\` or the parts 
 
 Declare every capability your code uses. The default is none. If your code makes a network request, reads cookies, or touches localStorage/sessionStorage/indexedDB, you must list the corresponding capability AND explain in your rationale why it is necessary. Undeclared use is rejected before it runs — it is not a judgement call. Most transforms need no capabilities at all.
 
-Default to the isolated execution world. Only request the MAIN world when the transform genuinely needs the page's own JavaScript globals, and say why in your rationale.
+Your code runs in an isolated world by default. Set requestedWorld to USER_SCRIPT unless the transform genuinely needs the page's own JavaScript globals. Setting it to MAIN is only a request: the code still runs in the isolated world until the user approves it, and the user is shown your reason. When you request MAIN, put the reason in worldReason in one or two plain sentences, naming the page global the code needs. Otherwise set worldReason to an empty string.
 
 ## Rationale
 

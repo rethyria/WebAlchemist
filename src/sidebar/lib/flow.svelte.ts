@@ -33,6 +33,7 @@ import {
 import type {
   Anchor,
   ElementContext,
+  ExecutionWorld,
   GenerationResult,
   HoverTarget,
   PageContext,
@@ -54,7 +55,9 @@ import {
   SENSITIVE_PAGE_MESSAGE,
 } from '@shared/excluded-sites'
 import { readCaptureGrant, recordCaptureGrant } from '@shared/capture-grant'
+import type { PickerAction } from '@shared/picker-keys'
 import { BackgroundError, generateOverPort, send } from './messaging.svelte'
+import { jsPreviewGate, reviewKey } from './preview-gate'
 
 /** An address without its fragment, so that scrolling to an anchor is not a new page. */
 const pageKey = (url: string): string => url.split('#')[0] ?? url
@@ -273,6 +276,14 @@ export class Flow {
   /** Set once the draft has been registered and the page reloaded. */
   jsRan = $state(false)
   /**
+   * The model review run before a JavaScript preview, and what it was run for.
+   * It is a separate call from the review at the approval step: it is made
+   * earlier, for the preview, and its approval token is not used for saving.
+   */
+  previewReview = $state<ReviewResult | null>(null)
+  private previewReviewFor: string | null = null
+  previewReviewing = $state(false)
+  /**
    * External CSS URLs the user approved in the approval panel, for a site set
    * to list them. Saved on the transform, so only these URLs may load.
    */
@@ -300,6 +311,12 @@ export class Flow {
   intentBaseline = ''
   matchPattern = $state('')
   review = $state<ReviewResult | null>(null)
+  /**
+   * Set by the approval panel after it has rendered the review. Saving from
+   * that panel is refused until then, so an approval cannot come from a key
+   * press or a click that reached the step before the panel was on screen.
+   */
+  reviewShown = $state(false)
 
   stage = $state<ProgressStage>('context')
   elapsed = $state(0)
@@ -639,6 +656,17 @@ export class Flow {
     }
   }
 
+  /**
+   * Passes a picker key pressed in the sidebar on to the page. The page's own
+   * listener cannot see keys while the keyboard focus is here.
+   */
+  async sendPickerKey(action: PickerAction): Promise<void> {
+    if (this.tabId === null || this.step !== 'picking') return
+    // A failed delivery means the page went away, which the panel learns of
+    // through its own path; there is nothing useful to show for one key.
+    await send({ type: 'picker-key', tabId: this.tabId, action }).catch(() => {})
+  }
+
   async cancelPicking(): Promise<void> {
     if (this.tabId !== null) {
       await send({ type: 'stop-picking', tabId: this.tabId }).catch(() => {})
@@ -796,7 +824,9 @@ export class Flow {
     })
 
     await browser.tabs.create({
-      url: browser.runtime.getURL(`src/editor/index.html?draft=${encodeURIComponent(key)}`),
+      url: browser.runtime.getURL(
+        `src/editor/index.html?draft=${encodeURIComponent(key)}${this.tabId === null ? '' : `&tab=${this.tabId}`}`,
+      ),
     })
 
     this.step = 'list'
@@ -1008,6 +1038,7 @@ export class Flow {
         transformId: transform.id,
         context: found.context,
         brokenReason,
+        tabId: this.tabId ?? undefined,
       })
       if (!current()) return
       const result = repaired.result
@@ -1196,7 +1227,10 @@ export class Flow {
       this.result = {
         name: transform.name,
         kind: transform.kind,
+        // A stored MAIN transform keeps running as MAIN, and the panel shows it.
         world: transform.world ?? 'USER_SCRIPT',
+        requestedWorld: transform.world ?? 'USER_SCRIPT',
+        worldReason: '',
         capabilities: transform.capabilities,
         code: transform.code,
         rationale: transform.rationale,
@@ -1733,6 +1767,10 @@ export class Flow {
       kind: result.kind,
       origin: 'ai',
       ...(result.kind === 'js' ? { world: result.world } : {}),
+      // A repair or a regeneration keeps the container restriction. The
+      // generation result knows nothing about it, and the record is replaced
+      // on save, so a field left out here would be removed (#127).
+      ...(this.draft?.cookieStoreId === undefined ? {} : { cookieStoreId: this.draft.cookieStoreId }),
       capabilities: result.capabilities,
       intent: this.intent,
       scopeDepth: this.scopeDepth,
@@ -1817,6 +1855,54 @@ export class Flow {
     }
   }
 
+  /** The review run for the preview, only while it still describes the current code. */
+  get currentPreviewReview(): ReviewResult | null {
+    const result = this.result
+    if (!result || this.previewReviewFor !== reviewKey(result, this.intent)) return null
+    return this.previewReview
+  }
+
+  /** True when the current JavaScript may be run as a preview. See jsPreviewGate. */
+  get jsPreviewAllowed(): boolean {
+    return jsPreviewGate(this.analysis, this.currentPreviewReview).allowed
+  }
+
+  /**
+   * Runs the model review for the preview. The preview button is offered only
+   * after this has completed with a verdict of match (issue 55), because the
+   * preview runs the code on the page before anything is saved.
+   */
+  async reviewForPreview(): Promise<void> {
+    const result = this.result
+    const draft = this.draft
+    if (!result || result.kind !== 'js' || !draft || this.previewReviewing) return
+    if (!this.analysis?.passed) return
+    const token = this.generation
+    const key = reviewKey(result, this.intent)
+    this.previewReviewing = true
+    try {
+      const review = await send<ReviewResult>({
+        type: 'review',
+        code: result.code,
+        intent: this.intent,
+        intentEditedByUser: this.intent !== this.intentBaseline,
+        instructions: this.reviewInstructions(),
+        declaredCapabilities: result.capabilities,
+        world: result.world,
+        transformId: draft.id,
+        match: draft.match,
+      })
+      if (token !== this.generation) return
+      if (review.usage) this.lastUsage = review.usage
+      this.previewReview = review
+      this.previewReviewFor = key
+    } catch (cause) {
+      if (token === this.generation) this.fail(cause, () => this.reviewForPreview())
+    } finally {
+      this.previewReviewing = false
+    }
+  }
+
   /**
    * JS only. Registers the draft and reloads, so it runs the way it will run.
    *
@@ -1828,7 +1914,7 @@ export class Flow {
    */
   async runJs(): Promise<void> {
     const draft = this.draft
-    if (!draft || this.tabId === null || !this.analysis?.passed) return
+    if (!draft || this.tabId === null || !this.jsPreviewAllowed) return
     // Discard, a tab close and a new generation all bump the generation. The
     // reply to preview-js arrives after the registration already exists, so a
     // run that is no longer current has to take that registration out again.
@@ -1865,7 +1951,22 @@ export class Flow {
 
       // The background reloads the tab to run it; that reload is ours.
       this.ourReload = 'pending'
-      await send({ type: 'preview-js', tabId: this.tabId, transform: draft })
+      const approvalToken = this.currentPreviewReview?.approvalToken
+      if (!approvalToken) {
+        this.ourReload = 'none'
+        this.show({
+          kind: 'request-failed',
+          message: 'The review that allows a preview has no approval, so nothing was run. Read the code again.',
+        })
+        return
+      }
+      await send({
+        type: 'preview-js',
+        tabId: this.tabId,
+        transform: draft,
+        expectedUrl: this.url,
+        approvalToken,
+      })
       if (!current()) {
         // jsRan was still false when discard or tabClosed looked at it, so
         // neither sent the clear, and the saved script would stay paused.
@@ -2028,6 +2129,7 @@ export class Flow {
 
     this.step = 'reviewing'
     this.review = null
+    this.reviewShown = false
 
     // CSS is not sent for model review: it cannot read storage or a cookie,
     // and what it can request is decided by the CSS check rather than by a
@@ -2069,6 +2171,22 @@ export class Flow {
       this.step = 'saving'
       this.fail(cause, () => this.toReview())
     }
+  }
+
+  /**
+   * Sets the world the code will run in, from the user's choice in the
+   * approval panel. The model's request never reaches here on its own.
+   *
+   * The approval token is bound to the world, so the review is run again and
+   * the save uses the token issued for the new world. The earlier token stays
+   * in the background, bound to the other world, and cannot save this one.
+   */
+  async setWorld(world: ExecutionWorld): Promise<void> {
+    const result = this.result
+    if (!result || result.kind !== 'js' || result.world === world) return
+    this.result = { ...result, world }
+    if (this.draft) this.draft = { ...this.draft, world }
+    await this.toReview()
   }
 
   /**
@@ -2176,9 +2294,16 @@ export class Flow {
     )
   }
 
+  /** Called by the approval panel once the review is on screen. */
+  markReviewShown(): void {
+    if (this.step === 'reviewing' && this.review !== null) this.reviewShown = true
+  }
+
   async save(): Promise<void> {
     const draft = this.draft
     if (!draft) return
+    // From the approval panel, a save needs a panel that has been shown.
+    if (this.step === 'reviewing' && !this.reviewShown) return
 
     /*
      * This must be the first thing that happens, before any await.
@@ -2456,6 +2581,9 @@ export class Flow {
     this.lastUsage = undefined
     this.previewedCss = null
     this.jsRan = false
+    this.previewReview = null
+    this.previewReviewFor = null
+    this.previewReviewing = false
     this.analysis = null
     this.approvedCssUrls = []
     this.permissionDenied = false
@@ -2463,6 +2591,7 @@ export class Flow {
     this.intentBaseline = ''
     this.matchPattern = ''
     this.review = null
+    this.reviewShown = false
     this.stage = 'context'
     this.elapsed = 0
     this.thinkingChars = 0

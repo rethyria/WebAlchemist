@@ -22,6 +22,15 @@ export const DISCLOSURE_PLAIN =
 export const DISCLOSURE_SEALED =
   'Keys are encrypted with your passphrase. What sits in this browser profile is ciphertext, and nothing stored on this machine decrypts it — the key is derived from your passphrase when you unlock, and kept in memory for the session only.'
 
+/**
+ * True with and without a passphrase: the passphrase protects credentials and
+ * nothing else (#132). A transform holds the text of the element it changes, the
+ * address pattern of the pages it applies to, and the description the person
+ * typed, and all of that is stored as plain text in the browser profile.
+ */
+export const DISCLOSURE_TRANSFORMS =
+  'Transforms are never encrypted, with or without a passphrase. Each saved transform stores text from the page element it changes, the addresses of the pages it applies to, and your description of it, as plain text in this browser profile. Exported files hold the same text.'
+
 export const STATUS_UNLOCKED = 'Unlocked for this session.'
 export const STATUS_LOCKED = 'Locked.'
 export const LOCKED_CONSEQUENCE = 'Generating anything will fail until you unlock.'

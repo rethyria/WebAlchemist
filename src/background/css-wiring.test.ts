@@ -255,7 +255,8 @@ describe('a save of JavaScript while a preview is ending (#91)', () => {
    */
   async function saveWhileEnding() {
     await start([js(GOOD_JS)])
-    await ask({ type: 'preview-js', tabId: 3, transform: js(GOOD_JS + ' // draft') })
+    h.tabUrls.set(3, 'https://shop.example.com/')
+    await ask(await h.approvedPreview({ type: 'preview-js', tabId: 3, transform: js(GOOD_JS + ' // draft') }))
     const { approvalToken } = await ask({
       type: 'approve-code',
       code: NEW_CODE,
@@ -264,7 +265,10 @@ describe('a save of JavaScript while a preview is ending (#91)', () => {
       transformId: 'saved',
       match: 'shop.example.com/*',
     })
-    const release = h.hold('browser.storage.session.set')
+    // The ending task also writes the error tokens (#123) to the same area.
+    // Those writes are let through, so the write that waits is the one that
+    // removes the preview's id from the list.
+    const release = h.hold('browser.storage.session.set', { exceptKeys: ['wa-error-tokens'] })
     const ended = h.onMessage({ type: 'clear-preview-js', id: 'saved' })
     await settle()
     const saved = h.onMessage({ type: 'save-transform', transform: js(NEW_CODE), approvalToken })

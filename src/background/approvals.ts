@@ -113,6 +113,8 @@ export async function isApproved(
   world: ExecutionWorld | undefined,
   capabilities: Capability[],
   binding: ApprovalBinding,
+  /** When given, the stored verdict must be this one; a preview asks for 'match'. */
+  options: { verdict?: ApprovalVerdict } = {},
 ): Promise<boolean> {
   if (!token) return false
   const hash = await hashCode(code, world)
@@ -122,6 +124,7 @@ export async function isApproved(
       a.hash === hash &&
       a.transformId === binding.transformId &&
       a.match === binding.match &&
+      (options.verdict === undefined || a.verdict === options.verdict) &&
       capabilities.every((c) => a.capabilities.includes(c)),
   )
 }

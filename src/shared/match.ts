@@ -113,6 +113,69 @@ export function matchPresetsFor(rawUrl: string): MatchPreset[] {
   return presets
 }
 
+/**
+ * A match pattern in plain words: which schemes, which sites and which pages
+ * it covers. It describes what the registration covers, and a pattern that
+ * covers more than the page the transform was written for reads as more.
+ */
+export function describeMatch(pattern: string): {
+  schemes: string
+  sites: string
+  pages: string
+  /** Present when the pattern also covers query strings or the trailing-slash form of a page. */
+  variants?: string
+} {
+  const { scheme, host, path } = parsePattern(pattern)
+  const schemes =
+    scheme === 'https' ? 'https pages' : scheme === 'http' ? 'http pages' : 'http and https pages'
+  let sites: string
+  if (host === '*' || host === '') sites = 'every site'
+  else if (host.startsWith('*.')) {
+    const domain = host.slice(2)
+    sites = `${domain} and every subdomain of ${domain}`
+  } else sites = `${host} (this host only, no subdomains)`
+  let pages: string
+  if (path === '/*' || path === '*') pages = 'every page'
+  else if (path.endsWith('*') && !path.slice(0, -1).includes('*')) {
+    pages = `pages whose path starts with ${path.slice(0, -1)}`
+  } else if (path.includes('*')) pages = `pages whose path fits ${path}`
+  else pages = `only the page ${path}`
+  /*
+   * What the registration adds to a path that names one page (see pathsFor in
+   * registry.ts): the form with and the form without a trailing slash, and,
+   * when the pattern has no query, every query string on that path.
+   */
+  let variants: string | undefined
+  if (!path.includes('*')) {
+    variants = path.includes('?')
+      ? 'It also covers the same page with a trailing slash.'
+      : 'It also covers the same page with any query string, and with or without a trailing slash.'
+  }
+  return variants === undefined ? { schemes, sites, pages } : { schemes, sites, pages, variants }
+}
+
+/**
+ * The match pattern for one page: its scheme, host, path and query. Used for a
+ * script preview, which must run on the tab being edited and on no other page,
+ * so the query is part of the pattern (a page that differs only in its query
+ * is another page). The registry does not add the query and trailing-slash
+ * forms to a preview. Returns null for a page that cannot be written as a
+ * pattern: a scheme other than http and https, or a path or query containing
+ * `*`, which a match pattern would read as a wildcard and so widen.
+ */
+export function exactPagePattern(rawUrl: string | undefined): string | null {
+  if (rawUrl === undefined) return null
+  let url: URL
+  try {
+    url = new URL(rawUrl)
+  } catch {
+    return null
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') return null
+  if (url.pathname.includes('*') || url.search.includes('*')) return null
+  return `${url.protocol}//${url.hostname}${url.pathname}${url.search}`
+}
+
 /** Escapes regex metacharacters except `*`, which becomes a wildcard. */
 function patternToRegExp(pattern: string): RegExp {
   const escaped = pattern

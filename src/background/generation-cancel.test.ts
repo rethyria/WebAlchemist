@@ -22,6 +22,8 @@ const abortError = () => Object.assign(new Error('The operation was aborted.'), 
 beforeEach(async () => {
   h = createHarness()
   signals = []
+  // A generation needs a tab it can read, to know the window is not private (#127).
+  h.tabUrls.set(1, 'https://news.example/')
   h.local.set('settings', {
     providers: [
       {
@@ -83,7 +85,7 @@ function generatePort(options: { throwWhenClosed?: boolean } = {}) {
 
 async function start(port: ReturnType<typeof generatePort>) {
   h.listeners.get('browser.runtime.onConnect')!(port)
-  port.send({ context: {}, instruction: 'x', history: [] })
+  port.send({ tabId: 1, context: {}, instruction: 'x', history: [] })
   await settle()
 }
 

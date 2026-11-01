@@ -11,6 +11,7 @@
  * is and is not guaranteed.
  */
 
+import type { PickerAction } from './picker-keys'
 import type {
   Anchor,
   Credential,
@@ -63,7 +64,14 @@ export type Message =
   | { type: 'get-vision-support' }
 
   /* --- generation --------------------------------------------------- */
-  | { type: 'repair'; transformId: string; context: PageContext; brokenReason: string }
+  | {
+      type: 'repair'
+      transformId: string
+      context: PageContext
+      brokenReason: string
+      /** The tab the page came from, so a private window can be refused. */
+      tabId?: number
+    }
   | {
       type: 'review'
       code: string
@@ -140,6 +148,11 @@ export type Message =
       approvalToken?: string
       /** What produced the code, kept with the version it replaces. */
       source?: TransformSource
+      /**
+       * Removes a stored container restriction. Without it, a record that has
+       * no cookieStoreId keeps the stored one.
+       */
+      clearContainer?: boolean
     }
   | { type: 'get-transform-versions'; id: string }
   /**
@@ -224,8 +237,20 @@ export type Message =
    * Registers an unsaved transform and reloads the tab, so the preview runs in
    * the same world, under the same CSP, through the same harness as the saved
    * one would. A JS preview that ran some other way would not be a preview.
+   *
+   * `expectedUrl` is the address the sidebar was showing the tab at; the
+   * preview is refused when the tab is at another address (the fragment is
+   * ignored). `approvalToken` is the one the model review returned for this
+   * code, world, capabilities, transform id and match, and the review's verdict
+   * must be `match`. A preview does not spend the token.
    */
-  | { type: 'preview-js'; tabId: number; transform: Transform }
+  | {
+      type: 'preview-js'
+      tabId: number
+      transform: Transform
+      expectedUrl: string
+      approvalToken: string
+    }
   | { type: 'clear-preview-js'; id: string }
   /**
    * Captures the region now.
@@ -268,6 +293,11 @@ export type Message =
    */
   | { type: 'start-picking'; tabId: number; mode?: PickMode }
   | { type: 'stop-picking'; tabId: number }
+  /**
+   * A picker key pressed while the keyboard focus is in the sidebar, where the
+   * page's own key listener cannot see it.
+   */
+  | { type: 'picker-key'; tabId: number; action: PickerAction }
   /**
    * Re-reads the element currently being described, from the live page.
    *
@@ -338,6 +368,7 @@ export type ContentMessage =
   /** The palette travels with the request: the overlay cannot read our CSS. */
   | { type: 'start-picking'; palette: OverlayPalette; mode: PickMode }
   | { type: 'cancel-picking' }
+  | { type: 'picker-key'; action: PickerAction }
   | { type: 'recapture' }
   /**
    * The palette travels with this request as it does with start-picking. A
@@ -363,7 +394,12 @@ export type ContentMessage =
   | { type: 'set-lock-scope'; depth: number }
   | { type: 'clear-lock' }
   | { type: 'apply-transforms'; transforms: Transform[] }
-  | { type: 'run-health-check'; transforms: Transform[] }
+  | {
+      type: 'run-health-check'
+      transforms: Transform[]
+      /** Transform id to the token in the name of its script's error marker. */
+      errorTokens: Record<string, string>
+    }
   | { type: 'url-changed'; url: string }
   /** Answered only by a live instance; the background uses it to avoid reinjecting. */
   | { type: 'ping' }
@@ -515,6 +551,7 @@ export interface Responses {
   }
   'start-picking': boolean
   'stop-picking': boolean
+  'picker-key': boolean
   retarget: boolean
   'highlight-node': boolean
   'expand-node': TreeRow[]

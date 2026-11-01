@@ -22,6 +22,9 @@
  * permission change.
  */
 
+import { excludedPatternsFor } from '@shared/excluded-sites'
+import { getExcludedSites } from './excluded-sites'
+
 /*
  * One registration per granted origin, with an id made from the origin. A single
  * registration for all origins was rejected as a whole when one pattern was
@@ -51,6 +54,8 @@ const isOurs = (id: string) => id === SCRIPT_ID_PREFIX || id.startsWith(`${SCRIP
 interface Registration {
   id: string
   matches: string[]
+  /** The excluded sites (#131), so that no content script is injected into them. */
+  excludeMatches?: string[]
   js: string[]
   runAt: 'document_idle'
   persistAcrossSessions?: boolean
@@ -85,10 +90,12 @@ async function grantedOrigins(): Promise<string[]> {
   return origins.filter((origin) => origin.includes('://') && !ALL_SITES.has(origin))
 }
 
-function registrationFor(origin: string): Registration {
+function registrationFor(origin: string, excluded: readonly string[]): Registration {
+  const excludeMatches = excludedPatternsFor(excluded)
   return {
     id: idFor(origin),
     matches: [origin],
+    ...(excludeMatches.length > 0 ? { excludeMatches } : {}),
     js: [CONTENT_FILE],
     // The picker needs a laid-out page to measure, and the health check needs
     // the DOM the site actually rendered rather than its first paint.
@@ -114,7 +121,10 @@ export function reconcile(): Promise<{ registered: number; failed: string[] }> {
 }
 
 async function reconcileNow(): Promise<{ registered: number; failed: string[] }> {
-  const wanted = new Map((await grantedOrigins()).map((origin) => [idFor(origin), registrationFor(origin)]))
+  const excluded = await getExcludedSites()
+  const wanted = new Map(
+    (await grantedOrigins()).map((origin) => [idFor(origin), registrationFor(origin, excluded)]),
+  )
   const held = await registeredContentScripts()
 
   /*
@@ -172,6 +182,7 @@ function sameRegistration(held: Registration, wanted: Registration): boolean {
   const sorted = (list: string[] | undefined) => JSON.stringify([...(list ?? [])].sort())
   return (
     sorted(held.matches) === sorted(wanted.matches) &&
+    sorted(held.excludeMatches) === sorted(wanted.excludeMatches) &&
     sorted(held.js) === sorted(wanted.js) &&
     held.runAt === wanted.runAt &&
     held.persistAcrossSessions === wanted.persistAcrossSessions

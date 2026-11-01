@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { radioGroup } from '@shared/radio-group'
+  import { focusOnMount } from '../lib/focus'
   /**
    * Settings inside the panel, as the design has it.
    *
@@ -12,7 +14,7 @@
   import { KILL_SWITCH_LABEL, KILL_SWITCH_NOTE } from '@shared/kill-switch'
   import { ACCENTS, type Accent, type CredentialStatus, type HealthCheckMode, type Settings } from '@shared/types'
   import { ACCENT_COLOURS } from '@shared/accents'
-  import { credentialDisclosure, type VaultView } from '@shared/vault-disclosure'
+  import { DISCLOSURE_TRANSFORMS, credentialDisclosure, type VaultView } from '@shared/vault-disclosure'
   import Label from './Label.svelte'
   import Toggle from './Toggle.svelte'
 
@@ -42,10 +44,10 @@
   let activeStatus = $derived(statuses.find((s) => s.providerId === active?.id))
 </script>
 
-<div class="panel">
+<div class="panel" role="region" aria-label="Settings" use:focusOnMount>
   <section>
     <Label>Accent colour</Label>
-    <div class="swatches" role="radiogroup" aria-label="Accent colour">
+    <div class="swatches" role="radiogroup" aria-label="Accent colour" use:radioGroup>
       {#each ACCENTS as accent}
         <button
           type="button"
@@ -103,7 +105,7 @@
 
   <section>
     <Label>Check for broken transforms</Label>
-    <div class="modes" role="radiogroup" aria-label="Check for broken transforms">
+    <div class="modes" role="radiogroup" aria-label="Check for broken transforms" use:radioGroup>
       {#each HEALTH_MODES as mode}
         <button
           type="button"
@@ -162,6 +164,7 @@
     {#if disclosure.status}
       <span class="note"><strong>{disclosure.status}</strong></span>
     {/if}
+    <span class="note">{DISCLOSURE_TRANSFORMS}</span>
     <span class="note">{REVOKE_KEY_NOTICE}</span>
   </div>
 

