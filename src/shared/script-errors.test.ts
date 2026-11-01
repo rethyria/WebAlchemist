@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { SCRIPT_ERROR_REASON, errorAttributeName, shortErrorMessage, withScriptErrors } from './script-errors'
+import {
+  SCRIPT_ERROR_REASON,
+  errorAttributeName,
+  readScriptErrors,
+  shortErrorMessage,
+  withScriptErrors,
+} from './script-errors'
 import type { TransformRuntimeState } from './types'
 
 const ok = (id: string): TransformRuntimeState => ({ id, status: 'ok' })
@@ -45,5 +51,46 @@ describe('the marker text', () => {
 
   it('names an attribute with only lowercase letters, digits and hyphens', () => {
     expect(errorAttributeName('AB_12 x')).toBe('data-wa-error-ab-12-x')
+  })
+})
+
+describe('the health check reading the marker', () => {
+  function holder(attributes: Record<string, string>) {
+    const map = new Map(Object.entries(attributes))
+    return {
+      map,
+      getAttribute: (name: string) => map.get(name) ?? null,
+      removeAttribute: (name: string) => void map.delete(name),
+    }
+  }
+  const transforms = [
+    { id: 'a', kind: 'js' as const },
+    { id: 'c', kind: 'css' as const },
+  ]
+
+  it('reports the error a script left and removes the marker', () => {
+    const element = holder({ [errorAttributeName('a')]: 'boom' })
+    const [state] = readScriptErrors([ok('a')], transforms, element)
+    expect(state).toMatchObject({ id: 'a', status: 'broken', pageReportedError: 'boom' })
+    expect(element.map.has(errorAttributeName('a'))).toBe(false)
+  })
+
+  it('reports an error once: the next check finds no marker', () => {
+    const element = holder({ [errorAttributeName('a')]: 'boom' })
+    readScriptErrors([ok('a')], transforms, element)
+    expect(readScriptErrors([ok('a')], transforms, element)).toEqual([ok('a')])
+  })
+
+  // Control: with no marker nothing is changed, so the states above come
+  // from the marker and not from the reading itself.
+  it('control: a document with no marker leaves the states as they were', () => {
+    const element = holder({})
+    expect(readScriptErrors([ok('a'), ok('c')], transforms, element)).toEqual([ok('a'), ok('c')])
+  })
+
+  it('does not read or remove the marker of a CSS transform', () => {
+    const element = holder({ [errorAttributeName('c')]: 'forged' })
+    expect(readScriptErrors([ok('c')], transforms, element)).toEqual([ok('c')])
+    expect(element.map.has(errorAttributeName('c'))).toBe(true)
   })
 })

@@ -17,7 +17,7 @@
  * The reason sent is the fixed sentence SCRIPT_ERROR_REASON.
  */
 
-import type { TransformRuntimeState } from './types'
+import type { Transform, TransformRuntimeState } from './types'
 
 const MAX_MESSAGE = 200
 
@@ -59,4 +59,34 @@ export function withScriptErrors(
       pageReportedError: shortErrorMessage(error),
     }
   })
+}
+
+/** The part of an element the health check reads and clears markers with. */
+export interface MarkerHolder {
+  getAttribute(name: string): string | null
+  removeAttribute(name: string): void
+}
+
+/**
+ * Applies the markers on `holder` to the states of a health check.
+ *
+ * Reading a marker removes it, so the next check reports an error only when
+ * the script failed again. This is the content script's health check path,
+ * kept here so that a test can run it on a fake element.
+ */
+export function readScriptErrors(
+  states: TransformRuntimeState[],
+  transforms: Pick<Transform, 'id' | 'kind'>[],
+  holder: MarkerHolder,
+): TransformRuntimeState[] {
+  return withScriptErrors(
+    states,
+    (id) => transforms.find((t) => t.id === id)?.kind,
+    (id) => {
+      const name = errorAttributeName(id)
+      const text = holder.getAttribute(name)
+      if (text !== null) holder.removeAttribute(name)
+      return text
+    },
+  )
 }
