@@ -600,6 +600,7 @@
       shotClipped={flow.shotClipped}
       shotMoved={flow.shotMoved}
       visionSupported={flow.visionSupported}
+      sentAddress={flow.picked.context.url}
       onchange={(value) => (flow.instruction = value)}
       onscreenshot={(value) =>
         value ? void flow.chooseScreenshotRegion() : flow.cancelScreenshot()}

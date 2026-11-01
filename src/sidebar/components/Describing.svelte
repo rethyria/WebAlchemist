@@ -18,6 +18,8 @@
     shotClipped: boolean
     shotMoved: boolean
     visionSupported: boolean
+    /** The page address as it will be sent to the provider. */
+    sentAddress: string
     onchange: (instruction: string) => void
     onscreenshot: (send: boolean) => void
     onincluderegion: () => void
@@ -46,6 +48,7 @@
     shotClipped,
     shotMoved,
     visionSupported,
+    sentAddress,
     onchange,
     onscreenshot,
     onincluderegion,
@@ -383,6 +386,11 @@
     </div>
   </section>
 
+  <section class="sent-address">
+    <p class="note">Page address sent to your AI provider, with query values and the fragment left out:</p>
+    <p class="address">{sentAddress}</p>
+  </section>
+
   {#if visionSupported}
     <section class="screenshot">
       <!--
@@ -662,6 +670,13 @@
 
   .node.selected.in-scope {
     box-shadow: inset 2px 0 0 rgb(from var(--neutral) r g b / 0.45);
+  }
+
+  .address {
+    margin: 0;
+    overflow-wrap: anywhere;
+    font: 11px var(--font-mono);
+    color: var(--text-dim);
   }
 
   .screenshot {

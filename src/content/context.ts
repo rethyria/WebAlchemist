@@ -72,9 +72,37 @@ export function extractElementContext(element: Element, selector: string): Eleme
   }
 }
 
+/** Stands in for every query value, so the model sees the keys and no values. */
+export const QUERY_VALUE_PLACEHOLDER = '[removed]'
+
+/**
+ * The address that is sent to the model provider: origin and path, the query
+ * keys with their values replaced, and no fragment, user name or password.
+ *
+ * Query strings and fragments carry access tokens, reset codes and session
+ * identifiers, and a transform needs none of them. The keys are kept because
+ * they show how the page is structured (`?tab=` or `?page=`). The panel shows
+ * this exact string, so what the user reads is what leaves the browser.
+ */
+export function addressForModel(href: string): string {
+  let url: URL
+  try {
+    url = new URL(href)
+  } catch {
+    return ''
+  }
+  // Opaque origins (about:, data:, file:) have no useful origin string.
+  const base = url.origin === 'null' ? url.protocol : url.origin
+  const keys = [...new Set([...url.searchParams.keys()])]
+  const query = keys.length
+    ? `?${keys.map((key) => `${encodeURIComponent(key)}=${QUERY_VALUE_PLACEHOLDER}`).join('&')}`
+    : ''
+  return `${base}${url.protocol === 'data:' ? '' : url.pathname}${query}`
+}
+
 export function extractContext(element: Element, selector: string): PageContext {
   return {
-    url: location.href,
+    url: addressForModel(location.href),
     target: extractElementContext(element, selector),
     ancestors: ancestorChain(element),
     customProperties: customPropertiesInScope(element),
