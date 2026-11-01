@@ -25,6 +25,15 @@ import { overlayPaletteFor } from '@shared/accents'
 import * as badge from './badge'
 import { reconcile as reconcileContentScripts } from './content-scripts'
 import { buildProbeTransform } from './csp-probe'
+import {
+  addPreviewedScript,
+  forgetCss,
+  previewedScriptIds,
+  previewedTabIds,
+  readCss,
+  removePreviewedScript,
+  writeCss,
+} from './css-state'
 import { forgetSession, runHealthCheck, shouldCheck } from './health'
 import { withKeepalive } from './keepalive'
 import { isContentEvent as isContentEventType, isExtensionPage } from './sender'
@@ -114,7 +123,9 @@ browser.webNavigation.onCommitted.addListener(async (details) => {
   if (details.frameId !== 0) return
   // The page reloaded, so nothing we injected survives — forget it rather
   // than trying to remove a stylesheet that is already gone.
-  appliedCss.delete(details.tabId)
+  // The same goes for a preview: the document it was injected into is gone.
+  await forgetCss('applied', details.tabId)
+  await forgetCss('preview', details.tabId)
   const transforms = await transformsForUrl(details.url)
 
   /*
@@ -418,7 +429,7 @@ async function handle(
       return true
 
     case 'clear-preview-css':
-      await setPreviewCss(message.tabId, null)
+      await clearPreviewCss(message.tabId, message.css)
       return true
 
     case 'preview-js': {
@@ -433,14 +444,14 @@ async function handle(
         throw new Error('Static analysis rejected this code, so it was not run.')
       }
       await registerTransform(message.transform)
-      previewedScripts.add(message.transform.id)
+      await addPreviewedScript(message.transform.id)
       await browser.tabs.reload(message.tabId)
       return true
     }
 
     case 'clear-preview-js':
       await unregisterTransform(message.id)
-      previewedScripts.delete(message.id)
+      await removePreviewedScript(message.id)
       return true
 
     case 'start-picking': {
@@ -603,32 +614,46 @@ async function checkAndPublish(tabId: number, transforms: Transform[]): Promise<
  * would be left carrying an unsaved change the user was told was discarded.
  *
  * Holding the exact injected string matters: removeCSS matches on content, so
- * the only way to take a preview back out is to have kept what went in.
+ * the only way to take a preview back out is to have kept what went in. It is
+ * kept in storage.session (see css-state.ts) because this page is suspended
+ * after 30 idle seconds and a module-level map would not survive that.
  */
-const previewedCss = new Map<number, string>()
-const previewedScripts = new Set<string>()
 
-async function setPreviewCss(tabId: number, css: string | null): Promise<void> {
-  const existing = previewedCss.get(tabId)
+async function removePreviewCss(tabId: number, css: string): Promise<void> {
+  await browser.scripting
+    .removeCSS({ target: { tabId }, css, origin: 'USER' })
+    .catch(() => {})
+}
+
+async function setPreviewCss(tabId: number, css: string): Promise<void> {
+  const existing = await readCss('preview', tabId)
   if (existing) {
-    await browser.scripting
-      .removeCSS({ target: { tabId }, css: existing, origin: 'USER' })
-      .catch(() => {})
-    previewedCss.delete(tabId)
+    await removePreviewCss(tabId, existing)
+    await forgetCss('preview', tabId)
   }
-  if (css === null) return
-
   await browser.scripting.insertCSS({ target: { tabId }, css, origin: 'USER' })
-  previewedCss.set(tabId, css)
+  await writeCss('preview', tabId, css)
+}
+
+/**
+ * Takes a preview out. `carried` is the string the sidebar says it inserted;
+ * the stored copy is removed as well when it differs, so a mismatch between
+ * the two cannot leave a stylesheet behind.
+ */
+async function clearPreviewCss(tabId: number, carried?: string): Promise<void> {
+  const stored = await readCss('preview', tabId)
+  const strings = new Set([carried, stored].filter((css): css is string => !!css))
+  for (const css of strings) await removePreviewCss(tabId, css)
+  await forgetCss('preview', tabId)
 }
 
 async function clearAllPreviews(): Promise<void> {
-  for (const tabId of [...previewedCss.keys()]) {
-    await setPreviewCss(tabId, null)
+  for (const tabId of await previewedTabIds()) {
+    await clearPreviewCss(tabId)
   }
-  for (const id of [...previewedScripts]) {
+  for (const id of await previewedScriptIds()) {
     await unregisterTransform(id)
-    previewedScripts.delete(id)
+    await removePreviewedScript(id)
   }
 }
 
@@ -737,8 +762,8 @@ async function runGeneration(
 }
 
 browser.tabs.onRemoved.addListener((tabId) => {
-  previewedCss.delete(tabId)
-  appliedCss.delete(tabId)
+  void forgetCss('preview', tabId)
+  void forgetCss('applied', tabId)
   badge.tabClosed(tabId)
 })
 
@@ -814,16 +839,6 @@ async function transformsForUrl(url: string): Promise<Transform[]> {
 }
 
 /**
- * What is currently injected in each tab.
- *
- * Held because removeCSS matches on content: taking a stylesheet back out
- * requires the exact string that went in. Without this, saving or toggling
- * could only add, never replace — so a change showed up on the next page load
- * and not before.
- */
-const appliedCss = new Map<number, string>()
-
-/**
  * CSS is applied by the background script rather than the content script:
  * insertCSS at the USER origin needs no page-side code, survives re-renders
  * without observers, and cannot be tampered with from the page.
@@ -835,19 +850,20 @@ async function applyCssTransforms(tabId: number, transforms: Transform[]): Promi
     .map((t) => `/* ${t.name} */\n${t.code}`)
     .join('\n\n')
 
-  const previous = appliedCss.get(tabId)
+  // Read from storage.session: see css-state.ts for why a module variable is not enough.
+  const previous = await readCss('applied', tabId)
   if (previous !== undefined && previous !== css) {
     await browser.scripting
       .removeCSS({ target: { tabId }, css: previous, origin: 'USER' })
       .catch(() => {})
-    appliedCss.delete(tabId)
+    await forgetCss('applied', tabId)
   }
 
   if (!css || previous === css) return
 
   try {
     await browser.scripting.insertCSS({ target: { tabId }, css, origin: 'USER' })
-    appliedCss.set(tabId, css)
+    await writeCss('applied', tabId, css)
   } catch {
     // No host permission for this origin yet, which is expected until the user
     // saves their first transform for the site.
