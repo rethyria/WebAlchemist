@@ -27,6 +27,8 @@
   import Describing from './components/Describing.svelte'
   import ErrorCard from './components/ErrorCard.svelte'
   import Generating from './components/Generating.svelte'
+  import FirstRunDisclosure from './components/FirstRunDisclosure.svelte'
+  import { readDisclosureNeeded, recordDisclosureAck, watchDisclosureNeeded } from '@shared/disclosure-ack'
   import Picking from './components/Picking.svelte'
   import Refining from './components/Refining.svelte'
   import Reviewing from './components/Reviewing.svelte'
@@ -53,6 +55,35 @@
   let loadError = $state<{ message: string; retryable: boolean } | null>(null)
   let checking = $state(false)
   let showSettings = $state(false)
+
+  /*
+   * Null until the stored acknowledgement has been read, which counts as not
+   * acknowledged for every action but does not yet replace the list with the
+   * disclosure, so a person who has acknowledged does not see it flash. Every
+   * way to send page content to a model goes through `describe` below; the
+   * settings page holds the same gate for the key fields.
+   */
+  let disclosureNeeded = $state<boolean | null>(null)
+  /** Set when a person tried to use the model before acknowledging. */
+  let showDisclosure = $state(false)
+
+  /**
+   * Runs an action that leads to a model call, or shows the disclosure first.
+   * "Write it myself" does not use this, because it needs no provider.
+   */
+  function describe(action: () => void): void {
+    if (disclosureNeeded !== false) {
+      showDisclosure = true
+      return
+    }
+    action()
+  }
+
+  async function acknowledgeDisclosure() {
+    await recordDisclosureAck()
+    disclosureNeeded = false
+    showDisclosure = false
+  }
 
   const flow = new Flow(() => void afterSave())
 
@@ -507,6 +538,8 @@
 
   $effect(() => {
     void load()
+    void readDisclosureNeeded().then((needed) => (disclosureNeeded = needed))
+    const stopWatching = watchDisclosureNeeded((needed) => (disclosureNeeded = needed))
 
     const onMessage = (message: ContentEvent, sender: browser.runtime.MessageSender) => {
       // Health results are the one content event the list owns rather than
@@ -585,6 +618,7 @@
       browser.tabs.onUpdated.removeListener(onTabUpdated)
       browser.tabs.onRemoved.removeListener(onTabRemoved)
       releasePort()
+      stopWatching()
     }
   })
 </script>
@@ -658,6 +692,20 @@
         This is a browser page, not a website. Open a site and the panel will show
         what can be changed on it.
       </p>
+    </div>
+  {:else if flow.step === 'list' && disclosureNeeded === true && (showDisclosure || transforms.length === 0)}
+    <!--
+      Before anything can be sent to a model. With saved transforms the list
+      stays first and this appears when a model action is chosen. "Write it
+      myself" is passed on because it needs no provider.
+    -->
+    <div class="first-run">
+      <FirstRunDisclosure
+        {vault}
+        takeFocus={showDisclosure}
+        onacknowledge={() => void acknowledgeDisclosure()}
+        onwriteitmyself={() => void flow.startPicking('author')}
+      />
     </div>
   {:else if flow.step === 'picking'}
     <Picking
@@ -768,7 +816,7 @@
         applied on every visit. You approve the code before it runs.
       </p>
       <div class="cta">
-        <button type="button" class="primary" onclick={() => void flow.startPicking()}>
+        <button type="button" class="primary" onclick={() => describe(() => void flow.startPicking())}>
           Select an element
         </button>
         <p class="hint">Or drag a rectangle on the page</p>
@@ -839,10 +887,11 @@
             (expandedId = expandedId === transform.id ? null : transform.id)}
           onrename={(name) => void renameTransform(transform, name)}
           onedit={() => void openEditor(transform)}
-          oneditwithai={() => void flow.editWithAi(transform)}
-          oneditintent={() => void flow.editIntent(transform)}
+          oneditwithai={() => describe(() => void flow.editWithAi(transform))}
+          oneditintent={() => describe(() => void flow.editIntent(transform))}
           ondelete={() => void removeTransform(transform)}
-          onrepair={(brokenReason: string) => void flow.repair(transform, brokenReason)}
+          onrepair={(brokenReason: string) =>
+            describe(() => void flow.repair(transform, brokenReason))}
           conflicts={conflictsFor(transform.id)}
           names={Object.fromEntries(transforms.map((t) => [t.id, t.name]))}
           dragging={draggingId === transform.id}
@@ -855,7 +904,7 @@
     </ul>
 
     <footer>
-      <button type="button" class="primary" onclick={() => void flow.startPicking()}>
+      <button type="button" class="primary" onclick={() => describe(() => void flow.startPicking())}>
         Select an element
       </button>
       <button type="button" class="link" onclick={() => void flow.startPicking('author')}>
@@ -1040,6 +1089,15 @@
     font: 600 12.5px var(--font-ui);
     color: var(--text);
     cursor: pointer;
+  }
+
+  .first-run {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    padding: var(--sp-20) 18px;
+    min-height: 0;
+    overflow-y: auto;
   }
 
   .empty {
