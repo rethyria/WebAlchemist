@@ -109,6 +109,8 @@ export async function createOpenAiCompatibleProvider(
       },
     })
 
+    const reportUnknownUsage = () => onUsage?.({ model: args.model, usage: null })
+
     const send = async (auth: Record<string, string>): Promise<Response> => {
       try {
         return await fetch(`${baseUrl}/chat/completions`, {
@@ -121,6 +123,9 @@ export async function createOpenAiCompatibleProvider(
           ...(args.signal ? { signal: args.signal } : {}),
         })
       } catch (error) {
+        // The request was sent, and the server may bill it although the answer
+        // is no longer wanted. The count is unknown, so null is reported (#71).
+        if (args.signal?.aborted) reportUnknownUsage()
         throw new ProviderError(
           `Could not reach ${provider.label}.`,
           'network',
@@ -177,6 +182,9 @@ export async function createOpenAiCompatibleProvider(
     try {
       payload = (await response.json()) as typeof payload
     } catch (error) {
+      // An abort while the body is being read leaves a complete, billed
+      // response unread, so the usage is recorded as unknown (#71).
+      if (args.signal?.aborted) reportUnknownUsage()
       throw new ProviderError(
         `${provider.label} returned a response that is not JSON. Check the base URL in settings.`,
         'bad-response',
