@@ -11,7 +11,7 @@
     TransformVersion,
   } from '@shared/types'
   import { hostOfPattern, modeForHost, policyKeyOfPattern } from '@safety/css-check'
-  import { compareWithCurrent, sourceLabel } from '@shared/versions'
+  import { compareWithCurrent, restoreNeedsMainConfirmation, restoreRefusal, sourceLabel } from '@shared/versions'
   import { matchPresetsFor, matchesUrl, originPermissionFor, parsePattern } from '@shared/match'
   import { send } from '@shared/messaging.svelte'
   import {
@@ -27,6 +27,7 @@
   import { excludedAccessMessage, excludedHostForPattern } from '@shared/excluded-sites'
   import { MAIN_WORLD_RISKS, WORLD_NAMES, WORLD_RESET_NOTICE, worldOf } from '@shared/world'
   import CodeArea from './CodeArea.svelte'
+  import MainRestoreRisks from './MainRestoreRisks.svelte'
   import { shouldConfirmLeaving } from './unload'
 
   /**
@@ -78,6 +79,8 @@
   let restoring = $state(false)
   /** The version shown for confirmation. Nothing is restored until it is confirmed. */
   let reviewing = $state<TransformVersion | null>(null)
+  /** Whether the user confirmed the risks of restoring a version that runs in MAIN. */
+  let mainRestoreConfirmed = $state(false)
   /**
    * The user's list of excluded sites, loaded when the page opens so that the
    * save and restore handlers can check it before their first await. An await
@@ -299,6 +302,11 @@
   async function restore(version: TransformVersion) {
     const current = transform
     if (!current || restoring || saving) return
+    const refusal = restoreRefusal(current.kind, version, mainRestoreConfirmed)
+    if (refusal !== null) {
+      findings = [refusal]
+      return
+    }
     // Before the permission request, and with no await since the click.
     const excluded = excludedHostForPattern(excludedSites, version.match)
     if (excluded !== null) {
@@ -336,6 +344,7 @@
       }
       await loadVersions()
       reviewing = null
+      mainRestoreConfirmed = false
       justSaved = true
       setTimeout(() => (justSaved = false), 2000)
     } catch (cause) {
@@ -820,7 +829,10 @@
                 type="button"
                 class="secondary"
                 disabled={dirty || restoring || saving}
-                onclick={() => (reviewing = version)}
+                onclick={() => {
+                  reviewing = version
+                  mainRestoreConfirmed = false
+                }}
               >
                 Review this version
               </button>
@@ -859,8 +871,14 @@
             </table>
             <h3>Code in this version</h3>
             <pre class="version-code">{reviewing.code}</pre>
+            {#if restoreNeedsMainConfirmation(transform.kind, reviewing)}
+              <MainRestoreRisks bind:confirmed={mainRestoreConfirmed} disabled={restoring} />
+            {/if}
             <div class="actions">
-              <button type="button" disabled={restoring || saving} onclick={() => void restore(reviewing!)}>
+              <button
+                type="button"
+                disabled={restoring || saving || restoreRefusal(transform.kind, reviewing, mainRestoreConfirmed) !== null}
+                onclick={() => void restore(reviewing!)}>
                 Restore this version
               </button>
               <button type="button" class="secondary" disabled={restoring} onclick={() => (reviewing = null)}>
