@@ -20,8 +20,20 @@ export function needsTabindex(element: Pick<Element, 'matches' | 'hasAttribute'>
   return !element.hasAttribute('tabindex') && !element.matches(NATIVELY_FOCUSABLE)
 }
 
+/**
+ * Whether a script may move the focus now. A step can change because a late
+ * event arrived, for example a health check result or a finished generation,
+ * while the user is typing in the page. A move then would take the keyboard
+ * from the page, so it is skipped when the sidebar does not have the focus
+ * (#39).
+ */
+export function mayMoveFocus(doc: Pick<Document, 'hasFocus'>): boolean {
+  return doc.hasFocus()
+}
+
 /** Svelte action: moves the focus to the element when it is added to the page. */
 export function focusOnMount(node: HTMLElement): void {
+  if (!mayMoveFocus(document)) return
   if (needsTabindex(node)) node.tabIndex = -1
   // preventScroll: the panel is already at the top, and a scroll would hide the
   // header the user has just been looking at.
@@ -35,4 +47,10 @@ export function focusOnMount(node: HTMLElement): void {
  */
 export function returnedToList(previous: string | null, step: string): boolean {
   return previous !== null && previous !== 'list' && step === 'list'
+}
+
+/** Moves the focus to the transform list's marked element, when a move is allowed. */
+export function focusList(doc: Pick<Document, 'hasFocus' | 'querySelector'>): void {
+  if (!mayMoveFocus(doc)) return
+  doc.querySelector<HTMLElement>('[data-list-focus]')?.focus()
 }

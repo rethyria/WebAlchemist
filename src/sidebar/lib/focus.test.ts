@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
-import { describe, expect, it } from 'vitest'
-import { needsTabindex, returnedToList } from './focus'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { focusList, focusOnMount, mayMoveFocus, needsTabindex, returnedToList } from './focus'
 
 const fake = (tag: string, tabindex = false) => ({
   hasAttribute: (name: string) => name === 'tabindex' && tabindex,
@@ -57,5 +57,52 @@ describe('every step moves the focus', () => {
     const app = readFileSync(new URL('../App.svelte', import.meta.url), 'utf8')
     expect(app).toContain('returnedToList(previousStep, step)')
     expect(app).toContain('data-list-focus')
+  })
+})
+
+describe('a move when the sidebar does not have the focus (#39)', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  const node = () => ({
+    tabIndex: 0,
+    focus: vi.fn(),
+    ...fake('h1'),
+  })
+
+  it('is allowed only while the document has the focus', () => {
+    expect(mayMoveFocus({ hasFocus: () => true })).toBe(true)
+    expect(mayMoveFocus({ hasFocus: () => false })).toBe(false)
+  })
+
+  it('does not move the focus to a panel that appears while the page has it', () => {
+    vi.stubGlobal('document', { hasFocus: () => false })
+    const heading = node()
+    focusOnMount(heading as unknown as HTMLElement)
+    expect(heading.focus).not.toHaveBeenCalled()
+  })
+
+  it('moves the focus to a panel that appears while the sidebar has it (control)', () => {
+    vi.stubGlobal('document', { hasFocus: () => true })
+    const heading = node()
+    focusOnMount(heading as unknown as HTMLElement)
+    expect(heading.focus).toHaveBeenCalledWith({ preventScroll: true })
+    expect(heading.tabIndex).toBe(-1)
+  })
+
+  it('does not move the focus to the list while the page has it', () => {
+    const list = { focus: vi.fn() }
+    focusList({ hasFocus: () => false, querySelector: () => list } as unknown as Document)
+    expect(list.focus).not.toHaveBeenCalled()
+  })
+
+  it('moves the focus to the list while the sidebar has it (control)', () => {
+    const list = { focus: vi.fn() }
+    focusList({ hasFocus: () => true, querySelector: () => list } as unknown as Document)
+    expect(list.focus).toHaveBeenCalledTimes(1)
+  })
+
+  it('is used by the list effect in the sidebar', () => {
+    const app = readFileSync(new URL('../App.svelte', import.meta.url), 'utf8')
+    expect(app).toContain('focusList(document)')
   })
 })

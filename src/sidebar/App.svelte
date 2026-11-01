@@ -20,7 +20,7 @@
   import { activeTab, BackgroundError, send } from './lib/messaging.svelte'
   import { isForTab, type HealthCheckResult } from './lib/health-result'
   import { Flow } from './lib/flow.svelte'
-  import { returnedToList } from './lib/focus'
+  import { focusList, returnedToList } from './lib/focus'
   import { brokenAnnouncement } from './lib/announce'
   import { tick } from 'svelte'
   import { holdSidebarPortForWindow } from './lib/sidebar-port'
@@ -106,7 +106,7 @@
   $effect(() => {
     const step = flow.step
     if (returnedToList(previousStep, step)) {
-      void tick().then(() => document.querySelector<HTMLElement>('[data-list-focus]')?.focus())
+      void tick().then(() => focusList(document))
     }
     previousStep = step
   })
