@@ -145,7 +145,7 @@ async function configureWorldFor(transform: Transform): Promise<void> {
   })
 }
 
-export async function registerTransform(transform: Transform): Promise<void> {
+async function registerTransformNow(transform: Transform): Promise<void> {
   const registration = await registrationFor(transform)
   if (!registration) return
 
@@ -193,7 +193,7 @@ export function previewIdFor(id: string): string {
  * edits, so only one of the two runs. Pausing an id that is not registered
  * (a new transform) does nothing.
  */
-export async function registerPreview(transform: Transform): Promise<void> {
+async function registerPreviewNow(transform: Transform): Promise<void> {
   // The kill switch wins over a preview. A preview is still code running on a
   // real page, and the switch exists to stop that. The alternative, running it because the user asked, was
   // rejected: a setting that a button next to the code can bypass is not a
@@ -207,7 +207,7 @@ export async function registerPreview(transform: Transform): Promise<void> {
       'Running transforms is switched off in the settings, so the JavaScript was not run. Turn that setting off to run it.',
     )
   }
-  await unregisterTransform(transform.id)
+  await unregisterTransformNow(transform.id)
   try {
     await registerPreviewScript(transform)
   } catch (cause) {
@@ -215,7 +215,7 @@ export async function registerPreview(transform: Transform): Promise<void> {
     // would otherwise leave it paused with nothing running in its place, and
     // the caller, which only records the preview after this returns, would
     // not know to restore it.
-    await unregisterPreview(transform.id).catch(() => {})
+    await unregisterPreviewNow(transform.id).catch(() => {})
     throw cause
   }
 }
@@ -226,7 +226,7 @@ async function registerPreviewScript(transform: Transform): Promise<void> {
   // now. The draft copies the saved flag, and registerTransform returns
   // without registering a disabled transform, so a preview of a disabled
   // script reloaded the page and ran nothing. The saved record is not changed.
-  await registerTransform({ ...transform, enabled: true, id: previewIdFor(transform.id) })
+  await registerTransformNow({ ...transform, enabled: true, id: previewIdFor(transform.id) })
 }
 
 /**
@@ -235,13 +235,13 @@ async function registerPreviewScript(transform: Transform): Promise<void> {
  * is read here, not kept from when the preview started, so a save made while
  * the preview was running is the version that comes back.
  */
-export async function unregisterPreview(id: string): Promise<void> {
-  await unregisterTransform(previewIdFor(id))
+async function unregisterPreviewNow(id: string): Promise<void> {
+  await unregisterTransformNow(previewIdFor(id))
   const saved = (await getAllTransforms()).find((t) => t.id === id)
-  if (saved) await registerTransform(saved)
+  if (saved) await registerTransformNow(saved)
 }
 
-export async function unregisterTransform(id: string): Promise<void> {
+async function unregisterTransformNow(id: string): Promise<void> {
   if (!(await hasUserScriptsPermission())) return
   try {
     await userScripts.unregister({ ids: [id] })
@@ -280,7 +280,7 @@ function sameRegistration(held: Mv3RegisteredUserScript, wanted: Mv3RegisteredUs
  * running: the preview registration (`previewIdFor(id)`) stays registered, and
  * the saved registration stays paused, as registerPreview left them.
  */
-export async function reregisterAll(
+async function reregisterAllNow(
   previewed: string[] = [],
 ): Promise<{ registered: number; skipped: number }> {
   if (!(await hasUserScriptsPermission())) {
@@ -313,7 +313,7 @@ export async function reregisterAll(
         // changed capability list has to reach it.
         await configureWorldFor(transform)
       } else {
-        await registerTransform(transform)
+        await registerTransformNow(transform)
       }
       registered += 1
     } catch {
@@ -332,3 +332,33 @@ export async function reregisterAll(
 
   return { registered, skipped }
 }
+
+/*
+ * Every change to the registered user scripts goes through one queue (#122).
+ *
+ * The permission listener, the save handlers, the preview handlers and the
+ * start-up pass all register scripts, and registerTransform reads what is
+ * registered and then registers or updates, which is not one step. Two of them
+ * running at once could both see the script as absent and both register it, and
+ * the second call fails. The functions that call each other (a preview pauses
+ * the saved script and registers its own) use the unqueued versions, so a call
+ * made while holding the queue never waits for the queue.
+ */
+let registrationQueue: Promise<unknown> = Promise.resolve()
+
+function queued<T>(work: () => Promise<T>): Promise<T> {
+  // A failed change must not stop the ones behind it.
+  const result = registrationQueue.then(work, work)
+  registrationQueue = result.catch(() => undefined)
+  return result
+}
+
+export const registerTransform = (transform: Transform): Promise<void> =>
+  queued(() => registerTransformNow(transform))
+export const unregisterTransform = (id: string): Promise<void> => queued(() => unregisterTransformNow(id))
+export const registerPreview = (transform: Transform): Promise<void> =>
+  queued(() => registerPreviewNow(transform))
+export const unregisterPreview = (id: string): Promise<void> => queued(() => unregisterPreviewNow(id))
+export const reregisterAll = (
+  previewed: string[] = [],
+): Promise<{ registered: number; skipped: number }> => queued(() => reregisterAllNow(previewed))
