@@ -3,7 +3,7 @@
  */
 
 import { beforeEach, describe, expect, it } from 'vitest'
-import { createHarness, cssTransform, type Harness } from './test-browser'
+import { createHarness, cssTransform, sidebarPort, type Harness } from './test-browser'
 
 const TAB = 3
 const app = cssTransform({ match: 'example.com/*' })
@@ -38,6 +38,13 @@ describe('a preview when the page is shown again from the back-forward cache (#8
     })
   const preview = () => h.onMessage({ type: 'preview-css', tabId: TAB, css: 'a { color: red }' })
   const stored = () => h.session.get(`wa-css-preview-${TAB}`)
+
+  // The preview's window is 1, which is where tabs are unless a test says so.
+  let sidebar: ReturnType<typeof sidebarPort>
+  beforeEach(() => {
+    sidebar = sidebarPort(1)
+    h.listeners.get('browser.runtime.onConnect')!(sidebar)
+  })
 
   it('gives the preview back to the document that had it, so it can still be removed', async () => {
     await commitUrl(PAGE)
@@ -82,6 +89,18 @@ describe('a preview when the page is shown again from the back-forward cache (#8
     await commitUrl(OTHER)
     await commitUrl(PAGE)
     expect(stored()).toBeUndefined()
+  })
+
+  it('removes the stylesheet at once when the owner window has no sidebar connected', async () => {
+    await commitUrl(PAGE)
+    await preview()
+    await commitUrl(OTHER) // the document with the preview goes to the cache
+    sidebar.drop() // the sidebar of window 1 closes while it is cached
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    h.calls.removeCSS.length = 0
+    await commitUrl(PAGE, ['forward_back'])
+    expect(stored()).toBeUndefined()
+    expect(h.calls.removeCSS).toEqual([{ tabId: TAB, css: 'a { color: red }' }])
   })
 
   it('discards the filed strings when the tab closes', async () => {

@@ -250,6 +250,7 @@ browser.webNavigation.onCommitted.addListener(async (details) => {
    * commit URL then looked unchanged and was skipped.
    */
   const recorded = browser.storage.session.set({ [leftUrlKey]: details.url })
+  let orphaned: string | undefined
   await inTabQueue(details.tabId, async () => {
     await forgetCss('applied', details.tabId)
     /*
@@ -279,12 +280,19 @@ browser.webNavigation.onCommitted.addListener(async (details) => {
     await forgetCss('preview', details.tabId)
     if (restored) {
       const back = await takeArchivedPreview(details.tabId, details.url)
-      if (back) {
+      if (back && ownerIsGone(back.windowId)) {
+        // The sidebar that made the preview closed while the page was cached,
+        // and the cached document still has the stylesheet. Making it the tab's
+        // preview again would leave a preview nothing owns, so it is removed
+        // below, outside this task because removal is queued too (#80).
+        orphaned = back.css
+      } else if (back) {
         await writeCss('preview', details.tabId, back.css)
         await writePreviewWindow(details.tabId, back.windowId)
       }
     }
   })
+  if (orphaned !== undefined) await clearPreviewCss(details.tabId, orphaned)
   await recorded
   await evaluateTab(details.tabId, details.url, { navigated: true })
 })
