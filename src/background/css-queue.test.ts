@@ -159,6 +159,22 @@ describe('CSS chosen for one page when the tab has moved to another (#57)', () =
     expect(stored()).toBeUndefined()
   })
 
+  it('is inserted when the tab URL differs only by a fragment that the page set during load', async () => {
+    h.tabUrls.set(TAB, 'https://example.com/a1#top')
+    await commit('https://example.com/a1')
+    await settle()
+    expect(h.calls.insertCSS.filter((c) => c.css === stamped(a))).toHaveLength(1)
+  })
+
+  it('control: a query change that moves the tab out of the pattern still skips the insert', async () => {
+    // The pattern has a query, so a different query is a different page.
+    h.local.set('transforms', [{ ...a, match: 'example.com/a1?x=1' }])
+    h.tabUrls.set(TAB, 'https://example.com/a1?x=2')
+    await commit('https://example.com/a1?x=1')
+    await settle()
+    expect(h.calls.insertCSS.filter((c) => c.css === stamped(a))).toEqual([])
+  })
+
   it('control: the same commit while the tab is still on A inserts it', async () => {
     h.tabUrls.set(TAB, 'https://example.com/a1')
     await commit('https://example.com/a1')

@@ -1462,7 +1462,17 @@ async function tabStillShows(
   const current = (await browser.tabs.get(tabId).catch(() => undefined))?.url
   // A tab whose URL cannot be read is one the extension has no access to, and
   // the insert fails there anyway.
-  if (current !== undefined && current !== expected.url) return false
+  if (current !== undefined && current !== expected.url) {
+    // Not compared as strings: a page that sets location.hash while it loads
+    // reports a URL with a fragment that the commit event did not have, and
+    // skipping the insert there left the page with no CSS (#57). The CSS is
+    // still right when the same transforms match both URLs.
+    const all = await getAllTransforms()
+    const same = all.every(
+      (t) => matchesUrl(t.match, current) === matchesUrl(t.match, expected.url),
+    )
+    if (!same) return false
+  }
   return documentOf(tabId) === expected.document
 }
 
