@@ -173,6 +173,7 @@ export async function createAnthropicProvider(provider: Provider): Promise<AiPro
           (body) =>
             client.messages.create(
               body as unknown as Parameters<typeof client.messages.create>[0],
+              request.signal ? { signal: request.signal } : undefined,
             ),
         )
 
@@ -234,6 +235,7 @@ export async function createAnthropicProvider(provider: Provider): Promise<AiPro
           async (payload) => {
             const stream = client.messages.stream(
               payload as unknown as Parameters<typeof client.messages.stream>[0],
+              request.signal ? { signal: request.signal } : undefined,
             )
 
             let accumulated = ''

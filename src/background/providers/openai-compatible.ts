@@ -83,6 +83,8 @@ export async function createOpenAiCompatibleProvider(
     schema: unknown
     schemaName: string
     maxTokens: number
+    /** Aborts the HTTP request when the caller no longer wants the answer. */
+    signal?: AbortSignal | undefined
   }): Promise<T> => {
     const body = JSON.stringify({
       model: args.model,
@@ -103,6 +105,7 @@ export async function createOpenAiCompatibleProvider(
           method: 'POST',
           headers: { 'Content-Type': 'application/json', ...auth },
           body,
+          ...(args.signal ? { signal: args.signal } : {}),
         })
       } catch (error) {
         throw new ProviderError(
@@ -230,6 +233,7 @@ export async function createOpenAiCompatibleProvider(
         schema: GENERATION_SCHEMA,
         schemaName: 'transform',
         maxTokens: 16000,
+        signal: request.signal,
       })
     },
 

@@ -1035,8 +1035,16 @@ browser.runtime.onConnect.addListener((port) => {
   }
 
   if (port.name === 'wa-generate') {
+    /*
+     * One controller for the port. The sidebar closing, or the panel dropping
+     * the port for any other reason, means nobody can receive the result, and a
+     * request left running is still billed. Aborting it stops the HTTP request
+     * and, for the streaming call, the stream.
+     */
+    const controller = new AbortController()
+    port.onDisconnect.addListener(() => controller.abort())
     port.onMessage.addListener((message) => {
-      void runGeneration(port, message as GenerateOverPort)
+      void runGeneration(port, message as GenerateOverPort, controller.signal)
     })
   }
 })
@@ -1072,35 +1080,58 @@ interface GenerateOverPort {
 async function runGeneration(
   port: browser.runtime.Port,
   request: GenerateOverPort,
+  signal: AbortSignal,
 ): Promise<void> {
   const { tabId } = request
   const accent = (await getSettings()).accent
+
+  /*
+   * Every message to the panel goes through here. After the port disconnects
+   * postMessage throws, and a chunk arriving then would end the stream as a
+   * side effect of the exception; the `catch` below would then call it again
+   * and the second throw became an unhandled rejection, since this function is
+   * started with `void`. A message nobody can receive is dropped instead.
+   */
+  const post = (message: unknown): void => {
+    if (signal.aborted) return
+    try {
+      port.postMessage(message)
+    } catch {
+      // The port closed between the check and the call.
+    }
+  }
+
   if (tabId !== undefined) {
     await restoreBadgeFacts(tabId, accent)
     await badge.generationStarted(tabId, accent)
   }
 
   try {
+    if (signal.aborted) return
     const provider = await resolveActiveProvider()
-    port.postMessage({ type: 'sent' })
+    if (signal.aborted) return
+    post({ type: 'sent' })
 
+    const withSignal = { ...request, signal }
     const result = await withKeepalive(() =>
       provider.generateStream
         ? provider.generateStream(
-            request,
+            withSignal,
             (accumulated) => {
-              port.postMessage({ type: 'chunk', text: accumulated })
+              post({ type: 'chunk', text: accumulated })
             },
             (characters) => {
-              port.postMessage({ type: 'thinking', characters })
+              post({ type: 'thinking', characters })
             },
           )
-        : provider.generate(request),
+        : provider.generate(withSignal),
     )
 
-    port.postMessage({ type: 'done', result })
+    post({ type: 'done', result })
   } catch (error) {
-    port.postMessage({
+    // An aborted request fails with an error about the abort; the panel that
+    // would show it is gone.
+    post({
       type: 'error',
       error:
         error instanceof ProviderError
