@@ -52,6 +52,8 @@ export interface Harness {
     unregister: string[]
     setBadgeText: { tabId?: number | undefined; text: string | null }[]
     sendMessage: { tabId: number; message: any }[]
+    /** Messages the background broadcast with `runtime.sendMessage`. */
+    runtimeMessages: any[]
   }
   /** Listeners registered by the most recent boot, keyed by API path. */
   listeners: Map<string, Listener>
@@ -69,7 +71,7 @@ export function createHarness(): Harness {
     session: new Map(),
     local: new Map(),
     tabUrls: new Map(),
-    calls: { insertCSS: [], removeCSS: [], unregister: [], setBadgeText: [], sendMessage: [] },
+    calls: { insertCSS: [], removeCSS: [], unregister: [], setBadgeText: [], sendMessage: [], runtimeMessages: [] },
     listeners: new Map(),
     hasUserScripts: false,
     contentReply: () => undefined,
@@ -87,6 +89,9 @@ export function createHarness(): Harness {
       h.calls.unregister.push(...filter.ids)
     },
     'browser.userScripts.getScripts': async () => [],
+    'browser.runtime.sendMessage': async (message: unknown) => {
+      h.calls.runtimeMessages.push(message)
+    },
     'browser.tabs.get': async (id: number) => ({ id, url: h.tabUrls.get(id) }),
     'browser.tabs.query': async () => [],
     'browser.tabs.sendMessage': async (tabId: number, message: unknown) => {

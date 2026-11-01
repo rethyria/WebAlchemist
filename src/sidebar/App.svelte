@@ -14,6 +14,7 @@
   import type { ConflictSpec } from '@shared/messages'
   import { parseRules } from '@shared/css'
   import { activeTab, BackgroundError, send } from './lib/messaging.svelte'
+  import { isForTab, type HealthCheckResult } from './lib/health-result'
   import { Flow } from './lib/flow.svelte'
   import { holdSidebarPort } from './lib/sidebar-port'
   import Describing from './components/Describing.svelte'
@@ -376,13 +377,19 @@
     void browser.runtime.openOptionsPage()
   }
 
+  /** Ignores results for tabs the panel is not showing; see health-result.ts. */
+  async function showHealthResult(message: HealthCheckResult) {
+    const tab = await activeTab()
+    if (isForTab(message, tab?.id)) runtimeStates = message.states
+  }
+
   $effect(() => {
     void load()
 
     const onMessage = (message: ContentEvent) => {
       // Health results are the one content event the list owns rather than
       // the flow — they describe saved transforms, not the draft.
-      if (message.type === 'health-check-result') runtimeStates = message.states
+      if (message.type === 'health-check-result') void showHealthResult(message)
       else flow.receive(message)
     }
     browser.runtime.onMessage.addListener(onMessage)

@@ -660,7 +660,7 @@ async function checkAndPublish(
   )
 
   await browser.runtime
-    .sendMessage({ type: 'health-check-result', states })
+    .sendMessage({ type: 'health-check-result', tabId, states })
     .catch(() => {})
 }
 

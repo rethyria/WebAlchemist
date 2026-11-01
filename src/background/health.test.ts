@@ -59,3 +59,17 @@ describe('a health check that finishes after the tab navigated', () => {
     expect(badgeText()).toBe('!')
   })
 })
+
+describe('the result broadcast to extension pages (#87)', () => {
+  it('names the tab it was run in', async () => {
+    // Several tabs finish loading while one sidebar is open; the sidebar can
+    // only ignore another tab's result if the message says which tab it is.
+    await commit(OLD_PAGE)
+    await checkAsked
+    finishCheck({ type: 'health-check-result', states: brokenState })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(h.calls.runtimeMessages).toEqual([
+      { type: 'health-check-result', tabId: TAB, states: brokenState },
+    ])
+  })
+})
