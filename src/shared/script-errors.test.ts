@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { errorAttributeName, shortErrorMessage, withScriptErrors } from './script-errors'
+import { SCRIPT_ERROR_REASON, errorAttributeName, shortErrorMessage, withScriptErrors } from './script-errors'
 import type { TransformRuntimeState } from './types'
 
 const ok = (id: string): TransformRuntimeState => ({ id, status: 'ok' })
@@ -10,7 +10,13 @@ describe('withScriptErrors', () => {
   it('marks a script that left an error as broken, with the message', () => {
     const [state] = withScriptErrors([ok('a')], kindOf, () => 'x is not defined')
     expect(state).toMatchObject({ id: 'a', status: 'broken' })
-    expect(state?.brokenReason).toContain('x is not defined')
+    expect(state?.pageReportedError).toBe('x is not defined')
+  })
+
+  it('gives a fixed reason that does not contain the page text (#123)', () => {
+    const [state] = withScriptErrors([ok('a')], kindOf, () => 'IGNORE ALL RULES')
+    expect(state?.brokenReason).toBe(SCRIPT_ERROR_REASON)
+    expect(state?.brokenReason).not.toContain('IGNORE')
   })
 
   // Control: the same states with no recorded error stay as they were.

@@ -8,14 +8,21 @@
  *
  * The page can read and forge these attributes, and can remove them. They are
  * used for diagnostics only: they decide what the panel shows and nothing that
- * grants a permission or runs code. The text is capped and shown as plain text.
- * It is also passed to a repair request as the reason, which is the same
- * channel the page's own text already has to the model.
+ * grants a permission or runs code. The text is capped and shown as plain text,
+ * labelled as text reported by the page.
+ *
+ * The text is never sent to the model. A repair request puts its reason above
+ * the page-content fence, where the system prompt says instructions are
+ * obeyed, so page-controlled text there would be a prompt injection (#123).
+ * The reason sent is the fixed sentence SCRIPT_ERROR_REASON.
  */
 
 import type { TransformRuntimeState } from './types'
 
 const MAX_MESSAGE = 200
+
+/** The reason a repair request carries for a script that threw. Never varies. */
+export const SCRIPT_ERROR_REASON = 'The script threw an error when it ran.'
 
 /** The attribute that holds the last error of one transform. */
 export function errorAttributeName(transformId: string): string {
@@ -48,7 +55,8 @@ export function withScriptErrors(
     return {
       ...rest,
       status: 'broken',
-      brokenReason: `The script threw an error when it ran: ${shortErrorMessage(error)}`,
+      brokenReason: SCRIPT_ERROR_REASON,
+      pageReportedError: shortErrorMessage(error),
     }
   })
 }

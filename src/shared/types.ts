@@ -150,6 +150,11 @@ export interface TransformRuntimeState {
   brokenReason?: string
   /** Which stored assumption stopped holding, when we can attribute it. */
   failedAssumption?: string
+  /**
+   * The error text a script left on the page. The page controls it, so it is
+   * for display only and is never sent to a model (#123).
+   */
+  pageReportedError?: string
 }
 
 /**
