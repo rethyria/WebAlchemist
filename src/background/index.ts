@@ -25,6 +25,7 @@ import type {
 import type { RefinementTurn } from './providers/types'
 import { overlayPaletteFor } from '@shared/accents'
 import * as badge from './badge'
+import { documentOf, forgetTab, inTabQueue, startDocument } from './tab-queue'
 import { reconcile as reconcileContentScripts } from './content-scripts'
 import { buildProbeTransform } from './csp-probe'
 import {
@@ -136,9 +137,17 @@ browser.webNavigation.onCommitted.addListener(async (details) => {
   if (details.frameId !== 0) return
   // The page reloaded, so nothing we injected survives — forget it rather
   // than trying to remove a stylesheet that is already gone.
-  await forgetCss('applied', details.tabId)
-  // The same goes for a preview: the document it was injected into is gone.
-  await forgetCss('preview', details.tabId)
+  //
+  // The counter moves before anything is awaited, so a task still queued for
+  // the old document sees that it is out of date. The forget steps are queued
+  // behind it for the same reason every other CSS change is: one that finished
+  // late would store a string for a document that is gone.
+  startDocument(details.tabId)
+  await inTabQueue(details.tabId, async () => {
+    await forgetCss('applied', details.tabId)
+    // The same goes for a preview: the document it was injected into is gone.
+    await forgetCss('preview', details.tabId)
+  })
   await evaluateTab(details.tabId, details.url, { navigated: true })
 })
 
@@ -178,7 +187,9 @@ async function evaluateTab(
 
   // A route change may leave nothing to apply, and the previous route's CSS
   // has to come out. On a new document nothing was applied, so this is a no-op.
-  if (!navigated || transforms.length > 0) await applyCssTransforms(tabId, transforms)
+  if (!navigated || transforms.length > 0) {
+    await applyCssTransforms(tabId, () => transformsForUrl(url))
+  }
 
   if (transforms.length === 0) return
   if (!(await shouldCheck(settings, url, transforms))) return
@@ -563,12 +574,12 @@ async function handle(
 
     case 'suspend-transform': {
       const tab = await browser.tabs.get(message.tabId).catch(() => undefined)
-      if (!tab?.url) return false
-      const all = await transformsForUrl(tab.url)
-      await applyCssTransforms(
-        message.tabId,
-        message.id === null ? all : all.filter((t) => t.id !== message.id),
-      )
+      const url = tab?.url
+      if (!url) return false
+      await applyCssTransforms(message.tabId, async () => {
+        const all = await transformsForUrl(url)
+        return message.id === null ? all : all.filter((t) => t.id !== message.id)
+      })
       return true
     }
 
@@ -710,14 +721,16 @@ async function removePreviewCss(tabId: number, css: string): Promise<void> {
     .catch(() => {})
 }
 
-async function setPreviewCss(tabId: number, css: string): Promise<void> {
-  const existing = await readCss('preview', tabId)
-  if (existing) {
-    await removePreviewCss(tabId, existing)
-    await forgetCss('preview', tabId)
-  }
-  await browser.scripting.insertCSS({ target: { tabId }, css, origin: 'USER' })
-  await writeCss('preview', tabId, css)
+function setPreviewCss(tabId: number, css: string): Promise<void> {
+  return inTabQueue(tabId, async () => {
+    const existing = await readCss('preview', tabId)
+    if (existing) {
+      await removePreviewCss(tabId, existing)
+      await forgetCss('preview', tabId)
+    }
+    await browser.scripting.insertCSS({ target: { tabId }, css, origin: 'USER' })
+    await writeCss('preview', tabId, css)
+  })
 }
 
 /**
@@ -725,11 +738,13 @@ async function setPreviewCss(tabId: number, css: string): Promise<void> {
  * the stored copy is removed as well when it differs, so a mismatch between
  * the two cannot leave a stylesheet behind.
  */
-async function clearPreviewCss(tabId: number, carried?: string): Promise<void> {
-  const stored = await readCss('preview', tabId)
-  const strings = new Set([carried, stored].filter((css): css is string => !!css))
-  for (const css of strings) await removePreviewCss(tabId, css)
-  await forgetCss('preview', tabId)
+function clearPreviewCss(tabId: number, carried?: string): Promise<void> {
+  return inTabQueue(tabId, async () => {
+    const stored = await readCss('preview', tabId)
+    const strings = new Set([carried, stored].filter((css): css is string => !!css))
+    for (const css of strings) await removePreviewCss(tabId, css)
+    await forgetCss('preview', tabId)
+  })
 }
 
 async function clearAllPreviews(): Promise<void> {
@@ -908,10 +923,13 @@ async function restoreBadgeFacts(tabId: number, accent: Accent): Promise<void> {
   )
 }
 
-browser.tabs.onRemoved.addListener((tabId) => {
-  void forgetCss('preview', tabId)
-  void forgetCss('applied', tabId)
+browser.tabs.onRemoved.addListener(async (tabId) => {
   badge.tabClosed(tabId)
+  await inTabQueue(tabId, async () => {
+    await forgetCss('preview', tabId)
+    await forgetCss('applied', tabId)
+    forgetTab(tabId)
+  })
   evaluations.delete(tabId)
 })
 
@@ -991,7 +1009,22 @@ async function transformsForUrl(url: string): Promise<Transform[]> {
  * insertCSS at the USER origin needs no page-side code, survives re-renders
  * without observers, and cannot be tampered with from the page.
  */
-async function applyCssTransforms(tabId: number, transforms: Transform[]): Promise<void> {
+function applyCssTransforms(
+  tabId: number,
+  load: () => Promise<Transform[]>,
+): Promise<void> {
+  // Taken now, not when the task runs: a document that commits while this is
+  // queued makes it out of date.
+  const document = documentOf(tabId)
+  return inTabQueue(tabId, async () => {
+    if (documentOf(tabId) !== document) return
+    // Read inside the queue. A list read before waiting would be older than the
+    // task ahead of this one, and a save finishing in between would be undone.
+    await applyCss(tabId, await load())
+  })
+}
+
+async function applyCss(tabId: number, transforms: Transform[]): Promise<void> {
   const css = transforms
     .filter((t) => t.kind === 'css' && t.enabled)
     .sort((a, b) => a.order - b.order)
@@ -1023,8 +1056,9 @@ async function reapply(tabId: number | undefined): Promise<void> {
   if (tabId === undefined) return
   const tab = await browser.tabs.get(tabId).catch(() => undefined)
   if (!tab?.url) return
-  const transforms = await transformsForUrl(tab.url)
-  await applyCssTransforms(tabId, transforms)
+  const url = tab.url
+  await applyCssTransforms(tabId, () => transformsForUrl(url))
+  const transforms = await transformsForUrl(url)
 
   // Every mutation that changes what runs — save, delete, reorder, toggle —
   // reaches here, which is why the count is refreshed here rather than at each
