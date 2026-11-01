@@ -126,6 +126,13 @@ describe('the instruction in a generation request (#56)', () => {
     expect(out).not.toContain('IMPORTED')
   })
 
+  it('fences an unchanged saved description sent as the instruction (#149)', () => {
+    const out = generationInstruction({ instruction: text, instructionSaved: true }, 'abc123')
+    expect(out).toContain('Carry out what the description says')
+    expect(out).toContain('--- BEGIN SAVED DESCRIPTION abc123 ---\n' + JSON.stringify(text))
+    expect(out).not.toContain('IMPORTED')
+  })
+
   it('passes a description the user typed or changed on as it is (control)', () => {
     expect(generationInstruction({ instruction: text }, 'abc123')).toBe(text)
     expect(generationInstruction({ instruction: text, instructionImported: false }, 'abc123')).toBe(text)

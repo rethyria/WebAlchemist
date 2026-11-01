@@ -1669,6 +1669,8 @@ interface GenerateOverPort {
   instructionImported?: boolean
   /** The imported description behind a follow-up. See GenerateRequest. */
   importedDescription?: string
+  /** True when `instruction` is a saved description, unchanged. See GenerateRequest. */
+  instructionSaved?: boolean
   /** The saved description behind a follow-up. See GenerateRequest. */
   savedDescription?: string
   history: RefinementTurn[]

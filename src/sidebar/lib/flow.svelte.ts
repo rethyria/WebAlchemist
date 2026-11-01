@@ -1493,6 +1493,13 @@ export class Flow {
             this.savedInstruction !== null &&
             this.instruction === this.savedInstruction &&
             this.history.length === 0,
+          // The same for a saved description that was not typed or edited in
+          // this session.
+          instructionSaved:
+            !this.savedImported &&
+            this.savedInstruction !== null &&
+            this.instruction === this.savedInstruction &&
+            this.history.length === 0,
           ...(this.importedDescription === null ? {} : { importedDescription: this.importedDescription }),
           ...(this.savedDescription === null ? {} : { savedDescription: this.savedDescription }),
           history: this.history,

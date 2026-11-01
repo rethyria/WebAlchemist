@@ -1802,6 +1802,29 @@ describe('a follow-up on an imported transform (#56)', () => {
       ])
     })
 
+    it('sends an unchanged saved description fenced on the first run (#149)', async () => {
+      const flow = newFlow()
+      await flow.editIntent({ ...importedJs, origin: 'ai' })
+      const first = flow.generate()
+      const port = await nextPort(1)
+      expect(port.request.instructionSaved).toBe(true)
+      expect(port.request.instructionImported).toBe(false)
+      port.emit({ type: 'done', result: cssResult('A1') })
+      await first
+    })
+
+    it('control: an edited saved description is sent as the user instruction on the first run (#149)', async () => {
+      const flow = newFlow()
+      await flow.editIntent({ ...importedJs, origin: 'ai' })
+      flow.instruction = 'IMPORTED INTENT, only the banner'
+      const first = flow.generate()
+      const port = await nextPort(1)
+      expect(port.request.instructionSaved).toBe(false)
+      expect(port.request.instruction).toBe('IMPORTED INTENT, only the banner')
+      port.emit({ type: 'done', result: cssResult('A1') })
+      await first
+    })
+
     it('control: a description the user changed is theirs and goes into the history', async () => {
       const flow = newFlow()
       await flow.editIntent(importedJs)
