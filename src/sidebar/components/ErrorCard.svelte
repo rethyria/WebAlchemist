@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { announcedSeconds } from '../lib/countdown'
   import type { FlowError } from '../lib/flow.svelte'
   import Button from './Button.svelte'
 
@@ -24,7 +25,7 @@
   class="card"
   class:block={error.kind === 'request-failed'}
   class:attention={error.kind === 'rate-limited'}
-  role="alert"
+  role={error.kind === 'rate-limited' ? undefined : 'alert'}
 >
   {#if error.kind === 'no-provider'}
     <span class="title">No provider set up</span>
@@ -58,7 +59,13 @@
   {:else if error.kind === 'rate-limited'}
     <div class="head">
       <span class="dot attention" aria-hidden="true"></span>
-      <span class="title">Rate limited</span>
+      <!--
+        The alert is on the title alone. An alert is an assertive live region,
+        and the countdown below it changes every second, so with the alert on
+        the whole card a screen reader was likely to announce every change
+        (not tested with a screen reader).
+      -->
+      <span class="title" role="alert">Rate limited</span>
     </div>
     <p>{error.message}</p>
     {#if error.retryInSeconds !== null}
@@ -70,9 +77,13 @@
         Waiting is the primary action, so Cancel is the one that has to be
         clicked: an automatic request is only acceptable if it can be stopped.
       -->
-      <p class="countdown" aria-live="polite">
+      <p class="countdown" aria-hidden="true">
         Trying again in {error.retryInSeconds}
         {error.retryInSeconds === 1 ? 'second' : 'seconds'}
+      </p>
+      <!-- What assistive technology gets instead: a polite region whose text changes at coarse steps. -->
+      <p class="hidden" role="status">
+        Trying again in less than {announcedSeconds(error.retryInSeconds)} seconds
       </p>
       <div class="actions">
         {#if onretry}
@@ -101,6 +112,15 @@
 </div>
 
 <style>
+  .hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
   .countdown {
     font-variant-numeric: tabular-nums;
     color: var(--attention);
