@@ -90,10 +90,106 @@ function migrateSettings(raw: Partial<Settings>): Settings {
 /* Transforms                                                          */
 /* ------------------------------------------------------------------ */
 
-export async function getAllTransforms(): Promise<Transform[]> {
+const isObject = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value)
+
+const isStringArray = (value: unknown): boolean =>
+  Array.isArray(value) && value.every((item) => typeof item === 'string')
+
+/**
+ * Names the first field of a record that code elsewhere would misread, or
+ * returns null when the record is usable.
+ *
+ * Stored records were never validated, so a hand-edited import with no `match`
+ * made matchesUrl throw on every navigation, which stopped every site from
+ * being restyled (#90). The check covers what would throw or mis-sort when
+ * used: the identifying and matching fields, the kind, the sort key, `intent`,
+ * and the nested objects whose fields the health check, the content script and
+ * the prompt builder read without checking (the anchor's tag, classes, path and
+ * selector, the rationale's assumptions).
+ *
+ * It does not check the contents of `code` or the rationale's text. A record
+ * with odd text in those fields fails inside one transform instead of across
+ * all of them. The fields it does check have been in the Transform type since
+ * the first version, so records from older versions pass.
+ */
+function firstProblem(value: unknown): string | null {
+  if (!isObject(value)) return 'record'
+  const { anchor, rationale } = value
+  if (typeof value.id !== 'string' || value.id === '') return 'id'
+  if (typeof value.name !== 'string') return 'name'
+  if (typeof value.enabled !== 'boolean') return 'enabled'
+  if (typeof value.order !== 'number' || !Number.isFinite(value.order)) return 'order'
+  if (typeof value.match !== 'string') return 'match'
+  if (value.kind !== 'css' && value.kind !== 'js') return 'kind'
+  if (typeof value.code !== 'string') return 'code'
+  if (typeof value.intent !== 'string') return 'intent'
+  if (!Array.isArray(value.capabilities)) return 'capabilities'
+  if (!isObject(anchor)) return 'anchor'
+  if (typeof anchor.selector !== 'string') return 'anchor.selector'
+  if (typeof anchor.tag !== 'string') return 'anchor.tag'
+  if (typeof anchor.path !== 'string') return 'anchor.path'
+  if (!isStringArray(anchor.classes)) return 'anchor.classes'
+  if (!isObject(rationale)) return 'rationale'
+  if (!isStringArray(rationale.assumptions)) return 'rationale.assumptions'
+  return null
+}
+
+export function isValidTransform(value: unknown): value is Transform {
+  return firstProblem(value) === null
+}
+
+/**
+ * Throws a message for the sidebar when a record is not usable. A provider
+ * that ignores strict structured output can return a transform with a field
+ * missing; storing it would answer ok and then hide it, because reads skip
+ * invalid records.
+ */
+export function assertValidTransform(value: unknown): asserts value is Transform {
+  const problem = firstProblem(value)
+  if (problem !== null) {
+    throw new Error(`This transform has no valid "${problem}" field, so it was not saved.`)
+  }
+}
+
+/**
+ * Splits the stored list into records this version can use and everything
+ * else, which is kept exactly as stored.
+ *
+ * Invalid records are not deleted. One may be a hand-edited import that the
+ * user means to fix, or a record from a newer version that this version cannot
+ * read; discarding it at the next unrelated save would lose it without a word.
+ * Every write puts the invalid entries back unchanged (see writeTransforms).
+ */
+async function readStored(): Promise<{ valid: Transform[]; invalid: unknown[] }> {
   const stored = await browser.storage.local.get(KEY_TRANSFORMS)
-  const list = (stored[KEY_TRANSFORMS] as Transform[] | undefined) ?? []
-  return list.sort((a, b) => a.order - b.order)
+  const raw = stored[KEY_TRANSFORMS]
+  const list: unknown[] = Array.isArray(raw) ? raw : []
+  return {
+    valid: list.filter(isValidTransform),
+    invalid: list.filter((record) => !isValidTransform(record)),
+  }
+}
+
+async function writeTransforms(valid: Transform[], invalid: unknown[]): Promise<void> {
+  await browser.storage.local.set({ [KEY_TRANSFORMS]: [...valid, ...invalid] })
+}
+
+/**
+ * Reads the transform list, leaving out records that fail isValidTransform.
+ *
+ * Skipping rather than throwing is deliberate: this runs on every navigation,
+ * and an error here would disable every other transform for the sake of one.
+ * The skipped records stay in storage; see readStored.
+ */
+export async function getAllTransforms(): Promise<Transform[]> {
+  const { valid } = await readStored()
+  return valid.sort((a, b) => a.order - b.order)
+}
+
+/** How many stored records are skipped on read, for the interface to report. */
+export async function countSkippedTransforms(): Promise<number> {
+  return (await readStored()).invalid.length
 }
 
 /**
@@ -124,12 +220,13 @@ function mutateTransforms<T>(work: () => Promise<T>): Promise<T> {
 
 export function saveTransform(transform: Transform): Promise<void> {
   return mutateTransforms(async () => {
-    const all = await getAllTransforms()
+    const { valid: all, invalid } = await readStored()
     const index = all.findIndex((t) => t.id === transform.id)
     const next = { ...transform, updatedAt: Date.now() }
+    assertValidTransform(next)
     if (index === -1) all.push(next)
     else all[index] = next
-    await browser.storage.local.set({ [KEY_TRANSFORMS]: all })
+    await writeTransforms(all, invalid)
   })
 }
 
@@ -149,32 +246,34 @@ export function updateTransform(
   patch: Partial<Omit<Transform, 'id'>>,
 ): Promise<Transform | null> {
   return mutateTransforms(async () => {
-    const all = await getAllTransforms()
+    const { valid: all, invalid } = await readStored()
     const index = all.findIndex((t) => t.id === id)
     if (index === -1) return null
     const next = { ...all[index]!, ...patch, id, updatedAt: Date.now() }
+    assertValidTransform(next)
     all[index] = next
-    await browser.storage.local.set({ [KEY_TRANSFORMS]: all })
+    await writeTransforms(all, invalid)
     return next
   })
 }
 
 export function deleteTransform(id: string): Promise<void> {
   return mutateTransforms(async () => {
-    const all = await getAllTransforms()
-    await browser.storage.local.set({
-      [KEY_TRANSFORMS]: all.filter((t) => t.id !== id),
-    })
+    const { valid: all, invalid } = await readStored()
+    await writeTransforms(
+      all.filter((t) => t.id !== id),
+      invalid,
+    )
   })
 }
 
 /** Persists a new ordering. Order decides which transform wins a conflict. */
 export function reorderTransforms(orderedIds: string[]): Promise<void> {
   return mutateTransforms(async () => {
-    const all = await getAllTransforms()
+    const { valid: all, invalid } = await readStored()
     const position = new Map(orderedIds.map((id, index) => [id, index]))
     const next = all.map((t) => ({ ...t, order: position.get(t.id) ?? t.order }))
-    await browser.storage.local.set({ [KEY_TRANSFORMS]: next })
+    await writeTransforms(next, invalid)
   })
 }
 
@@ -365,34 +464,51 @@ export async function exportTransforms(): Promise<ExportBundle> {
   }
 }
 
+export interface ImportResult {
+  imported: number
+  /** Records left out because they failed isValidTransform. */
+  skipped: number
+  needsRegeneration: string[]
+}
+
 /**
  * Imports a bundle. JS transforms arrive without code — a shared JS transform
  * carries only intent and anchor, and the importer's own model regenerates the
  * implementation locally under their own review and capability gates. CSS
  * arrives with code intact, since CSS cannot exfiltrate anything.
  */
-export function importTransforms(bundle: ExportBundle): Promise<{
-  imported: number
-  needsRegeneration: string[]
-}> {
+export function importTransforms(bundle: ExportBundle): Promise<ImportResult> {
   return mutateTransforms(() => importTransformsNow(bundle))
 }
 
-async function importTransformsNow(bundle: ExportBundle): Promise<{
-  imported: number
-  needsRegeneration: string[]
-}> {
+async function importTransformsNow(bundle: ExportBundle): Promise<ImportResult> {
+  // `undefined > SCHEMA_VERSION` is false, so a file with no version used to
+  // pass the check below. A missing or non-numeric version means the file is
+  // not one of ours, or was cut short.
+  if (
+    !isObject(bundle) ||
+    typeof bundle.schemaVersion !== 'number' ||
+    !Array.isArray(bundle.transforms)
+  ) {
+    throw new Error('This file is not a Web Alchemist export.')
+  }
   if (bundle.schemaVersion > SCHEMA_VERSION) {
     throw new Error(
       `This file was made by a newer version of Web Alchemist (schema ${bundle.schemaVersion}). Update the extension to import it.`,
     )
   }
 
-  const existing = await getAllTransforms()
+  const { valid: existing, invalid } = await readStored()
   const needsRegeneration: string[] = []
   let nextOrder = existing.length
 
+  let skipped = 0
+
   for (const incoming of bundle.transforms) {
+    if (!isValidTransform(incoming)) {
+      skipped++
+      continue
+    }
     const transform: Transform = {
       ...incoming,
       id: crypto.randomUUID(),
@@ -411,6 +527,6 @@ async function importTransformsNow(bundle: ExportBundle): Promise<{
     existing.push(transform)
   }
 
-  await browser.storage.local.set({ [KEY_TRANSFORMS]: existing })
-  return { imported: bundle.transforms.length, needsRegeneration }
+  await writeTransforms(existing, invalid)
+  return { imported: bundle.transforms.length - skipped, skipped, needsRegeneration }
 }

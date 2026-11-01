@@ -355,7 +355,7 @@ export interface Responses {
   'preview-js': boolean
   'clear-preview-js': boolean
   'export-transforms': { schemaVersion: number; exportedAt: number; transforms: Transform[] }
-  'import-transforms': { imported: number; needsRegeneration: string[] }
+  'import-transforms': { imported: number; skipped: number; needsRegeneration: string[] }
   'capture-region': { dataUrl: string; rect: Rect; clipped: boolean }
   'start-picking': boolean
   'stop-picking': boolean

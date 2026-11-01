@@ -36,6 +36,7 @@ import {
   unregisterTransform,
 } from './registry'
 import {
+  assertValidTransform,
   clearCredential,
   deleteTransform,
   disableVault,
@@ -279,6 +280,11 @@ async function handle(
       return runStaticAnalysis(message.code, message.declaredCapabilities)
 
     case 'save-transform': {
+      // First, so a record with a missing field is refused with a message
+      // before analysis reads fields it may not have. saveTransform checks
+      // again; this is only the earlier point.
+      assertValidTransform(message.transform)
+
       /*
        * Re-run the gate here rather than trusting that the caller did, exactly
        * as preview-js does. This stopped being a formality when transform code
