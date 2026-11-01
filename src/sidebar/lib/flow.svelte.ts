@@ -514,8 +514,33 @@ export class Flow {
     await this.discard()
   }
 
-  /** Content events arrive here from App's runtime listener. */
-  receive(event: ContentEvent): void {
+  /**
+   * Whether a run is waiting for an event from the page: a pick, a retarget
+   * on the describing step, a reference pick or a region pick.
+   */
+  private get awaitingPageEvent(): boolean {
+    return (
+      this.step === 'picking' ||
+      this.step === 'describing' ||
+      this.awaitingReference ||
+      this.choosingRegion
+    )
+  }
+
+  /**
+   * Content events arrive here from App's runtime listener.
+   *
+   * `sender` is checked here, and not left to the background's sender check
+   * (#68), because a content script's runtime.sendMessage reaches every
+   * extension page directly and the background never sees it. Without the
+   * check, a script in any other tab could send an element or a region, and
+   * the next generation would be built from its content. Events are ignored
+   * unless they come from the tab the run is working on and a run is waiting
+   * for one.
+   */
+  receive(event: ContentEvent, sender: { tab?: { id?: number | undefined } | undefined }): void {
+    if (sender.tab?.id === undefined || sender.tab.id !== this.tabId) return
+    if (!this.awaitingPageEvent) return
     switch (event.type) {
       case 'element-hovered':
         if (this.step === 'picking') this.hover = event.target

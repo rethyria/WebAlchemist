@@ -378,11 +378,11 @@
   $effect(() => {
     void load()
 
-    const onMessage = (message: ContentEvent) => {
+    const onMessage = (message: ContentEvent, sender: browser.runtime.MessageSender) => {
       // Health results are the one content event the list owns rather than
       // the flow — they describe saved transforms, not the draft.
       if (message.type === 'health-check-result') runtimeStates = message.states
-      else flow.receive(message)
+      else flow.receive(message, sender)
     }
     browser.runtime.onMessage.addListener(onMessage)
 

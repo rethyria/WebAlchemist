@@ -79,18 +79,24 @@ function newFlow() {
   return flow
 }
 
+/** The sender of an event from the tab the flows in these tests are bound to. */
+const fromRunTab = { tab: { id: 1 } }
+
 function pick(flow: InstanceType<typeof Flow>, selector = 'p.new') {
-  flow.receive({
-    type: 'element-picked',
-    context,
-    anchor: { ...anchor, selector },
-    crop,
-    cropClipped: false,
-    cropDrawn: false,
-    target: targetInfo,
-    tree: [],
-    viewportWidth: 800,
-  } as any)
+  flow.receive(
+    {
+      type: 'element-picked',
+      context,
+      anchor: { ...anchor, selector },
+      crop,
+      cropClipped: false,
+      cropDrawn: false,
+      target: targetInfo,
+      tree: [],
+      viewportWidth: 800,
+    } as any,
+    fromRunTab,
+  )
 }
 
 const suspendCalls = () => calls.filter((c) => c.type === 'suspend-transform')
@@ -167,7 +173,7 @@ describe('leaving a run that started from a saved transform', () => {
     await flow.editIntent(saved)
     flow.instruction = 'edited text'
     await flow.startPicking()
-    flow.receive({ type: 'picking-cancelled' } as any)
+    flow.receive({ type: 'picking-cancelled' } as any, fromRunTab)
     await new Promise((resolve) => setTimeout(resolve, 0))
     expect(flow.step).toBe('describing')
     expect(flow.suspendedId).toBe('OLD')
@@ -707,7 +713,7 @@ describe('Esc in the page during a screenshot region pick', () => {
     const flow = flowAtRefining()
     await flow.chooseScreenshotRegion()
     expect(flow.choosingRegion).toBe(true)
-    flow.receive({ type: 'picking-cancelled' } as any)
+    flow.receive({ type: 'picking-cancelled' } as any, fromRunTab)
     expect(flow.choosingRegion).toBe(false)
     expect(flow.step).toBe('refining')
   })
@@ -800,5 +806,92 @@ describe('whether the error card says the description is kept', () => {
     const flow = newFlow()
     flow.fail(new Error('delete failed'))
     expect((flow.error as any).descriptionKept).toBe(false)
+  })
+})
+
+describe('events from the page', () => {
+  const fromOtherTab = { tab: { id: 2 } }
+  const elementPicked = {
+    type: 'element-picked',
+    context,
+    anchor: { ...anchor, selector: 'p.other' },
+    crop,
+    cropClipped: false,
+    cropDrawn: false,
+    target: targetInfo,
+    tree: [],
+    viewportWidth: 800,
+  } as any
+
+  async function flowWaitingForPick() {
+    const flow = newFlow()
+    await flow.startPicking()
+    expect(flow.step).toBe('picking')
+    return flow
+  }
+
+  it('accepts a pick from the tab being worked on', async () => {
+    const flow = await flowWaitingForPick()
+    flow.receive(elementPicked, fromRunTab)
+    expect(flow.step).toBe('describing')
+    expect(flow.picked?.anchor.selector).toBe('p.other')
+  })
+
+  it('ignores the same pick from another tab', async () => {
+    const flow = await flowWaitingForPick()
+    flow.receive(elementPicked, fromOtherTab)
+    expect(flow.step).toBe('picking')
+    expect(flow.picked).toBeNull()
+  })
+
+  it('ignores a pick that carries no sender tab', async () => {
+    const flow = await flowWaitingForPick()
+    flow.receive(elementPicked, {})
+    expect(flow.step).toBe('picking')
+  })
+
+  it('ignores a region from another tab and accepts one from the run tab', async () => {
+    const flow = flowAtRefining()
+    flow.choosingRegion = true
+    const region = {
+      type: 'region-selected',
+      rect: { x: 0, y: 0, width: 5, height: 5 },
+      viewportWidth: 800,
+    } as any
+    flow.receive(region, fromOtherTab)
+    expect(flow.choosingRegion).toBe(true)
+    expect(calls.some((c) => c.type === 'capture-region')).toBe(false)
+
+    handler = (m) =>
+      m.type === 'capture-region'
+        ? { ok: true, data: { dataUrl: 'data:', rect: region.rect, clipped: false } }
+        : { ok: true, data: null }
+    flow.receive(region, fromRunTab)
+    expect(flow.choosingRegion).toBe(false)
+    expect(calls.some((c) => c.type === 'capture-region')).toBe(true)
+  })
+
+  it('ignores a reference from another tab', async () => {
+    const flow = flowAtRefining()
+    flow.awaitingReference = true
+    const reference = { type: 'element-referenced', element: { selector: 'a.b' } } as any
+    flow.receive(reference, fromOtherTab)
+    expect(flow.awaitingReference).toBe(true)
+    expect(flow.references).toEqual([])
+    flow.receive(reference, fromRunTab)
+    expect(flow.references).toHaveLength(1)
+  })
+
+  it('ignores an event from the run tab when no run is waiting for one', () => {
+    const flow = newFlow()
+    flow.receive(elementPicked, fromRunTab)
+    expect(flow.step).toBe('list')
+    expect(flow.picked).toBeNull()
+
+    // On refining with no reference or region pick open, a pick is ignored too.
+    const refining = flowAtRefining()
+    refining.receive(elementPicked, fromRunTab)
+    expect(refining.step).toBe('refining')
+    expect(refining.picked?.anchor.selector).toBe('div.x')
   })
 })
