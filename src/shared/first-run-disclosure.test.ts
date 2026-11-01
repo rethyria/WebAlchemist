@@ -31,11 +31,16 @@ describe('what the text says', () => {
     ['Firefox does not enforce the network restriction', /does not enforce a network restriction/],
     ['approving the code is the main protection', /Approving the code is the main protection/],
     ['static analysis and a second model, neither complete', /static analysis[\s\S]*second model\. Neither check is complete/],
-    ['what the excluded list stops', /does not run saved JavaScript transforms, does not apply saved CSS, does not count transforms on the toolbar badge, does not check whether transforms still work, and does not load its content script/],
     ['CSS is checked, whoever wrote it', /CSS, whether the model or you wrote it, is checked for addresses that it would load/],
     ['the default CSS policy', /By default only data: addresses are allowed/],
     ['the two per-site CSS settings', /Two settings, which are chosen for each site, allow addresses on the page's own site or addresses that you approve/],
     ['@import refused in every setting', /An @import rule is refused in every setting/],
+    ['computed styles of the element and four ancestors', /computed style values of the picked element and of up to four of its ancestors/],
+    ['elements added as references', /each element that you add as a reference/],
+    ['earlier turns and generated code', /earlier follow-up requests[\s\S]*code that the model generated/],
+    ['the saved code, description, rationale and reason on repair', /Repair or Edit with AI, the saved code, its description and rationale, and the reason that the transform stopped working/],
+    ['access from saving as well as picking', /Picking an element on a site, and saving a transform for a site, give Web Alchemist lasting access/],
+    ['what the excluded list stops', /does not run saved JavaScript transforms, does not apply saved CSS, does not count transforms on the toolbar badge, does not check whether transforms still work, and does not load its content script/],
     ['transforms are unencrypted', /stored unencrypted[\s\S]*also when a passphrase is set/],
     ['lasting access to a site, removable under Site access', /lasting access to that site[\s\S]*Site access/],
     ['the excluded list', /excluded list[\s\S]*Excluded sites[\s\S]*starts empty/],
@@ -207,6 +212,30 @@ describe('the sidebar holds back the model until acknowledged', () => {
     const unwrapped = sidebar.replace('describe(() => void flow.editIntent(', 'void flow.editIntent(')
     const call = unwrapped.indexOf('flow.editIntent(')
     expect(unwrapped.slice(Math.max(0, call - 80), call)).not.toMatch(/describe\(\(\) => void $/)
+  })
+})
+
+describe('the limits stated for the excerpt', () => {
+  const extractor = read('../content/context.ts')
+  const limit = (name: string) => Number(new RegExp(`const ${name} = (\\d+)`).exec(extractor)?.[1])
+
+  it('says 80 characters, the extractor limit on text', () => {
+    expect(limit('MAX_TEXT_LENGTH')).toBe(80)
+    expect(SENT_CHANNELS.textContent).toContain(`up to ${limit('MAX_TEXT_LENGTH')} characters`)
+  })
+
+  it('says four ancestors, the extractor limit', () => {
+    expect(limit('MAX_ANCESTORS')).toBe(4)
+    expect(SENT_CHANNELS.children).toContain('up to four of its ancestors')
+    expect(text()).toContain('up to four of its ancestors')
+  })
+
+  it('does not claim that the text of ancestors is sent (control: the extractor reads text only in the excerpt)', () => {
+    expect(SENT_CHANNELS.textContent).not.toMatch(/ancestors/)
+    // Ancestors are built without textContent; the only read is in summariseSubtree.
+    const ancestorChain = /function ancestorChain[\s\S]*?\n}\n/.exec(extractor)?.[0] ?? ''
+    expect(ancestorChain.length).toBeGreaterThan(0)
+    expect(ancestorChain).not.toContain('textContent')
   })
 })
 

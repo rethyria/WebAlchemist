@@ -41,12 +41,22 @@ export const SENT_CHANNELS = {
   id: 'the id value of each element',
   classList: 'the class values of each element',
   getAttribute: 'the role value of each element',
-  children: 'the elements around the picked element, which are its ancestors and the elements inside it',
-  textContent: 'the text of those elements, including text that is hidden on the page',
+  children:
+    'the picked element, up to four of its ancestors, and the elements inside the picked element',
+  textContent:
+    'the text of the elements inside the picked element, up to 80 characters for each element that has no elements inside it, including text that is hidden on the page',
 } as const
 
 export const SENT_RULES =
   'the CSS rules that match the picked element, and the custom properties in scope for it'
+export const SENT_STYLES =
+  'the computed style values of the picked element and of up to four of its ancestors, for a fixed set of layout and appearance properties'
+export const SENT_REFERENCES =
+  'the same details for each element that you add as a reference while refining a transform'
+export const SENT_HISTORY =
+  'your earlier follow-up requests for the same transform and the code that the model generated for them'
+export const SENT_REPAIR =
+  'when you use Repair or Edit with AI, the saved code, its description and rationale, and the reason that the transform stopped working'
 export const SENT_ADDRESS =
   'the address of the page, with the fragment removed and the query values removed'
 export const SENT_DESCRIPTION = 'your description of the change'
@@ -66,7 +76,7 @@ export const PASSPHRASE_OPTION_NOTICE =
   'A passphrase set on the settings page encrypts the keys.'
 
 export const SITE_ACCESS_NOTICE =
-  'Picking an element on a site gives Web Alchemist lasting access to that site. The access stays until it is removed under Site access on the settings page.'
+  'Picking an element on a site, and saving a transform for a site, give Web Alchemist lasting access to that site. The access stays until it is removed under Site access on the settings page.'
 
 export const EXCLUSION_NOTICE =
   'On sites on the excluded list, which also covers their subdomains, Web Alchemist does not pick elements, does not generate transforms, does not run saved JavaScript transforms, does not apply saved CSS, does not count transforms on the toolbar badge, does not check whether transforms still work, and does not load its content script. A page that is already open keeps the changes that were made before the site was added, until it is reloaded. The list is under Excluded sites on the settings page and starts empty. Before text from a page with password or payment fields is sent, a warning asks for confirmation.'
@@ -97,7 +107,11 @@ export function firstRunDisclosure(vault: VaultView): DisclosureSection[] {
       items: [
         capitalise(SENT_DESCRIPTION),
         ...Object.values(SENT_CHANNELS).map(capitalise),
+        capitalise(SENT_STYLES),
         capitalise(SENT_RULES),
+        capitalise(SENT_REFERENCES),
+        capitalise(SENT_HISTORY),
+        capitalise(SENT_REPAIR),
         capitalise(SENT_ADDRESS),
         capitalise(SENT_SCREENSHOT),
       ],
