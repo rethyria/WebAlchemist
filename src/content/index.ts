@@ -649,6 +649,7 @@ function clearHoldTimer(): void {
 }
 
 function onTouchStart(event: TouchEvent): void {
+  if (!isUserEvent(event)) return
   const at = touchPoint(event)
   if (!at) return
   clearHoldTimer()
@@ -664,6 +665,7 @@ function onTouchStart(event: TouchEvent): void {
 }
 
 function onTouchMove(event: TouchEvent): void {
+  if (!isUserEvent(event)) return
   const at = touchPoint(event)
   if (!at) return
   const rect = gesture.move(at)
@@ -677,6 +679,7 @@ function onTouchMove(event: TouchEvent): void {
 }
 
 function onTouchEnd(event: TouchEvent): void {
+  if (!isUserEvent(event)) return
   clearHoldTimer()
   const at = touchPoint(event)
   if (!at) return
@@ -697,7 +700,8 @@ function onTouchEnd(event: TouchEvent): void {
   tapAt(outcome.at.x, outcome.at.y)
 }
 
-function onTouchCancel(): void {
+function onTouchCancel(event: TouchEvent): void {
+  if (!isUserEvent(event)) return
   clearHoldTimer()
   gesture.cancel()
   crop = null
