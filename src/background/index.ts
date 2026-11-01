@@ -86,9 +86,30 @@ import {
   vaultState,
 } from './storage'
 
+/*
+ * One chain for the work that changes which scripts are registered and which
+ * of them are previews. A rebuild reads the previewed ids and then lists what
+ * the browser holds; a preview that registers itself between those two reads
+ * is in the list but not in the ids, and the rebuild removed it as stale. The
+ * chain is in memory, as the per-tab one is: a task cannot outlive a
+ * suspension, and the rebuild at the next start recomputes from storage.
+ */
+let registryTail: Promise<unknown> = Promise.resolve()
+
+function inRegistryQueue<T>(task: () => Promise<T>): Promise<T> {
+  const run = registryTail.then(task)
+  registryTail = run.then(
+    () => undefined,
+    () => undefined,
+  )
+  return run
+}
+
 /** Rebuilds registrations from storage, leaving preview scripts registered. */
-async function reregister(): Promise<void> {
-  await reregisterAll(await previewedScriptIds())
+function reregister(): Promise<void> {
+  return inRegistryQueue(async () => {
+    await reregisterAll(await previewedScriptIds())
+  })
 }
 
 /* ------------------------------------------------------------------ */
@@ -626,8 +647,11 @@ async function handle(
       if (!analysis.passed) {
         throw new Error('Static analysis rejected this code, so it was not run.')
       }
-      await registerPreview(message.transform)
-      await addPreviewedScript(message.transform.id, await windowOfTab(message.tabId))
+      const windowId = await windowOfTab(message.tabId)
+      await inRegistryQueue(async () => {
+        await registerPreview(message.transform)
+        await addPreviewedScript(message.transform.id, windowId)
+      })
       await browser.tabs.reload(message.tabId)
       return true
     }

@@ -141,3 +141,46 @@ describe('the content script at start-up', () => {
     expect(h.contentScriptHeld.matches).toHaveLength(2)
   })
 })
+
+describe('a preview that starts while the registrations are being rebuilt (#91)', () => {
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 20))
+  const draft = () => ({
+    ...cssTransform({ id: 'draft', kind: 'js', code: 'document.title = "x"' }),
+    world: 'USER_SCRIPT',
+  })
+
+  /**
+   * Saving settings rebuilds the registrations. The rebuild's first
+   * getScripts call is held, which is the point between it reading the
+   * previewed ids and listing what the browser holds, and a preview starts
+   * there.
+   */
+  async function previewDuringRebuild() {
+    await h.boot()
+    const settings = (await h.onMessage({ type: 'get-settings' })).data
+    const release = h.hold('browser.userScripts.getScripts', { firstCallOnly: true })
+    const rebuilt = h.onMessage({ type: 'save-settings', settings })
+    await settle()
+    const previewed = h.onMessage({ type: 'preview-js', tabId: 3, transform: draft() })
+    await settle()
+    release()
+    await Promise.all([rebuilt, previewed])
+    await settle()
+  }
+
+  it('is still registered afterwards', async () => {
+    await previewDuringRebuild()
+    expect(h.userScriptsHeld.has('preview-draft')).toBe(true)
+    expect(h.session.get('wa-preview-scripts')).toEqual(['draft'])
+  })
+
+  it('control: a preview started after the rebuild is registered too', async () => {
+    // Shows the stub registers and keeps a preview when nothing overlaps, so
+    // the test above is about the overlap.
+    await h.boot()
+    const settings = (await h.onMessage({ type: 'get-settings' })).data
+    await h.onMessage({ type: 'save-settings', settings })
+    await h.onMessage({ type: 'preview-js', tabId: 3, transform: draft() })
+    expect(h.userScriptsHeld.has('preview-draft')).toBe(true)
+  })
+})

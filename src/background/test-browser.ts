@@ -83,12 +83,14 @@ export interface Harness {
    * Makes the next calls to the stubbed API at `path` (for example
    * `browser.userScripts.getScripts`) wait until the returned function is
    * called. Lets a test place a second event between two steps of one handler.
+   * With `firstCallOnly` only the first call waits and later calls go through.
    */
-  hold(path: string): () => void
+  hold(path: string, options?: { firstCallOnly?: boolean }): () => void
 }
 
 export function createHarness(): Harness {
   const gates = new Map<string, Promise<void>>()
+  const onceOnly = new Set<string>()
   const h: Harness = {
     session: new Map(),
     local: new Map(),
@@ -101,11 +103,13 @@ export function createHarness(): Harness {
     listeners: new Map(),
     hasUserScripts: false,
     contentReply: () => undefined,
-    hold: (path) => {
+    hold: (path, options) => {
       let release: () => void = () => {}
       gates.set(path, new Promise<void>((resolve) => (release = resolve)))
+      if (options?.firstCallOnly) onceOnly.add(path)
       return () => {
         gates.delete(path)
+        onceOnly.delete(path)
         release()
       }
     },
@@ -184,6 +188,7 @@ export function createHarness(): Harness {
       // Looked up at call time, so a gate set after boot still applies.
       return (...args: unknown[]) => {
         const gate = gates.get(path)
+        if (gate && onceOnly.delete(path)) gates.delete(path)
         const call = () => (real as (...a: unknown[]) => unknown)(...args)
         // Unchanged for an ungated call: some of these stubs are synchronous.
         return gate ? gate.then(call) : call()
