@@ -23,7 +23,11 @@ beforeEach(() => {
   ;(globalThis as unknown as { browser: unknown }).browser = {
     permissions: { getAll: async () => ({ origins: held }) },
     // reconcile() records origins Firefox refused in session storage (#96).
-    storage: { session: { set: async () => {}, get: async () => ({}) } },
+    storage: {
+      session: { set: async () => {}, get: async () => ({}) },
+      // The excluded-sites list is read at registration (#131); none is set here.
+      local: { get: async () => ({}) },
+    },
     scripting: {
       getRegisteredContentScripts: async () => [...scripts.values()],
       unregisterContentScripts: async ({ ids }: { ids: string[] }) => {

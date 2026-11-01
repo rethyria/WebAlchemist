@@ -26,7 +26,7 @@ export const REVOKE_KEY_NOTICE =
  * alone does not need a new version. The acknowledgement stores the number,
  * so a raise shows the text again to everyone (see disclosure-ack.ts).
  */
-export const DISCLOSURE_VERSION = 1
+export const DISCLOSURE_VERSION = 2
 
 /**
  * The page-controlled values that the picked element's excerpt carries to the
@@ -69,7 +69,7 @@ export const SITE_ACCESS_NOTICE =
   'Picking an element on a site gives Web Alchemist lasting access to that site. The access stays until it is removed under Site access on the settings page.'
 
 export const EXCLUSION_NOTICE =
-  'Sites on the excluded list are never read, and picking and generating are turned off on them. The list is under Excluded sites on the settings page and starts empty. Before text from a page with password or payment fields is sent, a warning asks for confirmation.'
+  'On sites on the excluded list, which also covers their subdomains, Web Alchemist does not pick elements, does not generate transforms, does not run saved JavaScript transforms, does not apply saved CSS, does not count transforms on the toolbar badge, does not check whether transforms still work, and does not load its content script. A page that is already open keeps the changes that were made before the site was added, until it is reloaded. The list is under Excluded sites on the settings page and starts empty. Before text from a page with password or payment fields is sent, a warning asks for confirmation.'
 
 /** The heading and text of one part of the disclosure. */
 export interface DisclosureSection {

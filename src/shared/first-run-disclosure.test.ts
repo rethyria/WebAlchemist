@@ -31,7 +31,7 @@ describe('what the text says', () => {
     ['Firefox does not enforce the network restriction', /does not enforce a network restriction/],
     ['approving the code is the main protection', /Approving the code is the main protection/],
     ['static analysis and a second model, neither complete', /static analysis[\s\S]*second model\. Neither check is complete/],
-    ['CSS is checked for addresses', /CSS is checked for addresses that it would load/],
+    ['what the excluded list stops', /does not run saved JavaScript transforms, does not apply saved CSS, does not count transforms on the toolbar badge, does not check whether transforms still work, and does not load its content script/],
     ['transforms are unencrypted', /stored unencrypted[\s\S]*also when a passphrase is set/],
     ['lasting access to a site, removable under Site access', /lasting access to that site[\s\S]*Site access/],
     ['the excluded list', /excluded list[\s\S]*Excluded sites[\s\S]*starts empty/],
@@ -39,6 +39,10 @@ describe('what the text says', () => {
     ['removing the extension does not revoke the key', /does not revoke it/],
   ])('states %s', (_name, pattern) => {
     expect(all).toMatch(pattern)
+  })
+
+  it('no longer says that excluded sites are never read', () => {
+    expect(all).not.toMatch(/never read/)
   })
 
   it('reuses the existing constants, so each statement has one source', () => {
@@ -199,5 +203,12 @@ describe('the sidebar holds back the model until acknowledged', () => {
     const unwrapped = sidebar.replace('describe(() => void flow.editIntent(', 'void flow.editIntent(')
     const call = unwrapped.indexOf('flow.editIntent(')
     expect(unwrapped.slice(Math.max(0, call - 80), call)).not.toMatch(/describe\(\(\) => void $/)
+  })
+})
+
+describe('the version', () => {
+  it('shows the text again to someone who accepted version 1, which said excluded sites are never read', async () => {
+    const { needsDisclosure } = await import('./disclosure-ack')
+    expect(needsDisclosure({ version: 1 })).toBe(true)
   })
 })
