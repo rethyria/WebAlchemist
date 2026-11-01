@@ -32,6 +32,7 @@ import { overlayPaletteFor } from '@shared/accents'
 import * as badge from './badge'
 import { recordRunTab, takeRunTabs, windowsWithRunTabs } from './run-tabs'
 import { isUrlOff, setHostOff } from './site-off'
+import { isApproved } from './approvals'
 import { excludedHostOf, getExcludedSites, setExcludedSites } from './excluded-sites'
 import { excludedHostFor, excludedSiteMessage } from '@shared/excluded-sites'
 import { hostOfUrl } from '@shared/site-off'
@@ -882,9 +883,36 @@ async function handle(
        * while the preview was registered (#55). The address is read from the
        * tab here and not taken from the message.
        */
-      const previewMatch = exactPagePattern(await tabUrlOf(message.tabId))
-      if (previewMatch === null) {
+      const tabUrl = await tabUrlOf(message.tabId)
+      const previewMatch = exactPagePattern(tabUrl)
+      if (tabUrl === undefined || previewMatch === null) {
         throw new Error('This page cannot be previewed, so the script was not run.')
+      }
+      // The sidebar names the address it showed the user. A tab that has since
+      // moved to another page is not the page the code was reviewed for.
+      if (withoutFragment(message.expectedUrl) !== withoutFragment(tabUrl)) {
+        throw new Error('The tab has moved to another page, so the script was not run.')
+      }
+      // The draft's own pattern says where the code is meant to run, and the
+      // preview is only for a page that pattern covers (#55).
+      if (!matchesUrl(message.transform.match, tabUrl)) {
+        throw new Error("This page is not one that the transform's sites cover, so the script was not run.")
+      }
+      await refuseExcludedUrl(tabUrl)
+      // The model review must have matched this code, world, capabilities, id
+      // and pattern. Static analysis alone is not the review. The token is not
+      // spent: the save that follows uses it.
+      if (
+        !(await isApproved(
+          message.approvalToken,
+          message.transform.code,
+          message.transform.world,
+          message.transform.capabilities,
+          { transformId: message.transform.id, match: message.transform.match },
+          { verdict: 'match' },
+        ))
+      ) {
+        throw new Error('The model review did not match this code, so the script was not run.')
       }
       const previewTransform = { ...message.transform, match: previewMatch }
 
@@ -1340,6 +1368,11 @@ void (async () => {
 })()
 
 /** Throws the message to show when the address is on the excluded list. */
+function withoutFragment(url: string): string {
+  const at = url.indexOf('#')
+  return at === -1 ? url : url.slice(0, at)
+}
+
 async function refuseExcludedUrl(url: string): Promise<void> {
   const host = await excludedHostOf(url)
   if (host !== null) throw new Error(excludedSiteMessage(host))

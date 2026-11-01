@@ -253,7 +253,7 @@
       <div class="row">
         <dt>Runs on</dt>
         <dd>
-          {where.schemes}; {where.sites}; {where.pages}.
+          {where.schemes}; {where.sites}; {where.pages}.{#if where.variants} {where.variants}{/if}
         </dd>
       </div>
       {#if result.kind === 'js'}

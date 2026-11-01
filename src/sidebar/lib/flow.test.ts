@@ -103,6 +103,7 @@ function reviewedForRun(flow: InstanceType<typeof Flow>) {
     undeclaredCapabilities: [],
     passed: true,
     model: { verdict: 'match', explanation: '' },
+    approvalToken: 'preview-token',
   }
   ;(flow as any).previewReviewFor = reviewKey(flow.result as any, flow.intent)
 }
@@ -2187,7 +2188,11 @@ describe('the world a script runs in (issue 53)', () => {
 
 describe('running JavaScript only after the model review (issue 55)', () => {
   const clean = { static: [], undeclaredCapabilities: [], passed: true }
-  const verdict = (v: string) => ({ ...clean, model: { verdict: v, explanation: 'why' } })
+  const verdict = (v: string) => ({
+    ...clean,
+    model: { verdict: v, explanation: 'why' },
+    approvalToken: 'review-token',
+  })
 
   function flowWithUnreviewedScript() {
     const flow = newFlow()
@@ -2214,6 +2219,30 @@ describe('running JavaScript only after the model review (issue 55)', () => {
     await flow.runJs()
     expect(previews().length).toBe(1)
     expect(flow.jsRan).toBe(true)
+  })
+
+  it('sends the review token and the address the tab was at with the preview (#55)', async () => {
+    const flow = flowWithUnreviewedScript()
+    ;(flow as any).url = 'https://www.example.com/page?x=1'
+    handler = (m) => ({ ok: true, data: m.type === 'review' ? verdict('match') : null })
+    await flow.reviewForPreview()
+    await flow.runJs()
+    expect(previews()[0]).toMatchObject({
+      approvalToken: 'review-token',
+      expectedUrl: 'https://www.example.com/page?x=1',
+    })
+  })
+
+  it('does not register a preview when the review came back without a token (#55)', async () => {
+    const flow = flowWithUnreviewedScript()
+    handler = (m) => ({
+      ok: true,
+      data: m.type === 'review' ? { ...verdict('match'), approvalToken: undefined } : null,
+    })
+    await flow.reviewForPreview()
+    await flow.runJs()
+    expect(previews()).toEqual([])
+    expect(flow.jsRan).toBe(false)
   })
 
   it.each(['mismatch', 'uncertain'])('does not register the preview after a verdict of %s', async (v) => {

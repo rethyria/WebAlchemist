@@ -230,8 +230,20 @@ export type Message =
    * Registers an unsaved transform and reloads the tab, so the preview runs in
    * the same world, under the same CSP, through the same harness as the saved
    * one would. A JS preview that ran some other way would not be a preview.
+   *
+   * `expectedUrl` is the address the sidebar was showing the tab at; the
+   * preview is refused when the tab is at another address (the fragment is
+   * ignored). `approvalToken` is the one the model review returned for this
+   * code, world, capabilities, transform id and match, and the review's verdict
+   * must be `match`. A preview does not spend the token.
    */
-  | { type: 'preview-js'; tabId: number; transform: Transform }
+  | {
+      type: 'preview-js'
+      tabId: number
+      transform: Transform
+      expectedUrl: string
+      approvalToken: string
+    }
   | { type: 'clear-preview-js'; id: string }
   /**
    * Captures the region now.

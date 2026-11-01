@@ -12,6 +12,8 @@
  * registers are kept in `listeners` and replaced on every boot.
  */
 
+import type { ApprovalVerdict } from './approvals'
+import { approvedPreviewMessage, type PreviewMessageInput } from './test-support/preview-approval'
 import { vi } from 'vitest'
 import { originCovers } from '@shared/site-access'
 
@@ -98,6 +100,12 @@ export interface Harness {
   allUrlsGranted: boolean
   /** Permission sets passed to `permissions.remove`. */
   permissionsRemoved: unknown[]
+  /**
+   * Completes a preview-js message with the expected address (the tab's own)
+   * and the token of a recorded review whose verdict is match. Fields the
+   * message already has are kept.
+   */
+  approvedPreview(message: PreviewMessageInput, verdict?: ApprovalVerdict): Promise<any>
   /** Loads index.ts with fresh module state, as after a suspension. */
   boot(): Promise<void>
   onMessage(message: unknown, sender?: unknown): Promise<any>
@@ -149,6 +157,8 @@ export function createHarness(): Harness {
       }
     },
     boot: async () => {},
+    approvedPreview: async (message, verdict) =>
+      approvedPreviewMessage(h.session, message, h.tabUrls.get(message.tabId), verdict),
     onMessage: async (message, sender = extensionPage) =>
       h.listeners.get('browser.runtime.onMessage')!(message, sender),
   }

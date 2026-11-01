@@ -1927,7 +1927,22 @@ export class Flow {
 
       // The background reloads the tab to run it; that reload is ours.
       this.ourReload = 'pending'
-      await send({ type: 'preview-js', tabId: this.tabId, transform: draft })
+      const approvalToken = this.currentPreviewReview?.approvalToken
+      if (!approvalToken) {
+        this.ourReload = 'none'
+        this.show({
+          kind: 'request-failed',
+          message: 'The review that allows a preview has no approval, so nothing was run. Read the code again.',
+        })
+        return
+      }
+      await send({
+        type: 'preview-js',
+        tabId: this.tabId,
+        transform: draft,
+        expectedUrl: this.url,
+        approvalToken,
+      })
       if (!current()) {
         // jsRan was still false when discard or tabClosed looked at it, so
         // neither sent the clear, and the saved script would stay paused.

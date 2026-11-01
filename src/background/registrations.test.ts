@@ -76,11 +76,11 @@ describe('user scripts at start-up', () => {
   it('keeps the registration of a script being previewed', async () => {
     h.local.set('transforms', [js()])
     await h.boot()
-    await h.onMessage({
+    await h.onMessage(await h.approvedPreview({
       type: 'preview-js',
       tabId: 5,
       transform: { ...js({ id: 'draft' }), world: 'USER_SCRIPT' },
-    })
+    }))
     expect(h.userScriptsHeld.has('preview-draft')).toBe(true)
     await h.boot()
     expect(h.userScriptsHeld.has('preview-draft')).toBe(true)
@@ -92,11 +92,11 @@ describe('a saved script whose edit is being previewed, at start-up', () => {
     h.local.set('transforms', [js()])
     await h.boot()
     expect(h.userScriptsHeld.has('script-1')).toBe(true)
-    await h.onMessage({
+    await h.onMessage(await h.approvedPreview({
       type: 'preview-js',
       tabId: 5,
       transform: { ...js({ code: 'document.title = "draft"' }), world: 'USER_SCRIPT' },
-    })
+    }))
     expect(h.userScriptsHeld.has('script-1')).toBe(false)
     await h.boot()
     expect(h.userScriptsHeld.has('script-1')).toBe(false)
@@ -106,11 +106,11 @@ describe('a saved script whose edit is being previewed, at start-up', () => {
   it('is registered again when the preview is cleared after the start-up', async () => {
     h.local.set('transforms', [js()])
     await h.boot()
-    await h.onMessage({
+    await h.onMessage(await h.approvedPreview({
       type: 'preview-js',
       tabId: 5,
       transform: { ...js({ code: 'document.title = "draft"' }), world: 'USER_SCRIPT' },
-    })
+    }))
     await h.boot()
     await h.onMessage({ type: 'clear-preview-js', id: 'script-1' })
     expect(h.userScriptsHeld.has('preview-script-1')).toBe(false)
@@ -124,7 +124,7 @@ describe('the pages a JavaScript preview is registered for (#55)', () => {
   it('is the page of the tab and no other page of the site', async () => {
     h.tabUrls.set(3, 'https://www.example.com/shop/item?id=4')
     await h.boot()
-    await h.onMessage({ type: 'preview-js', tabId: 3, transform: draft() })
+    await h.onMessage(await h.approvedPreview({ type: 'preview-js', tabId: 3, transform: draft() }))
     const matches: string[] = h.userScriptsHeld.get('preview-draft').matches
     expect(matches.length).toBeGreaterThan(0)
     expect(matches.every((m) => m.startsWith('https://www.example.com/shop/item'))).toBe(true)
@@ -133,7 +133,7 @@ describe('the pages a JavaScript preview is registered for (#55)', () => {
   it('is not taken from the address in the message', async () => {
     h.tabUrls.set(3, 'https://www.example.com/a')
     await h.boot()
-    await h.onMessage({ type: 'preview-js', tabId: 3, transform: draft() })
+    await h.onMessage(await h.approvedPreview({ type: 'preview-js', tabId: 3, transform: draft() }))
     // The only wildcard is the query suffix the registry adds to every path.
     const matches: string[] = h.userScriptsHeld.get('preview-draft').matches
     expect(matches.every((m) => m.replace(/\?\*$/, '').startsWith('https://www.example.com/a') && !m.replace(/\?\*$/, '').includes('*'))).toBe(true)
@@ -142,7 +142,7 @@ describe('the pages a JavaScript preview is registered for (#55)', () => {
   it('refuses a tab whose page cannot be written as an exact pattern', async () => {
     h.tabUrls.set(3, 'about:blank')
     await h.boot()
-    const reply = await h.onMessage({ type: 'preview-js', tabId: 3, transform: draft() })
+    const reply = await h.onMessage(await h.approvedPreview({ type: 'preview-js', tabId: 3, transform: draft() }))
     expect(reply.ok).toBe(false)
     expect(reply.error.message).toMatch(/cannot be previewed/)
     expect(h.userScriptsHeld.has('preview-draft')).toBe(false)
@@ -259,7 +259,7 @@ describe('a preview that starts while the registrations are being rebuilt (#91)'
     const release = h.hold('browser.userScripts.getScripts', { firstCallOnly: true })
     const rebuilt = h.onMessage({ type: 'save-settings', settings })
     await settle()
-    const previewed = h.onMessage({ type: 'preview-js', tabId: 3, transform: draft() })
+    const previewed = h.onMessage(await h.approvedPreview({ type: 'preview-js', tabId: 3, transform: draft() }))
     await settle()
     release()
     await Promise.all([rebuilt, previewed])
@@ -278,7 +278,7 @@ describe('a preview that starts while the registrations are being rebuilt (#91)'
     await h.boot()
     const settings = (await h.onMessage({ type: 'get-settings' })).data
     await h.onMessage({ type: 'save-settings', settings })
-    await h.onMessage({ type: 'preview-js', tabId: 3, transform: draft() })
+    await h.onMessage(await h.approvedPreview({ type: 'preview-js', tabId: 3, transform: draft() }))
     expect(h.userScriptsHeld.has('preview-draft')).toBe(true)
   })
 })
@@ -291,7 +291,7 @@ describe('a preview that ends while the registrations are being rebuilt (#91)', 
   async function endDuringRebuild(end: () => Promise<unknown>) {
     h.local.set('transforms', [js()])
     await h.boot()
-    await h.onMessage({ type: 'preview-js', tabId: 3, transform: draft() })
+    await h.onMessage(await h.approvedPreview({ type: 'preview-js', tabId: 3, transform: draft() }))
     expect(h.userScriptsHeld.has('preview-script-1')).toBe(true)
     const settings = (await h.onMessage({ type: 'get-settings' })).data
     const release = h.hold('browser.userScripts.getScripts', { firstCallOnly: true })
@@ -314,7 +314,7 @@ describe('a preview that ends while the registrations are being rebuilt (#91)', 
   it('control: clear-preview-js with no rebuild running restores the saved script', async () => {
     h.local.set('transforms', [js()])
     await h.boot()
-    await h.onMessage({ type: 'preview-js', tabId: 3, transform: draft() })
+    await h.onMessage(await h.approvedPreview({ type: 'preview-js', tabId: 3, transform: draft() }))
     await h.onMessage({ type: 'clear-preview-js', id: 'script-1' })
     expect(h.userScriptsHeld.has('script-1')).toBe(true)
   })

@@ -98,9 +98,14 @@ export function cspForCapabilities(capabilities: Capability[]): string {
  * file: are never included, which is why the pattern is not passed through as
  * `*://`.
  */
-export function matchPatternsFor(transform: Transform): string[] {
+export function matchPatternsFor(
+  transform: Transform,
+  options: { exactPath?: boolean } = {},
+): string[] {
   const { scheme, host, path } = parsePattern(transform.match)
-  const bares = pathsFor(path).map((variant) => `${host}${variant}`)
+  // A preview is registered for the one address it was given, with none of the
+  // trailing-slash or query forms that pathsFor adds for a saved script (#55).
+  const bares = (options.exactPath ? [path] : pathsFor(path)).map((variant) => `${host}${variant}`)
   const forScheme = (name: string) => bares.map((bare) => `${name}://${bare}`)
   switch (scheme) {
     case 'http':
@@ -175,7 +180,7 @@ export async function hasUserScriptsPermission(): Promise<boolean> {
  */
 async function registrationFor(
   transform: Transform,
-  options: { skipAnalysis?: boolean } = {},
+  options: { skipAnalysis?: boolean; exactPath?: boolean } = {},
 ): Promise<{ registration: Mv3RegisteredUserScript | null; blocked: boolean }> {
   const none = { registration: null, blocked: false }
   if (transform.kind !== 'js' || !transform.enabled || !transform.code) return none
@@ -197,7 +202,7 @@ async function registrationFor(
   return {
     registration: {
       id: transform.id,
-      matches: matchPatternsFor(transform),
+      matches: matchPatternsFor(transform, { exactPath: options.exactPath === true }),
       // The per-site off switch and the excluded sites (#131). The registration
       // stays, so that turning a site back on needs no re-registration of
       // anything else.
@@ -231,7 +236,7 @@ async function configureWorldFor(transform: Transform): Promise<void> {
  */
 async function registerTransformNow(
   transform: Transform,
-  options: { skipAnalysis?: boolean } = {},
+  options: { skipAnalysis?: boolean; exactPath?: boolean } = {},
 ): Promise<boolean> {
   const { registration, blocked } = await registrationFor(transform, options)
   if (!registration) {
@@ -322,11 +327,14 @@ async function registerPreviewScript(transform: Transform): Promise<void> {
   // analysis refuses the code. A preview that was refused has to fail here:
   // returning normally would let the caller reload the page and report a run
   // that never happened.
-  const registered = await registerTransformNow({
-    ...transform,
-    enabled: true,
-    id: previewIdFor(transform.id),
-  })
+  const registered = await registerTransformNow(
+    {
+      ...transform,
+      enabled: true,
+      id: previewIdFor(transform.id),
+    },
+    { exactPath: true },
+  )
   if (!registered) {
     throw new Error('This code did not pass the safety check, so it was not run.')
   }

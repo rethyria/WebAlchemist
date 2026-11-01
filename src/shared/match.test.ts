@@ -239,8 +239,19 @@ describe('originPermissionFor', () => {
 })
 
 describe('exactPagePattern', () => {
-  it('keeps the scheme, host and path and drops the query and fragment', () => {
-    expect(exactPagePattern('https://www.example.com/a/b?q=1#top')).toBe('https://www.example.com/a/b')
+  it('keeps the scheme, host, path and query and drops the fragment', () => {
+    expect(exactPagePattern('https://www.example.com/a/b?q=1#top')).toBe('https://www.example.com/a/b?q=1')
+    expect(exactPagePattern('https://www.example.com/a/b#top')).toBe('https://www.example.com/a/b')
+  })
+
+  it('does not cover the same path with another query (#55)', () => {
+    const pattern = exactPagePattern('https://www.example.com/watch?v=abc')!
+    expect(matchesUrl(pattern, 'https://www.example.com/watch?v=abc')).toBe(true)
+    expect(matchesUrl(pattern, 'https://www.example.com/watch?v=other')).toBe(false)
+  })
+
+  it('refuses a `*` in the query, which would widen the pattern (#55)', () => {
+    expect(exactPagePattern('https://example.com/a?q=*')).toBeNull()
   })
 
   it('does not cover another subdomain or another path', () => {
@@ -256,6 +267,23 @@ describe('exactPagePattern', () => {
     expect(exactPagePattern('not a url')).toBeNull()
     // A `*` in the path would be read as a wildcard and widen the pattern.
     expect(exactPagePattern('https://example.com/a*b')).toBeNull()
+  })
+})
+
+describe('describeMatch variants (#55)', () => {
+  it('says that a pattern without a query also covers any query and the trailing-slash form', () => {
+    expect(describeMatch('https://example.com/a').variants).toMatch(/any query string.*trailing slash/)
+  })
+
+  it('says only the trailing-slash form when the pattern has a query', () => {
+    const variants = describeMatch('https://example.com/a?x=1').variants
+    expect(variants).toMatch(/trailing slash/)
+    expect(variants).not.toMatch(/any query/)
+  })
+
+  it('says nothing for a pattern with a wildcard path', () => {
+    expect(describeMatch('https://example.com/a*').variants).toBeUndefined()
+    expect(describeMatch('https://example.com/*').variants).toBeUndefined()
   })
 })
 
