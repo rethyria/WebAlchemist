@@ -37,7 +37,7 @@ import type { ScrollOffset } from './region'
 import type { OverlayPalette } from './accents'
 import type { RefinementTurn, ReviewInstruction } from '@background/providers/types'
 import type { ExportBundle, ImportResult } from '@background/storage'
-import type { PlannedTransform } from '@background/transfer'
+import type { BackupSettings, ExportMode, PlannedTransform } from '@background/transfer'
 
 /**
  * What a confirmed pick means.
@@ -160,7 +160,11 @@ export type Message =
   | { type: 'reapply-everywhere'; id: string }
   /** `tabId` re-applies in the new precedence now rather than on reload. */
   | { type: 'reorder-transforms'; orderedIds: string[]; tabId?: number }
-  | { type: 'set-enabled'; id: string; enabled: boolean; tabId?: number }
+  /**
+   * Turning on JavaScript restored from a backup needs `approvalToken`, from
+   * `approve-code` for the stored code, world, capabilities, id and match pattern.
+   */
+  | { type: 'set-enabled'; id: string; enabled: boolean; tabId?: number; approvalToken?: string }
 
   /* --- settings and credentials ------------------------------------- */
   | { type: 'save-settings'; settings: Settings }
@@ -318,9 +322,11 @@ export type Message =
   | { type: 'clear-csp-probe' }
 
   /* --- portability --------------------------------------------------- */
-  | { type: 'export-transforms' }
+  /** `mode` defaults to a share, which carries no JavaScript code. */
+  | { type: 'export-transforms'; mode?: ExportMode }
   | { type: 'preview-import'; bundle: unknown }
-  | { type: 'import-transforms'; bundle: unknown }
+  /** `restoreSettings` applies the accent and health check mode of a backup. */
+  | { type: 'import-transforms'; bundle: unknown; restoreSettings?: boolean }
 
 /** Sent from background to content script. */
 export type ContentMessage =
@@ -493,7 +499,7 @@ export interface Responses {
   'preview-js': boolean
   'clear-preview-js': boolean
   'export-transforms': ExportBundle
-  'preview-import': { items: PlannedTransform[] }
+  'preview-import': { mode: ExportMode; items: PlannedTransform[]; settings: BackupSettings | null }
   'import-transforms': ImportResult
   'capture-region': {
     dataUrl: string

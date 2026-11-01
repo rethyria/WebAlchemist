@@ -1,6 +1,11 @@
 <script lang="ts">
   import type { Conflict, Transform, TransformRuntimeState } from '@shared/types'
-  import { NEEDS_REGENERATING_NOTE, needsRegenerating, toggleOutcome } from '@shared/transform-state'
+  import {
+    AWAITING_APPROVAL_NOTE,
+    NEEDS_REGENERATING_NOTE,
+    needsRegenerating,
+    toggleOutcome,
+  } from '@shared/transform-state'
   import Toggle from './Toggle.svelte'
 
   interface Props {
@@ -21,6 +26,12 @@
     hasAccess: boolean
     /** Requests the missing origin. Called from the click, before any await. */
     ongrant: () => void
+    /**
+     * Approves the stored code of JavaScript restored from a backup and turns
+     * it on. Called from the click, before any await, because it may need to
+     * request the user scripts permission.
+     */
+    onapprove: () => void
     ontoggle: (enabled: boolean) => void
     onexpand: () => void
     onrename: (name: string) => void
@@ -52,6 +63,7 @@
     dragging,
     hasAccess,
     ongrant,
+    onapprove,
     ontoggle,
     onexpand,
     onrename,
@@ -86,9 +98,17 @@
   let explainOff = $state(false)
   let imported = $derived(transform.origin === 'imported')
 
+  /* Restored JavaScript waits for the user to read its code and approve it. */
+  let approving = $state(false)
+
   function onToggle(enabled: boolean) {
-    if (toggleOutcome(transform, enabled) === 'explain') {
+    const outcome = toggleOutcome(transform, enabled)
+    if (outcome === 'explain') {
       explainOff = true
+      return
+    }
+    if (outcome === 'approve') {
+      approving = true
       return
     }
     explainOff = false
@@ -246,6 +266,40 @@
       </span>
       <button type="button" class="secondary" onclick={oneditintent}>Review description</button>
     </div>
+  {/if}
+
+  {#if transform.awaitsApproval && !regenerates}
+    <div class="no-access" role="status">
+      <span>{approving ? AWAITING_APPROVAL_NOTE : 'Restored from a backup. It stays off until its code is approved.'}</span>
+      {#if !approving}
+        <button type="button" class="secondary" onclick={() => (approving = true)}>
+          Review code
+        </button>
+      {/if}
+    </div>
+    {#if approving}
+      <div class="approval">
+        <pre>{transform.code}</pre>
+        {#if transform.capabilities.length > 0}
+          <p>It declares these capabilities: {transform.capabilities.join(', ')}.</p>
+        {/if}
+        <div class="actions">
+          <button
+            type="button"
+            class="primary"
+            onclick={() => {
+              approving = false
+              onapprove()
+            }}
+          >
+            Approve and turn on
+          </button>
+          <button type="button" class="secondary" onclick={() => (approving = false)}>
+            Cancel
+          </button>
+        </div>
+      </div>
+    {/if}
   {/if}
 
   {#if expanded}
@@ -496,6 +550,27 @@
   .no-access button {
     padding: 3px 8px;
     font-weight: 400;
+  }
+
+  .approval {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 0 var(--gutter-sidebar) 9px var(--indent-expanded);
+    font: 11.5px/1.5 var(--font-ui);
+  }
+
+  .approval pre {
+    max-height: 220px;
+    overflow: auto;
+    margin: 0;
+    font: 11px/1.5 var(--font-mono);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+
+  .approval p {
+    margin: 0;
   }
 
   .body {

@@ -67,7 +67,15 @@ import { MIN_PASSPHRASE_LENGTH } from '@shared/vault-policy'
 import { assertEndpoint, endpointsOf } from '@shared/endpoint-policy'
 import { destinationOf, sameBinding } from '@shared/credential-binding'
 import type { Provider, TransformVersion } from '@shared/types'
-import { planImport, type PlanDeps, type PlannedTransform } from './transfer'
+import {
+  backupSettingsOf,
+  planImport,
+  settingsFieldsOf,
+  type BackupSettings,
+  type ExportMode,
+  type PlanDeps,
+  type PlannedTransform,
+} from './transfer'
 
 const KEY_SETTINGS = 'settings'
 const KEY_TRANSFORMS = 'transforms'
@@ -451,8 +459,20 @@ export function saveTransform(transform: Transform): Promise<Transform> {
     const { valid: all, invalid } = await readStored()
     const index = all.findIndex((t) => t.id === transform.id)
     const existing = index === -1 ? undefined : all[index]
+    // A record is waiting for approval only while its stored code is the code
+    // restored from the backup. The flag is decided here from the stored
+    // record, not taken from the caller: a save of changed code has been
+    // approved (the handler requires a token for it) and clears the flag, and
+    // a rename keeps it.
+    const { awaitsApproval: _sent, ...sent } = transform
+    const stillWaiting =
+      existing?.awaitsApproval === true &&
+      existing.code === transform.code &&
+      existing.match === transform.match &&
+      (existing.world ?? 'USER_SCRIPT') === (transform.world ?? 'USER_SCRIPT')
     const next = {
-      ...transform,
+      ...sent,
+      ...(stillWaiting ? { awaitsApproval: true as const } : {}),
       ...(existing && {
         order: existing.order,
         enabled: existing.enabled,
@@ -484,13 +504,16 @@ export function saveTransform(transform: Transform): Promise<Transform> {
  */
 export function updateTransform(
   id: string,
-  patch: Partial<Omit<Transform, 'id'>>,
+  patch: Partial<Omit<Transform, 'id' | 'awaitsApproval'>> & { awaitsApproval?: true | null },
 ): Promise<Transform | null> {
   return mutateTransforms(async () => {
     const { valid: all, invalid } = await readStored()
     const index = all.findIndex((t) => t.id === id)
     if (index === -1) return null
-    const next = { ...all[index]!, ...patch, id, updatedAt: Date.now() }
+    const { awaitsApproval, ...fields } = patch
+    const next: Transform = { ...all[index]!, ...fields, id, updatedAt: Date.now() }
+    // `null` clears the flag; leaving it out keeps what is stored.
+    if (awaitsApproval === null) delete next.awaitsApproval
     assertValidTransform(next)
     if (versionedFieldsDiffer(all[index]!, next)) await recordVersion(all[index]!)
     all[index] = next
@@ -1190,21 +1213,43 @@ export interface ExportBundle {
   format?: typeof EXPORT_FORMAT
   schemaVersion: number
   exportedAt: number
+  /** Absent in files written before backups existed, which are shares. */
+  mode?: ExportMode
   transforms: Transform[]
+  /** Present in a backup only. See backupSettingsOf for what a restore applies. */
+  settings?: BackupSettings
 }
 
 /**
- * The file a user shares. JavaScript is exported as its description only, with
- * no code: the file holds what the transform is for and where it applies, and
- * the person who imports it generates and reviews code of their own.
- * Credentials and provider settings are never included.
+ * The file a user shares, or backs up to.
+ *
+ * A share holds JavaScript as its description only, with no code: the file
+ * says what the transform is for and where it applies, and the person who
+ * imports it generates and reviews code of their own. A backup holds the
+ * JavaScript code too, and the accent and health check settings, so that the
+ * user's own set can be restored on another computer; restoring it still asks
+ * for approval of each script (see importTransforms). Credentials, providers
+ * and their addresses are in neither.
  */
-export async function exportTransforms(): Promise<ExportBundle> {
+export async function exportTransforms(mode: ExportMode = 'share'): Promise<ExportBundle> {
+  const transforms = await getAllTransforms()
+  if (mode === 'share') {
+    return {
+      format: EXPORT_FORMAT,
+      schemaVersion: SCHEMA_VERSION,
+      exportedAt: Date.now(),
+      mode,
+      transforms: transforms.map((t) => (t.kind === 'js' ? { ...t, code: '' } : t)),
+    }
+  }
+  const { accent, healthCheckMode } = await getSettings()
   return {
     format: EXPORT_FORMAT,
     schemaVersion: SCHEMA_VERSION,
     exportedAt: Date.now(),
-    transforms: (await getAllTransforms()).map((t) => (t.kind === 'js' ? { ...t, code: '' } : t)),
+    mode,
+    transforms,
+    settings: { accent, healthCheckMode },
   }
 }
 
@@ -1218,6 +1263,8 @@ export interface ImportResult {
   needsRegeneration: string[]
   /** What was decided for each record in the file, in file order. */
   items: PlannedTransform[]
+  /** True when settings from a backup were applied. */
+  settingsRestored: boolean
 }
 
 /** Throws unless the value is a file this version can read. */
@@ -1240,6 +1287,9 @@ function assertReadableBundle(bundle: unknown): asserts bundle is ExportBundle {
   }
 }
 
+/** Whether a file is a backup: the kind that carries JavaScript code. */
+const modeOf = (bundle: ExportBundle): ExportMode => (bundle.mode === 'backup' ? 'backup' : 'share')
+
 /**
  * What an import of this file would do, without storing anything. The same
  * planning runs in importTransforms, against the transforms stored at that
@@ -1247,41 +1297,55 @@ function assertReadableBundle(bundle: unknown): asserts bundle is ExportBundle {
  */
 export async function previewImport(
   bundle: unknown,
-  cssProblem: PlanDeps['cssProblem'],
-): Promise<{ items: PlannedTransform[] }> {
+  checks: Pick<PlanDeps, 'cssProblem' | 'jsProblem'>,
+): Promise<{ mode: ExportMode; items: PlannedTransform[]; settings: BackupSettings | null }> {
   assertReadableBundle(bundle)
   const { valid } = await readStored()
-  const plan = await planImport(bundle.transforms, valid, { isValid: isValidTransform, cssProblem }, Date.now())
-  return { items: plan.items }
+  const mode = modeOf(bundle)
+  const plan = await planImport(
+    bundle.transforms,
+    valid,
+    { isValid: isValidTransform, ...checks },
+    Date.now(),
+    mode,
+  )
+  return { mode, items: plan.items, settings: mode === 'backup' ? backupSettingsOf(bundle) : null }
 }
 
 /**
  * Imports a bundle as records this extension decides about (see
  * sanitiseIncoming): disabled, marked as imported, in the user script world,
- * with no capabilities and no JavaScript code. CSS arrives with its code unless
- * `cssProblem` reports that it fails the CSS check, which is how CSS can send
- * page data to another server, so the caller checks it. A record whose content
- * is already saved is skipped.
+ * with no capabilities. A share carries no JavaScript code. A backup keeps it,
+ * after static analysis, and marks the record as awaiting approval, so it
+ * cannot be turned on until the user has read and approved that code. CSS
+ * arrives with its code unless `cssProblem` reports that it fails the CSS
+ * check, which is how CSS can send page data to another server, so the caller
+ * checks it. A record whose content is already saved is skipped. With
+ * `restoreSettings`, the accent and health check mode of a backup are applied.
  */
 export function importTransforms(
   bundle: unknown,
-  cssProblem: PlanDeps['cssProblem'] = () => null,
+  checks: Pick<PlanDeps, 'cssProblem' | 'jsProblem'> = { cssProblem: () => null, jsProblem: () => null },
+  restoreSettings = false,
 ): Promise<ImportResult> {
-  return mutateTransforms(() => importTransformsNow(bundle, cssProblem))
+  return mutateTransforms(() => importTransformsNow(bundle, checks, restoreSettings))
 }
 
 async function importTransformsNow(
   bundle: unknown,
-  cssProblem: PlanDeps['cssProblem'],
+  checks: Pick<PlanDeps, 'cssProblem' | 'jsProblem'>,
+  restoreSettings: boolean,
 ): Promise<ImportResult> {
   assertReadableBundle(bundle)
 
   const { valid: existing, invalid } = await readStored()
+  const mode = modeOf(bundle)
   const plan = await planImport(
     bundle.transforms,
     existing,
-    { isValid: isValidTransform, cssProblem },
+    { isValid: isValidTransform, ...checks },
     Date.now(),
+    mode,
   )
   // After the highest value in use, not after the count: values are not
   // consecutive (new transforms are numbered by time), and a count can equal one.
@@ -1295,11 +1359,16 @@ async function importTransformsNow(
   }
 
   await writeTransforms(existing, invalid)
+
+  const settings = restoreSettings && mode === 'backup' ? backupSettingsOf(bundle) : null
+  if (settings) await changeSettings({ kind: 'fields', fields: settingsFieldsOf(settings) })
+
   return {
     imported: plan.records.length,
     skipped: plan.items.filter((item) => item.status === 'refused').length,
     duplicates: plan.items.filter((item) => item.status === 'duplicate').length,
     needsRegeneration,
     items: plan.items,
+    settingsRestored: settings !== null,
   }
 }

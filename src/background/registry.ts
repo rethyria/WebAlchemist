@@ -177,6 +177,9 @@ async function registrationFor(
 ): Promise<{ registration: Mv3RegisteredUserScript | null; blocked: boolean }> {
   const none = { registration: null, blocked: false }
   if (transform.kind !== 'js' || !transform.enabled || !transform.code) return none
+  // Restored code that the user has not approved never runs, whatever its
+  // enabled flag says (#124).
+  if (transform.awaitsApproval) return none
 
   const settings = await getSettings()
   // The switch covers hand-written scripts too: the user's own code can break

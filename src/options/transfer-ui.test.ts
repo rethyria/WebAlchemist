@@ -105,7 +105,14 @@ describe('the host permission request for an import', () => {
 })
 
 describe('what the user is told after an import', () => {
-  const result = { imported: 2, skipped: 1, duplicates: 1, needsRegeneration: ['x'], items: [] }
+  const result = {
+    imported: 2,
+    skipped: 1,
+    duplicates: 1,
+    needsRegeneration: ['x'],
+    items: [] as PlannedTransform[],
+    settingsRestored: false,
+  }
 
   it('says how many were imported, that they are off, and what needs regenerating', () => {
     const text = describeResult(result, true)
@@ -114,6 +121,25 @@ describe('what the user is told after an import', () => {
     expect(text).toContain('1 transform already saved and skipped.')
     expect(text).toContain('1 transform refused.')
     expect(text).not.toContain('No access')
+  })
+
+  it('says how many scripts wait for approval and that settings were restored', () => {
+    const text = describeResult(
+      {
+        ...result,
+        settingsRestored: true,
+        items: [item({ kind: 'js', needsApproval: true, code: 'x()' }), item({})],
+      },
+      true,
+    )
+    expect(text).toContain('1 transform was restored with JavaScript code. Each stays off until')
+    expect(text).toContain('The accent colour and health check mode were restored.')
+  })
+
+  it('does not mention approval or settings when there are none (control)', () => {
+    const text = describeResult(result, true)
+    expect(text).not.toContain('approved')
+    expect(text).not.toContain('accent')
   })
 
   it('says the sites have no access when the request was refused', () => {

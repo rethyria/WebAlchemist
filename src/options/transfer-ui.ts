@@ -83,6 +83,13 @@ export function describeResult(result: ImportResult, accessGranted: boolean): st
       `${count(result.needsRegeneration.length)} ${result.needsRegeneration.length === 1 ? 'has' : 'have'} no code and ${result.needsRegeneration.length === 1 ? 'needs' : 'need'} regenerating from the description.`,
     )
   }
+  const awaiting = result.items.filter((item) => item.status === 'import' && item.needsApproval).length
+  if (awaiting > 0) {
+    parts.push(
+      `${count(awaiting)} ${awaiting === 1 ? 'was' : 'were'} restored with JavaScript code. Each stays off until its code has been read and approved in the sidebar.`,
+    )
+  }
+  if (result.settingsRestored) parts.push('The accent colour and health check mode were restored.')
   if (result.duplicates > 0) parts.push(`${count(result.duplicates)} already saved and skipped.`)
   if (result.skipped > 0) parts.push(`${count(result.skipped)} refused.`)
   if (!accessGranted && result.imported > 0) {

@@ -9,7 +9,7 @@
    * requested in one prompt from the confirm click.
    */
   import type { ExportBundle, ImportResult } from '@background/storage'
-  import type { PlannedTransform } from '@background/transfer'
+  import type { BackupSettings, ExportMode, PlannedTransform } from '@background/transfer'
   import Button from '@sidebar/components/Button.svelte'
   import {
     describeResult,
@@ -32,17 +32,20 @@
   let fileName = $state('')
   let bundle = $state<unknown>(null)
   let items = $state<PlannedTransform[]>([])
+  let previewMode = $state<ExportMode>('share')
+  let previewSettings = $state<BackupSettings | null>(null)
+  let restoreSettings = $state(false)
   let fileInput: HTMLInputElement | undefined = $state()
 
   const importable = $derived(items.filter((item) => item.status === 'import'))
 
-  async function runExport() {
+  async function runExport(mode: ExportMode) {
     error = null
     notice = null
     busy = true
     try {
-      const exported = await call<ExportBundle>({ type: 'export-transforms' })
-      downloadText(JSON.stringify(exported, null, 2), exportFileName('share', new Date()), {
+      const exported = await call<ExportBundle>({ type: 'export-transforms', mode })
+      downloadText(JSON.stringify(exported, null, 2), exportFileName(mode, new Date()), {
         createObjectURL: (blob) => URL.createObjectURL(blob),
         revokeObjectURL: (url) => URL.revokeObjectURL(url),
         createAnchor: () => document.createElement('a'),
@@ -67,12 +70,19 @@
     busy = true
     try {
       const parsed = parseBundleText(await file.text())
-      const preview = await call<{ items: PlannedTransform[] }>({
+      const preview = await call<{
+        mode: ExportMode
+        items: PlannedTransform[]
+        settings: BackupSettings | null
+      }>({
         type: 'preview-import',
         bundle: parsed,
       })
       bundle = parsed
       items = preview.items
+      previewMode = preview.mode
+      previewSettings = preview.settings
+      restoreSettings = false
       fileName = file.name
     } catch (cause) {
       error = String(cause instanceof Error ? cause.message : cause)
@@ -85,6 +95,8 @@
     bundle = null
     items = []
     fileName = ''
+    previewSettings = null
+    restoreSettings = false
   }
 
   /*
@@ -103,7 +115,11 @@
     busy = true
     try {
       const granted = await access
-      const result = await call<ImportResult>({ type: 'import-transforms', bundle })
+      const result = await call<ImportResult>({
+        type: 'import-transforms',
+        bundle,
+        restoreSettings: restoreSettings && previewSettings !== null,
+      })
       notice = describeResult(result, granted)
       cancel()
     } catch (cause) {
@@ -119,14 +135,17 @@
 <section>
   <h2>Export and import</h2>
   <p class="subtitle">
-    Export saves your transforms to a JSON file that can be shared. JavaScript is saved as its
-    description only, without code. The file holds the text and addresses taken from pages the
-    transforms were written for, and it is not encrypted. Credentials are never included.
+    Export to share saves your transforms to a JSON file that can be given to someone else.
+    JavaScript is saved as its description only, without code. Back up also saves the JavaScript
+    code and the accent colour and health check mode, so that the set can be restored on another
+    computer. Neither file contains credentials or provider settings. Both files hold text and
+    addresses taken from the pages the transforms were written for, and they are not encrypted.
   </p>
   <p class="subtitle">
     Import reads such a file and shows what it would add before anything is saved. Imported
-    transforms are always turned off, and imported JavaScript has no code until its description
-    has been read and the code has been generated and reviewed here.
+    transforms are always turned off. Imported JavaScript from a shared file has no code until
+    its description has been read and code has been generated and reviewed here. JavaScript code
+    from a backup stays off until the code has been read and approved.
   </p>
 
   {#if error}
@@ -137,7 +156,8 @@
   {/if}
 
   <div class="buttons">
-    <Button disabled={busy} onclick={() => void runExport()}>Export transforms</Button>
+    <Button disabled={busy} onclick={() => void runExport('share')}>Export to share</Button>
+    <Button disabled={busy} onclick={() => void runExport('backup')}>Back up</Button>
     <Button disabled={busy} onclick={() => fileInput?.click()}>Import from file</Button>
     <input
       bind:this={fileInput}
@@ -152,6 +172,13 @@
   {#if bundle !== null}
     <div class="preview">
       <h3>Contents of {fileName}</h3>
+      {#if previewMode === 'backup'}
+        <p class="subtitle">
+          This file is a backup. JavaScript code in it is restored, but each script stays off
+          until its code has been read and approved. Code that fails the static analysis is not
+          restored.
+        </p>
+      {/if}
       {#if items.length === 0}
         <p class="subtitle">The file holds no transforms.</p>
       {:else}
@@ -168,8 +195,17 @@
               {:else if item.status === 'duplicate'}
                 <p>Will be skipped. {item.reason}</p>
               {:else}
-                {#if item.kind === 'js'}
-                  <p>Code not imported; will need regenerating.</p>
+                {#if item.needsApproval}
+                  <p>Code restored; it stays off until you approve it.</p>
+                  <details>
+                    <summary>Show code</summary>
+                    <pre>{item.code}</pre>
+                  </details>
+                {:else if item.kind === 'js'}
+                  <p>
+                    {item.reason ?? 'Code not imported; will need regenerating.'}
+                    {item.reason ? ' It will need regenerating.' : ''}
+                  </p>
                 {:else if item.needsRegeneration}
                   <p class="problem">{item.reason} It will need regenerating.</p>
                 {/if}
@@ -182,6 +218,13 @@
             </li>
           {/each}
         </ul>
+        {#if previewSettings}
+          <label class="check">
+            <input type="checkbox" bind:checked={restoreSettings} />
+            Also restore the accent colour ({previewSettings.accent}) and the health check mode
+            ({previewSettings.healthCheckMode})
+          </label>
+        {/if}
         <p class="subtitle">
           {importable.length === 0
             ? 'Nothing in this file can be imported.'
@@ -271,6 +314,29 @@
 
   .quiet {
     color: var(--text-faint);
+  }
+
+  .check {
+    display: flex;
+    gap: var(--sp-7);
+    margin: 0 0 var(--sp-9);
+    font: 12px/1.5 var(--font-ui);
+  }
+
+  details {
+    margin: var(--sp-5) 0 0;
+    font: 11.5px var(--font-ui);
+  }
+
+  pre {
+    max-height: 240px;
+    overflow: auto;
+    margin: var(--sp-5) 0 0;
+    padding: var(--sp-7);
+    border: 1px solid var(--border);
+    font: 11.5px/1.5 var(--font-mono);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
   }
 
   .line {

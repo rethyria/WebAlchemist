@@ -26,7 +26,7 @@ import type {
   Transform,
   TransformRuntimeState,
 } from '@shared/types'
-import { NEEDS_REGENERATING_NOTE, needsRegenerating } from '@shared/transform-state'
+import { AWAITING_APPROVAL_NOTE, NEEDS_REGENERATING_NOTE, needsRegenerating } from '@shared/transform-state'
 import type { RefinementTurn, ReviewInstruction } from './providers/types'
 import { overlayPaletteFor } from '@shared/accents'
 import * as badge from './badge'
@@ -36,7 +36,8 @@ import { excludedHostOf, getExcludedSites, setExcludedSites } from './excluded-s
 import { excludedSiteMessage } from '@shared/excluded-sites'
 import { hostOfUrl } from '@shared/site-off'
 import { isSidebarPortName, windowOfSidebarPort } from '@shared/sidebar-port'
-import { blockedStates, runStaticAnalysis } from './code-gate'
+import { isApproved, spendApproval } from './approvals'
+import { blockedStates, runStaticAnalysis, staticProblem } from './code-gate'
 import { checkCssForPage, checkCssTransform, pageUrlFor, sameCssContext } from './css-gate'
 import {
   applyCssTransforms as applyCssTransformsFor,
@@ -719,10 +720,30 @@ async function handle(
       if (message.enabled) {
         const stored = (await getAllTransforms()).find((t) => t.id === message.id)
         if (stored && needsRegenerating(stored)) throw new Error(NEEDS_REGENERATING_NOTE)
+        // JavaScript restored from a backup runs only after the user approved
+        // this code. The token ties the approval to the stored code, world,
+        // capabilities, id and match pattern, as for a save (#124).
+        if (stored?.awaitsApproval) {
+          const approved = await isApproved(
+            message.approvalToken,
+            stored.code,
+            stored.world,
+            stored.capabilities,
+            { transformId: stored.id, match: stored.match },
+          )
+          if (!approved || !runStaticAnalysis(stored.code, stored.capabilities).passed) {
+            throw new Error(AWAITING_APPROVAL_NOTE)
+          }
+          await spendApproval(message.approvalToken!)
+        }
       }
       // One queued update rather than a read followed by saveTransform: the
       // read has to be inside the queue or a concurrent save is overwritten.
-      const next = await updateTransform(message.id, { enabled: message.enabled })
+      const next = await updateTransform(message.id, {
+        enabled: message.enabled,
+        // Cleared once the approval has been used.
+        ...(message.enabled ? { awaitsApproval: null } : {}),
+      })
       if (!next) throw new Error('That transform no longer exists.')
       if (next.kind === 'js') {
         await inRegistryQueue(async () => {
@@ -1075,11 +1096,14 @@ async function handle(
 
 
     case 'export-transforms':
-      return exportTransforms()
+      return exportTransforms(message.mode ?? 'share')
 
     case 'preview-import': {
       const settings = await getSettings()
-      return previewImport(message.bundle, (t) => cssProblemOf(t, settings))
+      return previewImport(message.bundle, {
+        cssProblem: (t) => cssProblemOf(t, settings),
+        jsProblem: (t) => staticProblem(t.code, t.capabilities),
+      })
     }
 
     case 'import-transforms': {
@@ -1092,7 +1116,14 @@ async function handle(
        * sanitiseIncoming).
        */
       const settings = await getSettings()
-      const result = await importTransforms(message.bundle, (t) => cssProblemOf(t, settings))
+      const result = await importTransforms(
+        message.bundle,
+        {
+          cssProblem: (t) => cssProblemOf(t, settings),
+          jsProblem: (t) => staticProblem(t.code, t.capabilities),
+        },
+        message.restoreSettings === true,
+      )
       await reregister()
       return result
     }

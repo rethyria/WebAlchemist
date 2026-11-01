@@ -18,4 +18,13 @@ describe('a transform with no code', () => {
     expect(toggleOutcome({ code: '' }, false)).toBe('send')
     expect(toggleOutcome({ code: 'a{}' }, true)).toBe('send')
   })
+
+  it('opens its code for approval instead of turning on, when restored from a backup', () => {
+    expect(toggleOutcome({ code: 'a()', awaitsApproval: true }, true)).toBe('approve')
+  })
+
+  it('turns off without approval, and an approved script turns on (controls)', () => {
+    expect(toggleOutcome({ code: 'a()', awaitsApproval: true }, false)).toBe('send')
+    expect(toggleOutcome({ code: 'a()' }, true)).toBe('send')
+  })
 })

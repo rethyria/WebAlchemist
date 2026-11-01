@@ -147,6 +147,14 @@ export interface Transform {
    */
   approvedCssUrls?: string[]
   /**
+   * True on JavaScript that was restored from a backup file and has not been
+   * approved here. It arrives disabled with its code, and it cannot be turned
+   * on until the user has read the code and approved it for this transform and
+   * match pattern. Cleared when that approval is used. Never set by anything
+   * but an import (#124).
+   */
+  awaitsApproval?: true
+  /**
    * What produced `code`. Absent on records saved before versions were kept,
    * and on records whose saving caller did not say.
    */

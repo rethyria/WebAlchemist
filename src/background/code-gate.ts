@@ -30,6 +30,16 @@ export function runStaticAnalysis(
   }
 }
 
+/** The first reason JavaScript fails static analysis, or null when it passes. */
+export function staticProblem(code: string, declared: Transform['capabilities']): string | null {
+  const check = runStaticAnalysis(code, declared)
+  if (check.passed) return null
+  return (
+    check.static.find((f) => f.severity === 'block')?.explanation ??
+    'A capability was used without being declared.'
+  )
+}
+
 /**
  * Why stored code may not run, or null when it may.
  *
