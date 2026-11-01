@@ -59,16 +59,27 @@ function hostOf(url: string): string | null {
 export async function runHealthCheck(
   tabId: number,
   transforms: Transform[],
+  /**
+   * Reports whether the navigation that started this check is still the tab's
+   * current one. A check started by a page load has to stop answering for that
+   * page as soon as the tab leaves it: the ping loop below is satisfied by
+   * whichever document answers first, so after a navigation it would run the
+   * old page's transforms against the new page and report them broken.
+   */
+  isCurrent: () => boolean = () => true,
 ): Promise<TransformRuntimeState[] | null> {
   if (transforms.length === 0) return null
 
-  if (!(await waitForContentScript(tabId))) return null
+  if (!(await waitForContentScript(tabId, isCurrent))) return null
+  if (!isCurrent()) return null
 
   const message: ContentMessage = { type: 'run-health-check', transforms }
   try {
     const response = (await browser.tabs.sendMessage(tabId, message)) as
       | { type: 'health-check-result'; states: TransformRuntimeState[] }
       | undefined
+    // The page may also have navigated while the content script was checking.
+    if (!isCurrent()) return null
     return response?.states ?? null
   } catch {
     return null
@@ -103,8 +114,12 @@ const READY_INTERVAL_MS = 250
  * absent on origins the user has not granted, and silence is the honest answer
  * there.
  */
-async function waitForContentScript(tabId: number): Promise<boolean> {
+async function waitForContentScript(
+  tabId: number,
+  isCurrent: () => boolean,
+): Promise<boolean> {
   for (let attempt = 0; attempt < READY_ATTEMPTS; attempt += 1) {
+    if (!isCurrent()) return false
     try {
       if (await browser.tabs.sendMessage(tabId, { type: 'ping' } as ContentMessage)) return true
     } catch {

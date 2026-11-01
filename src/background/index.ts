@@ -155,6 +155,10 @@ async function evaluateTab(
   url: string,
   { navigated }: { navigated: boolean },
 ): Promise<void> {
+  // Taken before any await, so a check that is still running for an earlier
+  // evaluation of this tab is already out of date by the time this one reads
+  // storage.
+  const evaluation = beginEvaluation(tabId)
   const transforms = await transformsForUrl(url)
 
   /*
@@ -177,7 +181,26 @@ async function evaluateTab(
   // to three seconds for a slow page to settle, and CSS must not queue behind
   // it. A visible delay before the page restyles would be a worse bug than a
   // late health result.
-  void checkAndPublish(tabId, transforms)
+  void checkAndPublish(tabId, transforms, () => isLatestEvaluation(tabId, evaluation))
+}
+
+/*
+ * Which evaluation of each tab is the latest, so a health check can tell that
+ * the page it was started for has been replaced. A counter rather than the URL:
+ * a reload keeps the URL and still replaces the document. In memory because a
+ * check cannot outlive a suspension anyway, and after one the missing entry
+ * makes every old check count as out of date, which is the safe answer.
+ */
+const evaluations = new Map<number, number>()
+
+function beginEvaluation(tabId: number): number {
+  const next = (evaluations.get(tabId) ?? 0) + 1
+  evaluations.set(tabId, next)
+  return next
+}
+
+function isLatestEvaluation(tabId: number, evaluation: number): boolean {
+  return evaluations.get(tabId) === evaluation
 }
 
 /* ------------------------------------------------------------------ */
@@ -621,8 +644,12 @@ async function handle(
  * now, not a property of the transform — storing it would mean showing a stale
  * warning about a site that has since been fixed.
  */
-async function checkAndPublish(tabId: number, transforms: Transform[]): Promise<void> {
-  const states = await runHealthCheck(tabId, transforms)
+async function checkAndPublish(
+  tabId: number,
+  transforms: Transform[],
+  isCurrent: () => boolean,
+): Promise<void> {
+  const states = await runHealthCheck(tabId, transforms, isCurrent)
   if (!states) return
 
   const settings = await getSettings()
@@ -828,6 +855,7 @@ browser.tabs.onRemoved.addListener((tabId) => {
   void forgetCss('preview', tabId)
   void forgetCss('applied', tabId)
   badge.tabClosed(tabId)
+  evaluations.delete(tabId)
 })
 
 /* ------------------------------------------------------------------ */
