@@ -130,6 +130,54 @@ describe('the broken badge after a repair, a delete or a manual check (#88)', ()
     expect(badgeText()).toBe('1')
   })
 
+  describe('on a tab whose badge facts were lost in a suspension', () => {
+    const OTHER_TAB = 8
+    const OTHER_PAGE = 'https://example.com/other'
+    const elsewhere = 'https://unrelated.example/'
+    const bothBroken = async () => {
+      h.tabUrls.set(OTHER_TAB, OTHER_PAGE)
+      currentStates = brokenState
+      await commit(OLD_PAGE)
+      await h.listeners.get('browser.webNavigation.onCommitted')!({ frameId: 0, tabId: OTHER_TAB, url: OTHER_PAGE })
+      await settle()
+      await settle()
+    }
+    const textOf = (tabId: number) => h.calls.setBadgeText.filter((c) => c.tabId === tabId).at(-1)?.text
+
+    it('clears "!" on another tab when the transform is saved', async () => {
+      await bothBroken()
+      expect(textOf(OTHER_TAB)).toBe('!')
+      await h.boot() // suspension: the badge facts are gone, the drawn "!" stays
+      await h.onMessage({ type: 'save-transform', transform: app, tabId: TAB })
+      expect(textOf(OTHER_TAB)).toBe('1')
+    })
+
+    it('clears "!" on another tab when the transform is deleted', async () => {
+      await bothBroken()
+      await h.boot()
+      await h.onMessage({ type: 'delete-transform', id: app.id, tabId: TAB })
+      expect(textOf(OTHER_TAB)).toBe('')
+    })
+
+    it('does not touch a tab the transform does not match', async () => {
+      await bothBroken()
+      h.tabUrls.set(11, elsewhere)
+      await h.boot()
+      await h.onMessage({ type: 'save-transform', transform: app, tabId: TAB })
+      expect(h.calls.setBadgeText.filter((c) => c.tabId === 11)).toEqual([])
+    })
+
+    it('control: a reorder, which does not repaint other tabs, leaves "!" in place', async () => {
+      // A reorder reapplies only the tab it came from, so the "!" staying shows
+      // the clears above come from the repaint and not from the stub or the
+      // reapply reaching the other tab.
+      await bothBroken()
+      await h.boot()
+      await h.onMessage({ type: 'reorder-transforms', orderedIds: [app.id], tabId: TAB })
+      expect(textOf(OTHER_TAB)).toBe('!')
+    })
+  })
+
   it('clears the marker after the broken transform is deleted', async () => {
     await loadBroken()
     await h.onMessage({ type: 'delete-transform', id: app.id, tabId: TAB })

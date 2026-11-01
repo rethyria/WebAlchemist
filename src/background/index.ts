@@ -456,27 +456,34 @@ async function handle(
 
       // Register what was stored, not what was sent: a save keeps the stored
       // `enabled`, and the copy that arrived may hold an older value.
+      const before = (await getAllTransforms()).find((t) => t.id === message.transform.id)
       const saved = await saveTransform(message.transform)
       if (saved.kind === 'js') {
         await registerTransform(saved)
       }
-      await badge.transformEdited(saved.id, (await getSettings()).accent)
+      const { accent } = await getSettings()
+      await badge.transformEdited(saved.id, accent)
+      await repaintOtherTabs([saved.match, before?.match], accent)
       // Apply it now rather than on the next navigation. The preview was just
       // taken down, so without this the page visibly reverts on save.
       await reapply(message.tabId)
       return true
     }
 
-    case 'delete-transform':
+    case 'delete-transform': {
+      const doomed = (await getAllTransforms()).find((t) => t.id === message.id)
       await unregisterTransform(message.id)
       await deleteTransform(message.id)
-      await badge.transformEdited(message.id, (await getSettings()).accent)
+      const { accent } = await getSettings()
+      await badge.transformEdited(message.id, accent)
+      await repaintOtherTabs([doomed?.match], accent)
       // Take it off the page now. Without this a deleted CSS transform stayed
       // applied until the next navigation — the row vanished from the list
       // while the change it made was still on screen, which reads as the
       // delete having failed.
       await reapply(message.tabId)
       return true
+    }
 
     case 'reorder-transforms':
       await reorderTransforms(message.orderedIds)
@@ -1014,6 +1021,32 @@ async function runGeneration(
       await restoreBadgeFacts(tabId, accent)
       await badge.generationEnded(tabId, accent)
     }
+  }
+}
+
+/**
+ * Repaints the tabs that match one of `patterns` and that the badge knows
+ * nothing about, after a save or a delete.
+ *
+ * `badge.transformEdited` removes the edited transform from the broken set of
+ * every tab it has facts for, and a suspension empties those facts while the
+ * "!" Firefox drew stays on the tab. The edit would then leave "!" on every
+ * tab except the one the edit was made from. Asking the browser which tabs
+ * match recovers the tabs the in-memory facts have forgotten. Both the old and
+ * the new pattern are used, since an edit can move a transform off a tab.
+ * Tabs the badge does have facts for were already updated.
+ */
+async function repaintOtherTabs(
+  patterns: (string | undefined)[],
+  accent: Accent,
+): Promise<void> {
+  const wanted = patterns.filter((p): p is string => !!p)
+  if (wanted.length === 0) return
+  for (const tab of await browser.tabs.query({})) {
+    if (tab.id === undefined || !tab.url) continue
+    const url = tab.url
+    if (!wanted.some((pattern) => matchesUrl(pattern, url))) continue
+    await restoreBadgeFacts(tab.id, accent)
   }
 }
 
