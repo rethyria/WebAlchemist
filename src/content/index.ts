@@ -24,6 +24,7 @@ import type {
 } from '@shared/types'
 import { captureAnchor, isBuildHashClass, resolveAnchor } from './anchor'
 import { extractContext, extractElementContext } from './context'
+import { LONG_PRESS_MS, TouchGesture } from './touch'
 
 /* ------------------------------------------------------------------ */
 /* Overlay                                                             */
@@ -389,9 +390,17 @@ class Overlay {
     if (this.dim) this.dim.style.display = 'block'
   }
 
-  setHint(hasCrop: boolean, region = false): void {
+  setHint(hasCrop: boolean, region = false, touch = false): void {
     if (!this.hint) return
     const lead = this.hint.firstElementChild
+    if (touch) {
+      // No keys exist on a touch screen, and the panel holds the buttons.
+      for (const part of Array.from(this.hint.children).slice(1)) {
+        part.setAttribute('style', 'display:none')
+      }
+      if (lead) lead.textContent = 'Tap an element, or touch and hold to draw an area'
+      return
+    }
     if (lead) {
       lead.textContent = region
         ? 'Drag the area to capture'
@@ -557,7 +566,11 @@ function onMouseUp(event: MouseEvent): void {
   const width = Math.abs(event.clientX - dragOrigin.x)
   const height = Math.abs(event.clientY - dragOrigin.y)
   dragOrigin = null
+  completeDrag(width, height)
+}
 
+/** What releasing a drag decides, for the mouse and for a touch drag. */
+function completeDrag(width: number, height: number): void {
   if (pickMode === 'region') {
     // Too small to be a deliberate region. Left waiting rather than cancelled:
     // a stray click while aiming should not throw the user out of the mode.
@@ -593,6 +606,108 @@ function onMouseUp(event: MouseEvent): void {
   // the pick.
   const ancestor = commonAncestor(elementsInRect(crop as Rect))
   if (ancestor) setCurrent(ancestor)
+  confirmSelection()
+}
+
+/* ------------------------------------------------------------------ */
+/* Touch                                                               */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Set by the start-picking message on Firefox for Android. In this mode the
+ * picker listens for touches instead of mouse movement, and a tap selects.
+ */
+let touchMode = false
+const gesture = new TouchGesture()
+let holdTimer: ReturnType<typeof setTimeout> | null = null
+
+function touchPoint(event: TouchEvent): { x: number; y: number } | null {
+  const touch = event.changedTouches[0] ?? event.touches[0]
+  return touch ? { x: touch.clientX, y: touch.clientY } : null
+}
+
+function clearHoldTimer(): void {
+  if (holdTimer !== null) clearTimeout(holdTimer)
+  holdTimer = null
+}
+
+function onTouchStart(event: TouchEvent): void {
+  const at = touchPoint(event)
+  if (!at) return
+  clearHoldTimer()
+  gesture.begin(at, event.touches.length)
+  crop = null
+  overlay.hideCrop()
+  holdTimer = setTimeout(() => {
+    holdTimer = null
+    // Only now does the picker take over the finger: it starts a rectangle at
+    // the spot where the finger has been held still.
+    if (gesture.hold()) overlay.showCrop({ x: at.x, y: at.y, width: 0, height: 0 })
+  }, LONG_PRESS_MS)
+}
+
+function onTouchMove(event: TouchEvent): void {
+  const at = touchPoint(event)
+  if (!at) return
+  const rect = gesture.move(at)
+  // Cancelled only for a drag, so a finger moving before the long press still
+  // scrolls the page.
+  if (gesture.isDragging && event.cancelable) event.preventDefault()
+  if (rect) {
+    crop = rect
+    overlay.showCrop(rect)
+  }
+}
+
+function onTouchEnd(event: TouchEvent): void {
+  clearHoldTimer()
+  const at = touchPoint(event)
+  if (!at) return
+  const outcome = gesture.end(at)
+  if (outcome.kind === 'none') {
+    crop = null
+    overlay.hideCrop()
+    return
+  }
+  event.preventDefault()
+  if (outcome.kind === 'rect') {
+    crop = outcome.rect
+    completeDrag(outcome.rect.width, outcome.rect.height)
+    return
+  }
+  crop = null
+  overlay.hideCrop()
+  tapAt(outcome.at.x, outcome.at.y)
+}
+
+function onTouchCancel(): void {
+  clearHoldTimer()
+  gesture.cancel()
+  crop = null
+  overlay.hideCrop()
+}
+
+/**
+ * A tap selects the element under the finger. In region mode the selection is
+ * that element's box, which is the screenshot area without drawing one; the
+ * rectangle drawn by a long press is the alternative.
+ */
+function tapAt(x: number, y: number): void {
+  const target = elementUnder(x, y)
+  if (!target) return
+  if (pickMode === 'region') {
+    const rect = boundingRectWithPadding(target)
+    stopPicking()
+    void send({
+      type: 'region-selected',
+      rect,
+      clipped: exceedsViewport(rect),
+      viewportWidth: window.innerWidth,
+    })
+    updateLock()
+    return
+  }
+  setCurrent(target)
   confirmSelection()
 }
 
@@ -1412,13 +1527,22 @@ function startPicking(palette: OverlayPalette): void {
   picking = true
   crop = null
   overlay.mount(palette)
-  overlay.setHint(false, pickMode === 'region')
+  overlay.setHint(false, pickMode === 'region', touchMode)
 
   // The picker's own handlers first, so they see the event before it is
   // swallowed below.
-  document.addEventListener('mousemove', onMouseMove, true)
-  document.addEventListener('mousedown', onMouseDown, true)
-  document.addEventListener('mouseup', onMouseUp, true)
+  if (touchMode) {
+    // The mouse events a tap produces are swallowed below and not acted on, so
+    // a tap is not counted twice.
+    document.addEventListener('touchstart', onTouchStart, { capture: true, passive: true })
+    document.addEventListener('touchmove', onTouchMove, { capture: true, passive: false })
+    document.addEventListener('touchend', onTouchEnd, { capture: true, passive: false })
+    document.addEventListener('touchcancel', onTouchCancel, true)
+  } else {
+    document.addEventListener('mousemove', onMouseMove, true)
+    document.addEventListener('mousedown', onMouseDown, true)
+    document.addEventListener('mouseup', onMouseUp, true)
+  }
   document.addEventListener('keydown', onKeyDown, true)
 
   for (const type of SWALLOWED_EVENTS) {
@@ -1438,7 +1562,13 @@ function stopPicking(): void {
   document.removeEventListener('mousemove', onMouseMove, true)
   document.removeEventListener('mousedown', onMouseDown, true)
   document.removeEventListener('mouseup', onMouseUp, true)
+  document.removeEventListener('touchstart', onTouchStart, true)
+  document.removeEventListener('touchmove', onTouchMove, true)
+  document.removeEventListener('touchend', onTouchEnd, true)
+  document.removeEventListener('touchcancel', onTouchCancel, true)
   document.removeEventListener('keydown', onKeyDown, true)
+  clearHoldTimer()
+  gesture.cancel()
 
   detachSwallow()
   // The click completing the mouseup that got us here has not fired yet.
@@ -1550,6 +1680,7 @@ async function handleMessage(message: ContentMessage) {
     case 'start-picking':
       palette = message.palette
       pickMode = message.mode
+      touchMode = message.touch === true
       preview.unmount()
       /*
        * A reference pick keeps the subject. Only a target pick replaces it, so

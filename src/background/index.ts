@@ -945,6 +945,8 @@ async function handle(
         type: 'start-picking',
         palette: overlayPaletteFor(settings.accent, dark),
         mode: message.mode ?? 'target',
+        // A finger cannot hover or press keys; the content script switches to taps.
+        touch: platformOs === 'android',
       })
       return true
     }
