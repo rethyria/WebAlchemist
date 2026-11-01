@@ -286,6 +286,10 @@ deny(
   'setKeyframes',
 )
 deny(
+  'Returns the document inside an object or embed element, which is another document that this check cannot follow.',
+  'getSVGDocument',
+)
+deny(
   'Submits a form, which sends its contents to the form address.',
   'submit', 'requestSubmit',
 )

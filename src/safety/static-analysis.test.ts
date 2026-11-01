@@ -1319,3 +1319,15 @@ describe('second audit (#48): imageSrcset', () => {
     expect(blocks(`const l = document.createElement('div'); l.imageSizes = '100vw'`)).toBe(false)
   })
 })
+
+describe('second audit (#48): getSVGDocument', () => {
+  it(`blocks: document.querySelector('object').getSVGDocument()`, () => {
+    expect(blocks(`document.querySelector('object').getSVGDocument()`)).toBe(true)
+  })
+
+  it('blocks variants, and still passes reading an ordinary element', () => {
+    expect(blocks(`const o = document.querySelector('div'); o.getSVGDocument().body`)).toBe(true)
+    expect(blocks(`document.querySelector('div')['getSVG' + 'Document']()`)).toBe(true)
+    expect(blocks(`document.querySelector('div').getAttribute('data-x')`)).toBe(false)
+  })
+})
