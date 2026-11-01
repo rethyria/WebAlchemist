@@ -833,6 +833,16 @@ export class Flow {
       }
     } catch (cause) {
       this.stopClock()
+      if (!current()) return
+      /*
+       * Back to the list, as repair and editWithAi do. The step was set to
+       * 'generating' at the top, and nothing else moves it on failure, so
+       * without this the panel stayed on a stopped Generating checklist and
+       * "Try again" ran a plain generate() against whatever was left picked.
+       * Through discard because the failure can come after the draft was set
+       * and the saved transform suspended.
+       */
+      await this.discard()
       this.fail(cause, () => this.editIntent(transform))
     }
   }

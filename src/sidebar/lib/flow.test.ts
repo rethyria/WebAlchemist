@@ -191,6 +191,33 @@ describe('leaving a run that started from a saved transform', () => {
   })
 })
 
+describe('failures that must leave the Generating step', () => {
+  it('returns to the list when Edit description cannot find the element', async () => {
+    const flow = newFlow()
+    // The default handler answers every message with null, which is the
+    // "element not found" answer for context-for-anchor.
+    await flow.editIntent(saved)
+    expect(flow.step).toBe('list')
+    expect(flow.error).not.toBeNull()
+    expect(flow.draft).toBeNull()
+    expect(flow.canRetry).toBe(true)
+  })
+
+  it('repeats Edit description, not a generation, on "Try again"', async () => {
+    const flow = newFlow()
+    let lookups = 0
+    handler = (m) => {
+      if (m.type !== 'context-for-anchor') return { ok: true, data: null }
+      lookups += 1
+      return { ok: true, data: lookups === 1 ? null : found }
+    }
+    await flow.editIntent(saved)
+    await flow.retry()
+    expect(lookups).toBe(2)
+    expect(flow.step).toBe('describing')
+  })
+})
+
 const jsResult = {
   name: 'n',
   kind: 'js',
