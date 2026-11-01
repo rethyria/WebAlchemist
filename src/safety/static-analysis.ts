@@ -228,11 +228,15 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
   walk(ast, (node) => {
     // Dynamic import is its own node type, not a call to an identifier.
     if (node.type === 'ImportExpression') {
+      // Not tied to the network capability. A capability that is only a
+      // warning when declared would let `network` unlock running code that
+      // nobody reviewed, and whose content the server can change after
+      // approval. Declaring network allows requests, not remote code (#137).
       record(node, {
         path: 'import()',
-        capability: 'network',
-        severity: 'warn',
-        explanation: 'Loads and runs code from another location.',
+        capability: null,
+        severity: 'block',
+        explanation: 'Loads and runs code from another location, which is never allowed.',
       })
       return
     }

