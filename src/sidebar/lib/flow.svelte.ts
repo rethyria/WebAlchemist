@@ -1759,9 +1759,14 @@ export class Flow {
       this.review = await send<ReviewResult>({
         type: 'review',
         code: result.code,
-        // The edited intent, not the model's. The reviewer is asked whether
-        // the code matches what the user says they wanted.
+        // The edited intent is sent as the generator's summary only. The
+        // reviewer judges against what the user typed, which is every user
+        // turn in the history followed by the current instruction.
         intent: this.intent,
+        instructions: [
+          ...this.history.filter((turn) => turn.role === 'user').map((turn) => turn.content),
+          this.instruction,
+        ],
         declaredCapabilities: result.capabilities,
         transformId: this.transformKey(),
       })

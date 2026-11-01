@@ -25,6 +25,7 @@ import {
   REVIEW_SYSTEM_PROMPT,
   fencePageContent,
   repairPrompt,
+  reviewContent,
   scopeInstruction,
 } from '../prompts'
 import { retryAfterSeconds, type HeaderSource } from './retry-after'
@@ -37,6 +38,7 @@ import {
   modelNotPermittedError,
   type AiProvider,
   type GenerateRequest,
+  type ReviewArgs,
   type StreamListener,
   type ThinkingListener,
   type UsageListener,
@@ -315,10 +317,10 @@ export async function createAnthropicProvider(
       }
     },
 
-    async review(args: { code: string; intent: string }): Promise<ModelReview> {
+    async review(args: ReviewArgs): Promise<ModelReview> {
       // Note what is absent: no PageContext, no URL, no DOM, no screenshot.
       // See REVIEW_SYSTEM_PROMPT for why this matters.
-      const body = `INTENT (stated by the user):\n${args.intent}\n\nCODE:\n\`\`\`js\n${args.code}\n\`\`\``
+      const body = reviewContent(args)
 
       try {
         const response = await withoutUnsupportedFields(

@@ -1400,3 +1400,21 @@ describe('reload and try again with a script that has run (#114)', () => {
     expect(generate).toHaveBeenCalledTimes(1)
   })
 })
+
+describe('the review is given what the user typed (#52)', () => {
+  it('sends the description and every follow-up verbatim, not the model intent', async () => {
+    const flow = flowAtApprove()
+    flow.history = [
+      { role: 'user', content: 'first description' },
+      { role: 'assistant', content: 'model approach text' },
+    ]
+    flow.instruction = 'the follow-up as typed'
+    handler = () => ({ ok: true, data: { static: [], undeclaredCapabilities: [], passed: true } })
+
+    await flow.toReview()
+
+    const sent = calls.filter((c) => c.type === 'review').at(-1)
+    expect(sent.instructions).toEqual(['first description', 'the follow-up as typed'])
+    expect(sent.intent).toBe('edited intent')
+  })
+})

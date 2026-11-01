@@ -22,6 +22,7 @@ import {
   REVIEW_SYSTEM_PROMPT,
   fencePageContent,
   repairPrompt,
+  reviewContent,
   scopeInstruction,
 } from '../prompts'
 import { TOKEN_REQUEST_TIMEOUT_MS, credentialFrom, needsRefresh, type TokenPayload } from '../oauth'
@@ -37,6 +38,7 @@ import {
   modelNotPermittedError,
   type AiProvider,
   type GenerateRequest,
+  type ReviewArgs,
   type UsageListener,
 } from './types'
 import { readUsage } from '@shared/usage'
@@ -274,12 +276,12 @@ export async function createOpenAiCompatibleProvider(
       })
     },
 
-    async review(args: { code: string; intent: string }): Promise<ModelReview> {
+    async review(args: ReviewArgs): Promise<ModelReview> {
       // No page content, deliberately. See REVIEW_SYSTEM_PROMPT.
       return complete<ModelReview>({
         model: provider.reviewModel,
         system: REVIEW_SYSTEM_PROMPT,
-        userContent: `INTENT (stated by the user):\n${args.intent}\n\nCODE:\n\`\`\`js\n${args.code}\n\`\`\``,
+        userContent: reviewContent(args),
         schema: REVIEW_SCHEMA,
         schemaName: 'review',
         maxTokens: 4000,

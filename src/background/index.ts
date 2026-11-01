@@ -551,6 +551,7 @@ async function handle(
       return runReview(
         message.code,
         message.intent,
+        message.instructions,
         message.declaredCapabilities,
         message.transformId,
       )
@@ -1387,6 +1388,7 @@ function runStaticAnalysis(
 async function runReview(
   code: string,
   intent: string,
+  instructions: string[],
   declared: Transform['capabilities'],
   transformId?: string,
 ): Promise<ReviewResult> {
@@ -1404,7 +1406,7 @@ async function runReview(
   // is suspended and the caller is told the receiving end does not exist.
   let model: ModelReview
   try {
-    model = await withKeepalive(() => provider.review({ code, intent }))
+    model = await withKeepalive(() => provider.review({ code, intent, instructions }))
   } finally {
     // In `finally` so a billed response that failed to parse is still counted.
     await usage.settled()

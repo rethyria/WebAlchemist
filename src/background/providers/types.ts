@@ -13,6 +13,19 @@ export interface RefinementTurn {
   content: string
 }
 
+/** What a review call is given. Page content is never part of it. */
+export interface ReviewArgs {
+  code: string
+  /** The generator's summary of the intent. The model wrote it. */
+  intent: string
+  /**
+   * Everything the user typed for this transform, verbatim, in order. The
+   * message and the background entry point require it; it is optional here
+   * only so that adapter tests that exercise transport do not all need one.
+   */
+  instructions?: string[]
+}
+
 export interface GenerateRequest {
   context: PageContext
   /** The user's latest instruction. */
@@ -81,13 +94,13 @@ export interface AiProvider {
   ): Promise<GenerationResult>
 
   /**
-   * Reviews generated JavaScript against the stated intent.
+   * Reviews generated JavaScript against what the user typed.
    *
    * Implementations MUST NOT include page content in this call. The reviewer's
    * independence comes entirely from not sharing the generator's context: a
    * page that can steer the generator can steer a reviewer that reads it too.
    */
-  review(args: { code: string; intent: string }): Promise<ModelReview>
+  review(args: ReviewArgs): Promise<ModelReview>
 
   /**
    * Whether the configured generation model accepts images, used to decide
