@@ -9,7 +9,8 @@
  * so that it survives the background page being suspended.
  */
 
-const keyFor = (windowId: number) => `wa-run-tabs-${windowId}`
+const PREFIX = 'wa-run-tabs-'
+const keyFor = (windowId: number) => `${PREFIX}${windowId}`
 
 /** Records that the sidebar of `windowId` is working in `tabId`. */
 export async function recordRunTab(windowId: number, tabId: number): Promise<void> {
@@ -26,4 +27,13 @@ export async function takeRunTabs(windowId: number): Promise<number[]> {
   const stored = (await browser.storage.session.get(key))[key]
   await browser.storage.session.remove(key)
   return Array.isArray(stored) ? (stored as number[]) : []
+}
+
+/** The windows that have run tabs recorded, for a start-up that has lost its in-memory state. */
+export async function windowsWithRunTabs(): Promise<number[]> {
+  const stored = await browser.storage.session.get(null)
+  return Object.keys(stored)
+    .filter((key) => key.startsWith(PREFIX))
+    .map((key) => Number(key.slice(PREFIX.length)))
+    .filter((windowId) => Number.isInteger(windowId))
 }

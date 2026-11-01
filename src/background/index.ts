@@ -29,7 +29,7 @@ import type {
 import type { RefinementTurn } from './providers/types'
 import { overlayPaletteFor } from '@shared/accents'
 import * as badge from './badge'
-import { recordRunTab, takeRunTabs } from './run-tabs'
+import { recordRunTab, takeRunTabs, windowsWithRunTabs } from './run-tabs'
 import { isUrlOff, setHostOff } from './site-off'
 import { excludedHostOf, getExcludedSites, setExcludedSites } from './excluded-sites'
 import { excludedSiteMessage } from '@shared/excluded-sites'
@@ -1162,10 +1162,17 @@ void (async () => {
   const stored =
     (await previewedTabIds()).length > 0 ||
     (await previewedScriptIds()).length > 0 ||
-    (await suspendedTabIds()).length > 0
+    (await suspendedTabIds()).length > 0 ||
+    (await windowsWithRunTabs()).length > 0
   if (!stored) return
   await new Promise((resolve) => setTimeout(resolve, SIDEBAR_RECONNECT_GRACE_MS))
   await clearPreviewsWhere(ownerIsGone)
+  // The picker overlay and the lock outline are in the page, not in storage, so
+  // a panel closed during a suspension left them there (#108). A window whose
+  // sidebar did not reconnect has no panel to cancel them.
+  for (const windowId of await windowsWithRunTabs()) {
+    if (ownerIsGone(windowId)) await clearPageOverlays(windowId)
+  }
 })()
 
 /** Throws the message to show when the address is on the excluded list. */
