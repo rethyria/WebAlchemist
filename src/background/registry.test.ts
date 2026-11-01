@@ -11,6 +11,8 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import type { Transform } from '@shared/types'
 
 const store = new Map<string, unknown>()
+/** Ids whose registration fails, to test a preview that cannot be registered. */
+const failing = new Set<string>()
 let stored: unknown[] = []
 let killSwitch = false
 ;(globalThis as unknown as { browser: unknown }).browser = {
@@ -26,7 +28,12 @@ let killSwitch = false
     configureWorld: async () => {},
     getScripts: async (f: { ids: string[] }) =>
       f.ids.filter((id) => store.has(id)).map((id) => store.get(id)),
-    register: async (list: { id: string }[]) => list.forEach((r) => store.set(r.id, r)),
+    register: async (list: { id: string }[]) => {
+      for (const r of list) {
+        if (failing.has(r.id)) throw new Error('register failed')
+        store.set(r.id, r)
+      }
+    },
     update: async (list: { id: string }[]) => list.forEach((r) => store.set(r.id, r)),
     unregister: async (f: { ids?: string[] }) => {
       if (f.ids) f.ids.forEach((id) => store.delete(id))
@@ -62,6 +69,19 @@ describe('previewing a saved JavaScript transform', () => {
     store.clear()
     stored = [saved]
     killSwitch = false
+    failing.clear()
+  })
+
+  it('registers the saved script again when the preview cannot be registered', async () => {
+    await registerTransform(saved)
+    failing.add('preview-SAVED')
+    await expect(registerPreview({ ...saved, code: 'draftCode()' })).rejects.toThrow(
+      'register failed',
+    )
+    // Control: the saved script was paused by registerPreview before the
+    // failure, so without the restore this is false.
+    expect(code('SAVED')).toContain('savedCode()')
+    expect(store.has('preview-SAVED')).toBe(false)
   })
 
   it('runs a preview of a script that is disabled in storage', async () => {

@@ -421,6 +421,22 @@ describe('resetting the flow', () => {
     expect(flow.canRetry).toBe(false)
   })
 
+  it('clears a running JavaScript preview when the tab closes', async () => {
+    const flow = flowAtApprove()
+    flow.draft = { ...saved, kind: 'js' }
+    flow.jsRan = true
+    flow.tabClosed(1)
+    // The background restores the saved script it paused for the preview.
+    expect(calls.filter((c) => c.type === 'clear-preview-js').map((c) => c.id)).toEqual(['OLD'])
+    expect(flow.jsRan).toBe(false)
+  })
+
+  it('sends no preview clear when the tab closes and no script ran', () => {
+    const flow = flowAtApprove()
+    flow.tabClosed(1)
+    expect(calls.some((c) => c.type === 'clear-preview-js')).toBe(false)
+  })
+
   it('stops the countdown when the tab closes', async () => {
     vi.useFakeTimers()
     const flow = flowAtApprove()

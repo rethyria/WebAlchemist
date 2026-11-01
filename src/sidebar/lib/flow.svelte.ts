@@ -327,6 +327,13 @@ export class Flow {
   /** The run cannot outlive the page it is about. */
   tabClosed(tabId: number): void {
     if (tabId !== this.tabId) return
+    // reset() only forgets the run. A preview that already ran is registered in
+    // the background, and the saved script it paused stays paused until the
+    // preview is cleared, so the clear has to be sent before the state that
+    // says it is needed is wiped.
+    if (this.draft && this.jsRan) {
+      void send({ type: 'clear-preview-js', id: this.draft.id }).catch(() => {})
+    }
     this.reset()
   }
 

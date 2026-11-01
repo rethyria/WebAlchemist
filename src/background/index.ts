@@ -435,8 +435,16 @@ async function handle(
       if (!analysis.passed) {
         throw new Error('Static analysis rejected this code, so it was not run.')
       }
-      await registerPreview(message.transform)
+      // Recorded before registering: registerPreview pauses the saved script
+      // first, so a close of the sidebar during or after a failed registration
+      // has to find the id here to restore it.
       previewedScripts.add(message.transform.id)
+      try {
+        await registerPreview(message.transform)
+      } catch (cause) {
+        previewedScripts.delete(message.transform.id)
+        throw cause
+      }
       await browser.tabs.reload(message.tabId)
       return true
     }

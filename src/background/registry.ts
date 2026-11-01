@@ -188,6 +188,19 @@ export async function registerPreview(transform: Transform): Promise<void> {
     )
   }
   await unregisterTransform(transform.id)
+  try {
+    await registerPreviewScript(transform)
+  } catch (cause) {
+    // The saved script was paused above. A preview that fails to register
+    // would otherwise leave it paused with nothing running in its place, and
+    // the caller, which only records the preview after this returns, would
+    // not know to restore it.
+    await unregisterPreview(transform.id).catch(() => {})
+    throw cause
+  }
+}
+
+async function registerPreviewScript(transform: Transform): Promise<void> {
   // `enabled` is forced on because the saved record's flag describes the saved
   // script, not the question being asked, which is whether to run this draft
   // now. The draft copies the saved flag, and registerTransform returns
