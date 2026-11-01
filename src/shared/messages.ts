@@ -22,6 +22,7 @@ import type {
   Rect,
   ReviewResult,
   Settings,
+  SettingsChange,
   UsageReport,
   UsageStore,
   Conflict,
@@ -101,6 +102,8 @@ export type Message =
 
   /* --- settings and credentials ------------------------------------- */
   | { type: 'save-settings'; settings: Settings }
+  /** Applies one change to the stored settings and returns the settings as saved. */
+  | { type: 'patch-settings'; change: SettingsChange }
   | { type: 'set-credential'; providerId: string; credential: Credential }
   | { type: 'clear-credential'; providerId: string }
   /*
