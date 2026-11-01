@@ -13,7 +13,7 @@ import { pageHasSensitiveFields } from './sensitive'
 import type { ConflictSpec, ContentEvent, ContentMessage, PickMode } from '@shared/messages'
 import type { OverlayPalette } from '@shared/accents'
 import { moveFrom, pickerActionFor, type PickerAction } from '@shared/picker-keys'
-import { relayPickerKey } from './picker-input'
+import { decideKey, relayPickerKey } from './picker-input'
 import type {
   Conflict,
   HoverTarget,
@@ -500,10 +500,17 @@ function publishTarget(): void {
   void send({ type: 'element-hovered', target: describeTarget(current) })
 }
 
+/**
+ * True from the moment the picker selects the body on its own until anything
+ * else moves the selection. Enter does not confirm while it is true (#118).
+ */
+let atSeed = false
+
 function setCurrent(element: Element | null): void {
   if (!element || element === current) return
   // Never let the picker select its own overlay.
   if (element.closest('[data-webalchemist-overlay]')) return
+  atSeed = false
   current = element
   overlay.showElement(element, selectorFor(element))
   publishTarget()
@@ -539,7 +546,11 @@ function onMouseMove(event: MouseEvent): void {
   // Once a rectangle exists it owns the selection; moving the mouse must not
   // silently retarget underneath it.
   if (crop) return
-  setCurrent(elementUnder(event.clientX, event.clientY))
+  const under = elementUnder(event.clientX, event.clientY)
+  // Pointing at the body is a choice of the body, so it ends the seed state
+  // even though the selection does not change.
+  if (under) atSeed = false
+  setCurrent(under)
 }
 
 function onMouseDown(event: MouseEvent): void {
@@ -638,7 +649,8 @@ function applyPickerAction(action: PickerAction): boolean {
       return true
     case 'confirm':
       // Nothing is selected in region mode, so there is nothing to confirm —
-      // the drag itself is the whole act.
+      // the drag itself is the whole act. Whether Enter may confirm at all is
+      // decided before this is called (see decideKey).
       if (pickMode !== 'region') confirmSelection()
       return true
     case 'parent':
@@ -670,7 +682,10 @@ function onKeyDown(event: KeyboardEvent): void {
   }
 
   const action = pickerActionFor(event.key)
-  if (action && applyPickerAction(action)) handled()
+  if (!action) return
+  const decision = decideKey({ picking, atSeed }, action, event.repeat)
+  if (decision === 'consume') handled()
+  else if (decision === 'apply' && applyPickerAction(action)) handled()
 }
 
 /**
@@ -1418,7 +1433,11 @@ function startPicking(palette: OverlayPalette): void {
   // The arrow keys move from the current element, and a pointer has not set
   // one yet. Starting from the body lets a keyboard user pick without ever
   // moving the pointer. Region mode has no current element.
-  if (pickMode !== 'region' && document.body) setCurrent(document.body)
+  atSeed = false
+  if (pickMode !== 'region' && document.body) {
+    setCurrent(document.body)
+    atSeed = current === document.body
+  }
 
   // The picker's own handlers first, so they see the event before it is
   // swallowed below.
@@ -1437,6 +1456,7 @@ function startPicking(palette: OverlayPalette): void {
 
 function stopPicking(): void {
   picking = false
+  atSeed = false
   current = null
   dragOrigin = null
   crop = null
@@ -1619,7 +1639,7 @@ async function handleMessage(message: ContentMessage) {
     }
     case 'picker-key':
       // Ignored unless a pick is running, as the page's own listener is.
-      relayPickerKey({ picking }, message.action, applyPickerAction)
+      relayPickerKey({ picking, atSeed }, message.action, applyPickerAction)
       return true
     case 'cancel-picking':
       stopPicking()

@@ -38,6 +38,7 @@
       altKey: event.altKey,
       metaKey: event.metaKey,
       shiftKey: event.shiftKey,
+      repeat: event.repeat,
       fromButtonLike: target?.closest('button, a, input, textarea, select, summary') != null,
     })
     if (!action) return

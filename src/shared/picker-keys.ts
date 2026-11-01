@@ -36,6 +36,8 @@ export interface KeyLike {
   shiftKey: boolean
   /** Whether the event came from a control that acts on Enter by itself. */
   fromButtonLike: boolean
+  /** Whether the key is held down and the browser is repeating it. */
+  repeat?: boolean
 }
 
 /**
@@ -48,6 +50,8 @@ export function forwardedAction(event: KeyLike): PickerAction | null {
   if (event.ctrlKey || event.altKey || event.metaKey || event.shiftKey) return null
   const action = pickerActionFor(event.key)
   if (action === 'confirm' && event.fromButtonLike) return null
+  // A held Enter would confirm again on every repeat (#118).
+  if (action === 'confirm' && event.repeat) return null
   return action
 }
 

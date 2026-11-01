@@ -3,7 +3,8 @@
  * tested without one (#118).
  *
  * The picker's handlers in index.ts act on the page's DOM and cannot be loaded
- * in a test. What they decide is kept here.
+ * in a test. What they decide is kept here: whether a forwarded key does
+ * anything and whether Enter may confirm.
  */
 
 import type { PickerAction } from '@shared/picker-keys'
@@ -11,18 +12,45 @@ import type { PickerAction } from '@shared/picker-keys'
 export interface PickerInputState {
   /** Whether a pick is running. */
   picking: boolean
+  /**
+   * Whether the selected element is still the one the picker started on and
+   * nothing has moved the selection since.
+   */
+  atSeed: boolean
+}
+
+/**
+ * What the picker does with an action:
+ *
+ * - `ignore`: nothing, and the key is left to the page;
+ * - `consume`: nothing, and the key is not passed on;
+ * - `apply`: the action runs.
+ *
+ * Enter does not confirm while it is held down (`repeat`), because holding the
+ * key would confirm again on the next pick. It also does not confirm while the
+ * selection is still the element the picker started on, because that element is
+ * the whole body and Enter pressed before any move is not a choice of it.
+ */
+export function decideKey(
+  state: PickerInputState,
+  action: PickerAction,
+  repeat: boolean,
+): 'ignore' | 'consume' | 'apply' {
+  if (!state.picking) return 'ignore'
+  if (action === 'confirm' && (repeat || state.atSeed)) return 'consume'
+  return 'apply'
 }
 
 /**
  * Runs an action forwarded by the sidebar, only while a pick is running, and
- * returns what was decided: `ignore` when no pick is running, otherwise `apply`.
+ * returns what was decided.
  */
 export function relayPickerKey(
   state: PickerInputState,
   action: PickerAction,
   apply: (action: PickerAction) => boolean,
-): 'ignore' | 'apply' {
-  if (!state.picking) return 'ignore'
-  apply(action)
-  return 'apply'
+): 'ignore' | 'consume' | 'apply' {
+  const decision = decideKey(state, action, false)
+  if (decision === 'apply') apply(action)
+  return decision
 }

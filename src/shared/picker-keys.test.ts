@@ -31,6 +31,21 @@ describe('pickerActionFor', () => {
   })
 })
 
+describe('forwardedAction and a held key (#118)', () => {
+  it('does not forward Enter while it repeats', () => {
+    expect(forwardedAction(press('Enter', { repeat: true }))).toBeNull()
+  })
+
+  it('forwards the first Enter (control)', () => {
+    expect(forwardedAction(press('Enter', { repeat: false }))).toBe('confirm')
+    expect(forwardedAction(press('Enter'))).toBe('confirm')
+  })
+
+  it('still forwards a repeating arrow key, which moves one step for each repeat', () => {
+    expect(forwardedAction(press('ArrowDown', { repeat: true }))).toBe('child')
+  })
+})
+
 describe('forwardedAction', () => {
   it('forwards a plain arrow key', () => {
     expect(forwardedAction(press('ArrowDown'))).toBe('child')
@@ -112,6 +127,6 @@ describe('wiring', () => {
   })
 
   it('the content script seeds the current element from the body when picking starts', () => {
-    expect(read('../content/index.ts')).toMatch(/pickMode !== 'region' && document\.body\) setCurrent\(document\.body\)/)
+    expect(read('../content/index.ts')).toMatch(/pickMode !== 'region' && document\.body\) \{\s*setCurrent\(document\.body\)/)
   })
 })
