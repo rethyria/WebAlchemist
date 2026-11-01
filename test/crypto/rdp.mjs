@@ -8,7 +8,7 @@ import { connect } from 'node:net'
 
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
-export function open(port = 41365, host = '127.0.0.1') {
+export function open(port = Number(process.env.WA_RDP_PORT) || 41365, host = '127.0.0.1') {
   const socket = connect(port, host)
   let buf = Buffer.alloc(0)
   let greeted = null
