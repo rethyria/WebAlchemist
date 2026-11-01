@@ -23,6 +23,7 @@
 
 import type { AnchoredElement, ContentEvent } from '@shared/messages'
 import type { RefinementTurn } from '@background/providers/types'
+import type { ScrollOffset } from '@shared/region'
 import {
   matchPresetsFor,
   originPermissionFor,
@@ -94,6 +95,8 @@ interface Picked {
   cropDrawn: boolean
   target: HoverTarget
   viewportWidth: number
+  /** The scroll offset `crop` was measured at, for a capture made after scrolling. */
+  scrolledTo?: ScrollOffset
 }
 
 /** Named so the generating checklist can render them in order. */
@@ -558,6 +561,7 @@ export class Flow {
           cropDrawn: event.cropDrawn,
           target: event.target,
           viewportWidth: event.viewportWidth,
+          scrolledTo: event.scrolledTo,
         }
         this.tree = event.tree
         // Retargeting must not wipe what has already been typed — the user is
@@ -1245,7 +1249,7 @@ export class Flow {
     if (!(await this.requestCaptureAccess())) return
     this.shotPreview = null
     this.shot = null
-    await this.captureRegion(picked.crop, picked.viewportWidth)
+    await this.captureRegion(picked.crop, picked.viewportWidth, picked.scrolledTo)
   }
 
   /**
@@ -1289,7 +1293,11 @@ export class Flow {
   }
 
   /** Takes the shot as soon as the region is drawn. */
-  private async captureRegion(rect: Rect, viewportWidth: number): Promise<void> {
+  private async captureRegion(
+    rect: Rect,
+    viewportWidth: number,
+    scrolledTo?: ScrollOffset,
+  ): Promise<void> {
     if (this.tabId === null) return
     try {
       this.acceptShot(
@@ -1298,10 +1306,11 @@ export class Flow {
           tabId: this.tabId,
           rect,
           viewportWidth,
+          ...(scrolledTo ? { scrolledTo } : {}),
         }),
       )
     } catch (cause) {
-      this.fail(cause, () => this.captureRegion(rect, viewportWidth))
+      this.fail(cause, () => this.captureRegion(rect, viewportWidth, scrolledTo))
     }
   }
 

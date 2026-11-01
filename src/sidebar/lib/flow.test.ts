@@ -977,3 +977,34 @@ describe('opening Change with AI', () => {
     expect(flow.result?.rationale.approach).toBe('a')
   })
 })
+
+describe('including the drawn region', () => {
+  it('sends the scroll offset the region was drawn at with the capture', async () => {
+    const flow = newFlow()
+    await flow.startPicking()
+    flow.receive(
+      {
+        type: 'element-picked',
+        context,
+        anchor,
+        crop,
+        cropClipped: false,
+        cropDrawn: true,
+        target: targetInfo,
+        tree: [],
+        viewportWidth: 800,
+        scrolledTo: { x: 0, y: 340 },
+      } as any,
+      fromRunTab,
+    )
+    handler = (m) =>
+      m.type === 'capture-region'
+        ? { ok: true, data: { dataUrl: 'data:', rect: crop, clipped: false } }
+        : { ok: true, data: null }
+    await flow.includePickedRegion()
+    const capture = calls.find((c) => c.type === 'capture-region')
+    // The background needs this to move the rectangle by the distance the page
+    // has scrolled since; without it the old viewport numbers are cropped.
+    expect(capture?.scrolledTo).toEqual({ x: 0, y: 340 })
+  })
+})

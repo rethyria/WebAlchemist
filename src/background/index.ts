@@ -14,6 +14,7 @@ import type {
   MessageResponse,
 } from '@shared/messages'
 import { matchesUrl } from '@shared/match'
+import { regionAtScroll, type ScrollOffset, type Viewport } from '@shared/region'
 import type {
   PageContext,
   Rect,
@@ -556,7 +557,12 @@ async function handle(
     }
 
     case 'capture-region':
-      return captureWithLockDown(message.tabId, message.rect, message.viewportWidth)
+      return captureWithLockDown(
+        message.tabId,
+        message.rect,
+        message.viewportWidth,
+        message.scrolledTo,
+      )
 
 
     case 'export-transforms':
@@ -902,11 +908,33 @@ async function captureWithLockDown(
   tabId: number,
   rect: Rect,
   viewportWidth: number,
+  scrolledTo?: ScrollOffset,
 ): Promise<{ dataUrl: string; rect: Rect; clipped: boolean }> {
+  /*
+   * A rectangle stored from a pick is in viewport coordinates, so it is moved
+   * by however far the page has scrolled since. Asked of the page, because
+   * the background cannot read it. Without a reply the rectangle is used as
+   * it is, which is what happened before and is right when nothing scrolled.
+   */
+  let target = rect
+  let moveClipped = false
+  if (scrolledTo) {
+    const now = (await askContent(tabId, { type: 'get-viewport' })) as Viewport | undefined
+    if (now) {
+      const moved = regionAtScroll(rect, scrolledTo, now)
+      if (!moved) {
+        throw new Error(
+          'The area you drew is no longer on screen. Scroll it back into view, or draw it again.',
+        )
+      }
+      target = moved.rect
+      moveClipped = moved.clipped
+    }
+  }
   await sendToContent(tabId, { type: 'set-lock-visible', visible: false })
   try {
-    const shot = await captureRegion(rect, viewportWidth)
-    return { ...shot, rect }
+    const shot = await captureRegion(target, viewportWidth)
+    return { ...shot, clipped: shot.clipped || moveClipped, rect: target }
   } finally {
     await sendToContent(tabId, { type: 'set-lock-visible', visible: true })
   }

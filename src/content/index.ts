@@ -1007,6 +1007,7 @@ function emitPicked(element: Element, region: Rect, drawn = false): void {
     target: describeTarget(element),
     tree: buildTree(element),
     viewportWidth: window.innerWidth,
+    scrolledTo: { x: window.scrollX, y: window.scrollY },
   })
 }
 
@@ -1588,6 +1589,7 @@ async function handleMessage(message: ContentMessage) {
         cropClipped: exceedsViewport(region),
         target: describeTarget(element),
         viewportWidth: window.innerWidth,
+        scrolledTo: { x: window.scrollX, y: window.scrollY },
         // For editing an intent, which re-enters the describing step and needs
         // the same list a pick would have produced. A repair ignores it.
         tree: buildTree(element),
@@ -1649,6 +1651,13 @@ async function handleMessage(message: ContentMessage) {
       return { type: 'health-check-result', states: await runHealthCheck(message.transforms) }
     case 'ping':
       return true
+    case 'get-viewport':
+      return {
+        x: window.scrollX,
+        y: window.scrollY,
+        width: window.innerWidth,
+        height: window.innerHeight,
+      }
     case 'url-changed':
       // Re-evaluation is driven from the background script, which owns the
       // record set; nothing to do here beyond dropping picker state.

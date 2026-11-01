@@ -1,0 +1,40 @@
+import type { Rect } from './types'
+
+/** How far a page is scrolled, in CSS pixels, and how large its viewport is. */
+export interface ScrollOffset {
+  x: number
+  y: number
+}
+
+export interface Viewport extends ScrollOffset {
+  width: number
+  height: number
+}
+
+/**
+ * Where a rectangle drawn at one scroll position is on screen at another.
+ *
+ * A drawn rectangle is stored in viewport coordinates, which describe a place
+ * on the screen and not a place on the page. If the page scrolls between
+ * drawing and capturing, the same numbers point at different content. The
+ * rectangle is moved by the scroll distance so that it covers the content that
+ * was drawn around, then clamped to the viewport because a screenshot can show
+ * nothing outside it. `clipped` says whether the clamp removed any part.
+ *
+ * Returns null when none of the rectangle is on screen any more.
+ */
+export function regionAtScroll(
+  rect: Rect,
+  drawnAt: ScrollOffset,
+  now: Viewport,
+): { rect: Rect; clipped: boolean } | null {
+  const moved = { x: rect.x + drawnAt.x - now.x, y: rect.y + drawnAt.y - now.y }
+  const left = Math.max(0, moved.x)
+  const top = Math.max(0, moved.y)
+  const right = Math.min(now.width, moved.x + rect.width)
+  const bottom = Math.min(now.height, moved.y + rect.height)
+  if (right <= left || bottom <= top) return null
+  const clamped = { x: left, y: top, width: right - left, height: bottom - top }
+  const clipped = clamped.width < rect.width - 1 || clamped.height < rect.height - 1
+  return { rect: clamped, clipped }
+}

@@ -29,6 +29,7 @@ import type {
   TreeRow,
 } from './types'
 import type { Rule } from './css'
+import type { ScrollOffset } from './region'
 import type { OverlayPalette } from './accents'
 import type { RefinementTurn } from '@background/providers/types'
 
@@ -146,7 +147,18 @@ export type Message =
    * So the panel asks for it once, from the click that turns screenshots on,
    * and after that this simply works.
    */
-  | { type: 'capture-region'; tabId: number; rect: Rect; viewportWidth: number }
+  | {
+      type: 'capture-region'
+      tabId: number
+      rect: Rect
+      viewportWidth: number
+      /**
+       * How far the page was scrolled when `rect` was drawn. Present for a
+       * rectangle stored from a pick, which may be captured after the page has
+       * scrolled; absent for a region that is captured as soon as it is drawn.
+       */
+      scrolledTo?: ScrollOffset
+    }
   /**
    * `mode` decides what a confirmed pick means. 'target' replaces what the
    * transform acts on; 'reference' adds an element the follow-up can talk
@@ -241,6 +253,8 @@ export type ContentMessage =
   | { type: 'url-changed'; url: string }
   /** Answered only by a live instance; the background uses it to avoid reinjecting. */
   | { type: 'ping' }
+  /** Answers the current scroll offset and viewport size. */
+  | { type: 'get-viewport' }
 
 /**
  * Sent from content script to sidebar, via the background script.
@@ -284,6 +298,8 @@ export type ContentEvent =
       tree: TreeRow[]
       /** CSS pixels, for scaling the crop against a device-pixel capture. */
       viewportWidth: number
+      /** The scroll offset the crop was measured at. */
+      scrolledTo: ScrollOffset
     }
   | { type: 'picking-cancelled' }
   | { type: 'health-check-result'; states: TransformRuntimeState[] }
@@ -310,6 +326,8 @@ export interface AnchoredElement {
   cropClipped: boolean
   target: HoverTarget
   viewportWidth: number
+  /** The scroll offset the crop was measured at. */
+  scrolledTo: ScrollOffset
   /**
    * The subtree around the element, as a pick would have produced.
    *
