@@ -33,6 +33,8 @@ import {
   GENERATION_SCHEMA,
   ProviderError,
   REVIEW_SCHEMA,
+  isModelNotPermitted,
+  modelNotPermittedError,
   type AiProvider,
   type GenerateRequest,
   type StreamListener,
@@ -504,6 +506,12 @@ function toProviderError(
    * because the same status answers a wrong path. Anthropic words it
    * "model: <id>".
    */
+  if (
+    error instanceof Anthropic.NotFoundError &&
+    isModelNotPermitted(String(error.message ?? ''))
+  ) {
+    return modelNotPermittedError(context.model, context.label, error)
+  }
   if (
     error instanceof Anthropic.NotFoundError &&
     error.type === 'not_found_error' &&

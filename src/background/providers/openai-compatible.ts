@@ -33,6 +33,8 @@ import {
   GENERATION_SCHEMA,
   ProviderError,
   REVIEW_SCHEMA,
+  isModelNotPermitted,
+  modelNotPermittedError,
   type AiProvider,
   type GenerateRequest,
   type UsageListener,
@@ -566,6 +568,10 @@ async function httpToProviderError(
       ? await readErrorFields(response)
       : { message: '', code: '', type: '' }
 
+  // Before the missing-model check, whose wording and code match these too.
+  if (status === 404 && isModelNotPermitted(fields.message)) {
+    return modelNotPermittedError(model, label)
+  }
   if (status === 404 && isModelNotFound(fields)) {
     return new ProviderError(
       `The model ${modelDisplayName(model)} is not available from ${label}. Choose another model in settings.`,

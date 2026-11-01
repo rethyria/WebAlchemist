@@ -71,6 +71,23 @@ describe('Anthropic adapter', () => {
     expect(error.retryable).toBe(false)
   })
 
+  it('maps a 404 saying the model does not exist or is not accessible to model-not-permitted, not a retired model', async () => {
+    respond(404, {
+      type: 'error',
+      error: {
+        type: 'not_found_error',
+        message: 'The model `claude-opus-4-6` does not exist or you do not have access to it.',
+      },
+    })
+    const error = await failure(run)
+    expect(error.kind).toBe('model-not-permitted')
+    expect(error.message).toContain('Opus 4.6 (claude-opus-4-6)')
+    expect(error.message).toContain('not available to this account')
+    expect(error.message).toContain('account')
+    expect(error.message).not.toContain('Choose another model in settings.')
+    expect(error.retryable).toBe(false)
+  })
+
   it('maps a billing_error and the 400 low-balance wording to billing', async () => {
     respond(402, { type: 'error', error: { type: 'billing_error', message: 'Billing problem' } })
     expect((await failure(run)).kind).toBe('billing')
@@ -116,6 +133,38 @@ describe('OpenAI-compatible adapter', () => {
 
     respond(404, { error: { message: 'No endpoints found for gone-model.' } })
     expect((await failure(run)).kind).toBe('model-unavailable')
+  })
+
+  it('maps the wording that the model does not exist or is not accessible to model-not-permitted, also with model_not_found', async () => {
+    respond(404, {
+      error: {
+        message: 'The model `gone-model` does not exist or you do not have access to it.',
+        code: 'model_not_found',
+      },
+    })
+    const error = await failure(run)
+    expect(error.kind).toBe('model-not-permitted')
+    expect(error.message).toContain('gone-model')
+    expect(error.message).toContain('not available to this account')
+    expect(error.message).toContain('Local')
+    expect(error.retryable).toBe(false)
+  })
+
+  it('maps the OpenRouter data policy 404 to model-not-permitted', async () => {
+    respond(404, { error: { message: 'No endpoints found matching your data policy (Free model publication).' } })
+    expect((await failure(run)).kind).toBe('model-not-permitted')
+  })
+
+  // Control: the retired-model wordings above still give model-unavailable, and
+  // the same permission wording on another status is not a model error.
+  it('keeps the retired-model message for the other 404 wordings', async () => {
+    respond(404, { error: { message: 'No endpoints found for gone-model.' } })
+    const error = await failure(run)
+    expect(error.kind).toBe('model-unavailable')
+    expect(error.message).toContain('Choose another model in settings.')
+
+    respond(403, { error: { message: 'The model `x` does not exist or you do not have access to it.' } })
+    expect((await failure(run)).kind).toBe('auth')
   })
 
   it('maps 402 and a 429 with insufficient_quota to billing, not rate-limit', async () => {

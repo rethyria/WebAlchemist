@@ -1,9 +1,10 @@
-import type {
-  GenerationResult,
-  TokenUsage,
-  ModelReview,
-  PageContext,
-  Provider,
+import {
+  modelDisplayName,
+  type GenerationResult,
+  type TokenUsage,
+  type ModelReview,
+  type PageContext,
+  type Provider,
 } from '@shared/types'
 
 /** One conversational turn during refinement. */
@@ -113,6 +114,13 @@ export class ProviderError extends Error {
        * other failure here, so it has its own kind.
        */
       | 'model-unavailable'
+      /**
+       * The model exists, but this account may not use it: access is not
+       * granted, or the account's data policy excludes every provider of it.
+       * Choosing another model may help, but the setting to change is in the
+       * provider's account, so it is not reported as a retired model.
+       */
+      | 'model-not-permitted'
       /** The account has no credit or a billing problem. Retrying cannot help. */
       | 'billing'
       | 'bad-response'
@@ -198,3 +206,33 @@ export const REVIEW_SCHEMA = {
   required: ['verdict', 'explanation'],
   additionalProperties: false,
 } as const
+
+/**
+ * Whether a 404 message says the account cannot use the model, as opposed to
+ * the model not existing. OpenAI words it "The model `x` does not exist or you
+ * do not have access to it", and sends it with the code model_not_found. The
+ * sentence does not say which of the two applies, and the reviewed reports of
+ * it were for accounts without access, so it is checked before the code and is
+ * treated as an account problem. OpenRouter answers "No endpoints found matching your data policy" when the account's
+ * privacy settings exclude every provider of the model.
+ */
+export function isModelNotPermitted(message: string): boolean {
+  return (
+    /does not exist or you do not have access to it/i.test(message) ||
+    /no endpoints found matching your data policy/i.test(message)
+  )
+}
+
+/** The error for a model the account may not use. Names the model and where to change it. */
+export function modelNotPermittedError(
+  model: string,
+  label: string,
+  cause?: unknown,
+): ProviderError {
+  return new ProviderError(
+    `The model ${modelDisplayName(model)} is not available to this account on ${label}. Check the account and data policy settings with the provider, or choose another model in settings.`,
+    'model-not-permitted',
+    false,
+    cause === undefined ? undefined : { cause },
+  )
+}
