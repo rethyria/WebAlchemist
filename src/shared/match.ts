@@ -28,20 +28,25 @@ export function matchPresetsFor(rawUrl: string): MatchPreset[] {
   const presets: MatchPreset[] = []
 
   /*
+   * The exact host is recommended, not the domain with its subdomains. The
+   * wider pattern used to be recommended, with a leading `www.` removed, so
+   * saving on www.google.com produced `*.google.com/*`, and the transform then
+   * also ran on accounts.google.com and mail.google.com, and the permission
+   * prompt asked for every google.com subdomain. A transform is written for
+   * the pages the user was looking at; covering sibling services is a choice
+   * the user makes, so it is offered below and not preselected.
+   */
+  presets.push({ label: `${host} only`, pattern: `${host}/*`, recommended: true })
+
+  /*
    * `*.` covers the domain itself as well as its subdomains, so this matches
-   * youtube.com and www.youtube.com alike.
-   *
-   * The bare `registrable/*` that used to be recommended here did not match
-   * its own page on any www host: saving on www.youtube.com produced a
-   * transform that could never apply and never appeared in the list.
+   * youtube.com and www.youtube.com alike. A bare `registrable/*` would not
+   * match its own page on a www host, which is why the `*.` form is used.
    */
   presets.push({
-    label: `${registrable} and its subdomains`,
+    label: `${registrable} and all its subdomains`,
     pattern: `*.${registrable}/*`,
-    recommended: true,
   })
-
-  presets.push({ label: `${host} only`, pattern: `${host}/*` })
 
   // First meaningful path segment, e.g. reddit.com/r/programming*
   const segments = url.pathname.split('/').filter(Boolean)

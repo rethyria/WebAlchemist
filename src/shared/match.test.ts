@@ -35,9 +35,33 @@ describe('matchesUrl', () => {
 })
 
 describe('matchPresetsFor', () => {
-  it('recommends the whole site, including subdomains', () => {
+  it('recommends the exact host the page is on', () => {
     const presets = matchPresetsFor('https://news.ycombinator.com/item?id=1')
-    expect(presets.find((p) => p.recommended)?.pattern).toBe('*.news.ycombinator.com/*')
+    expect(presets.find((p) => p.recommended)?.pattern).toBe('news.ycombinator.com/*')
+  })
+
+  describe('on a www host (#58)', () => {
+    const presets = matchPresetsFor('https://www.google.com/search?q=x')
+    const recommended = presets.find((p) => p.recommended)!.pattern
+
+    it('recommends www.google.com and no other host', () => {
+      expect(recommended).toBe('www.google.com/*')
+      expect(matchesUrl(recommended, 'https://www.google.com/maps')).toBe(true)
+      expect(matchesUrl(recommended, 'https://accounts.google.com/signin')).toBe(false)
+      expect(matchesUrl(recommended, 'https://mail.google.com/')).toBe(false)
+    })
+
+    it('is the first preset, which is the one the authoring flow starts from', () => {
+      expect(presets[0]?.pattern).toBe(recommended)
+    })
+
+    it('control: the subdomain preset is still offered, is not recommended, and does cover them', () => {
+      // Shows the assertions above are about which preset is recommended, since
+      // the wider pattern genuinely reaches the sibling hosts.
+      const wide = presets.find((p) => p.pattern === '*.google.com/*')!
+      expect(wide.recommended).toBeUndefined()
+      expect(matchesUrl(wide.pattern, 'https://accounts.google.com/signin')).toBe(true)
+    })
   })
 
   it('offers a path-prefix option for nested URLs', () => {
