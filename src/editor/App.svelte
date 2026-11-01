@@ -3,7 +3,7 @@
   import type { ReviewResult, Settings, Transform } from '@shared/types'
   import { matchPresetsFor, matchesUrl, originPermissionFor } from '@shared/match'
   import { send } from '@shared/messaging.svelte'
-import { permissionRequestsFor, requestAll } from '@shared/permissions'
+import { editorOriginToRequest, permissionRequestsFor, requestAll } from '@shared/permissions'
   import CodeArea from './CodeArea.svelte'
   import { shouldConfirmLeaving } from './unload'
 
@@ -163,7 +163,9 @@ import { permissionRequestsFor, requestAll } from '@shared/permissions'
     try {
       /*
        * Widening where a transform applies is asking to read more sites, so
-       * it goes through the same prompt saving a new one does. A JavaScript
+       * it goes through the same prompt saving a new one does, and creating
+       * always asks because the default pattern is wider than the picked host
+       * (#102, see editorOriginToRequest). A JavaScript
        * transform also needs the optional userScripts permission, which the
        * background cannot request because it has no user gesture. Without it
        * the background stored the record and then failed to register it,
@@ -173,7 +175,7 @@ import { permissionRequestsFor, requestAll } from '@shared/permissions'
        * so the click that reached here is still live; the request is refused
        * outright once a gesture has been spent.
        */
-      const origin = wanted !== current.match ? originPermissionFor(wanted) : null
+      const origin = editorOriginToRequest(creating, wanted, current.match)
       const granted = await requestAll(
         (permissions) => browser.permissions.request(permissions),
         permissionRequestsFor(creating ? kind : current.kind, origin),

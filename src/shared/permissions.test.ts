@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { permissionRequestsFor, requestAll } from './permissions'
+import { editorOriginToRequest, permissionRequestsFor, requestAll } from './permissions'
 
 type Request = browser.permissions.Permissions
 
@@ -64,5 +64,28 @@ describe('requestAll', () => {
     const { request } = recorder()
     expect(await requestAll(request, permissionRequestsFor('js', '*://example.com/*'))).toBe(true)
     expect(await requestAll(request, [])).toBe(true)
+  })
+})
+
+describe('editorOriginToRequest', () => {
+  // Fails with the previous rule, which compared the pattern to the saved one
+  // in create mode too and so returned null here.
+  it('requests the origin when creating with the pattern unchanged', () => {
+    expect(editorOriginToRequest(true, '*.example.com/*', '*.example.com/*')).toBe(
+      '*://*.example.com/*',
+    )
+  })
+
+  it('requests the origin when creating with a changed pattern', () => {
+    expect(editorOriginToRequest(true, 'other.com/*', '*.example.com/*')).toBe('*://other.com/*')
+  })
+
+  // Controls: editing keeps the earlier behaviour.
+  it('requests nothing when editing with the pattern unchanged', () => {
+    expect(editorOriginToRequest(false, 'example.com/*', 'example.com/*')).toBeNull()
+  })
+
+  it('requests the origin when editing with a changed pattern', () => {
+    expect(editorOriginToRequest(false, 'other.com/*', 'example.com/*')).toBe('*://other.com/*')
   })
 })

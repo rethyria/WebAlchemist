@@ -1,3 +1,4 @@
+import { originPermissionFor } from './match'
 import type { TransformKind } from './types'
 
 /**
@@ -38,4 +39,26 @@ export function requestAll(
 ): Promise<boolean> {
   const pending = requests.map((one) => request(one))
   return Promise.all(pending).then((results) => results.every(Boolean))
+}
+
+/**
+ * The origin the editor has to request for a save, or null when none is needed.
+ *
+ * Creating always requests it. The sidebar's draft starts with a pattern that
+ * covers the domain and its subdomains, while picking an element granted only
+ * the exact host, so an unchanged pattern is still wider than what is held.
+ * Skipping the request when the pattern was not edited left the transform
+ * working on the picked host and nowhere else it claimed to apply (#102).
+ * Requesting something already held resolves true without a prompt.
+ *
+ * Editing an existing transform requests only when the pattern changed,
+ * because the saved pattern was already requested when it was saved.
+ */
+export function editorOriginToRequest(
+  creating: boolean,
+  wanted: string,
+  savedMatch: string,
+): string | null {
+  if (!creating && wanted === savedMatch) return null
+  return originPermissionFor(wanted)
 }
