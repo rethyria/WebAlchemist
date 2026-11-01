@@ -19,6 +19,7 @@ import type {
   Rect,
   ReviewResult,
   Transform,
+  TransformRuntimeState,
 } from '@shared/types'
 import type { RefinementTurn } from './providers/types'
 import { overlayPaletteFor } from '@shared/accents'
@@ -168,7 +169,11 @@ async function evaluateTab(
    */
   const settings = await getSettings()
   if (navigated) await badge.tabNavigated(tabId, transforms.length, settings.accent)
-  else await badge.transformCountChanged(tabId, transforms.length, settings.accent)
+  else await badge.transformCountChanged(
+    tabId,
+    transforms.map((t) => t.id),
+    settings.accent,
+  )
 
   // A route change may leave nothing to apply, and the previous route's CSS
   // has to come out. On a new document nothing was applied, so this is a no-op.
@@ -378,6 +383,7 @@ async function handle(
       if (saved.kind === 'js') {
         await registerTransform(saved)
       }
+      await badge.transformEdited(saved.id, (await getSettings()).accent)
       // Apply it now rather than on the next navigation. The preview was just
       // taken down, so without this the page visibly reverts on save.
       await reapply(message.tabId)
@@ -387,6 +393,7 @@ async function handle(
     case 'delete-transform':
       await unregisterTransform(message.id)
       await deleteTransform(message.id)
+      await badge.transformEdited(message.id, (await getSettings()).accent)
       // Take it off the page now. Without this a deleted CSS transform stayed
       // applied until the next navigation — the row vanished from the list
       // while the change it made was still on screen, which reads as the
@@ -617,7 +624,15 @@ async function handle(
       // this host has already been seen.
       forgetSession(message.url)
       const transforms = await transformsForUrl(message.url)
-      return (await runHealthCheck(message.tabId, transforms)) ?? []
+      const states = await runHealthCheck(message.tabId, transforms)
+      // Without this a manual check showed its result in the panel only: a
+      // broken transform it found left the badge unchanged, and a clean result
+      // did not clear an earlier "!". No result means no change.
+      if (states) {
+        const { accent } = await getSettings()
+        await badge.healthChecked(message.tabId, brokenIds(states), accent)
+      }
+      return states ?? []
     }
 
     case 'capture-region':
@@ -644,6 +659,10 @@ async function handle(
  * now, not a property of the transform — storing it would mean showing a stale
  * warning about a site that has since been fixed.
  */
+function brokenIds(states: TransformRuntimeState[]): string[] {
+  return states.filter((state) => state.status === 'broken').map((state) => state.id)
+}
+
 async function checkAndPublish(
   tabId: number,
   transforms: Transform[],
@@ -653,11 +672,7 @@ async function checkAndPublish(
   if (!states) return
 
   const settings = await getSettings()
-  await badge.healthChecked(
-    tabId,
-    states.filter((state) => state.status === 'broken').length,
-    settings.accent,
-  )
+  await badge.healthChecked(tabId, brokenIds(states), settings.accent)
 
   await browser.runtime
     .sendMessage({ type: 'health-check-result', tabId, states })
@@ -973,7 +988,11 @@ async function reapply(tabId: number | undefined): Promise<void> {
   // reaches here, which is why the count is refreshed here rather than at each
   // of the four call sites.
   const settings = await getSettings()
-  await badge.transformCountChanged(tabId, transforms.length, settings.accent)
+  await badge.transformCountChanged(
+    tabId,
+    transforms.map((t) => t.id),
+    settings.accent,
+  )
 }
 
 /* ------------------------------------------------------------------ */

@@ -12,7 +12,7 @@ import { badgeFor, type TabFacts } from './badge'
 
 const facts = (over: Partial<TabFacts> = {}): TabFacts => ({
   matching: 0,
-  broken: 0,
+  broken: new Set<string>(),
   working: false,
   ...over,
 })
@@ -31,11 +31,11 @@ describe('what the badge shows', () => {
   })
 
   it('shows ! when a check found something broken', () => {
-    expect(badgeFor(facts({ matching: 3, broken: 1 }))?.text).toBe('!')
+    expect(badgeFor(facts({ matching: 3, broken: new Set(['a']) }))?.text).toBe('!')
   })
 
   it('lets working win over broken, and gives broken back afterwards', () => {
-    const during = facts({ matching: 2, broken: 1, working: true })
+    const during = facts({ matching: 2, broken: new Set(['a']), working: true })
     expect(badgeFor(during)?.text).toBe('··')
     expect(badgeFor({ ...during, working: false })?.text).toBe('!')
   })
@@ -49,7 +49,7 @@ describe('what the badge shows', () => {
   })
 
   it('uses the broken hue only for broken', () => {
-    expect(badgeFor(facts({ matching: 1, broken: 1 }))?.background).toBe('#ef8354')
+    expect(badgeFor(facts({ matching: 1, broken: new Set(['a']) }))?.background).toBe('#ef8354')
     expect(badgeFor(facts({ matching: 1 }))?.background).toBe('accent')
     expect(badgeFor(facts({ working: true }))?.background).toBe('accent')
   })

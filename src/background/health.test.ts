@@ -73,3 +73,74 @@ describe('the result broadcast to extension pages (#87)', () => {
     ])
   })
 })
+
+describe('the broken badge after a repair, a delete or a manual check (#88)', () => {
+
+  beforeEach(() => {
+    h.tabUrls.set(TAB, OLD_PAGE)
+    // Every check answers immediately in these tests.
+    h.contentReply = (message) =>
+      message.type === 'ping' ? true : { type: 'health-check-result', states: currentStates }
+  })
+
+  let currentStates: unknown[] = []
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 0))
+
+  async function loadBroken() {
+    currentStates = brokenState
+    await commit(OLD_PAGE)
+    await settle()
+    expect(badgeText()).toBe('!')
+  }
+
+  it('shows the count again after the broken transform is saved', async () => {
+    await loadBroken()
+    await h.onMessage({ type: 'save-transform', transform: app, tabId: TAB })
+    expect(badgeText()).toBe('1')
+  })
+
+  it('clears the marker on other tabs that showed the saved transform as broken', async () => {
+    await loadBroken()
+    // The edit comes from the editor page, which has no tab of its own.
+    await h.onMessage({ type: 'save-transform', transform: app })
+    expect(badgeText()).toBe('1')
+  })
+
+  it('clears the marker after the broken transform is deleted', async () => {
+    await loadBroken()
+    await h.onMessage({ type: 'delete-transform', id: app.id, tabId: TAB })
+    expect(badgeText()).toBe('')
+  })
+
+  it('clears the marker when the broken transform is disabled', async () => {
+    await loadBroken()
+    await h.onMessage({ type: 'set-enabled', id: app.id, enabled: false, tabId: TAB })
+    expect(badgeText()).toBe('')
+  })
+
+  it('shows "!" when a manual check finds a broken transform', async () => {
+    currentStates = []
+    await commit(OLD_PAGE)
+    await settle()
+    expect(badgeText()).toBe('1')
+    currentStates = brokenState
+    await h.onMessage({ type: 'check-now', tabId: TAB, url: OLD_PAGE })
+    expect(badgeText()).toBe('!')
+  })
+
+  it('clears "!" when a manual check finds everything working', async () => {
+    await loadBroken()
+    currentStates = [{ id: app.id, status: 'working' }]
+    await h.onMessage({ type: 'check-now', tabId: TAB, url: OLD_PAGE })
+    expect(badgeText()).toBe('1')
+  })
+
+  it('control: a transform that stays broken keeps the marker after an unrelated reapply', async () => {
+    // Shows the tests above clear the marker because of the edit and not
+    // because any reapply clears it: reordering reapplies the tab and changes
+    // nothing about this transform.
+    await loadBroken()
+    await h.onMessage({ type: 'reorder-transforms', orderedIds: [app.id], tabId: TAB })
+    expect(badgeText()).toBe('!')
+  })
+})
