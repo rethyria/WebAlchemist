@@ -288,7 +288,12 @@ export type ContentMessage =
   | { type: 'set-lock-scope'; depth: number }
   | { type: 'clear-lock' }
   | { type: 'apply-transforms'; transforms: Transform[] }
-  | { type: 'run-health-check'; transforms: Transform[] }
+  | {
+      type: 'run-health-check'
+      transforms: Transform[]
+      /** Transform id to the token in the name of its script's error marker. */
+      errorTokens: Record<string, string>
+    }
   | { type: 'url-changed'; url: string }
   /** Answered only by a live instance; the background uses it to avoid reinjecting. */
   | { type: 'ping' }

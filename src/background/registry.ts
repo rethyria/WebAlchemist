@@ -36,6 +36,7 @@
  */
 
 import type { Capability, Transform } from '@shared/types'
+import { errorTokenFor, forgetErrorTokens } from './error-tokens'
 import { wrapTransform } from './harness'
 import { userScripts, type ExecutionWorld, type Mv3RegisteredUserScript } from './userscripts-api'
 import { getAllTransforms, getSettings } from './storage'
@@ -119,7 +120,7 @@ async function registrationFor(transform: Transform): Promise<Mv3RegisteredUserS
     id: transform.id,
     matches: matchPatternsFor(transform),
     // Wrapped so the transform re-applies after framework re-renders.
-    js: [{ code: wrapTransform(transform) }],
+    js: [{ code: wrapTransform(transform, await errorTokenFor(transform.id)) }],
     world: world satisfies ExecutionWorld,
     ...(world === 'USER_SCRIPT' ? { worldId } : {}),
     runAt: 'document_idle',
@@ -235,6 +236,7 @@ export async function unregisterPreview(id: string): Promise<void> {
 }
 
 export async function unregisterTransform(id: string): Promise<void> {
+  await forgetErrorTokens([id]).catch(() => {})
   if (!(await hasUserScriptsPermission())) return
   try {
     await userScripts.unregister({ ids: [id] })
@@ -317,6 +319,7 @@ export async function reregisterAll(
   if (stale.length > 0) {
     try {
       await userScripts.unregister({ ids: stale })
+      await forgetErrorTokens(stale).catch(() => {})
     } catch {
       // Already gone.
     }

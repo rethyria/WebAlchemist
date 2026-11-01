@@ -1456,7 +1456,10 @@ function stopPicking(): void {
  */
 const GRACE_PERIOD_MS = 3000
 
-async function runHealthCheck(transforms: Transform[]): Promise<TransformRuntimeState[]> {
+async function runHealthCheck(
+  transforms: Transform[],
+  errorTokens: Record<string, string>,
+): Promise<TransformRuntimeState[]> {
   const pending = new Map(transforms.map((t) => [t.id, t]))
   const states: TransformRuntimeState[] = []
 
@@ -1472,7 +1475,7 @@ async function runHealthCheck(transforms: Transform[]): Promise<TransformRuntime
 
   // Read last, once per check: see script-errors.ts for why this is not trusted.
   const withErrors = (found: TransformRuntimeState[]) =>
-    readScriptErrors(found, transforms, document.documentElement)
+    readScriptErrors(found, transforms, errorTokens, document.documentElement)
 
   settle()
   if (pending.size === 0) return withErrors(states)
@@ -1669,7 +1672,7 @@ async function handleMessage(message: ContentMessage) {
       lock.hide()
       return true
     case 'run-health-check':
-      return { type: 'health-check-result', states: await runHealthCheck(message.transforms) }
+      return { type: 'health-check-result', states: await runHealthCheck(message.transforms, message.errorTokens) }
     case 'ping':
       return true
     case 'get-viewport':

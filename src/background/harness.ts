@@ -19,7 +19,11 @@ function jsString(value: string): string {
   return JSON.stringify(value)
 }
 
-export function wrapTransform(transform: Transform): string {
+/**
+ * `errorToken` is the random part of the error marker's name, made by
+ * error-tokens.ts when the script is registered.
+ */
+export function wrapTransform(transform: Transform, errorToken: string): string {
   const scopeCandidates = [
     ...transform.anchor.landmarks,
     'main',
@@ -32,7 +36,12 @@ export function wrapTransform(transform: Transform): string {
   const SCOPES = [${scopeCandidates.join(', ')}];
   // Where the last error is recorded for the content script to read. The page
   // can read and forge it, so it is for diagnostics only (see script-errors.ts).
-  const ERROR_ATTRIBUTE = ${jsString(errorAttributeName(transform.id))};
+  const ERROR_ATTRIBUTE = ${jsString(errorAttributeName(errorToken))};
+
+  // True only after this script wrote the marker. A successful run touches the
+  // attribute only then: removing it on every run would let a page that
+  // watches removeAttribute see the name on every run.
+  let wroteMarker = false;
 
   const apply = () => {
     try {
@@ -44,12 +53,16 @@ ${transform.code}
       })();
       // A run that finishes clears an earlier error, so a failure that a later
       // run fixes is not reported.
-      try { document.documentElement.removeAttribute(ERROR_ATTRIBUTE); } catch (_) {}
+      if (wroteMarker) {
+        wroteMarker = false;
+        try { document.documentElement.removeAttribute(ERROR_ATTRIBUTE); } catch (_) {}
+      }
     } catch (error) {
       console.error('[Web Alchemist] transform failed:', NAME, error);
       try {
         const text = String((error && error.message) || error);
         document.documentElement.setAttribute(ERROR_ATTRIBUTE, text.slice(0, 500));
+        wroteMarker = true;
       } catch (_) { /* the document cannot be written; the console line remains */ }
     }
   };

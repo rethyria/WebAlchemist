@@ -11,6 +11,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import type { Transform } from '@shared/types'
 
 const store = new Map<string, unknown>()
+const sessionStore = new Map<string, unknown>()
 /** Ids whose registration fails, to test a preview that cannot be registered. */
 const failing = new Set<string>()
 let stored: unknown[] = []
@@ -19,6 +20,12 @@ let killSwitch = false
   permissions: { contains: async () => true },
   // `stored` is what getAllTransforms reads, so a test can say what is saved.
   storage: {
+    session: {
+      get: async (key: string) => (sessionStore.has(key) ? { [key]: sessionStore.get(key) } : {}),
+      set: async (items: Record<string, unknown>) => {
+        for (const [key, value] of Object.entries(items)) sessionStore.set(key, value)
+      },
+    },
     local: {
       get: async () => ({ transforms: stored, settings: { aiJsKillSwitch: killSwitch } }),
       set: async () => {},

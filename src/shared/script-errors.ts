@@ -24,9 +24,13 @@ const MAX_MESSAGE = 200
 /** The reason a repair request carries for a script that threw. Never varies. */
 export const SCRIPT_ERROR_REASON = 'The script threw an error when it ran.'
 
-/** The attribute that holds the last error of one transform. */
-export function errorAttributeName(transformId: string): string {
-  return `data-wa-error-${transformId.toLowerCase().replace(/[^a-z0-9-]/g, '-')}`
+/**
+ * The attribute that holds the last error of one registered script. The token
+ * is random per registration and is not the transform id (see
+ * background/error-tokens.ts).
+ */
+export function errorAttributeName(token: string): string {
+  return `data-wa-error-${token.toLowerCase().replace(/[^a-z0-9-]/g, '-')}`
 }
 
 /** One line of at most MAX_MESSAGE characters. */
@@ -70,20 +74,25 @@ export interface MarkerHolder {
 /**
  * Applies the markers on `holder` to the states of a health check.
  *
- * Reading a marker removes it, so the next check reports an error only when
- * the script failed again. This is the content script's health check path,
- * kept here so that a test can run it on a fake element.
+ * `tokens` maps a transform id to the token in its marker name. A transform
+ * without a token is not read. Reading a marker removes it, so the next check
+ * reports an error only when the script failed again. This is the content
+ * script's health check path, kept here so that a test can run it on a fake
+ * element.
  */
 export function readScriptErrors(
   states: TransformRuntimeState[],
   transforms: Pick<Transform, 'id' | 'kind'>[],
+  tokens: Record<string, string>,
   holder: MarkerHolder,
 ): TransformRuntimeState[] {
   return withScriptErrors(
     states,
     (id) => transforms.find((t) => t.id === id)?.kind,
     (id) => {
-      const name = errorAttributeName(id)
+      const token = tokens[id]
+      if (token === undefined) return null
+      const name = errorAttributeName(token)
       const text = holder.getAttribute(name)
       if (text !== null) holder.removeAttribute(name)
       return text
