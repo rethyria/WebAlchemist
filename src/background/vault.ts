@@ -55,6 +55,9 @@ const IV_BYTES = 12
 
 const SESSION_KEY = 'waVaultKey'
 
+/** The alarm that locks the vault after a period without use. See storage.ts. */
+export const IDLE_ALARM = 'wa-vault-idle'
+
 /** What `storage.local` holds instead of the plaintext, when this is on. */
 export interface Sealed {
   /** Marks the value as ciphertext rather than a credential map. */
@@ -170,6 +173,10 @@ export async function recallKey(): Promise<CryptoKey | null> {
 
 export async function forgetKey(): Promise<void> {
   await browser.storage.session.remove(SESSION_KEY)
+  // With no key there is nothing left to lock, so the idle alarm is cancelled
+  // here, which covers every way the key can go: locking, removing the
+  // passphrase and discarding the vault.
+  await browser.alarms.clear(IDLE_ALARM)
 }
 
 export function saltOf(sealed: Sealed): Uint8Array {

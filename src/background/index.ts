@@ -70,6 +70,7 @@ import {
   getAllTransforms,
   getCredentialStatus,
   getSettings,
+  handleVaultIdleAlarm,
   importTransforms,
   lockVault,
   reorderTransforms,
@@ -108,6 +109,10 @@ browser.runtime.onInstalled.addListener(async (details) => {
  * changes in both directions from about:addons as well as from our own
  * request at save time.
  */
+// Registered at the top level so the browser can deliver an alarm that wakes a
+// stopped background page.
+browser.alarms.onAlarm.addListener((alarm) => void handleVaultIdleAlarm(alarm))
+
 browser.permissions.onAdded.addListener(async (permissions) => {
   const granted = permissions.permissions as string[] | undefined
   if (granted?.includes('userScripts')) await reregister()

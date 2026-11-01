@@ -110,6 +110,10 @@
 
     <VaultSettings
       {vault}
+      idleMinutes={settings.vaultIdleLockMinutes}
+      onidlechange={async (vaultIdleLockMinutes) => {
+        if (settings) await save({ ...settings, vaultIdleLockMinutes })
+      }}
       onenable={async (passphrase) => {
         await call({ type: 'enable-vault', passphrase })
         await afterVault()

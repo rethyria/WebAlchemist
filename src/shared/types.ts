@@ -13,6 +13,8 @@
  *   code       the implementation itself.
  */
 
+import { DEFAULT_VAULT_IDLE_MINUTES } from './vault-policy'
+
 export const SCHEMA_VERSION = 1
 
 export type TransformKind = 'css' | 'js'
@@ -352,6 +354,11 @@ export interface Settings {
   keepScreenshotPermission: boolean
   /** Disables execution of every AI-authored JS transform, everywhere. */
   aiJsKillSwitch: boolean
+  /**
+   * Minutes without a provider call after which an unlocked vault locks
+   * itself. Zero means never. Has no effect while credentials are not sealed.
+   */
+  vaultIdleLockMinutes: number
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -362,6 +369,7 @@ export const DEFAULT_SETTINGS: Settings = {
   accent: 'blue',
   keepScreenshotPermission: false,
   aiJsKillSwitch: false,
+  vaultIdleLockMinutes: DEFAULT_VAULT_IDLE_MINUTES,
 }
 
 /* ------------------------------------------------------------------ */

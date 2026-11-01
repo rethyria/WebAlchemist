@@ -7,7 +7,7 @@
    * true statements, and the one shown follows the stored data rather than a
    * setting — see `vaultState` in storage.ts.
    */
-  import { MIN_PASSPHRASE_LENGTH } from '@shared/vault-policy'
+  import { MIN_PASSPHRASE_LENGTH, VAULT_IDLE_OPTIONS } from '@shared/vault-policy'
   import Button from '@sidebar/components/Button.svelte'
 
   interface Props {
@@ -16,6 +16,9 @@
      * rune in this file as a store subscription on the prop.
      */
     vault: { sealed: boolean; unlocked: boolean }
+    /** Minutes of no use before the vault locks itself; 0 means never. */
+    idleMinutes: number
+    onidlechange: (minutes: number) => Promise<void>
     onenable: (passphrase: string) => Promise<void>
     ondisable: (passphrase: string) => Promise<void>
     onunlock: (passphrase: string) => Promise<void>
@@ -23,7 +26,7 @@
     ondiscard: () => Promise<void>
   }
 
-  let { vault, onenable, ondisable, onunlock, onlock, ondiscard }: Props = $props()
+  let { vault, idleMinutes, onidlechange, onenable, ondisable, onunlock, onlock, ondiscard }: Props = $props()
 
   type Panel = 'enable' | 'disable' | 'unlock' | null
   let panel = $state<Panel>(null)
@@ -133,6 +136,25 @@
       {#if !vault.unlocked}
         Generating anything will fail until you unlock.
       {/if}
+    </p>
+  {/if}
+
+  {#if vault.sealed}
+    <label class="idle">
+      Lock automatically after
+      <select
+        value={idleMinutes}
+        onchange={(event) => void onidlechange(Number(event.currentTarget.value))}
+      >
+        {#each VAULT_IDLE_OPTIONS as option}
+          <option value={option.minutes}>{option.label}</option>
+        {/each}
+      </select>
+      without a request to a provider
+    </label>
+    <p class="note">
+      Locking stops generation until the passphrase is entered again. With Never selected, the
+      vault stays unlocked until the browser closes or it is locked by hand.
     </p>
   {/if}
 
@@ -260,6 +282,24 @@
     margin: 0;
     font: 12px/1.6 var(--font-ui);
     color: var(--text-dim);
+  }
+
+  .idle {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-7);
+    flex-wrap: wrap;
+    font: 12px/1.6 var(--font-ui);
+    color: var(--text-dim);
+  }
+
+  .idle select {
+    padding: 4px 6px;
+    border: 1px solid var(--border);
+    border-radius: var(--r-input);
+    background: var(--surface);
+    font: 12px var(--font-ui);
+    color: var(--text);
   }
 
   .caution {

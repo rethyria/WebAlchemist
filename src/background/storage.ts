@@ -48,6 +48,7 @@ import {
 import {
   LockedError,
   deriveKey,
+  IDLE_ALARM,
   forgetKey,
   isSealed,
   randomSalt,
@@ -80,6 +81,13 @@ export async function getSettings(): Promise<Settings> {
 }
 
 export async function saveSettings(settings: Settings): Promise<void> {
+  const idle = settings.vaultIdleLockMinutes
+  if (!Number.isInteger(idle) || idle < 0) {
+    throw new Error('The vault lock period must be a whole number of minutes, or 0 for never.')
+  }
+  const previous = (await browser.storage.local.get(KEY_SETTINGS))[KEY_SETTINGS] as
+    | Partial<Settings>
+    | undefined
   // Checked here and not only in the settings page: this is reached by a
   // message that any extension context can send.
   for (const provider of settings.providers) {
@@ -88,6 +96,12 @@ export async function saveSettings(settings: Settings): Promise<void> {
     }
   }
   await browser.storage.local.set({ [KEY_SETTINGS]: settings })
+
+  // A changed period applies to the vault that is open now, not only to the
+  // next unlock. Other settings changes leave the running timer alone, so
+  // that picking an accent colour does not count as using the vault.
+  const before = previous?.vaultIdleLockMinutes ?? DEFAULT_SETTINGS.vaultIdleLockMinutes
+  if (before !== idle && (await recallKey())) await armIdleLock()
 }
 
 function migrateSettings(raw: Partial<Settings>): Settings {
@@ -321,7 +335,7 @@ export function reorderTransforms(orderedIds: string[]): Promise<void> {
  * settings flag. A flag can disagree with the bytes; the bytes cannot disagree
  * with themselves.
  */
-async function readCredentialMap(): Promise<CredentialMap> {
+async function readCredentialMap(touch = false): Promise<CredentialMap> {
   const stored = await browser.storage.local.get(KEY_CREDENTIALS)
   const value = stored[KEY_CREDENTIALS]
   if (value === undefined) return {}
@@ -329,7 +343,33 @@ async function readCredentialMap(): Promise<CredentialMap> {
 
   const key = await recallKey()
   if (!key) throw new LockedError()
-  return JSON.parse(await unseal(key, value)) as CredentialMap
+  const map = JSON.parse(await unseal(key, value)) as CredentialMap
+  if (touch) await armIdleLock()
+  return map
+}
+
+/**
+ * Starts, or restarts, the countdown to the idle lock.
+ *
+ * An alarm rather than a timer in the page or a `setTimeout`: the background
+ * is an event page that the browser stops when it is idle, and a timer stops
+ * with it, so the vault would stay unlocked. A named alarm survives the page
+ * being stopped and wakes it, and creating one with the same name replaces
+ * the earlier one, which is what makes each use restart the countdown.
+ *
+ * Restarted only by provider calls, so that opening settings or the sidebar,
+ * which read credential statuses, does not keep an unattended vault open.
+ */
+async function armIdleLock(): Promise<void> {
+  const minutes = (await getSettings()).vaultIdleLockMinutes
+  if (minutes > 0) await browser.alarms.create(IDLE_ALARM, { delayInMinutes: minutes })
+  else await browser.alarms.clear(IDLE_ALARM)
+}
+
+/** Handles an alarm from the browser; the background registers this at start. */
+export async function handleVaultIdleAlarm(alarm: { name: string }): Promise<void> {
+  if (alarm.name !== IDLE_ALARM) return
+  await forgetKey()
 }
 
 /** Writes the map back in whichever form it is currently kept. */
@@ -429,6 +469,7 @@ export async function enableVault(passphrase: string): Promise<void> {
     // Still inside the lock: a write queued behind this one must find the key
     // in the session, or it would fail as locked.
     await rememberKey(key)
+    await armIdleLock()
   })
 }
 
@@ -470,6 +511,7 @@ export async function unlockVault(passphrase: string): Promise<void> {
   // rather than accepted and then failing on the next generation.
   await unseal(key, existing)
   await rememberKey(key)
+  await armIdleLock()
 }
 
 export async function lockVault(): Promise<void> {
@@ -532,7 +574,7 @@ export class CredentialOriginError extends Error {
  * every stored key on upgrade.
  */
 export async function readCredentialForRequest(provider: Provider): Promise<Credential | null> {
-  const found = (await readCredentialMap())[provider.id]
+  const found = (await readCredentialMap(true))[provider.id]
   if (!found) return null
   const destination = destinationOf(provider)
 
