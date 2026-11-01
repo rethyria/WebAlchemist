@@ -9,6 +9,7 @@
  * sensitive content.
  */
 
+import './i18n-overlay'
 import { readScriptErrors } from '@shared/script-errors'
 import { pageHasSensitiveFields } from './sensitive'
 import type { ConflictSpec, ContentEvent, ContentMessage, PickMode } from '@shared/messages'

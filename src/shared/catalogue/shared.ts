@@ -118,10 +118,6 @@ export const sharedMessages = defineMessages({
     description: 'Shown when the panel cannot work. $REOPEN$ is the sentence that says how to open it again.',
     placeholders: ['REOPEN'],
   },
-  scriptErrorReason: {
-    message: 'The script threw an error when it ran.',
-    description: 'Sent to the model as the reason a repair is requested, and shown to the user.',
-  },
   containerEveryTab: {
     message: 'Every tab',
     description: 'Choice in the editor.',

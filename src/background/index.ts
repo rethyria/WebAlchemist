@@ -6,6 +6,7 @@
  * script talk to this module; only this module talks to a provider.
  */
 
+import '@shared/i18n-en'
 import type {
   ContentEvent,
   ContentMessage,

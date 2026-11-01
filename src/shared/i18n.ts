@@ -1,4 +1,4 @@
-import { EN_CATALOGUE, type MessageKey } from './catalogue'
+import type { MessageKey } from './catalogue'
 import type { CatalogueEntry } from './catalogue/define'
 
 export type { MessageKey }
@@ -12,11 +12,23 @@ export type { MessageKey }
  * supplies the text, so a label is never blank. Substitutions fill the
  * placeholders of the message in the order that the entry lists them.
  */
+let fallback: Record<string, CatalogueEntry> = {}
+
+/**
+ * Sets the English catalogue that t() reads when the browser has no text for a
+ * key. Each entry point registers the messages that it uses, so that the
+ * content script, which runs on every page, carries only its own surface.
+ */
+export function useCatalogue(catalogue: Record<string, CatalogueEntry>): void {
+  fallback = catalogue
+}
+
 export function t(key: MessageKey, ...substitutions: Array<string | number>): string {
   const values = substitutions.map(String)
   const translated = browserMessage(key, values)
   if (translated !== '') return translated
-  return fillEnglish(EN_CATALOGUE[key], values)
+  const entry = fallback[key]
+  return entry ? fillEnglish(entry, values) : key
 }
 
 function browserMessage(key: string, values: string[]): string {

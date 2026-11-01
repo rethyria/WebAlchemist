@@ -1,3 +1,4 @@
+import '@shared/i18n-en'
 import { mount } from 'svelte'
 import App from './App.svelte'
 import { applyPageLanguage, t } from '@shared/i18n'

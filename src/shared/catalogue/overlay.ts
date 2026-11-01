@@ -40,4 +40,13 @@ export const overlayMessages = defineMessages({
     description: 'Reason shown for a transform whose element is gone. $SELECTOR$ is a CSS selector.',
     placeholders: ['SELECTOR'],
   },
+  scriptErrorReason: {
+    message: 'The script threw an error when it ran.',
+    description: 'Sent to the model as the reason a repair is requested, and shown to the user.',
+  },
+  addressRemovalNote: {
+    message: 'Page address sent to your AI provider. Removed from it: the fragment, the user name and password, query values, query keys with no value, query keys and path segments longer than $LIMIT$ characters or that look like tokens (a long run of digits, or a long run of letters and digits), and path parameters (everything after a semicolon in a path segment). Removed path segments are shown as $PLACEHOLDER$. For file, blob, data and other addresses that are not http or https, only the scheme is sent.',
+    description: 'Shown next to the page address. $LIMIT$ is a number of characters; $PLACEHOLDER$ is the text that replaces a removed path segment.',
+    placeholders: ['LIMIT', 'PLACEHOLDER'],
+  },
 })
