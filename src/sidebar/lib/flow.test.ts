@@ -1185,3 +1185,55 @@ describe('a re-pick from Edit description', () => {
     expect(flow.tree).toEqual([{ label: 'row' }])
   })
 })
+
+describe('a JavaScript preview that is answered after the run ended (#98)', () => {
+  function flowWithDraft() {
+    const flow = newFlow()
+    flow.draft = { ...saved, kind: 'js' }
+    flow.analysis = { static: [], undeclaredCapabilities: [], passed: true } as any
+    return flow
+  }
+
+  /** A preview-js reply that the test releases when it chooses. */
+  function holdPreviewReply() {
+    let release: () => void = () => {}
+    const gate = new Promise<void>((resolve) => (release = resolve))
+    handler = async (m) => {
+      if (m.type === 'preview-js') await gate
+      return { ok: true, data: null }
+    }
+    return release
+  }
+
+  it('clears the preview when the run was discarded before the reply', async () => {
+    const flow = flowWithDraft()
+    const release = holdPreviewReply()
+    const run = flow.runJs()
+    await vi.waitFor(() => expect(calls.some((c) => c.type === 'preview-js')).toBe(true))
+    await flow.discard()
+    expect(calls.some((c) => c.type === 'clear-preview-js')).toBe(false)
+    release()
+    await run
+    expect(calls.filter((c) => c.type === 'clear-preview-js').map((c) => c.id)).toEqual(['OLD'])
+    expect(flow.jsRan).toBe(false)
+  })
+
+  it('clears the preview when the tab closed before the reply', async () => {
+    const flow = flowWithDraft()
+    const release = holdPreviewReply()
+    const run = flow.runJs()
+    await vi.waitFor(() => expect(calls.some((c) => c.type === 'preview-js')).toBe(true))
+    flow.tabClosed(1)
+    release()
+    await run
+    expect(calls.filter((c) => c.type === 'clear-preview-js').map((c) => c.id)).toEqual(['OLD'])
+  })
+
+  it('records the run and sends no clear when the reply arrives while the run is current (control)', async () => {
+    const flow = flowWithDraft()
+    handler = () => ({ ok: true, data: null })
+    await flow.runJs()
+    expect(flow.jsRan).toBe(true)
+    expect(calls.some((c) => c.type === 'clear-preview-js')).toBe(false)
+  })
+})

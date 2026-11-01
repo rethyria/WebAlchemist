@@ -186,6 +186,23 @@ describe('preview-js and clear-preview-js', () => {
     await vi.waitFor(() => expect(holds('SAVED')).toContain('savedCode()'))
   })
 
+  it('removes the preview and restores the saved script when the reload fails', async () => {
+    tabHooks.reload = async () => {
+      throw new Error('tab gone')
+    }
+    expect(await previewJs()).toMatchObject({ ok: false })
+    expect(registered.has('preview-SAVED')).toBe(false)
+    expect(holds('SAVED')).toContain('savedCode()')
+    // The id is no longer stored, so a later sidebar close has nothing to clear.
+    expect([...session.values()].flat()).not.toContain('SAVED')
+  })
+
+  it('keeps the preview registered when the reload succeeds (control)', async () => {
+    expect(await previewJs()).toMatchObject({ ok: true })
+    expect(holds('preview-SAVED')).toContain('draftCode()')
+    expect(session.get('wa-preview-scripts')).toEqual(['SAVED'])
+  })
+
   it('leaves the saved script running when no preview was started', async () => {
     // Control for the two tests above: a close with nothing to clear must not
     // change the saved registration, so a restore there is not just

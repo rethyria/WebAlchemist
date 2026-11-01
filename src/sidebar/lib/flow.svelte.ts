@@ -1504,6 +1504,11 @@ export class Flow {
   async runJs(): Promise<void> {
     const draft = this.draft
     if (!draft || this.tabId === null || !this.analysis?.passed) return
+    // Discard, a tab close and a new generation all bump the generation. The
+    // reply to preview-js arrives after the registration already exists, so a
+    // run that is no longer current has to take that registration out again.
+    const token = this.generation
+    const current = () => token === this.generation
 
     /*
      * The whole body is guarded, not just the send.
@@ -1536,6 +1541,13 @@ export class Flow {
       // The background reloads the tab to run it; that reload is ours.
       this.ourReload = 'pending'
       await send({ type: 'preview-js', tabId: this.tabId, transform: draft })
+      if (!current()) {
+        // jsRan was still false when discard or tabClosed looked at it, so
+        // neither sent the clear, and the saved script would stay paused.
+        this.ourReload = 'none'
+        await send({ type: 'clear-preview-js', id: draft.id }).catch(() => {})
+        return
+      }
       this.jsRan = true
     } catch (cause) {
       // Otherwise a reload that never came leaves us armed, and the next

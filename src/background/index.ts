@@ -601,7 +601,16 @@ async function handle(
         await removePreviewedScript(message.transform.id)
         throw cause
       }
-      await browser.tabs.reload(message.tabId)
+      try {
+        await browser.tabs.reload(message.tabId)
+      } catch (cause) {
+        // The preview is registered and the saved script paused, but the
+        // sidebar treats a rejected request as "nothing ran" and never sends a
+        // clear, so the registration is removed here.
+        await unregisterPreview(message.transform.id).catch(() => {})
+        await removePreviewedScript(message.transform.id)
+        throw cause
+      }
       return true
     }
 
