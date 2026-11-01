@@ -35,7 +35,7 @@ import { excludedSiteMessage } from '@shared/excluded-sites'
 import { hostOfUrl } from '@shared/site-off'
 import { isSidebarPortName, windowOfSidebarPort } from '@shared/sidebar-port'
 import { blockedStates, runStaticAnalysis } from './code-gate'
-import { checkCssForPage, checkCssTransform, pageUrlFor } from './css-gate'
+import { checkCssForPage, checkCssTransform, pageUrlFor, sameCssContext } from './css-gate'
 import {
   applyCssTransforms as applyCssTransformsFor,
   fromExtensionPage,
@@ -822,13 +822,18 @@ async function handle(
       await discardVault()
       return true
 
-    case 'preview-css':
+    case 'preview-css': {
+      // Taken before the first check reads the tab, so that a navigation after
+      // the check is seen when the preview is about to be inserted.
+      const checkedDocument = documentOf(message.tabId)
       await refuseWhenOff(message.tabId)
       return handlePreviewCss(message, {
         getSettings,
         tabUrl: tabUrlOf,
-        setPreviewCss: async (tabId, css) => setPreviewCss(tabId, css, await windowOfTab(tabId)),
+        setPreviewCss: async (tabId, css) =>
+          setPreviewCss(tabId, css, await windowOfTab(tabId), checkedDocument),
       })
+    }
 
     case 'clear-preview-css':
       await clearPreviewCss(message.tabId, message.css)
@@ -1130,8 +1135,20 @@ async function windowOfTab(tabId: number): Promise<number | undefined> {
   return (await browser.tabs.get(tabId).catch(() => undefined))?.windowId
 }
 
-function setPreviewCss(tabId: number, css: string, windowId: number | undefined): Promise<void> {
+function setPreviewCss(
+  tabId: number,
+  css: string,
+  windowId: number | undefined,
+  /** The document the CSS was checked for. A preview is refused for any other. */
+  checkedDocument: number,
+): Promise<void> {
   return inTabQueue(tabId, async () => {
+    // The check read the tab's address for one document. The CSS may pass for
+    // that page and fail for the one the tab shows now, and insertCSS would put
+    // it into whichever is there.
+    if (documentOf(tabId) !== checkedDocument) {
+      throw new Error('The page changed while the preview was being prepared, so it was not shown.')
+    }
     const existing = await readCss('preview', tabId)
     if (existing) {
       await removePreviewCss(tabId, existing)
@@ -1736,12 +1753,15 @@ async function tabStillShows(
     // Not compared as strings: a page that sets location.hash while it loads
     // reports a URL with a fragment that the commit event did not have, and
     // skipping the insert there left the page with no CSS (#57). The CSS is
-    // still right when the same transforms match both URLs.
+    // still right when the same transforms match both URLs and the CSS is
+    // filtered the same way for both: the filter depends on the site's CSS
+    // setting and on the origin, so a move to another origin is not the same page.
     const all = await getAllTransforms()
     const same = all.every(
       (t) => matchesUrl(t.match, current) === matchesUrl(t.match, expected.url),
     )
     if (!same) return false
+    if (!sameCssContext(await getSettings(), current, expected.url)) return false
   }
   return documentOf(tabId) === expected.document
 }

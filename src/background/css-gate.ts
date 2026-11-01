@@ -32,6 +32,22 @@ export function modeForPage(settings: Settings, pageUrl: string | undefined): Cs
   }
 }
 
+/**
+ * Whether stored CSS is filtered the same way for two addresses: the same
+ * per-site mode and the same origin, which is what a same-origin address is
+ * judged against. Two addresses that differ only in path or fragment give the
+ * same filtered CSS; a move to another origin or to a site with another
+ * setting does not.
+ */
+export function sameCssContext(settings: Settings, a: string, b: string): boolean {
+  if (modeForPage(settings, a) !== modeForPage(settings, b)) return false
+  try {
+    return new URL(a).origin === new URL(b).origin
+  } catch {
+    return a === b
+  }
+}
+
 /** The check in the shape the approval panel already renders for JavaScript. */
 export function checkCssForPage(
   css: string,
