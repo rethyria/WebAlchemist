@@ -82,6 +82,7 @@ import {
   reorderTransforms,
   saveSettings,
   changeSettings,
+  foldUnsavedUsage,
   saveTransform,
   saveCredentialFor,
   unlockVault,
@@ -113,6 +114,7 @@ browser.runtime.onInstalled.addListener(async (details) => {
       )
     })
   }
+  await foldUnsavedUsage().catch(() => undefined)
   // The platform wipes every userScripts registration on update, and drops
   // dynamic content scripts too. Without this, transforms silently stop
   // working after an extension update — with no error, which is the worst
@@ -122,6 +124,9 @@ browser.runtime.onInstalled.addListener(async (details) => {
     await reconcileContentScripts()
   }
 })
+
+// Folds the usage of discarded drafts. See foldUnsavedUsage for why only here.
+browser.runtime.onStartup.addListener(() => void foldUnsavedUsage().catch(() => undefined))
 
 /*
  * Both directions matter. Firefox drops user script registrations when the

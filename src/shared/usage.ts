@@ -42,6 +42,25 @@ export function emptyTotals(): UsageTotals {
   return { calls: 0, reportedCalls: 0, inputTokens: 0, outputTokens: 0, costUsd: 0, pricedCalls: 0 }
 }
 
+/**
+ * The key under which the usage of drafts that were never saved is kept. Every
+ * transform id is a random UUID, so it cannot collide with this.
+ */
+export const NOT_SAVED_USAGE_ID = 'not-saved'
+
+/** The sum of two totals objects; neither argument is changed. */
+export function addTotals(a: UsageTotals | undefined, b: UsageTotals): UsageTotals {
+  const base = a ?? emptyTotals()
+  return {
+    calls: base.calls + b.calls,
+    reportedCalls: base.reportedCalls + b.reportedCalls,
+    inputTokens: base.inputTokens + b.inputTokens,
+    outputTokens: base.outputTokens + b.outputTokens,
+    costUsd: base.costUsd + b.costUsd,
+    pricedCalls: base.pricedCalls + b.pricedCalls,
+  }
+}
+
 /** A new totals object with one call added; the argument is not changed. */
 export function addCall(
   totals: UsageTotals | undefined,

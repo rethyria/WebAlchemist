@@ -49,7 +49,7 @@ import {
   type Transform,
   type UsageStore,
 } from '@shared/types'
-import { addCall, monthOf } from '@shared/usage'
+import { NOT_SAVED_USAGE_ID, addCall, addTotals, monthOf } from '@shared/usage'
 import {
   LockedError,
   deriveKey,
@@ -442,14 +442,19 @@ export function updateTransform(
   })
 }
 
-export function deleteTransform(id: string): Promise<void> {
-  return mutateTransforms(async () => {
+export async function deleteTransform(id: string): Promise<void> {
+  await mutateTransforms(async () => {
     const { valid: all, invalid } = await readStored()
     await writeTransforms(
       all.filter((t) => t.id !== id),
       invalid,
     )
   })
+  // The transform is gone, so its usage would otherwise stay in the store
+  // forever with no name to show. The provider totals by month keep the cost.
+  // The delete has already happened, so a failure here is not reported as a
+  // failed delete; the entry is removed by the next start-up sweep instead.
+  await pruneTransformUsage(id).catch(() => undefined)
 }
 
 /** Persists a new ordering. Order decides which transform wins a conflict. */
@@ -1001,7 +1006,7 @@ export function recordUsage(call: {
   costUsd: number | null
   at?: number
 }): Promise<void> {
-  const run = async () => {
+  return mutateUsage(async () => {
     const store = await getUsage()
     const month = monthOf(call.at ?? Date.now())
     const byProvider = (store.months[month] ??= {})
@@ -1014,10 +1019,59 @@ export function recordUsage(call: {
       )
     }
     await browser.storage.local.set({ [KEY_USAGE]: store })
-  }
-  const next = usageQueue.then(run, run)
+  })
+}
+
+function mutateUsage<T>(work: () => Promise<T>): Promise<T> {
+  const next = usageQueue.then(work, work)
   usageQueue = next.catch(() => undefined)
   return next
+}
+
+/**
+ * Removes one transform's usage entry. Called when the transform is deleted.
+ * Runs in the usage queue so it does not overlap a recording.
+ */
+export function pruneTransformUsage(transformId: string): Promise<void> {
+  return mutateUsage(async () => {
+    const store = await getUsage()
+    if (!(transformId in store.transforms)) return
+    delete store.transforms[transformId]
+    await browser.storage.local.set({ [KEY_USAGE]: store })
+  })
+}
+
+/**
+ * Moves the usage of every id that is not a saved transform into the single
+ * "not saved" entry.
+ *
+ * A draft gets its id before it is saved, and its model calls are recorded
+ * under that id. A draft that is then discarded leaves an entry that nothing
+ * else removes, one for each discarded draft. Nothing tells the background
+ * that a draft was discarded, so this runs when the browser starts and when
+ * the extension is installed or updated, when no sidebar can be holding a
+ * draft that is still being worked on. Running it while the sidebar is open
+ * would move the cost of a draft that has not been saved yet. Records that are
+ * stored but fail validation still count as saved, so their usage is kept.
+ */
+export function foldUnsavedUsage(): Promise<void> {
+  return mutateUsage(async () => {
+    const stored = (await browser.storage.local.get(KEY_TRANSFORMS))[KEY_TRANSFORMS]
+    const kept = new Set<string>([NOT_SAVED_USAGE_ID])
+    for (const record of Array.isArray(stored) ? stored : []) {
+      const id = (record as { id?: unknown } | null)?.id
+      if (typeof id === 'string') kept.add(id)
+    }
+    const store = await getUsage()
+    let changed = false
+    for (const [id, totals] of Object.entries(store.transforms)) {
+      if (kept.has(id)) continue
+      store.transforms[NOT_SAVED_USAGE_ID] = addTotals(store.transforms[NOT_SAVED_USAGE_ID], totals)
+      delete store.transforms[id]
+      changed = true
+    }
+    if (changed) await browser.storage.local.set({ [KEY_USAGE]: store })
+  })
 }
 
 /* ------------------------------------------------------------------ */

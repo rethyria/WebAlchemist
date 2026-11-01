@@ -11,6 +11,7 @@
     type UsageStore,
   } from '@shared/types'
   import { ACCENT_COLOURS } from '@shared/accents'
+  import { NOT_SAVED_USAGE_ID } from '@shared/usage'
   import Toggle from '@sidebar/components/Toggle.svelte'
   import ProviderSettings from './ProviderSettings.svelte'
   import SiteAccess from './SiteAccess.svelte'
@@ -60,6 +61,7 @@
       usage = await call<UsageStore>({ type: 'get-usage' })
       const names: Record<string, string> = {}
       for (const id of Object.keys(usage.transforms)) {
+        if (id === NOT_SAVED_USAGE_ID) continue
         const found = await call<Transform | null>({ type: 'get-transform', id })
         if (found) names[id] = found.name
       }
