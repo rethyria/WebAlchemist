@@ -4,13 +4,14 @@
   import '@shared/tokens.css'
   import type {
     CssUrlMode,
+    ExecutionWorld,
     ReviewResult,
     Settings,
     Transform,
     TransformVersion,
   } from '@shared/types'
   import { hostOfPattern, modeForHost, policyKeyOfPattern } from '@safety/css-check'
-  import { compareWithCurrent, sourceLabel } from '@shared/versions'
+  import { compareWithCurrent, restoreNeedsMainConfirmation, restoreRefusal, sourceLabel } from '@shared/versions'
   import { matchPresetsFor, matchesUrl, originPermissionFor, parsePattern } from '@shared/match'
   import { send } from '@shared/messaging.svelte'
   import {
@@ -24,7 +25,9 @@
   } from '@shared/container'
   import { editorOriginToRequest, permissionRequestsFor, requestAll } from '@shared/permissions'
   import { excludedAccessMessage, excludedHostForPattern } from '@shared/excluded-sites'
+  import { MAIN_WORLD_RISKS, WORLD_NAMES, WORLD_RESET_NOTICE, worldOf } from '@shared/world'
   import CodeArea from './CodeArea.svelte'
+  import MainRestoreRisks from './MainRestoreRisks.svelte'
   import { shouldConfirmLeaving } from './unload'
 
   /**
@@ -53,6 +56,9 @@
   let saved = $state('')
   let match = $state('')
   let savedMatch = $state('')
+  /** The world a JavaScript transform runs in. Only the user changes it. */
+  let world = $state<ExecutionWorld>('USER_SCRIPT')
+  let savedWorld = $state<ExecutionWorld>('USER_SCRIPT')
   /* The container restriction; see shared/container.ts. */
   let choice = $state<ContainerChoice>('every-tab')
   let savedChoice = $state<ContainerChoice>('every-tab')
@@ -73,6 +79,8 @@
   let restoring = $state(false)
   /** The version shown for confirmation. Nothing is restored until it is confirmed. */
   let reviewing = $state<TransformVersion | null>(null)
+  /** Whether the user confirmed the risks of restoring a version that runs in MAIN. */
+  let mainRestoreConfirmed = $state(false)
   /**
    * The user's list of excluded sites, loaded when the page opens so that the
    * save and restore handlers can check it before their first await. An await
@@ -122,7 +130,7 @@
     transform !== null &&
       (creating
         ? code.trim().length > 0 && name.trim().length > 0
-        : code !== saved || match !== savedMatch || choice !== savedChoice),
+        : code !== saved || match !== savedMatch || world !== savedWorld || choice !== savedChoice),
   )
 
   /*
@@ -226,6 +234,8 @@
       saved = found.code
       match = found.match
       savedMatch = found.match
+      world = worldOf(found)
+      savedWorld = world
       choice = found.cookieStoreId === undefined ? 'every-tab' : 'tab-container'
       savedChoice = choice
       document.title = `${found.name} — Web Alchemist`
@@ -292,6 +302,11 @@
   async function restore(version: TransformVersion) {
     const current = transform
     if (!current || restoring || saving) return
+    const refusal = restoreRefusal(current.kind, version, mainRestoreConfirmed)
+    if (refusal !== null) {
+      findings = [refusal]
+      return
+    }
     // Before the permission request, and with no await since the click.
     const excluded = excludedHostForPattern(excludedSites, version.match)
     if (excluded !== null) {
@@ -324,9 +339,12 @@
         saved = found.code
         match = found.match
         savedMatch = found.match
+        world = worldOf(found)
+        savedWorld = world
       }
       await loadVersions()
       reviewing = null
+      mainRestoreConfirmed = false
       justSaved = true
       setTimeout(() => (justSaved = false), 2000)
     } catch (cause) {
@@ -429,7 +447,7 @@
             type: 'approve-code',
             code,
             declaredCapabilities: current.capabilities,
-            ...(current.world ? { world: current.world } : {}),
+            world,
             transformId: current.id,
             match: wanted,
           })
@@ -471,6 +489,7 @@
             match: wanted,
             kind,
             name: name.trim(),
+            ...(kind === 'js' ? { world } : {}),
             ...(approvedCssUrls ? { approvedCssUrls } : {}),
             updatedAt: Date.now(),
           }
@@ -478,6 +497,7 @@
             ...withContainer(current, current.kind, storeId),
             code,
             match: wanted,
+            ...(current.kind === 'js' ? { world } : {}),
             ...(approvedCssUrls ? { approvedCssUrls } : {}),
             rationale: {
               targets: current.rationale.targets,
@@ -509,6 +529,7 @@
       saved = code
       savedMatch = wanted
       match = wanted
+      savedWorld = world
       savedChoice = next.cookieStoreId === undefined ? 'every-tab' : 'tab-container'
       choice = savedChoice
       justSaved = true
@@ -701,6 +722,37 @@
       {/if}
     </section>
 
+    {#if (creating ? kind : transform.kind) === 'js'}
+      <section class="where">
+        <span class="label">World</span>
+        {#if transform?.worldResetFromModel}
+          <p class="warn">{WORLD_RESET_NOTICE}</p>
+        {/if}
+        <p class="hint">
+          Now: {WORLD_NAMES[world]}.
+          {#if world === 'MAIN' && savedWorld === 'MAIN'}
+            This transform was saved to run in the page's own world and keeps doing so.
+          {/if}
+        </p>
+        <label>
+          <input
+            type="checkbox"
+            checked={world === 'MAIN'}
+            onchange={(event) => (world = event.currentTarget.checked ? 'MAIN' : 'USER_SCRIPT')}
+          />
+          Run in the page's own world (MAIN)
+        </label>
+        {#if world === 'MAIN'}
+          <p class="warn">Running in the page's own world has these risks:</p>
+          <ul class="hint">
+            {#each MAIN_WORLD_RISKS as risk}
+              <li>{risk}</li>
+            {/each}
+          </ul>
+        {/if}
+      </section>
+    {/if}
+
     {#if (creating ? kind : transform.kind) === 'css' && (sourceTabId !== null || savedChoice === 'tab-container')}
       <section class="where">
         <label for="container">Container</label>
@@ -777,7 +829,10 @@
                 type="button"
                 class="secondary"
                 disabled={dirty || restoring || saving}
-                onclick={() => (reviewing = version)}
+                onclick={() => {
+                  reviewing = version
+                  mainRestoreConfirmed = false
+                }}
               >
                 Review this version
               </button>
@@ -816,8 +871,14 @@
             </table>
             <h3>Code in this version</h3>
             <pre class="version-code">{reviewing.code}</pre>
+            {#if restoreNeedsMainConfirmation(transform.kind, reviewing)}
+              <MainRestoreRisks bind:confirmed={mainRestoreConfirmed} disabled={restoring} />
+            {/if}
             <div class="actions">
-              <button type="button" disabled={restoring || saving} onclick={() => void restore(reviewing!)}>
+              <button
+                type="button"
+                disabled={restoring || saving || restoreRefusal(transform.kind, reviewing, mainRestoreConfirmed) !== null}
+                onclick={() => void restore(reviewing!)}>
                 Restore this version
               </button>
               <button type="button" class="secondary" disabled={restoring} onclick={() => (reviewing = null)}>

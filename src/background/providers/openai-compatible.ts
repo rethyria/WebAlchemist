@@ -14,6 +14,7 @@ import {
   modelDisplayName,
   type Credential,
   type GenerationResult,
+  toGenerationResult,
   type ModelReview,
   type Provider,
 } from '@shared/types'
@@ -273,7 +274,7 @@ export async function createOpenAiCompatibleProvider(
           ]
         : text
 
-      return complete<GenerationResult>({
+      return toGenerationResult(await complete<Record<string, unknown>>({
         model: provider.generateModel,
         system: GENERATE_SYSTEM_PROMPT,
         userContent,
@@ -281,7 +282,7 @@ export async function createOpenAiCompatibleProvider(
         schemaName: 'transform',
         maxTokens: 16000,
         signal: request.signal,
-      })
+      }))
     },
 
     async review(args: ReviewArgs): Promise<ModelReview> {

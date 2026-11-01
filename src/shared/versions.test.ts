@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { compareWithCurrent } from './versions'
+import { compareWithCurrent, restoreNeedsMainConfirmation, restoreRefusal } from './versions'
 import type { Transform, TransformVersion } from './types'
 
 const current = {
@@ -62,5 +62,29 @@ describe('compareWithCurrent', () => {
       status: 'Same',
       current: 'Not used by CSS',
     })
+  })
+})
+
+describe('restoring a version that runs in MAIN (issue 53)', () => {
+  const main = { world: 'MAIN' } as TransformVersion
+  const isolated = { world: 'USER_SCRIPT' } as TransformVersion
+
+  it('needs a confirmation for a JavaScript version in MAIN', () => {
+    expect(restoreNeedsMainConfirmation('js', main)).toBe(true)
+  })
+
+  it('needs none for an isolated version, an absent world or CSS (controls)', () => {
+    expect(restoreNeedsMainConfirmation('js', isolated)).toBe(false)
+    expect(restoreNeedsMainConfirmation('js', {} as TransformVersion)).toBe(false)
+    expect(restoreNeedsMainConfirmation('css', main)).toBe(false)
+  })
+
+  it('refuses the restore until the risks are confirmed', () => {
+    expect(restoreRefusal('js', main, false)).toMatch(/Read the risks/)
+  })
+
+  it('allows the restore after the confirmation, and always for an isolated version (controls)', () => {
+    expect(restoreRefusal('js', main, true)).toBeNull()
+    expect(restoreRefusal('js', isolated, false)).toBeNull()
   })
 })

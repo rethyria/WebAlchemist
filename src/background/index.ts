@@ -12,7 +12,7 @@ import type {
   Message,
   MessageResponse,
 } from '@shared/messages'
-import { matchesUrl, originPermissionForUrl } from '@shared/match'
+import { exactPagePattern, matchesUrl, originPermissionForUrl } from '@shared/match'
 import { CAPTURE_GRANT_KEY } from '@shared/capture-grant'
 import { appliesInContainer } from '@shared/container'
 import { refuseInPrivateWindow, requireNormalWindow } from './private-window'
@@ -35,6 +35,7 @@ import { panelPageKey, panelPagesFromStorage } from '@shared/panel-binding'
 import { SCREENSHOTS_UNAVAILABLE } from '@shared/android-limits'
 import { ownersWithRunTabs, recordRunTab, takeRunTabs } from './run-tabs'
 import { isUrlOff, setHostOff } from './site-off'
+import { isApproved } from './approvals'
 import { excludedHostOf, getExcludedSites, setExcludedSites } from './excluded-sites'
 import { excludedHostFor, excludedSiteMessage } from '@shared/excluded-sites'
 import { hostOfUrl } from '@shared/site-off'
@@ -113,6 +114,7 @@ import {
   saveSettings,
   changeSettings,
   foldUnsavedUsage,
+  resetModelChosenMain,
   saveTransform,
   saveCredentialFor,
   unlockVault,
@@ -152,6 +154,20 @@ function endPreviewScript(id: string): Promise<void> {
   })
 }
 
+/**
+ * Moves JavaScript transforms that run in MAIN with no record of the user's
+ * approval to the isolated world, once. The caller rebuilds the registrations
+ * afterwards. A failure is logged and does not stop start-up; the flag is set
+ * only after the transforms were written, so the next start tries again.
+ */
+async function migrateModelChosenWorlds(): Promise<void> {
+  try {
+    await resetModelChosenMain()
+  } catch (error) {
+    console.error('Resetting the world of transforms failed:', error instanceof Error ? error.message : 'unknown error')
+  }
+}
+
 /** Rebuilds registrations from storage, leaving preview scripts registered. */
 function reregister(): Promise<void> {
   return inRegistryQueue(async () => {
@@ -180,6 +196,9 @@ browser.runtime.onInstalled.addListener(async (details) => {
     })
   }
   await foldUnsavedUsage().catch(() => undefined)
+  // Before the registrations below are rebuilt, so a moved transform is
+  // registered for the isolated world. Runs once; see resetModelChosenMain.
+  if (details.reason === 'update') await migrateModelChosenWorlds()
   // The platform wipes every userScripts registration on update, and drops
   // dynamic content scripts too. Without this, transforms silently stop
   // working after an extension update — with no error, which is the worst
@@ -913,6 +932,46 @@ async function handle(
       if (!analysis.passed) {
         throw new Error('Static analysis rejected this code, so it was not run.')
       }
+      /*
+       * Registered for the page in this tab only. The draft's own match pattern
+       * is usually the whole site with its subdomains, and a preview that used
+       * it ran unreviewed code on every other tab of the site that loaded
+       * while the preview was registered (#55). The address is read from the
+       * tab here and not taken from the message.
+       */
+      const tabUrl = await tabUrlOf(message.tabId)
+      const previewMatch = exactPagePattern(tabUrl)
+      if (tabUrl === undefined || previewMatch === null) {
+        throw new Error('This page cannot be previewed, so the script was not run.')
+      }
+      // The sidebar names the address it showed the user. A tab that has since
+      // moved to another page is not the page the code was reviewed for.
+      if (withoutFragment(message.expectedUrl) !== withoutFragment(tabUrl)) {
+        throw new Error('The tab has moved to another page, so the script was not run.')
+      }
+      // The draft's own pattern says where the code is meant to run, and the
+      // preview is only for a page that pattern covers (#55).
+      if (!matchesUrl(message.transform.match, tabUrl)) {
+        throw new Error("This page is not one that the transform's sites cover, so the script was not run.")
+      }
+      await refuseExcludedUrl(tabUrl)
+      // The model review must have matched this code, world, capabilities, id
+      // and pattern. Static analysis alone is not the review. The token is not
+      // spent: the save that follows uses it.
+      if (
+        !(await isApproved(
+          message.approvalToken,
+          message.transform.code,
+          message.transform.world,
+          message.transform.capabilities,
+          { transformId: message.transform.id, match: message.transform.match },
+          { verdict: 'match' },
+        ))
+      ) {
+        throw new Error('The model review did not match this code, so the script was not run.')
+      }
+      const previewTransform = { ...message.transform, match: previewMatch }
+
       // Recorded before registering: registerPreview pauses the saved script
       // first, so a close of the sidebar during or after a failed registration
       // has to find the id in storage to restore it. Registration runs in the
@@ -922,7 +981,7 @@ async function handle(
       await inRegistryQueue(async () => {
         await addPreviewedScript(message.transform.id, owner)
         try {
-          await registerPreview(message.transform)
+          await registerPreview(previewTransform)
         } catch (cause) {
           await removePreviewedScript(message.transform.id)
           throw cause
@@ -1382,6 +1441,11 @@ void (async () => {
 })()
 
 /** Throws the message to show when the address is on the excluded list. */
+function withoutFragment(url: string): string {
+  const at = url.indexOf('#')
+  return at === -1 ? url : url.slice(0, at)
+}
+
 async function refuseExcludedUrl(url: string): Promise<void> {
   const host = await excludedHostOf(url)
   if (host !== null) throw new Error(excludedSiteMessage(host))
@@ -2169,6 +2233,9 @@ export { transformsForUrl, runReview }
 // Registration state can drift if the browser restarted with stale scripts,
 // or if a permission changed while the background script was not alive.
 void (async () => {
+  // Runs once, and before the rebuild, for an install that never saw an
+  // update event with the migration in it.
+  await migrateModelChosenWorlds()
   if (await hasUserScriptsPermission()) await reregister()
   await reconcileContentScripts()
 })()

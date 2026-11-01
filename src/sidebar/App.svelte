@@ -843,6 +843,10 @@
       onscreenshot={(value) =>
         value ? void flow.chooseScreenshotRegion() : flow.cancelScreenshot()}
       onregenerate={() => void flow.regenerate()}
+      previewReview={flow.currentPreviewReview}
+      previewReviewing={flow.previewReviewing}
+      previewAllowed={flow.jsPreviewAllowed}
+      onreviewfirst={() => void flow.reviewForPreview()}
       onrun={() => void flow.runJs()}
       onreload={() => void flow.reloadAndRetry()}
       ondiscard={() => void flow.discard()}
@@ -866,10 +870,14 @@
       review={flow.review}
       intent={flow.intent}
       origin={originPermissionFor(flow.matchPattern)}
+      match={flow.matchPattern}
+      shown={flow.reviewShown}
+      onshown={() => flow.markReviewShown()}
       permissionDenied={flow.permissionDenied}
       onrefuse={() => void flow.refuseCapabilities()}
       onapproveurls={() => void flow.approveCssUrls()}
       onsave={() => void flow.save()}
+      onworld={(world) => void flow.setWorld(world)}
       onback={() => flow.toSaving()}
     />
     <UsageLine report={flow.lastUsage} />

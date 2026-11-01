@@ -18,7 +18,7 @@ import { appliesInContainer } from '@shared/container'
 import type { Message } from '@shared/messages'
 import type { ReviewInstruction } from './providers/types'
 import type { ReviewResult, Settings, Transform } from '@shared/types'
-import { mayBeSaved, recordApproval, spendApproval, type ApprovalVerdict } from './approvals'
+import { isApproved, mayBeSaved, recordApproval, spendApproval, type ApprovalVerdict } from './approvals'
 import { blockedStates, problemWithStoredCode, runStaticAnalysis } from './code-gate'
 import { assertPreviewable, checkCssTransform } from './css-gate'
 
@@ -124,9 +124,31 @@ export async function handleSaveTransform(message: Of<'save-transform'>, deps: S
     }
   }
 
+  /*
+   * The record of the user's approval of MAIN is decided here and not taken
+   * from the message. It is set when this save carried an approval token for
+   * code in MAIN, which the editor and the panel obtain only after showing the
+   * risks, and it is kept when the stored record already had it. The notice
+   * that the migration reset the world is cleared by any save.
+   */
+  const { mainApprovedByUser: _sent, worldResetFromModel: _notice, ...incoming } = message.transform
+  let outgoing: Transform = incoming
+  if (incoming.kind === 'js' && incoming.world === 'MAIN') {
+    const stored = before
+    const grantedNow = await isApproved(
+      message.approvalToken,
+      incoming.code,
+      incoming.world,
+      incoming.capabilities,
+      { transformId: incoming.id, match: incoming.match },
+    )
+    const keptFromStored = stored?.world === 'MAIN' && stored.mainApprovedByUser === true
+    if (grantedNow || keptFromStored) outgoing = { ...incoming, mainApprovedByUser: true }
+  }
+
   // Register what was stored, not what was sent: a save keeps the stored
   // `enabled`, and the copy that arrived may hold an older value.
-  const saved = await deps.saveTransform(message.transform, {
+  const saved = await deps.saveTransform(outgoing, {
     clearContainer: message.clearContainer === true,
   })
   if (saved.kind === 'js') {

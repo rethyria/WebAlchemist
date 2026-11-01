@@ -78,6 +78,7 @@ const KEY_CREDENTIALS = 'credentials'
 const KEY_USAGE = 'usage'
 /** Set to true once bindStoredCredentials has finished a pass. */
 const KEY_BINDING_PASS = 'credentialBindingPassDone'
+const KEY_WORLD_RESET = 'wa-world-reset-done'
 
 type CredentialMap = Record<string, Credential>
 
@@ -534,6 +535,37 @@ export function updateTransform(
     all[index] = next
     await writeTransforms(all, invalid)
     return next
+  })
+}
+
+/**
+ * The one-time migration for JavaScript transforms that run in MAIN with no
+ * record that the user chose it (issue 53). Before the user's approval was
+ * recorded, the model could choose the world, so such a transform may be in
+ * MAIN because the model asked. Each one is moved to USER_SCRIPT and marked
+ * with `worldResetFromModel`, and its earlier state is kept as a version. A
+ * transform with `mainApprovedByUser` is left as it is.
+ *
+ * It runs once: a flag in local storage is set afterwards, and a later call
+ * returns an empty list. The read, the changes and the flag are written inside
+ * the transform queue, so an approval saved while it runs is not overwritten.
+ * Returns the ids that were moved, so the caller can register them again.
+ */
+export function resetModelChosenMain(): Promise<string[]> {
+  return mutateTransforms(async () => {
+    if ((await browser.storage.local.get(KEY_WORLD_RESET))[KEY_WORLD_RESET] === true) return []
+    const { valid: all, invalid } = await readStored()
+    const moved: string[] = []
+    for (const [index, existing] of all.entries()) {
+      if (existing.kind !== 'js' || existing.world !== 'MAIN' || existing.mainApprovedByUser === true) continue
+      const next: Transform = { ...existing, world: 'USER_SCRIPT', worldResetFromModel: true, updatedAt: Date.now() }
+      await recordVersion(existing)
+      all[index] = next
+      moved.push(existing.id)
+    }
+    if (moved.length > 0) await writeTransforms(all, invalid)
+    await browser.storage.local.set({ [KEY_WORLD_RESET]: true })
+    return moved
   })
 }
 

@@ -9,6 +9,7 @@
  * the registry tests.
  */
 
+import { approvedPreviewMessage } from './test-support/preview-approval'
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 type Listener = (...args: any[]) => any
@@ -153,9 +154,13 @@ const saved = {
 const extensionPage = { url: 'moz-extension://abc/src/sidebar/index.html', id: 'wa@test' }
 const holds = (id: string) => JSON.stringify(registered.get(id) ?? null)
 
-const previewJs = (code = DRAFT_CODE) =>
+const previewJs = async (code = DRAFT_CODE) =>
   onMessage(
-    { type: 'preview-js', tabId: 1, transform: { ...saved, code } },
+    await approvedPreviewMessage(
+      session,
+      { type: 'preview-js', tabId: 1, transform: { ...saved, code } },
+      'https://www.example.com/',
+    ),
     extensionPage,
   )
 
@@ -490,7 +495,14 @@ describe('panels open in tabs are cleaned up one by one (#128)', () => {
 
   it('removes a script preview only for the panel that closed', async () => {
     twoPanels()
-    await onMessage({ type: 'preview-js', tabId: 9, transform: { ...saved, code: DRAFT_CODE } }, extensionPage)
+    await onMessage(
+      await approvedPreviewMessage(
+        session,
+        { type: 'preview-js', tabId: 9, transform: { ...saved, code: DRAFT_CODE } },
+        'https://www.example.com/',
+      ),
+      extensionPage,
+    )
     expect(session.get('wa-preview-script-window-SAVED')).toBe(-50)
     await closePanel(51)
     await new Promise((r) => setTimeout(r, 20))

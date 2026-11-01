@@ -203,10 +203,16 @@ export const GENERATION_SCHEMA = {
       description: 'Short literal name for this transform, e.g. "Hide sidebar". No metaphor.',
     },
     kind: { type: 'string', enum: ['css', 'js'] },
-    world: {
+    requestedWorld: {
       type: 'string',
       enum: ['USER_SCRIPT', 'MAIN'],
-      description: 'Ignored for css. Default USER_SCRIPT; MAIN only with justification.',
+      description:
+        'Ignored for css. USER_SCRIPT unless the code needs the page\'s own JavaScript globals. MAIN is only a request: the code runs in the isolated world until the user approves it.',
+    },
+    worldReason: {
+      type: 'string',
+      description:
+        'Why MAIN is needed, in one or two plain sentences for the user. Empty string when requestedWorld is USER_SCRIPT.',
     },
     capabilities: {
       type: 'array',
@@ -229,7 +235,7 @@ export const GENERATION_SCHEMA = {
       description: 'Single sentence describing the end state. Must stand alone.',
     },
   },
-  required: ['name', 'kind', 'world', 'capabilities', 'code', 'rationale', 'intent'],
+  required: ['name', 'kind', 'requestedWorld', 'worldReason', 'capabilities', 'code', 'rationale', 'intent'],
   additionalProperties: false,
 } as const
 

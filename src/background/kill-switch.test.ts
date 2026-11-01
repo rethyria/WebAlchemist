@@ -131,8 +131,8 @@ describe('turning off one site', () => {
 })
 
 describe('a JavaScript preview and the switches (#121)', () => {
-  const startPreview = () =>
-    ask({ type: 'preview-js', tabId: A, transform: { ...js, code: 'document.title = "unsaved"' } })
+  const startPreview = async () =>
+    ask(await h.approvedPreview({ type: 'preview-js', tabId: A, transform: { ...js, code: 'document.title = "unsaved"' } }))
 
   it('is registered while no switch is on (control)', async () => {
     await startPreview()

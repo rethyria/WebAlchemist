@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { Conflict, Transform, TransformRuntimeState } from '@shared/types'
   import Toggle from './Toggle.svelte'
+  import { WORLD_RESET_NOTICE } from '@shared/world'
 
   interface Props {
     transform: Transform
@@ -225,6 +226,18 @@
         <h3 class="label">You wanted</h3>
         <p>{transform.intent}</p>
       </section>
+
+      {#if transform.worldResetFromModel}
+        <section class="world-reset">
+          <h3 class="label attention">Environment changed</h3>
+          <p>{WORLD_RESET_NOTICE}</p>
+          <div class="actions">
+            <button type="button" class="secondary" onclick={onedit}>
+              Open the editor to turn on the page's environment
+            </button>
+          </div>
+        </section>
+      {/if}
 
       {#if overridden.length > 0 || overriding.length > 0}
         <section>

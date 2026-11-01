@@ -6,14 +6,17 @@
   import { reviewAnnouncement } from '../lib/announce'
   import CodeBlock from './CodeBlock.svelte'
   import Label from './Label.svelte'
+  import { describeMatch } from '@shared/match'
+  import { MAIN_WORLD_RISKS, WORLD_NAMES, worldState } from '@shared/world'
+  import type { ExecutionWorld } from '@shared/types'
 
   /**
-   * Treatment A: a clean review collapses to a single quiet line, expandable
-   * to the three rows underneath it.
-   *
-   * There is no green banner and no tick. A review that celebrates itself
-   * trains people to skim past the one that matters, and the only reviews
-   * worth reading are the ones with something in them.
+   * Everything the user needs to judge the code is shown at once: the world,
+   * the capabilities, which sites the code runs on, the code scan, the second
+   * model's reading and, for JavaScript, the code itself. Nothing is collapsed,
+   * and a review with nothing found says what the checks cover and what they
+   * do not (issue 64). A clean result is not shown in a way that invites
+   * skipping the code.
    */
   interface Props {
     result: GenerationResult
@@ -21,10 +24,18 @@
     intent: string
     /** Host the transform will need permission to run on. */
     origin: string
+    /** The match pattern the transform will be saved with. */
+    match: string
+    /** True once the panel has been displayed with its review. */
+    shown: boolean
+    /** Called after the review is on screen. Saving is not possible before it. */
+    onshown: () => void
     permissionDenied: boolean
     onrefuse: () => void
     onapproveurls: () => void
     onsave: () => void
+    /** The user's choice of world. The model's request does not call this. */
+    onworld: (world: ExecutionWorld) => void
     onback: () => void
   }
 
@@ -33,15 +44,26 @@
     review,
     intent,
     origin,
+    match,
+    shown,
+    onshown,
     permissionDenied,
     onrefuse,
     onapproveurls,
     onsave,
+    onworld,
     onback,
   }: Props = $props()
 
-  let detailOpen = $state(false)
-  let codeOpen = $state(false)
+  /* JavaScript is shown expanded. The user decides on code they can see. */
+  // svelte-ignore state_referenced_locally
+  let codeOpen = $state(result.kind === 'js')
+
+  $effect(() => {
+    // Runs after the review has been rendered, so the approve button is
+    // enabled only for a panel the user could see.
+    if (review !== null) onshown()
+  })
 
   /* Set once the user has refused, so the block card can say why it appeared. */
   let refused = $state(false)
@@ -52,24 +74,13 @@
   let capabilities = $derived(result.capabilities)
   let mismatch = $derived(review?.model && review.model.verdict !== 'match')
 
-  let clean = $derived(
-    review !== null &&
-      blocking.length === 0 &&
-      warnings.length === 0 &&
-      capabilities.length === 0 &&
-      !mismatch,
-  )
+  let world = $derived(worldState(result))
 
   let flaggedLines = $derived([...blocking, ...warnings].map((f) => f.line))
   let lineCount = $derived(result.code.split('\n').length)
 
-  let modelLine = $derived.by(() => {
-    if (result.kind === 'css') return 'CSS — not reviewed'
-    if (!review?.model) return 'not reviewed'
-    return review.model.verdict === 'match'
-      ? 'Second model read it and agrees with your description'
-      : review.model.explanation
-  })
+  let findingCount = $derived(blocking.length + warnings.length)
+  let where = $derived(describeMatch(match))
 </script>
 
 <div class="panel">
@@ -84,6 +95,54 @@
   {#if review === null}
     <p class="waiting">Reading the code…</p>
   {:else}
+    {#if result.kind === 'js'}
+      <div class="card" class:attention={world.showRisks}>
+        <div class="card-head">
+          {#if world.showRisks}<span class="dot attention" aria-hidden="true"></span>{/if}
+          <div class="card-body">
+            <span class="card-title">Runs in: {WORLD_NAMES[world.world]}</span>
+            {#if world.requestPending}
+              <p class="finding">
+                The model asked to run this code in the page's own world. It stays in the
+                isolated world until you allow it here.
+              </p>
+              <p class="finding">
+                {world.reason ? `Reason given: ${world.reason}` : 'No reason was given.'}
+              </p>
+            {:else if world.runsInMain}
+              <p class="finding">
+                This code runs in the page's own world.
+                {#if world.reason}Reason given: {world.reason}{/if}
+              </p>
+            {:else}
+              <p class="finding">
+                The code runs apart from the page's own scripts, and the page cannot change it.
+              </p>
+            {/if}
+          </div>
+        </div>
+        {#if world.showRisks}
+          <p class="finding">Running in the page's own world has these risks:</p>
+          <ul class="risks">
+            {#each MAIN_WORLD_RISKS as risk}
+              <li>{risk}</li>
+            {/each}
+          </ul>
+          <div>
+            {#if world.runsInMain}
+              <Button small full onclick={() => onworld('USER_SCRIPT')}>
+                Run in the isolated world instead
+              </Button>
+            {:else}
+              <Button small full onclick={() => onworld('MAIN')}>
+                Allow the page's own world
+              </Button>
+            {/if}
+          </div>
+        {/if}
+      </div>
+    {/if}
+
     {#if blocking.length > 0}
       <div class="card block">
         <div class="card-head">
@@ -190,55 +249,68 @@
       </div>
     {/if}
 
-    {#if clean}
-      <button type="button" class="quiet-line" onclick={() => (detailOpen = !detailOpen)}>
-        <span class="dot" aria-hidden="true"></span>
-        Checked — nothing flagged
-        <span class="caret" aria-hidden="true">{detailOpen ? '▾' : '▸'}</span>
-      </button>
-    {/if}
-
-    {#if detailOpen || !clean}
-      <dl class="rows">
+    <dl class="rows">
+      <div class="row">
+        <dt>Runs on</dt>
+        <dd>
+          {where.schemes}; {where.sites}; {where.pages}.{#if where.variants} {where.variants}{/if}
+        </dd>
+      </div>
+      {#if result.kind === 'js'}
         <div class="row">
-          <span class="dot" aria-hidden="true"></span>
-          <dt>Code scan</dt>
-          <dd>
-            {#if blocking.length + warnings.length === 0}
-              no findings
+          <dt>World</dt>
+          <dd>{WORLD_NAMES[world.world]}</dd>
+        </div>
+      {/if}
+      <div class="row">
+        <dt>Capabilities</dt>
+        <dd>
+          {#if capabilities.length === 0}
+            None declared. Code that uses network, storage or cookies without declaring it cannot be saved.
+          {:else}
+            {capabilities.join(', ')}
+          {/if}
+        </dd>
+      </div>
+      <div class="row">
+        <dt>{result.kind === 'css' ? 'CSS check' : 'Code scan'}</dt>
+        <dd>
+          {#if findingCount === 0}
+            No known patterns found.
+            {#if result.kind === 'js'}
+              The scan looks for known patterns and cannot prove the code harmless. The
+              code still runs with access to this page.
             {:else}
-              {blocking.length + warnings.length}
-              {blocking.length + warnings.length === 1 ? 'finding' : 'findings'}
+              The check looks for addresses the CSS would load.
             {/if}
-          </dd>
-        </div>
-        <div class="row">
-          <span class="dot" aria-hidden="true"></span>
-          <dt>Capabilities</dt>
-          <dd>
-            {capabilities.length === 0 ? 'none requested' : capabilities.join(', ')}
-          </dd>
-        </div>
-        <div class="row">
-          <span class="dot" aria-hidden="true"></span>
-          <dt>Second model</dt>
-          <dd>{result.kind === 'css' ? 'CSS — not reviewed' : (review.model?.verdict ?? 'not reviewed')}</dd>
-        </div>
-      </dl>
-    {/if}
-
-    {#if result.kind === 'js' && review.model?.verdict === 'match' && !clean}
-      <p class="quiet-line static">
-        <span class="dot" aria-hidden="true"></span>
-        {modelLine}
-      </p>
-    {/if}
+          {:else}
+            {findingCount}
+            {findingCount === 1 ? 'finding' : 'findings'}, listed above.
+          {/if}
+        </dd>
+      </div>
+      <div class="row">
+        <dt>Second model</dt>
+        <dd>
+          {#if result.kind === 'css'}
+            CSS is not sent to a second model.
+          {:else if !review.model}
+            Not reviewed.
+          {:else if review.model.verdict === 'match'}
+            Read the code and agreed it does what you described.
+            {#if review.model.explanation}Its note: {review.model.explanation}{/if}
+          {:else}
+            Verdict: {review.model.verdict}. {review.model.explanation}
+          {/if}
+        </dd>
+      </div>
+    </dl>
   {/if}
 
   <details bind:open={codeOpen}>
     <summary>
       <span class="caret" aria-hidden="true">{codeOpen ? '▾' : '▸'}</span>
-      Code and rationale
+      {result.kind === 'js' ? 'Code to be run, and rationale' : 'Code and rationale'}
       <span class="meta">{lineCount} lines · {result.kind.toUpperCase()}</span>
     </summary>
     <div class="detail">
@@ -278,7 +350,7 @@
     {:else if pendingUrls.length > 0}
       <div class="split">
         <Button grow={1} small onclick={onback}>Back</Button>
-        <Button variant="primary" grow={1.3} small onclick={onapproveurls}>
+        <Button variant="primary" grow={1.3} small disabled={!shown} onclick={onapproveurls}>
           Approve {pendingUrls.length === 1 ? 'this address' : 'these addresses'}
         </Button>
       </div>
@@ -294,10 +366,12 @@
         >
           Refuse {capabilities.join(' and ')}
         </Button>
-        <Button variant="primary" grow={1.3} small onclick={onsave}>Allow and save</Button>
+        <Button variant="primary" grow={1.3} small disabled={!shown} onclick={onsave}>
+          Allow and save
+        </Button>
       </div>
     {:else}
-      <Button variant="primary" full disabled={review === null} onclick={onsave}>
+      <Button variant="primary" full disabled={review === null || !shown} onclick={onsave}>
         Save transform
       </Button>
     {/if}
@@ -420,28 +494,6 @@
     background: var(--block);
   }
 
-  .quiet-line {
-    display: flex;
-    width: 100%;
-    align-items: center;
-    gap: var(--sp-6);
-    padding: 0;
-    border: none;
-    background: none;
-    font: 11.5px var(--font-ui);
-    color: var(--text-faint);
-    text-align: left;
-    cursor: pointer;
-  }
-
-  .quiet-line.static {
-    cursor: default;
-  }
-
-  .quiet-line .caret {
-    margin-left: auto;
-  }
-
   .caret {
     font-size: 9px;
   }
@@ -455,21 +507,22 @@
 
   .row {
     display: flex;
-    align-items: center;
-    gap: 8px;
+    flex-direction: column;
+    gap: var(--sp-3);
     padding: 8px 0;
     border-bottom: 1px solid var(--border-subtle);
   }
 
   dt {
-    font: 11.5px var(--font-ui);
-    color: var(--text-faint);
+    font: 600 11.5px var(--font-ui);
+    color: var(--text-dim);
   }
 
   dd {
-    margin: 0 0 0 auto;
-    font: 11.5px var(--font-ui);
-    color: var(--text-faint);
+    margin: 0;
+    font: 11.5px/1.5 var(--font-ui);
+    color: var(--text-dim);
+    overflow-wrap: anywhere;
   }
 
   summary {
@@ -513,6 +566,13 @@
 
   .submit {
     margin-top: auto;
+  }
+
+  .risks {
+    margin: 0;
+    padding-left: 16px;
+    font: 11.5px/1.6 var(--font-ui);
+    color: var(--text-dim);
   }
 
   .urls {

@@ -60,3 +60,29 @@ export function compareWithCurrent(current: Transform, version: TransformVersion
   ]
   return rows.map((row) => ({ ...row, status: row.current === row.version ? 'Same' : 'Different' }))
 }
+
+/**
+ * True when restoring this version puts a JavaScript transform in the MAIN
+ * world, which the user has to confirm after reading the risks (issue 53).
+ */
+export function restoreNeedsMainConfirmation(
+  kind: Transform['kind'],
+  version: Pick<TransformVersion, 'world'>,
+): boolean {
+  return kind === 'js' && version.world === 'MAIN'
+}
+
+/**
+ * The message to show when a restore may not go ahead yet, or null when it
+ * may. A MAIN version is refused until the user has confirmed the risks.
+ */
+export function restoreRefusal(
+  kind: Transform['kind'],
+  version: Pick<TransformVersion, 'world'>,
+  mainConfirmed: boolean,
+): string | null {
+  if (restoreNeedsMainConfirmation(kind, version) && !mainConfirmed) {
+    return "This version runs in the page's own world. Read the risks and tick the box to confirm before restoring it."
+  }
+  return null
+}

@@ -16,6 +16,7 @@ import Anthropic from '@anthropic-ai/sdk'
 import {
   modelDisplayName,
   type GenerationResult,
+  toGenerationResult,
   type ModelReview,
   type PageContext,
   type Provider,
@@ -215,7 +216,7 @@ export async function createAnthropicProvider(
         )
 
         reportUsage(generateModel, response)
-        return parseJsonResponse<GenerationResult>(response)
+        return toGenerationResult(parseJsonResponse<Record<string, unknown>>(response))
       } catch (error) {
         throw toProviderError(error, { model: generateModel, label: provider.label })
       }
@@ -314,7 +315,7 @@ export async function createAnthropicProvider(
         )
 
         reportUsage(generateModel, final)
-        return parseJsonResponse<GenerationResult>(final)
+        return toGenerationResult(parseJsonResponse<Record<string, unknown>>(final))
       } catch (error) {
         throw toProviderError(error, { model: generateModel, label: provider.label })
       }
