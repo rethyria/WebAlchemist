@@ -3,6 +3,7 @@
   import type { ReviewResult, Settings, Transform } from '@shared/types'
   import { matchPresetsFor, matchesUrl, originPermissionFor } from '@shared/match'
   import { send } from '@shared/messaging.svelte'
+import { permissionRequestsFor, requestAll } from '@shared/permissions'
   import CodeArea from './CodeArea.svelte'
   import { shouldConfirmLeaving } from './unload'
 
@@ -162,20 +163,28 @@
     try {
       /*
        * Widening where a transform applies is asking to read more sites, so
-       * it goes through the same prompt saving a new one does. First await in
-       * the handler, so the click that reached here is still live — the
-       * request is refused outright once a gesture has been spent.
+       * it goes through the same prompt saving a new one does. A JavaScript
+       * transform also needs the optional userScripts permission, which the
+       * background cannot request because it has no user gesture. Without it
+       * the background stored the record and then failed to register it,
+       * leaving a saved row that never ran (#101).
+       *
+       * The requests are issued here, before the first await in the handler,
+       * so the click that reached here is still live; the request is refused
+       * outright once a gesture has been spent.
        */
-      if (wanted !== current.match) {
-        const granted = await browser.permissions.request({
-          origins: [originPermissionFor(wanted)],
-        })
-        if (!granted) {
-          findings = [
-            `Web Alchemist needs permission for ${originPermissionFor(wanted)} before it can apply this there.`,
-          ]
-          return
-        }
+      const origin = wanted !== current.match ? originPermissionFor(wanted) : null
+      const granted = await requestAll(
+        (permissions) => browser.permissions.request(permissions),
+        permissionRequestsFor(creating ? kind : current.kind, origin),
+      )
+      if (!granted) {
+        findings = [
+          (creating ? kind : current.kind) === 'js'
+            ? 'Web Alchemist needs the permission to run JavaScript transforms, and permission for the site it applies to, before it can save this.'
+            : `Web Alchemist needs permission for ${originPermissionFor(wanted)} before it can apply this there.`,
+        ]
+        return
       }
 
       /*
