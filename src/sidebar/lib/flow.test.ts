@@ -799,6 +799,21 @@ describe('an error card left on the list when the page changes', () => {
 })
 
 describe('whether the error card says the description is kept', () => {
+  it('says it once, from the card, when the script permission is refused', async () => {
+    const flow = flowAtRefining()
+    flow.draft = { ...saved, kind: 'js' }
+    flow.analysis = { static: [], undeclaredCapabilities: [], passed: true } as any
+    ;(globalThis as any).browser.permissions.request = async () => false
+    await flow.runJs()
+    ;(globalThis as any).browser.permissions.request = async () => true
+    const error = flow.error as any
+    // The card appends " Your description is kept." when this is true, so the
+    // message must not say it as well. Control: before the change the message
+    // itself ended with "and your description is kept".
+    expect(error.descriptionKept).toBe(true)
+    expect(error.message).not.toMatch(/description is kept/)
+  })
+
   it('says so for a failure on the refining step', () => {
     const flow = newFlow()
     flow.step = 'refining'

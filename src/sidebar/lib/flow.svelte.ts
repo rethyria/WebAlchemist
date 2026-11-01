@@ -1528,7 +1528,7 @@ export class Flow {
         this.show({
           kind: 'request-failed',
           message:
-            'Running a script needs Firefox’s user scripts permission. Nothing was run, and your description is kept.',
+            'Running a script needs Firefox’s user scripts permission. Nothing was run.',
         })
         return
       }
