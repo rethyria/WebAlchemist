@@ -504,3 +504,42 @@ describe('a refinement that does not complete', () => {
     expect(flow.result?.rationale.approach).toBe('A2')
   })
 })
+
+describe('changing the element from the describing step', () => {
+  beforeEach(() => {
+    handler = (m) =>
+      m.type === 'context-for-anchor' ? { ok: true, data: found } : { ok: true, data: null }
+  })
+
+  it('keeps the description that was typed', async () => {
+    const flow = newFlow()
+    await flow.startPicking()
+    pick(flow)
+    flow.instruction = 'make the heading larger'
+
+    await flow.startPicking()
+    expect(flow.step).toBe('picking')
+    pick(flow, 'h1.other')
+    expect(flow.step).toBe('describing')
+    expect(flow.picked?.anchor.selector).toBe('h1.other')
+    expect(flow.instruction).toBe('make the heading larger')
+  })
+
+  it('keeps the pre-filled intent in Edit description', async () => {
+    const flow = newFlow()
+    await flow.editIntent(saved)
+    expect(flow.instruction).toBe('old intent')
+    await flow.startPicking()
+    pick(flow)
+    expect(flow.instruction).toBe('old intent')
+    expect(flow.draft?.id).toBe('OLD')
+  })
+
+  it('still starts with an empty description for a new pick from the list', async () => {
+    const flow = newFlow()
+    flow.instruction = 'left over'
+    await flow.startPicking()
+    pick(flow)
+    expect(flow.instruction).toBe('')
+  })
+})

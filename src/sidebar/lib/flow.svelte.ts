@@ -372,8 +372,18 @@ export class Flow {
    */
   private pickPurpose: 'describe' | 'author' = 'describe'
 
+  /**
+   * The description typed before "Change" started a new pick, held until the
+   * pick arrives. A pick that arrives while the step is 'picking' goes through
+   * enterDescribing, which empties the instruction, so the text has to be kept
+   * somewhere that survives the step change. Null when the pick did not start
+   * from the describing step.
+   */
+  private keptInstruction: string | null = null
+
   async startPicking(purpose: 'describe' | 'author' = 'describe'): Promise<void> {
     this.pickPurpose = purpose
+    this.keptInstruction = this.step === 'describing' ? this.instruction : null
     if (this.tabId === null) return
 
     const origin = originPermissionForUrl(this.url)
@@ -465,7 +475,15 @@ export class Flow {
         // adjusting the target of a description they are partway through.
         if (retargeting) return
         if (this.pickPurpose === 'author') void this.openAuthoring()
-        else this.enterDescribing()
+        else {
+          const kept = this.keptInstruction
+          this.keptInstruction = null
+          this.enterDescribing()
+          // Changing the element is not starting a new description, so what
+          // was typed stays. The screenshot, scope and references describe the
+          // old element and are reset as before.
+          if (kept !== null) this.instruction = kept
+        }
         return
       }
 
@@ -1716,6 +1734,7 @@ export class Flow {
     // calling retry() with nothing to repeat.
     this.dismissError()
     this.refinement = null
+    this.keptInstruction = null
     this.generation += 1
     // The run is over, so the all-sites grant it may have taken goes back.
     this.cancelScreenshot()
