@@ -36,6 +36,7 @@
  */
 
 import type { Capability, Transform } from '@shared/types'
+import { AWAITING_APPROVAL_NOTE } from '@shared/transform-state'
 import { errorTokenFor, forgetErrorTokens } from './error-tokens'
 import { parsePattern } from '@shared/match'
 import { problemWithStoredCode } from './code-gate'
@@ -305,6 +306,12 @@ async function registerPreviewNow(transform: Transform): Promise<void> {
     throw new Error(
       'Running transforms is switched off in the settings, so the JavaScript was not run. Turn that setting off to run it.',
     )
+  }
+  // Restored code that waits for approval never runs, so a preview of it is
+  // refused with that reason and not with the safety check's (#124). Checked
+  // before the saved registration is paused.
+  if (transform.awaitsApproval) {
+    throw new Error(`The code is waiting for approval, so it was not run. ${AWAITING_APPROVAL_NOTE}`)
   }
   await unregisterTransformNow(transform.id)
   try {
