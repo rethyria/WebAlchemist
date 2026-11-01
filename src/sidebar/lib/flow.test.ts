@@ -1416,6 +1416,47 @@ describe('reload and try again with a script that has run (#114)', () => {
   })
 })
 
+describe('a repair or regeneration of a transform restricted to a container (#127)', () => {
+  const restricted = { ...saved, enabled: true, cookieStoreId: 'firefox-container-3' }
+  const generated = {
+    name: 'New',
+    kind: 'css',
+    code: 'div { color: red }',
+    capabilities: [],
+    rationale: { targets: 't', approach: 'a', assumptions: [] },
+  }
+  const savedCall = () => calls.filter((c) => c.type === 'save-transform').at(-1)
+
+  async function repairAndSave(from: typeof saved) {
+    const flow = newFlow()
+    handler = (m) => {
+      if (m.type === 'context-for-anchor') return { ok: true, data: found }
+      if (m.type === 'repair' || m.type === 'generate') {
+        return { ok: true, data: { result: generated } }
+      }
+      return { ok: true, data: null }
+    }
+    await flow.repair(from, 'broken')
+    expect(flow.step).toBe('refining')
+    return flow
+  }
+
+  it('keeps the restriction in the record that is saved after a repair', async () => {
+    const flow = await repairAndSave(restricted)
+    await flow.save()
+    expect(savedCall()?.transform.cookieStoreId).toBe('firefox-container-3')
+    expect(savedCall()?.transform.code).toBe('div { color: red }')
+  })
+
+  // Control: a transform with no restriction is saved with none, so the field
+  // above comes from the transform that was repaired.
+  it('control: a repair of an unrestricted transform saves no restriction', async () => {
+    const flow = await repairAndSave({ ...restricted, cookieStoreId: undefined })
+    await flow.save()
+    expect(savedCall()?.transform).not.toHaveProperty('cookieStoreId')
+  })
+})
+
 describe('the review is given what the user typed (#52)', () => {
   it('sends the description and every follow-up verbatim, not the model intent', async () => {
     const flow = flowAtApprove()

@@ -14,6 +14,8 @@ import type {
 } from '@shared/messages'
 import { matchesUrl, originPermissionForUrl } from '@shared/match'
 import { CAPTURE_GRANT_KEY } from '@shared/capture-grant'
+import { appliesInContainer } from '@shared/container'
+import { refuseInPrivateWindow, requireNormalWindow } from './private-window'
 import { regionAtScroll, viewportChanged, type ScrollOffset, type Viewport } from '@shared/region'
 import type {
   Accent,
@@ -398,7 +400,7 @@ async function evaluateTab(
   // evaluation of this tab is already out of date by the time this one reads
   // storage.
   const evaluation = beginEvaluation(tabId)
-  const transforms = await transformsForUrl(url)
+  const transforms = await inTabContainer(tabId, await transformsForUrl(url))
 
   /*
    * Before the early return below, not after. A tab that navigates from a site
@@ -576,6 +578,7 @@ async function handle(
     }
 
     case 'repair': {
+      await requireNormalWindow(message.tabId)
       await refuseExcludedUrl(message.context.url)
       const transforms = await getAllTransforms()
       const existing = transforms.find((t) => t.id === message.transformId)
@@ -633,6 +636,7 @@ async function handle(
     }
 
     case 'save-transform':
+      await refuseInPrivateWindow(message.tabId)
       return handleSaveTransform(
         message.source ? { ...message, transform: { ...message.transform, producedBy: message.source } } : message,
         saveDeps,
@@ -642,6 +646,7 @@ async function handle(
       return getVersions(message.id)
 
     case 'restore-transform-version': {
+      await refuseInPrivateWindow(message.tabId)
       const current = (await getAllTransforms()).find((t) => t.id === message.id)
       if (!current) throw new Error('That transform no longer exists.')
       const version = (await getVersions(message.id)).find((v) => v.id === message.versionId)
@@ -716,11 +721,9 @@ async function handle(
     }
 
     case 'save-settings': {
-      const switchBefore = (await getSettings()).aiJsKillSwitch
       return handleSaveSettings(message, {
-        getSettings,
         saveSettings,
-        reregisterAll: () => afterSettingsWritten(switchBefore),
+        reregisterAll: (before) => afterSettingsWritten(before.aiJsKillSwitch),
         reapplyAllTabs,
       })
     }
@@ -773,8 +776,12 @@ async function handle(
     }
 
     case 'patch-settings': {
-      const switchBefore = (await getSettings()).aiJsKillSwitch
-      const saved = await changeSettings(message.change)
+      // Read inside the settings queue, so this change keeps its place there
+      // relative to a save sent at the same time (#85).
+      let switchBefore = false
+      const saved = await changeSettings(message.change, (before) => {
+        switchBefore = before.aiJsKillSwitch
+      })
       if (message.change.kind === 'fields') await afterSettingsWritten(switchBefore)
       return saved
     }
@@ -827,8 +834,7 @@ async function handle(
       return true
 
     case 'disable-vault':
-      await disableVault(message.passphrase)
-      return true
+      return disableVault(message.passphrase)
 
     case 'unlock-vault':
       return unlockVault(message.passphrase)
@@ -901,6 +907,7 @@ async function handle(
       return true
 
     case 'start-picking': {
+      await refuseInPrivateWindow(message.tabId)
       // The panel checks this first so that no permission is requested; this
       // is the check for any other caller of the message.
       await refuseExcludedTab(message.tabId)
@@ -935,9 +942,11 @@ async function handle(
      * keep the context it already has rather than as a failure.
      */
     case 'recapture':
+      await refuseInPrivateWindow(message.tabId)
       return askContent(message.tabId, { type: 'recapture' })
 
     case 'context-for-anchor': {
+      await refuseInPrivateWindow(message.tabId)
       await recordRunTabOf(message.tabId)
       // The page keeps the palette from the last start-picking, and a page
       // that has had no pick has none, so Edit description drew no outline.
@@ -1041,7 +1050,7 @@ async function handle(
       // moved to.
       const evaluation = beginEvaluation(message.tabId)
       const isCurrent = () => isLatestEvaluation(message.tabId, evaluation)
-      const transforms = await transformsForUrl(message.url)
+      const transforms = await inTabContainer(message.tabId, await transformsForUrl(message.url))
       await forgetSession(message.url, transforms)
       const settings = await getSettings()
       const health = await runHealthCheck(message.tabId, transforms, isCurrent)
@@ -1061,6 +1070,7 @@ async function handle(
     }
 
     case 'capture-region':
+      await refuseInPrivateWindow(message.tabId)
       return captureWithLockDown(
         message.tabId,
         message.rect,
@@ -1473,6 +1483,13 @@ async function runGeneration(
   signal: AbortSignal,
 ): Promise<void> {
   const { tabId } = request
+  // Before the badge changes and before anything is sent to a provider.
+  try {
+    await requireNormalWindow(tabId)
+  } catch (error) {
+    port.postMessage({ type: 'error', error: { message: (error as Error).message } })
+    return
+  }
   const accent = (await getSettings()).accent
 
   /*
@@ -1594,7 +1611,7 @@ async function repaintOtherTabs(
 async function restoreBadgeFacts(tabId: number, accent: Accent): Promise<void> {
   if (badge.hasFacts(tabId)) return
   const tab = await browser.tabs.get(tabId).catch(() => undefined)
-  const transforms = tab?.url ? await transformsForUrl(tab.url) : []
+  const transforms = tab?.url ? await inTabContainer(tabId, await transformsForUrl(tab.url)) : []
   await badge.transformCountChanged(
     tabId,
     transforms.map((t) => t.id),
@@ -1749,6 +1766,19 @@ async function cssTransformsFor(tabId: number, url: string): Promise<Transform[]
 }
 
 /**
+ * Leaves out the CSS transforms restricted to a container other than the
+ * tab's. JavaScript transforms are kept, because a user script registration
+ * cannot be limited to a container (see shared/container.ts). The CSS apply
+ * path filters by container itself in handlers.ts; this is for the badge and
+ * the health check.
+ */
+async function inTabContainer(tabId: number, transforms: Transform[]): Promise<Transform[]> {
+  if (!transforms.some((t) => t.kind === 'css' && t.cookieStoreId !== undefined)) return transforms
+  const tab = await browser.tabs.get(tabId).catch(() => undefined)
+  return transforms.filter((t) => t.kind !== 'css' || appliesInContainer(t, tab?.cookieStoreId))
+}
+
+/**
  * CSS is applied by the background script rather than the content script:
  * insertCSS at the USER origin needs no page-side code, survives re-renders
  * without observers, and cannot be tampered with from the page. The logic,
@@ -1828,6 +1858,7 @@ const cssApplyDeps: CssApplyDeps = {
   getSettings,
   insertCss: (tabId, css) => browser.scripting.insertCSS({ target: { tabId }, css, origin: 'USER' }),
   removeCss: (tabId, css) => browser.scripting.removeCSS({ target: { tabId }, css, origin: 'USER' }),
+  tabCookieStore: async (tabId) => (await browser.tabs.get(tabId).catch(() => undefined))?.cookieStoreId,
   // Read from storage.session: see css-state.ts for why a module variable is not enough.
   applied: {
     read: (tabId) => readCss('applied', tabId),
@@ -1843,7 +1874,7 @@ async function reapply(tabId: number | undefined): Promise<void> {
   if (!tab?.url) return
   const url = tab.url
   await applyCssTransforms(tabId, () => cssTransformsFor(tabId, url), url)
-  const transforms = await transformsForUrl(url)
+  const transforms = await inTabContainer(tabId, await transformsForUrl(url))
 
   // Every mutation that changes what runs — save, delete, reorder, toggle —
   // reaches here, which is why the count is refreshed here rather than at each

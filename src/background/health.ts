@@ -13,6 +13,7 @@
  */
 
 import type { ContentMessage } from '@shared/messages'
+import { errorTokensFor } from './error-tokens'
 import type { Settings, Transform, TransformRuntimeState } from '@shared/types'
 
 /**
@@ -105,8 +106,9 @@ export async function runHealthCheck(
   if (!(await waitForContentScript(tabId, isCurrent))) return null
   if (!isCurrent()) return null
 
-  const message: ContentMessage = { type: 'run-health-check', transforms }
   try {
+    const errorTokens = await errorTokensFor(transforms.filter((t) => t.kind === 'js').map((t) => t.id))
+    const message: ContentMessage = { type: 'run-health-check', transforms, errorTokens }
     const response = (await browser.tabs.sendMessage(tabId, message)) as
       | { type: 'health-check-result'; states: TransformRuntimeState[] }
       | undefined

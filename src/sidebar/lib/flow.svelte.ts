@@ -798,7 +798,9 @@ export class Flow {
     })
 
     await browser.tabs.create({
-      url: browser.runtime.getURL(`src/editor/index.html?draft=${encodeURIComponent(key)}`),
+      url: browser.runtime.getURL(
+        `src/editor/index.html?draft=${encodeURIComponent(key)}${this.tabId === null ? '' : `&tab=${this.tabId}`}`,
+      ),
     })
 
     this.step = 'list'
@@ -1005,6 +1007,7 @@ export class Flow {
         transformId: transform.id,
         context: found.context,
         brokenReason,
+        tabId: this.tabId ?? undefined,
       })
       if (!current()) return
       const result = repaired.result
@@ -1721,6 +1724,10 @@ export class Flow {
       kind: result.kind,
       origin: 'ai',
       ...(result.kind === 'js' ? { world: result.world } : {}),
+      // A repair or a regeneration keeps the container restriction. The
+      // generation result knows nothing about it, and the record is replaced
+      // on save, so a field left out here would be removed (#127).
+      ...(this.draft?.cookieStoreId === undefined ? {} : { cookieStoreId: this.draft.cookieStoreId }),
       capabilities: result.capabilities,
       intent: this.intent,
       scopeDepth: this.scopeDepth,

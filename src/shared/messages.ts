@@ -61,7 +61,14 @@ export type Message =
   | { type: 'get-vision-support' }
 
   /* --- generation --------------------------------------------------- */
-  | { type: 'repair'; transformId: string; context: PageContext; brokenReason: string }
+  | {
+      type: 'repair'
+      transformId: string
+      context: PageContext
+      brokenReason: string
+      /** The tab the page came from, so a private window can be refused. */
+      tabId?: number
+    }
   | {
       type: 'review'
       code: string
@@ -138,6 +145,11 @@ export type Message =
       approvalToken?: string
       /** What produced the code, kept with the version it replaces. */
       source?: TransformSource
+      /**
+       * Removes a stored container restriction. Without it, a record that has
+       * no cookieStoreId keeps the stored one.
+       */
+      clearContainer?: boolean
     }
   | { type: 'get-transform-versions'; id: string }
   /**
@@ -356,7 +368,12 @@ export type ContentMessage =
   | { type: 'set-lock-scope'; depth: number }
   | { type: 'clear-lock' }
   | { type: 'apply-transforms'; transforms: Transform[] }
-  | { type: 'run-health-check'; transforms: Transform[] }
+  | {
+      type: 'run-health-check'
+      transforms: Transform[]
+      /** Transform id to the token in the name of its script's error marker. */
+      errorTokens: Record<string, string>
+    }
   | { type: 'url-changed'; url: string }
   /** Answered only by a live instance; the background uses it to avoid reinjecting. */
   | { type: 'ping' }

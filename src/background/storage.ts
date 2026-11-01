@@ -154,10 +154,15 @@ function mutateSettings<T>(work: () => Promise<T>): Promise<T> {
 /**
  * Replaces the stored settings with the ones given. A caller that holds a copy
  * from when it loaded should use changeSettings, which does not write back
- * fields it did not mean to change.
+ * fields it did not mean to change. Returns the settings that were stored
+ * before, read in the same queued step as the write.
  */
-export function saveSettings(settings: Settings): Promise<void> {
-  return mutateSettings(() => writeSettings(settings))
+export function saveSettings(settings: Settings): Promise<Settings> {
+  return mutateSettings(async () => {
+    const previous = await getSettings()
+    await writeSettings(settings)
+    return previous
+  })
 }
 
 const SETTINGS_FIELDS = [
@@ -177,14 +182,22 @@ const PROVIDER_FIELDS = [
   'oauth',
 ] as const satisfies readonly ProviderEditableField[]
 
+const UNSETTABLE_PROVIDER_FIELDS: readonly string[] = ['price', 'oauth']
+
 /**
  * Applies one change to the settings as they are stored now, inside the
  * settings queue, and returns what was saved. Throws when the change is
- * refused, and then writes nothing.
+ * refused, and then writes nothing. `seen` is called with the settings as they
+ * were stored before the change, inside the same queued step, so a caller does
+ * not need a read of its own before the queue (#85).
  */
-export function changeSettings(change: SettingsChange): Promise<Settings> {
+export function changeSettings(
+  change: SettingsChange,
+  seen?: (before: Settings) => void,
+): Promise<Settings> {
   return mutateSettings(async () => {
     const current = await getSettings()
+    seen?.(current)
     let next: Settings
     switch (change.kind) {
       case 'add-provider':
@@ -215,7 +228,12 @@ export function changeSettings(change: SettingsChange): Promise<Settings> {
           if (key in change.fields) fields[key] = (change.fields as Record<string, unknown>)[key]
         }
         next = { ...current, ...fields }
+        // Checked only when this change sets the active provider. Checking it
+        // on every change meant a stored active provider that no longer exists
+        // blocked unrelated changes, including the one that turns off AI
+        // JavaScript.
         if (
+          'activeProviderId' in change.fields &&
           next.activeProviderId !== null &&
           !next.providers.some((p) => p.id === next.activeProviderId)
         ) {
@@ -234,7 +252,15 @@ export function changeSettings(change: SettingsChange): Promise<Settings> {
             ;(updated as unknown as Record<string, unknown>)[key] = (change.set as Record<string, unknown>)[key]
           }
         }
-        for (const key of change.unset ?? []) delete updated[key]
+        // Only the optional fields may be removed. The list comes from a
+        // message, and deleting the id, the type, the address or the label
+        // would leave a provider that cannot be used or found.
+        for (const key of change.unset ?? []) {
+          if (!UNSETTABLE_PROVIDER_FIELDS.includes(key)) {
+            throw new Error(`The provider field "${String(key)}" cannot be removed.`)
+          }
+          delete updated[key]
+        }
         next = {
           ...current,
           providers: current.providers.map((p) => (p.id === found.id ? updated : p)),
@@ -293,6 +319,9 @@ function firstProblem(value: unknown): string | null {
   if (typeof value.code !== 'string') return 'code'
   if (typeof value.intent !== 'string') return 'intent'
   if (!Array.isArray(value.capabilities)) return 'capabilities'
+  if (value.cookieStoreId !== undefined && (typeof value.cookieStoreId !== 'string' || value.cookieStoreId === '')) {
+    return 'cookieStoreId'
+  }
   if (!isObject(anchor)) return 'anchor'
   if (typeof anchor.selector !== 'string') return 'anchor.selector'
   if (typeof anchor.tag !== 'string') return 'anchor.tag'
@@ -444,8 +473,15 @@ function mutateTransforms<T>(work: () => Promise<T>): Promise<T> {
  * and the old enabled flag after a toggle, and undid both (#85). Only
  * `reorderTransforms` and `updateTransform` change those fields. Returns the
  * record as stored, which is what callers should register or apply.
+ *
+ * `cookieStoreId` is kept the same way when the incoming record omits it, so
+ * that a sender that does not know about the container restriction cannot
+ * remove it (#127). A sender that means to remove it passes `clearContainer`.
  */
-export function saveTransform(transform: Transform): Promise<Transform> {
+export function saveTransform(
+  transform: Transform,
+  options: { clearContainer?: boolean } = {},
+): Promise<Transform> {
   return mutateTransforms(async () => {
     const { valid: all, invalid } = await readStored()
     const index = all.findIndex((t) => t.id === transform.id)
@@ -456,6 +492,9 @@ export function saveTransform(transform: Transform): Promise<Transform> {
         order: existing.order,
         enabled: existing.enabled,
         createdAt: existing.createdAt,
+        ...(transform.cookieStoreId === undefined &&
+          !options.clearContainer &&
+          existing.cookieStoreId !== undefined && { cookieStoreId: existing.cookieStoreId }),
       }),
       updatedAt: Date.now(),
     }
@@ -712,10 +751,10 @@ export async function enableVault(passphrase: string): Promise<void> {
  * what set it — and since a wrong passphrase fails the AES-GCM tag check, this
  * verifies without anything to compare against.
  */
-export async function disableVault(passphrase: string): Promise<void> {
+export async function disableVault(passphrase: string): Promise<{ bindingError: string | null }> {
   const stored = await browser.storage.local.get(KEY_CREDENTIALS)
   const existing = stored[KEY_CREDENTIALS]
-  if (!isSealed(existing)) return
+  if (!isSealed(existing)) return { bindingError: null }
 
   const key = await deriveKey(passphrase, saltOf(existing))
   await unseal(key, existing)
@@ -729,6 +768,11 @@ export async function disableVault(passphrase: string): Promise<void> {
     await browser.storage.local.set({ [KEY_CREDENTIALS]: map })
     await forgetKey()
   })
+  // Turning the vault off is the other way the map becomes writable, so keys
+  // stored before bindings existed are bound here as well as at unlock. The
+  // pass takes the credential lock itself, so it runs after the block above.
+  // Its failure is returned and not thrown, because the vault is already off.
+  return runBindingPass()
 }
 
 /**
@@ -753,6 +797,11 @@ export async function unlockVault(passphrase: string): Promise<{ bindingError: s
   await armIdleLock()
   // The first moment the map can be written after an upgrade, so this is where
   // keys stored before bindings existed are bound; see bindStoredCredentials.
+  return runBindingPass()
+}
+
+/** Runs the binding pass and returns its failure message, or null. */
+async function runBindingPass(): Promise<{ bindingError: string | null }> {
   try {
     await bindStoredCredentials()
     return { bindingError: null }

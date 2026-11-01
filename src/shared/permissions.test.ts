@@ -35,6 +35,19 @@ describe('permissionRequestsFor', () => {
   })
 })
 
+describe('the cookies permission for a container restriction (#127)', () => {
+  it('is requested on its own when a container has to be read', () => {
+    expect(permissionRequestsFor('css', null, true)).toEqual([{ permissions: ['cookies'] }])
+  })
+
+  // Control: no request for cookies unless a container has to be read.
+  it('control: it is not requested by default', () => {
+    expect(permissionRequestsFor('css', '*://example.com/*')).toEqual([
+      { origins: ['*://example.com/*'] },
+    ])
+  })
+})
+
 describe('requestAll', () => {
   it('issues every request before the first one resolves', () => {
     const { issued, request } = recorder()

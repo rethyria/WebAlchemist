@@ -36,6 +36,7 @@
  */
 
 import type { Capability, Transform } from '@shared/types'
+import { errorTokenFor, forgetErrorTokens } from './error-tokens'
 import { parsePattern } from '@shared/match'
 import { problemWithStoredCode } from './code-gate'
 import { wrapTransform } from './harness'
@@ -202,7 +203,7 @@ async function registrationFor(
       // anything else.
       ...(excludeMatches ? { excludeMatches } : {}),
       // Wrapped so the transform re-applies after framework re-renders.
-      js: [{ code: wrapTransform(transform) }],
+      js: [{ code: wrapTransform(transform, await errorTokenFor(transform.id)) }],
       world: world satisfies ExecutionWorld,
       ...(world === 'USER_SCRIPT' ? { worldId } : {}),
       runAt: 'document_idle',
@@ -344,6 +345,7 @@ async function unregisterPreviewNow(id: string): Promise<void> {
 }
 
 async function unregisterTransformNow(id: string): Promise<void> {
+  await forgetErrorTokens([id]).catch(() => {})
   if (!(await hasUserScriptsPermission())) return
   try {
     await userScripts.unregister({ ids: [id] })
@@ -457,6 +459,7 @@ async function reregisterAllNow(
   if (stale.length > 0) {
     try {
       await userScripts.unregister({ ids: stale })
+      await forgetErrorTokens(stale).catch(() => {})
     } catch {
       // Already gone.
     }

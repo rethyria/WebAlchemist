@@ -159,8 +159,8 @@
 
   {#if bindingError}
     <p class="load-error" role="alert">
-      The vault is unlocked. The stored keys could not be checked against their providers: {bindingError}
-      Unlock the vault again to repeat the check.
+      The vault change was made, but the stored keys could not be checked against their providers: {bindingError}
+      The check is repeated when a stored key is next used.
     </p>
   {/if}
 
@@ -198,7 +198,10 @@
         await afterVault()
       }}
       ondisable={async (passphrase) => {
-        await call({ type: 'disable-vault', passphrase })
+        const disabled = await call<{ bindingError: string | null }>({ type: 'disable-vault', passphrase })
+        // The passphrase is already removed. A failed check of the stored keys
+        // is shown on its own, as it is after an unlock.
+        bindingError = disabled.bindingError
         await afterVault()
       }}
       onunlock={async (passphrase) => {
