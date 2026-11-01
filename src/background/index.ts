@@ -25,6 +25,7 @@ import type {
 import type { RefinementTurn } from './providers/types'
 import { overlayPaletteFor } from '@shared/accents'
 import * as badge from './badge'
+import { isSidebarPortName, windowOfSidebarPort } from '@shared/sidebar-port'
 import { documentOf, forgetTab, inTabQueue, startDocument } from './tab-queue'
 import { reconcile as reconcileContentScripts } from './content-scripts'
 import { buildProbeTransform } from './csp-probe'
@@ -34,10 +35,14 @@ import {
   forgetSuspended,
   previewedScriptIds,
   previewedTabIds,
+  previewScriptWindow,
+  previewWindow,
+  suspendedTabIds,
   readCss,
   readSuspended,
   removePreviewedScript,
   writeCss,
+  writePreviewWindow,
   writeSuspended,
 } from './css-state'
 import { forgetSession, markChecked, runHealthCheck, shouldCheck } from './health'
@@ -540,7 +545,7 @@ async function handle(
       return true
 
     case 'preview-css':
-      await setPreviewCss(message.tabId, message.css)
+      await setPreviewCss(message.tabId, message.css, await windowOfTab(message.tabId))
       return true
 
     case 'clear-preview-css':
@@ -559,7 +564,7 @@ async function handle(
         throw new Error('Static analysis rejected this code, so it was not run.')
       }
       await registerTransform(message.transform)
-      await addPreviewedScript(message.transform.id)
+      await addPreviewedScript(message.transform.id, await windowOfTab(message.tabId))
       await browser.tabs.reload(message.tabId)
       return true
     }
@@ -755,7 +760,11 @@ async function removePreviewCss(tabId: number, css: string): Promise<void> {
     .catch(() => {})
 }
 
-function setPreviewCss(tabId: number, css: string): Promise<void> {
+async function windowOfTab(tabId: number): Promise<number | undefined> {
+  return (await browser.tabs.get(tabId).catch(() => undefined))?.windowId
+}
+
+function setPreviewCss(tabId: number, css: string, windowId: number | undefined): Promise<void> {
   return inTabQueue(tabId, async () => {
     const existing = await readCss('preview', tabId)
     if (existing) {
@@ -764,6 +773,7 @@ function setPreviewCss(tabId: number, css: string): Promise<void> {
     }
     await browser.scripting.insertCSS({ target: { tabId }, css, origin: 'USER' })
     await writeCss('preview', tabId, css)
+    await writePreviewWindow(tabId, windowId)
   })
 }
 
@@ -781,18 +791,49 @@ function clearPreviewCss(tabId: number, carried?: string): Promise<void> {
   })
 }
 
-async function clearAllPreviews(): Promise<void> {
+/**
+ * Takes out the previews, and lifts the pauses on transforms, that belong to
+ * windows for which `ownerIsGone` is true. A preview with no recorded window
+ * has no owner and is always taken out.
+ */
+async function clearPreviewsWhere(
+  ownerIsGone: (windowId: number | undefined) => boolean,
+): Promise<void> {
   for (const tabId of await previewedTabIds()) {
-    await clearPreviewCss(tabId)
+    if (ownerIsGone(await previewWindow(tabId))) await clearPreviewCss(tabId)
   }
   for (const id of await previewedScriptIds()) {
+    if (!ownerIsGone(await previewScriptWindow(id))) continue
     await unregisterTransform(id)
     await removePreviewedScript(id)
   }
+  // A pause belongs to the window the tab is in: the sidebar that paused it is
+  // the one that resumes it, and a sidebar that closed cannot.
+  for (const tabId of await suspendedTabIds()) {
+    if (!ownerIsGone(await windowOfTab(tabId))) continue
+    await forgetSuspended(tabId)
+    await reapply(tabId)
+  }
 }
 
-/** Sidebar ports connected to this run of the background page. */
-const sidebarPorts = new Set<browser.runtime.Port>()
+/**
+ * Sidebar ports connected to this run of the background page, with the window
+ * each one names. A port that names no window maps to undefined.
+ */
+const sidebarPorts = new Map<browser.runtime.Port, number | undefined>()
+
+/**
+ * Whether the sidebar that owns a preview is gone. A port that names no window
+ * could own anything, so while one is connected no preview is called
+ * abandoned; a preview with no recorded window is abandoned when no sidebar at
+ * all is connected.
+ */
+function ownerIsGone(windowId: number | undefined): boolean {
+  const connected = [...sidebarPorts.values()]
+  if (connected.includes(undefined)) return false
+  if (windowId === undefined) return connected.length === 0
+  return !connected.includes(windowId)
+}
 
 /**
  * How long a freshly started background page waits for a sidebar to connect
@@ -811,10 +852,12 @@ export const SIDEBAR_RECONNECT_GRACE_MS = 3000
  */
 void (async () => {
   const stored =
-    (await previewedTabIds()).length > 0 || (await previewedScriptIds()).length > 0
+    (await previewedTabIds()).length > 0 ||
+    (await previewedScriptIds()).length > 0 ||
+    (await suspendedTabIds()).length > 0
   if (!stored) return
   await new Promise((resolve) => setTimeout(resolve, SIDEBAR_RECONNECT_GRACE_MS))
-  if (sidebarPorts.size === 0) await clearAllPreviews()
+  await clearPreviewsWhere(ownerIsGone)
 })()
 
 /**
@@ -830,13 +873,23 @@ browser.runtime.onConnect.addListener((port) => {
     return
   }
 
-  if (port.name === 'wa-sidebar') {
-    sidebarPorts.add(port)
+  if (isSidebarPortName(port.name)) {
+    const windowId = windowOfSidebarPort(port.name)
+    sidebarPorts.set(port, windowId)
     port.onDisconnect.addListener(() => {
       sidebarPorts.delete(port)
-      // Another window's sidebar may still be open, and previews are not kept
-      // per window, so they are only discarded when the last panel is gone.
-      if (sidebarPorts.size === 0) void clearAllPreviews()
+      // Only what this window's sidebar made. Another window's panel may still
+      // be open, and its preview must stay: removing every preview whenever the
+      // last panel closed was right for one window and wrong for two. While
+      // another port for the same window is connected the panel is still open.
+      if (windowId === undefined) {
+        void clearPreviewsWhere(ownerIsGone)
+      } else if (![...sidebarPorts.values()].includes(windowId)) {
+        // Exactly this window, not every window whose sidebar is not connected
+        // at this moment: right after a start-up the other windows' sidebars
+        // have not reconnected yet, and they are still open.
+        void clearPreviewsWhere((owner) => owner === windowId)
+      }
     })
     return
   }

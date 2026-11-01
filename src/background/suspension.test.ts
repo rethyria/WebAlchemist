@@ -229,3 +229,111 @@ describe('the badge when a generation starts after a suspension (#92)', () => {
     expect(badgeText().at(-1)).toBe('1')
   })
 })
+
+describe('previews with two windows open (#81)', () => {
+  const GRACE = 3000
+  const afterGrace = () => vi.advanceTimersByTimeAsync(GRACE + 100)
+  const TAB_B = 6
+  const connect = (windowId: number | null) => {
+    const port = sidebarPort(windowId)
+    h.listeners.get('browser.runtime.onConnect')!(port)
+    return port
+  }
+  const removed = () => h.calls.removeCSS.map((c) => c.tabId).sort()
+  const jsPreview = (id: string, tabId: number) =>
+    h.onMessage({
+      type: 'preview-js',
+      tabId,
+      transform: {
+        ...cssTransform({ id, kind: 'js', code: 'document.title = "x"' }),
+        world: 'USER_SCRIPT',
+      },
+    })
+
+  beforeEach(async () => {
+    vi.useFakeTimers()
+    h.hasUserScripts = true
+    h.tabUrls.set(TAB_B, 'https://example.com/other')
+    h.tabWindows.set(TAB, 1)
+    h.tabWindows.set(TAB_B, 2)
+    await h.boot()
+    await h.onMessage({ type: 'preview-css', tabId: TAB, css: 'a { color: red }' })
+    await h.onMessage({ type: 'preview-css', tabId: TAB_B, css: 'a { color: blue }' })
+    await jsPreview('draft-1', TAB)
+    await jsPreview('draft-2', TAB_B)
+  })
+  afterEach(() => vi.useRealTimers())
+
+  it('removes only the closed window\'s previews', async () => {
+    const first = connect(1)
+    connect(2)
+    first.drop()
+    await vi.advanceTimersByTimeAsync(50)
+    expect(removed()).toEqual([TAB])
+    expect(h.calls.unregister).toEqual(['draft-1'])
+    expect(h.session.get(`wa-css-preview-${TAB_B}`)).toBe('a { color: blue }')
+  })
+
+  it('removes the other window\'s previews when its panel closes too', async () => {
+    const first = connect(1)
+    const second = connect(2)
+    first.drop()
+    second.drop()
+    await vi.advanceTimersByTimeAsync(50)
+    expect(removed()).toEqual([TAB, TAB_B])
+    expect(h.calls.unregister.sort()).toEqual(['draft-1', 'draft-2'])
+  })
+
+  it('control: a port that names no window, closing last, removes every preview', async () => {
+    // The behaviour before ports named a window, which a sidebar that cannot
+    // look up its window id still gets. It passes with and without the change,
+    // so it shows the stub and the removal path work, and that the failures
+    // above come from the per-window rule.
+    const only = connect(null)
+    only.drop()
+    await vi.advanceTimersByTimeAsync(50)
+    expect(removed()).toEqual([TAB, TAB_B])
+    expect(h.calls.unregister.sort()).toEqual(['draft-1', 'draft-2'])
+  })
+
+  it('at start-up removes previews whose window has no sidebar and keeps the rest', async () => {
+    await h.boot()
+    connect(2)
+    await afterGrace()
+    expect(removed()).toEqual([TAB])
+    expect(h.calls.unregister).toEqual(['draft-1'])
+    expect(h.session.get(`wa-css-preview-${TAB_B}`)).toBe('a { color: blue }')
+  })
+
+  it('does not remove another window\'s previews when a window closes right after start-up', async () => {
+    // After a suspension the second sidebar has not reconnected yet when the
+    // first one's port drops; the second is still open.
+    await h.boot()
+    const first = connect(1)
+    first.drop()
+    await vi.advanceTimersByTimeAsync(50)
+    expect(removed()).toEqual([TAB])
+    expect(h.session.get(`wa-css-preview-${TAB_B}`)).toBe('a { color: blue }')
+  })
+})
+
+describe('a paused transform when its window\'s sidebar closes (#83)', () => {
+  it('is applied again', async () => {
+    vi.useFakeTimers()
+    try {
+      const dark = cssTransform()
+      h.local.set('transforms', [dark])
+      await h.boot()
+      await commit()
+      await h.onMessage({ type: 'suspend-transform', tabId: TAB, id: dark.id })
+      expect(h.calls.insertCSS).toHaveLength(1)
+      const port = sidebarPort(1)
+      h.listeners.get('browser.runtime.onConnect')!(port)
+      port.drop()
+      await vi.advanceTimersByTimeAsync(50)
+      expect(h.calls.insertCSS).toHaveLength(2)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})

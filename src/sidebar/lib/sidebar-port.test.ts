@@ -8,7 +8,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { holdSidebarPort, type PortLike } from './sidebar-port'
+import { holdSidebarPort, holdSidebarPortForWindow, type PortLike } from './sidebar-port'
 
 function fakeConnect() {
   const ports: (PortLike & { drop(): void; disconnect: ReturnType<typeof vi.fn> })[] = []
@@ -80,5 +80,43 @@ describe('holdSidebarPort', () => {
     expect(connect).toHaveBeenCalledTimes(1)
     await vi.advanceTimersByTimeAsync(0)
     expect(connect).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('holdSidebarPortForWindow', () => {
+  it('opens the port under a name that carries the window id', async () => {
+    const names: string[] = []
+    holdSidebarPortForWindow(
+      (name) => {
+        names.push(name)
+        return { onDisconnect: { addListener: () => {} }, disconnect: () => {} }
+      },
+      async () => 7,
+    )
+    await vi.advanceTimersByTimeAsync(0)
+    expect(names).toEqual(['wa-sidebar:7'])
+  })
+
+  it('falls back to a name without an id when the lookup fails', async () => {
+    const names: string[] = []
+    holdSidebarPortForWindow(
+      (name) => {
+        names.push(name)
+        return { onDisconnect: { addListener: () => {} }, disconnect: () => {} }
+      },
+      async () => {
+        throw new Error('no window')
+      },
+    )
+    await vi.advanceTimersByTimeAsync(0)
+    expect(names).toEqual(['wa-sidebar'])
+  })
+
+  it('does not connect when the panel closes before the lookup finishes', async () => {
+    const connect = vi.fn()
+    const stop = holdSidebarPortForWindow(connect, async () => 7)
+    stop()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(connect).not.toHaveBeenCalled()
   })
 })

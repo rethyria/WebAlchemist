@@ -12,12 +12,38 @@
  * refused the port, an immediate retry would loop without pause.
  */
 
+import { sidebarPortName } from '@shared/sidebar-port'
+
 export interface PortLike {
   onDisconnect: { addListener(listener: () => void): void }
   disconnect(): void
 }
 
 const RETRY_DELAY_MS = 250
+
+/**
+ * Holds the port under a name that carries this window's id, and returns the
+ * function that releases it. The window id is looked up first, so the port
+ * opens a moment after the panel does; if the lookup fails the port is opened
+ * without an id and the background treats it as owning no window's previews.
+ */
+export function holdSidebarPortForWindow(
+  connect: (name: string) => PortLike,
+  getWindowId: () => Promise<number | undefined>,
+): () => void {
+  let release: (() => void) | null = null
+  let stopped = false
+  void getWindowId()
+    .catch(() => undefined)
+    .then((windowId) => {
+      if (stopped) return
+      release = holdSidebarPort(() => connect(sidebarPortName(windowId)))
+    })
+  return () => {
+    stopped = true
+    release?.()
+  }
+}
 
 /** Returns the function that releases the port when the panel closes. */
 export function holdSidebarPort(connect: () => PortLike): () => void {

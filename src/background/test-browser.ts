@@ -46,6 +46,8 @@ export interface Harness {
   local: Map<string, unknown>
   /** The URL `tabs.get` reports for each tab id; `tabs.query` lists these tabs. */
   tabUrls: Map<number, string>
+  /** The window each tab is in; a tab not listed is in window 1. */
+  tabWindows: Map<number, number>
   calls: {
     insertCSS: { tabId: number; css: string }[]
     removeCSS: { tabId: number; css: string }[]
@@ -71,6 +73,7 @@ export function createHarness(): Harness {
     session: new Map(),
     local: new Map(),
     tabUrls: new Map(),
+    tabWindows: new Map(),
     calls: { insertCSS: [], removeCSS: [], unregister: [], setBadgeText: [], sendMessage: [], runtimeMessages: [] },
     listeners: new Map(),
     hasUserScripts: false,
@@ -92,7 +95,11 @@ export function createHarness(): Harness {
     'browser.runtime.sendMessage': async (message: unknown) => {
       h.calls.runtimeMessages.push(message)
     },
-    'browser.tabs.get': async (id: number) => ({ id, url: h.tabUrls.get(id) }),
+    'browser.tabs.get': async (id: number) => ({
+      id,
+      url: h.tabUrls.get(id),
+      windowId: h.tabWindows.get(id) ?? 1,
+    }),
     'browser.tabs.query': async () => [...h.tabUrls].map(([id, url]) => ({ id, url })),
     'browser.tabs.sendMessage': async (tabId: number, message: unknown) => {
       h.calls.sendMessage.push({ tabId, message })
@@ -159,10 +166,10 @@ export function cssTransform(over: Record<string, unknown> = {}) {
 }
 
 /** A `runtime.Port` as the background sees one connecting from the sidebar. */
-export function sidebarPort() {
+export function sidebarPort(windowId: number | null = 1) {
   let onDrop: () => void = () => {}
   return {
-    name: 'wa-sidebar',
+    name: windowId === null ? 'wa-sidebar' : `wa-sidebar:${windowId}`,
     sender: extensionPage,
     disconnect: () => {},
     postMessage: () => {},

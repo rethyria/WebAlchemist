@@ -36,7 +36,41 @@ export async function writeCss(kind: CssKind, tabId: number, css: string): Promi
 }
 
 export async function forgetCss(kind: CssKind, tabId: number): Promise<void> {
-  await browser.storage.session.remove(keyFor(kind, tabId))
+  await browser.storage.session.remove(
+    kind === 'preview' ? [keyFor(kind, tabId), previewWindowKey(tabId)] : keyFor(kind, tabId),
+  )
+}
+
+/*
+ * Which browser window's sidebar made each preview. Every window has its own
+ * sidebar, and closing one must discard only the previews that sidebar made. A
+ * preview with no recorded window has no sidebar that owns it, so only the
+ * start-up cleanup and the closing of a sidebar that names no window remove it.
+ */
+const previewWindowKey = (tabId: number) => `wa-preview-window-${tabId}`
+const scriptWindowKey = (id: string) => `wa-preview-script-window-${id}`
+
+export async function writePreviewWindow(tabId: number, windowId: number | undefined): Promise<void> {
+  if (windowId !== undefined) await browser.storage.session.set({ [previewWindowKey(tabId)]: windowId })
+}
+
+export async function previewWindow(tabId: number): Promise<number | undefined> {
+  const value = (await browser.storage.session.get(previewWindowKey(tabId)))[previewWindowKey(tabId)]
+  return typeof value === 'number' ? value : undefined
+}
+
+export async function previewScriptWindow(id: string): Promise<number | undefined> {
+  const value = (await browser.storage.session.get(scriptWindowKey(id)))[scriptWindowKey(id)]
+  return typeof value === 'number' ? value : undefined
+}
+
+/** Tab ids that hold a suspension record, so a closing sidebar can lift them. */
+export async function suspendedTabIds(): Promise<number[]> {
+  const stored = await browser.storage.session.get(null)
+  return Object.keys(stored)
+    .filter((key) => key.startsWith('wa-suspended-'))
+    .map((key) => Number(key.slice('wa-suspended-'.length)))
+    .filter(Number.isInteger)
 }
 
 /** Tab ids that currently hold a preview stylesheet. */
@@ -60,14 +94,16 @@ export async function previewedScriptIds(): Promise<string[]> {
   return Array.isArray(value) ? value.filter((id): id is string => typeof id === 'string') : []
 }
 
-export async function addPreviewedScript(id: string): Promise<void> {
+export async function addPreviewedScript(id: string, windowId?: number): Promise<void> {
   const ids = await previewedScriptIds()
   if (!ids.includes(id)) await browser.storage.session.set({ [SCRIPTS_KEY]: [...ids, id] })
+  if (windowId !== undefined) await browser.storage.session.set({ [scriptWindowKey(id)]: windowId })
 }
 
 export async function removePreviewedScript(id: string): Promise<void> {
   const ids = await previewedScriptIds()
   await browser.storage.session.set({ [SCRIPTS_KEY]: ids.filter((existing) => existing !== id) })
+  await browser.storage.session.remove(scriptWindowKey(id))
 }
 
 /*

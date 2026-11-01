@@ -16,7 +16,7 @@
   import { activeTab, BackgroundError, send } from './lib/messaging.svelte'
   import { isForTab, type HealthCheckResult } from './lib/health-result'
   import { Flow } from './lib/flow.svelte'
-  import { holdSidebarPort } from './lib/sidebar-port'
+  import { holdSidebarPortForWindow } from './lib/sidebar-port'
   import Describing from './components/Describing.svelte'
   import ErrorCard from './components/ErrorCard.svelte'
   import Generating from './components/Generating.svelte'
@@ -439,7 +439,10 @@
     // a closed sidebar gets no chance to run cleanup of its own. It is opened
     // again whenever the background drops it, because a suspension does that
     // while the panel is still open.
-    const releasePort = holdSidebarPort(() => browser.runtime.connect({ name: 'wa-sidebar' }))
+    const releasePort = holdSidebarPortForWindow(
+      (name) => browser.runtime.connect({ name }),
+      async () => (await browser.windows.getCurrent()).id,
+    )
 
     return () => {
       browser.runtime.onMessage.removeListener(onMessage)
