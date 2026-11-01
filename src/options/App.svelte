@@ -14,6 +14,7 @@
   import ProviderSettings from './ProviderSettings.svelte'
   import UsageSettings from './UsageSettings.svelte'
   import VaultSettings from './VaultSettings.svelte'
+  import { storeKey } from './provider-add'
   import { loadVaultAndStatuses } from './vault-load'
 
   let settings = $state<Settings | null>(null)
@@ -85,12 +86,8 @@
   }
 
   async function setKey(providerId: string, key: string) {
-    await call({
-      type: 'set-credential',
-      providerId,
-      credential: { kind: 'api_key', value: key },
-    })
-    statuses = await call<CredentialStatus[]>({ type: 'get-credential-statuses' })
+    const next = await storeKey(call, providerId, key)
+    if (next) statuses = next
   }
 
   async function clearKey(providerId: string) {
@@ -122,6 +119,7 @@
       {statuses}
       onsave={save}
       onsetkey={setKey}
+      onreadsettings={() => call<Settings>({ type: 'get-settings' })}
       onclearkey={clearKey}
       onconnectoauth={connectOAuth}
     />

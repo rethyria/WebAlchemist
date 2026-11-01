@@ -21,6 +21,7 @@
   } from '@shared/types'
   import { endpointProblem } from '@shared/endpoint-policy'
   import ModelPicker from './ModelPicker.svelte'
+  import { addProviderWithKey } from './provider-add'
   import Button from '@sidebar/components/Button.svelte'
 
   interface Props {
@@ -28,11 +29,13 @@
     statuses: CredentialStatus[]
     onsave: (settings: Settings) => Promise<void>
     onsetkey: (providerId: string, key: string) => Promise<void>
+    /** The settings as stored now, for the rollback of a failed add. */
+    onreadsettings: () => Promise<Settings>
     onclearkey: (providerId: string) => Promise<void>
     onconnectoauth: (providerId: string) => Promise<void>
   }
 
-  let { settings, statuses, onsave, onsetkey, onclearkey, onconnectoauth }: Props = $props()
+  let { settings, statuses, onsave, onsetkey, onreadsettings, onclearkey, onconnectoauth }: Props = $props()
 
   /*
    * The sidebar links here with #models after a model error. A browser scrolls
@@ -198,22 +201,18 @@
         supportsVision: draftType === 'anthropic',
       }
 
-      // The provider is saved first, because the background binds the key to
-      // the saved provider's address and refuses a key for a provider it does
-      // not know. If saving the key fails, the provider is removed again, so a
-      // dead entry without a key is not left behind.
-      const previous = settings
-      await onsave({
-        ...settings,
-        providers: [...settings.providers, provider],
-        activeProviderId: settings.activeProviderId ?? provider.id,
-      })
-      try {
-        await onsetkey(provider.id, draftKey.trim())
-      } catch (error) {
-        await onsave(previous)
-        throw error
-      }
+      // See addProviderWithKey for the order and for what a failed key save
+      // does to the provider.
+      await addProviderWithKey(
+        {
+          current: () => settings,
+          readSettings: onreadsettings,
+          save: onsave,
+          setKey: onsetkey,
+        },
+        provider,
+        draftKey.trim(),
+      )
       resetDraft()
     } finally {
       busy = false
