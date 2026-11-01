@@ -60,6 +60,30 @@ describe('a health check that finishes after the tab navigated', () => {
   })
 })
 
+describe('a manual check that finishes after the tab navigated (#88)', () => {
+  it('does not mark the new page broken', async () => {
+    h.tabUrls.set(TAB, OLD_PAGE)
+    const manual = h.onMessage({ type: 'check-now', tabId: TAB, url: OLD_PAGE })
+    await checkAsked
+    await commit(NEW_PAGE)
+    finishCheck({ type: 'health-check-result', states: brokenState })
+    await manual
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(badgeText()).toBe('')
+  })
+
+  it('control: the same result with no navigation in between marks the page broken', async () => {
+    // Shows the manual check does paint "!" when its page is still current, so
+    // the empty badge above comes from the navigation.
+    h.tabUrls.set(TAB, OLD_PAGE)
+    const manual = h.onMessage({ type: 'check-now', tabId: TAB, url: OLD_PAGE })
+    await checkAsked
+    finishCheck({ type: 'health-check-result', states: brokenState })
+    await manual
+    expect(badgeText()).toBe('!')
+  })
+})
+
 describe('the result broadcast to extension pages (#87)', () => {
   it('names the tab it was run in', async () => {
     // Several tabs finish loading while one sidebar is open; the sidebar can

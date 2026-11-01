@@ -705,15 +705,23 @@ async function handle(
     case 'check-now': {
       // A manual check must actually run, even under once-per-session where
       // this host has already been seen.
+      //
+      // The evaluation counter is taken first, as evaluateTab does, so a
+      // navigation that happens while the check runs makes this one out of
+      // date. Without it a late result painted "!" on the page the tab had
+      // moved to.
+      const evaluation = beginEvaluation(message.tabId)
+      const isCurrent = () => isLatestEvaluation(message.tabId, evaluation)
       const transforms = await transformsForUrl(message.url)
       await forgetSession(message.url, transforms)
-      const states = await runHealthCheck(message.tabId, transforms)
+      const states = await runHealthCheck(message.tabId, transforms, isCurrent)
       // Without this a manual check showed its result in the panel only: a
       // broken transform it found left the badge unchanged, and a clean result
-      // did not clear an earlier "!". No result means no change.
-      if (states) {
+      // did not clear an earlier "!". No result means no change, and neither
+      // does a result for a page the tab has left.
+      if (states && isCurrent()) {
         const { accent } = await getSettings()
-        await badge.healthChecked(message.tabId, brokenIds(states), accent)
+        if (isCurrent()) await badge.healthChecked(message.tabId, brokenIds(states), accent)
       }
       return states ?? []
     }
