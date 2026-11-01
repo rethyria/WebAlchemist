@@ -514,13 +514,43 @@ export async function deleteTransform(id: string): Promise<void> {
   await pruneTransformUsage(id).catch(() => undefined)
 }
 
-/** Persists a new ordering. Order decides which transform wins a conflict. */
+/**
+ * Persists a new ordering of the transforms listed for one page. Order decides
+ * which transform wins a conflict.
+ *
+ * `orderedIds` holds only the transforms that match the page the user is on.
+ * It used to give them the values 0 to n − 1 and leave the others alone, so a
+ * transform that matches two pages could end up with the same value as one that
+ * matches only the other page, and which of two equal values wins then depended
+ * on where the records sit in storage. Now the listed transforms take the
+ * places in the overall ranking that they already held, in the new order, and
+ * every record is numbered 0 to n − 1 by its place. Each value is unique, a
+ * transform that was not listed keeps its rank relative to the other
+ * transforms it was not listed with, and ties that already exist are resolved
+ * in their stored order.
+ */
 export function reorderTransforms(orderedIds: string[]): Promise<void> {
   return mutateTransforms(async () => {
     const { valid: all, invalid } = await readStored()
-    const position = new Map(orderedIds.map((id, index) => [id, index]))
-    const next = all.map((t) => ({ ...t, order: position.get(t.id) ?? t.order }))
-    await writeTransforms(next, invalid)
+    const byId = new Map(all.map((t) => [t.id, t]))
+    const wanted = [...new Set(orderedIds)].filter((id) => byId.has(id))
+    const listed = new Set(wanted)
+
+    // Array position breaks a tie, which is what getAllTransforms does: the sort
+    // is stable, so equal values keep their stored order.
+    const ranking = all
+      .map((transform, index) => ({ transform, index }))
+      .sort((a, b) => a.transform.order - b.transform.order || a.index - b.index)
+      .map(({ transform }) => transform)
+
+    let nextListed = 0
+    const placed = ranking.map((t) => (listed.has(t.id) ? byId.get(wanted[nextListed++]!)! : t))
+
+    const rankOf = new Map(placed.map((t, rank) => [t.id, rank]))
+    await writeTransforms(
+      all.map((t) => ({ ...t, order: rankOf.get(t.id)! })),
+      invalid,
+    )
   })
 }
 
@@ -1202,7 +1232,9 @@ async function importTransformsNow(bundle: ExportBundle): Promise<ImportResult> 
 
   const { valid: existing, invalid } = await readStored()
   const needsRegeneration: string[] = []
-  let nextOrder = existing.length
+  // After the highest value in use, not after the count: values are not
+  // consecutive (new transforms are numbered by time), and a count can equal one.
+  let nextOrder = existing.reduce((highest, t) => Math.max(highest, t.order), -1) + 1
 
   let skipped = 0
 

@@ -24,7 +24,11 @@ export const ORIGIN = 'moz-extension://abc-123/'
 export const extensionPage = { url: `${ORIGIN}src/sidebar/index.html`, id: 'wa@test' }
 
 /** A storage area whose contents outlive `boot()`. */
-function area(data: Map<string, unknown>) {
+function area(data: Map<string, unknown>, path: string, gates: Map<string, Promise<void>>) {
+  /** Waits for a gate set with `hold(`${path}.set`)` or `.get`, `.remove`. */
+  const gated = async (method: string) => {
+    await gates.get(`${path}.${method}`)
+  }
   return {
     get: async (keys?: string | string[] | null) => {
       const out: Record<string, unknown> = {}
@@ -33,6 +37,7 @@ function area(data: Map<string, unknown>) {
       return out
     },
     set: async (items: Record<string, unknown>) => {
+      await gated('set')
       for (const [key, value] of Object.entries(items)) data.set(key, structuredClone(value))
     },
     remove: async (keys: string | string[]) => {
@@ -47,8 +52,10 @@ export interface Harness {
   local: Map<string, unknown>
   /** What `userScripts.getScripts` reports; changed by register, update and unregister. */
   userScriptsHeld: Map<string, any>
-  /** The content script registration, or null. */
-  contentScriptHeld: any
+  /** The content script registrations by id. */
+  contentScriptsHeld: Map<string, any>
+  /** Makes `registerContentScripts` reject a registration for which this returns true. */
+  rejectContentScript: (script: any) => boolean
   /** Origins `permissions.getAll` reports as granted. */
   origins: string[]
   /** The URL `tabs.get` reports for each tab id; `tabs.query` lists these tabs. */
@@ -72,26 +79,52 @@ export interface Harness {
   listeners: Map<string, Listener>
   /** Reports whether the userScripts permission is held. Defaults to false. */
   hasUserScripts: boolean
+  /** Whether the `<all_urls>` origin grant is held; `permissions.remove` clears it. */
+  allUrlsGranted: boolean
+  /** Permission sets passed to `permissions.remove`. */
+  permissionsRemoved: unknown[]
   /** Loads index.ts with fresh module state, as after a suspension. */
   boot(): Promise<void>
   onMessage(message: unknown, sender?: unknown): Promise<any>
   /** Replaces what the content script answers to `tabs.sendMessage`. */
   contentReply: (message: any) => unknown
+  /**
+   * Makes the next calls to the stubbed API at `path` (for example
+   * `browser.userScripts.getScripts`) wait until the returned function is
+   * called. Lets a test place a second event between two steps of one handler.
+   * With `firstCallOnly` only the first call waits and later calls go through.
+   */
+  hold(path: string, options?: { firstCallOnly?: boolean }): () => void
 }
 
 export function createHarness(): Harness {
+  const gates = new Map<string, Promise<void>>()
+  const onceOnly = new Set<string>()
   const h: Harness = {
     session: new Map(),
     local: new Map(),
     tabUrls: new Map(),
     userScriptsHeld: new Map(),
-    contentScriptHeld: null,
+    contentScriptsHeld: new Map(),
+    rejectContentScript: () => false,
     origins: [],
     tabWindows: new Map(),
     calls: { insertCSS: [], removeCSS: [], unregister: [], registry: [], setBadgeText: [], sendMessage: [], reload: [], runtimeMessages: [] },
     listeners: new Map(),
     hasUserScripts: false,
+    allUrlsGranted: false,
+    permissionsRemoved: [],
     contentReply: () => undefined,
+    hold: (path, options) => {
+      let release: () => void = () => {}
+      gates.set(path, new Promise<void>((resolve) => (release = resolve)))
+      if (options?.firstCallOnly) onceOnly.add(path)
+      return () => {
+        gates.delete(path)
+        onceOnly.delete(path)
+        release()
+      }
+    },
     boot: async () => {},
     onMessage: async (message, sender = extensionPage) =>
       h.listeners.get('browser.runtime.onMessage')!(message, sender),
@@ -101,8 +134,17 @@ export function createHarness(): Harness {
     'browser.runtime.getURL': (path: string) => ORIGIN + path,
     'browser.runtime.id': 'wa@test',
     'browser.permissions.getAll': async () => ({ origins: h.origins, permissions: [] }),
-    'browser.permissions.contains': async (p: { origins?: string[] }) =>
-      p.origins ? p.origins.every((o) => h.origins.some((held) => originCovers(held, o))) : h.hasUserScripts,
+    'browser.permissions.contains': async (p?: { origins?: string[] }) => {
+      if (p?.origins?.includes('<all_urls>')) return h.allUrlsGranted
+      return p?.origins
+        ? p.origins.every((o) => h.origins.some((held) => originCovers(held, o)))
+        : h.hasUserScripts
+    },
+    'browser.permissions.remove': async (p: { origins?: string[] }) => {
+      h.permissionsRemoved.push(structuredClone(p))
+      if (p.origins?.includes('<all_urls>')) h.allUrlsGranted = false
+      return true
+    },
     'browser.userScripts.unregister': async (filter?: { ids?: string[] }) => {
       const ids = filter?.ids ?? [...h.userScriptsHeld.keys()]
       h.calls.registry.push(filter?.ids ? `unregister:${ids.join(',')}` : 'unregister:all')
@@ -124,15 +166,22 @@ export function createHarness(): Harness {
     'browser.userScripts.configureWorld': async () => {},
     'browser.userScripts.getScripts': async (filter?: { ids?: string[] }) =>
       [...h.userScriptsHeld.values()].filter((s) => !filter?.ids || filter.ids.includes(s.id)),
-    'browser.scripting.getRegisteredContentScripts': async () =>
-      h.contentScriptHeld ? [structuredClone(h.contentScriptHeld)] : [],
-    'browser.scripting.unregisterContentScripts': async () => {
-      h.calls.registry.push('unregister-content')
-      h.contentScriptHeld = null
+    'browser.scripting.getRegisteredContentScripts': async (filter?: { ids?: string[] }) =>
+      [...h.contentScriptsHeld.values()]
+        .filter((s) => !filter?.ids || filter.ids.includes(s.id))
+        .map((s) => structuredClone(s)),
+    'browser.scripting.unregisterContentScripts': async (filter?: { ids?: string[] }) => {
+      const ids = filter?.ids ?? [...h.contentScriptsHeld.keys()]
+      h.calls.registry.push(`unregister-content:${ids.join(',')}`)
+      for (const id of ids) h.contentScriptsHeld.delete(id)
     },
     'browser.scripting.registerContentScripts': async (scripts: any[]) => {
-      h.calls.registry.push('register-content')
-      h.contentScriptHeld = structuredClone(scripts[0])
+      for (const script of scripts) {
+        if (h.rejectContentScript(script)) throw new Error('Invalid match pattern')
+        if (h.contentScriptsHeld.has(script.id)) throw new Error('Duplicate script ID')
+        h.calls.registry.push(`register-content:${script.id}`)
+        h.contentScriptsHeld.set(script.id, structuredClone(script))
+      }
     },
     'browser.runtime.sendMessage': async (message: unknown) => {
       h.calls.runtimeMessages.push(message)
@@ -159,13 +208,24 @@ export function createHarness(): Harness {
     'browser.action.setBadgeText': async (o: { tabId?: number; text: string | null }) => {
       h.calls.setBadgeText.push({ tabId: o.tabId, text: o.text })
     },
-    'browser.storage.local': area(h.local),
-    'browser.storage.session': area(h.session),
+    'browser.storage.local': area(h.local, 'browser.storage.local', gates),
+    'browser.storage.session': area(h.session, 'browser.storage.session', gates),
   }
 
   /** Any unlisted property is another stub; `addListener` records its function. */
   function stub(path: string): any {
-    if (path in overrides) return overrides[path]
+    if (path in overrides) {
+      const real = overrides[path]
+      if (typeof real !== 'function') return real
+      // Looked up at call time, so a gate set after boot still applies.
+      return (...args: unknown[]) => {
+        const gate = gates.get(path)
+        if (gate && onceOnly.delete(path)) gates.delete(path)
+        const call = () => (real as (...a: unknown[]) => unknown)(...args)
+        // Unchanged for an ungated call: some of these stubs are synchronous.
+        return gate ? gate.then(call) : call()
+      }
+    }
     const fn = () => Promise.resolve(undefined)
     return new Proxy(fn, {
       get(_target, prop: string) {

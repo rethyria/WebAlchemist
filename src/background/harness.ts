@@ -12,6 +12,7 @@
  * performance problem on precisely the heavy sites that need transforms most.
  */
 
+import { pathMatcherFor } from '@shared/match'
 import type { Transform } from '@shared/types'
 
 function jsString(value: string): string {
@@ -25,10 +26,30 @@ export function wrapTransform(transform: Transform): string {
     'body',
   ].map(jsString)
 
+  const matcher = pathMatcherFor(transform.match)
+
   return `(() => {
   'use strict';
   const NAME = ${jsString(transform.name)};
   const SCOPES = [${scopeCandidates.join(', ')}];
+
+  /*
+   * The path check that matchesUrl makes for the CSS side. A browser match
+   * pattern compares the path together with the query, so a wildcard in the
+   * pattern can match across the start of the query and register the script
+   * on a page the CSS does not apply to. Running the same check here makes
+   * the two agree. The host and scheme are already limited by the
+   * registration.
+   */
+  const PATH_FORMS = ${JSON.stringify(matcher.forms)};
+  const PATTERN_HAS_QUERY = ${matcher.hasQuery};
+  const pathAgrees = () => {
+    const path = location.pathname;
+    const trimmed = path.replace(/\\/+$/, '') || '/';
+    return PATH_FORMS.some((source) => [path, trimmed].some((form) =>
+      new RegExp(source).test(PATTERN_HAS_QUERY ? form + location.search : form)));
+  };
+  if (!pathAgrees()) return;
 
   const apply = () => {
     try {

@@ -37,6 +37,7 @@
 
 import { excludePatternsFor } from '@shared/site-off'
 import type { Capability, Transform } from '@shared/types'
+import { parsePattern } from '@shared/match'
 import { wrapTransform } from './harness'
 import { userScripts, type ExecutionWorld, type Mv3RegisteredUserScript } from './userscripts-api'
 import { getOffHosts } from './site-off'
@@ -76,11 +77,61 @@ export function cspForCapabilities(capabilities: Capability[]): string {
   return directives.join('; ')
 }
 
-function matchPatternsFor(transform: Transform): string[] {
-  // Stored matches omit the scheme; register for http and https explicitly
-  // rather than using *:// so that ftp: and file: are never included.
-  const bare = transform.match.replace(/^\*:\/\//, '')
-  return [`https://${bare}`, `http://${bare}`]
+/**
+ * The match patterns a script is registered with, one per scheme it may run on.
+ *
+ * A transform saved on an https page is registered for https only. It used to
+ * be registered for http as well, and on the plain-http version of a site the
+ * page is whatever a network attacker serves, so the script ran against markup
+ * the attacker chose. The scheme comes from the stored pattern: `https://` and
+ * `http://` give that scheme, and `*://` gives both because the pattern says
+ * so explicitly.
+ *
+ * A pattern with no scheme was stored before the scheme was recorded, and the
+ * page it was saved on is not known. It is registered for both schemes, as it
+ * was before, so that old transforms keep working, including those saved on an
+ * http-only site such as local development. The scheme restriction applies from
+ * the next save of the transform, which records the page's scheme. ftp: and
+ * file: are never included, which is why the pattern is not passed through as
+ * `*://`.
+ */
+export function matchPatternsFor(transform: Transform): string[] {
+  const { scheme, host, path } = parsePattern(transform.match)
+  const bares = pathsFor(path).map((variant) => `${host}${variant}`)
+  const forScheme = (name: string) => bares.map((bare) => `${name}://${bare}`)
+  switch (scheme) {
+    case 'http':
+      return forScheme('http')
+    case '*':
+      return [...forScheme('https'), ...forScheme('http')]
+    case 'https':
+      return forScheme('https')
+    case undefined:
+      return [...forScheme('https'), ...forScheme('http')]
+  }
+}
+
+/**
+ * The paths to register for one stored path, so that the script runs on the
+ * same pages the CSS does (see matchesUrl).
+ *
+ * A browser match pattern compares the path together with the query string and
+ * knows no trailing-slash rule, so the stored path is written out once per form
+ * of the page: with and without a trailing slash, and, when the stored path has
+ * no query, also with any query. A path with no query that ends in `*` already
+ * covers all of these.
+ */
+function pathsFor(path: string): string[] {
+  const query = path.indexOf('?')
+  // Without a query, a path that ends in `*` already covers every form. With
+  // one, `/search?q=*` does not cover `/search/?q=x`, which the CSS side
+  // matches, so the trailing-slash form is written out too (#95).
+  if (query === -1 && path.endsWith('*')) return [path]
+  const base = query === -1 ? path : path.slice(0, query)
+  const rest = query === -1 ? '' : path.slice(query)
+  const trimmed = base.replace(/\/+$/, '')
+  const forms = trimmed === '' ? ['/'] : [trimmed, `${trimmed}/`]
+  return rest ? forms.map((form) => form + rest) : forms.flatMap((form) => [form, `${form}?*`])
 }
 
 /**

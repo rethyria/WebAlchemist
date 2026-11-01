@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest'
-import { parseRules, propertiesIn } from './css'
+import { parseRules, propertiesIn, stripComments } from './css'
 
 describe('parseRules', () => {
   test('reads selectors and properties from an ordinary rule', () => {
@@ -87,5 +87,63 @@ describe('propertiesIn', () => {
     expect(propertiesIn('.a { color: red } @media print { .b { color: blue; margin: 0 } }')).toEqual(
       new Set(['color', 'margin']),
     )
+  })
+})
+
+describe('a comment marker inside a string or an unquoted url (#97)', () => {
+  const sheet = 'a { content: "/*"; color: red } b { margin: 0 } /* x */'
+
+  test('does not hide the rules after it', () => {
+    const rules = parseRules(sheet)
+    expect(rules.map((r) => r.selectors[0])).toEqual(['a', 'b'])
+    expect(rules[0]?.declarations.map((d) => d.property)).toEqual(['content', 'color'])
+    expect(rules[1]?.declarations.map((d) => d.property)).toEqual(['margin'])
+  })
+
+  test('works with single quotes and an escaped quote before the marker', () => {
+    const rules = parseRules(`a { content: '/*'; color: red } b { margin: 0 } /* x */`)
+    expect(rules.map((r) => r.selectors[0])).toEqual(['a', 'b'])
+    const escaped = parseRules('a { content: "\\"/*"; color: red } b { margin: 0 } /* x */')
+    expect(escaped.map((r) => r.selectors[0])).toEqual(['a', 'b'])
+  })
+
+  test('does not read a comment marker in an unquoted url', () => {
+    const rules = parseRules('a { background: url(a/*b); color: red } b { margin: 0 } /* x */')
+    expect(rules.map((r) => r.selectors[0])).toEqual(['a', 'b'])
+  })
+
+  test('still removes real comments, including one that follows a string', () => {
+    const rules = parseRules('a { content: "x" /* gone: green */; color: red }')
+    expect(rules[0]?.declarations.map((d) => d.property)).toEqual(['content', 'color'])
+  })
+
+  test('control: a comment marker outside any string still starts a comment', () => {
+    // Shows the fix did not stop comments from being removed: this rule is
+    // inside a comment and must not be read.
+    const rules = parseRules('/* a { color: red } */ b { margin: 0 }')
+    expect(rules.map((r) => r.selectors[0])).toEqual(['b'])
+  })
+
+  test('treats an unterminated comment as running to the end', () => {
+    const rules = parseRules('a { color: red } /* b { margin: 0 }')
+    expect(rules.map((r) => r.selectors[0])).toEqual(['a'])
+  })
+})
+
+describe('a string with no closing quote (#97)', () => {
+  test('ends at the newline, so a comment on a later line is removed', () => {
+    expect(stripComments('a { content: "oops\n} /* gone */ b { margin: 0 }')).toBe(
+      'a { content: "oops\n}   b { margin: 0 }',
+    )
+  })
+
+  test('control: a backslash before the newline continues the string', () => {
+    // CSS allows an escaped newline inside a string, so the marker stays.
+    const css = 'a { content: "one\\\n/* kept */two" }'
+    expect(stripComments(css)).toBe(css)
+  })
+
+  test('control: a closed string still protects a comment marker', () => {
+    expect(stripComments('a { content: "/* kept */" } /* gone */')).toBe('a { content: "/* kept */" }  ')
   })
 })

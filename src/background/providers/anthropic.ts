@@ -205,6 +205,7 @@ export async function createAnthropicProvider(
           (body) =>
             client.messages.create(
               body as unknown as Parameters<typeof client.messages.create>[0],
+              request.signal ? { signal: request.signal } : undefined,
             ),
         )
 
@@ -267,6 +268,7 @@ export async function createAnthropicProvider(
           async (payload) => {
             const stream = client.messages.stream(
               payload as unknown as Parameters<typeof client.messages.stream>[0],
+              request.signal ? { signal: request.signal } : undefined,
             )
 
             let accumulated = ''
@@ -289,7 +291,20 @@ export async function createAnthropicProvider(
               onThinking?.(thought)
             })
 
-            return await stream.finalMessage()
+            try {
+              return await stream.finalMessage()
+            } catch (error) {
+              /*
+               * An aborted generation makes finalMessage() throw, so the
+               * report after this call never runs. The tokens counted in the
+               * message events received before the abort are still billed, so
+               * they are reported here (#71). The message is absent when the
+               * abort came before the first event.
+               */
+              const partial = stream.currentMessage
+              if (partial?.usage) reportUsage(generateModel, partial)
+              throw error
+            }
           },
         )
 

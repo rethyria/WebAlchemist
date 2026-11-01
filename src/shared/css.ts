@@ -34,8 +34,63 @@ export interface Rule {
 /** At-rules whose bodies are declarations or frames, not element rules. */
 const NOT_ELEMENT_RULES = /^@(keyframes|-\w+-keyframes|font-face|counter-style|property|page)\b/i
 
-function stripComments(css: string): string {
-  return css.replace(/\/\*[\s\S]*?\*\//g, ' ')
+/**
+ * Replaces each comment with a space, in one pass that knows where strings are.
+ *
+ * A regular expression for `/* ... *\/` cannot tell a comment marker from the
+ * same two characters inside a string, as in `content: "/*"`. It treated that
+ * string as the start of a comment that ran to the next closing marker anywhere
+ * in the stylesheet, and every rule in between was lost (#97). Here a comment
+ * starts only outside a quoted string and outside an unquoted `url(...)`, where
+ * CSS also does not read comments. An unterminated comment runs to the end of
+ * the input, as the CSS specification says.
+ */
+export function stripComments(css: string): string {
+  let out = ''
+  let quote: string | null = null
+  let i = 0
+
+  while (i < css.length) {
+    const c = css[i]!
+    if (quote) {
+      out += c
+      if (c === '\\' && i + 1 < css.length) {
+        out += css[i + 1]
+        i += 2
+        continue
+      }
+      // CSS ends a string at an unescaped newline (a bad string), so a quote
+      // that is never closed does not hide what follows on later lines. The
+      // escaped case, a backslash before the newline, is taken above (#97).
+      if (c === quote || c === '\n' || c === '\r' || c === '\f') quote = null
+      i += 1
+      continue
+    }
+    if (c === '"' || c === "'") {
+      quote = c
+      out += c
+      i += 1
+      continue
+    }
+    if (c === '/' && css[i + 1] === '*') {
+      const end = css.indexOf('*/', i + 2)
+      out += ' '
+      i = end === -1 ? css.length : end + 2
+      continue
+    }
+    // An unquoted url( runs to the closing parenthesis and holds no comments.
+    const unquotedUrl = /^url\(\s*(?!["'\s])/i.exec(css.slice(i, i + 12))
+    if (unquotedUrl && (i === 0 || !/[\w-]/.test(css[i - 1]!))) {
+      const close = css.indexOf(')', i + unquotedUrl[0].length)
+      const stop = close === -1 ? css.length : close + 1
+      out += css.slice(i, stop)
+      i = stop
+      continue
+    }
+    out += c
+    i += 1
+  }
+  return out
 }
 
 /**

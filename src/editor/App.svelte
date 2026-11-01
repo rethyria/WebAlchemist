@@ -2,7 +2,7 @@
   import '@shared/tokens.css'
   import type { ReviewResult, Settings, Transform, TransformVersion } from '@shared/types'
   import { sourceLabel } from '@shared/versions'
-  import { matchPresetsFor, matchesUrl, originPermissionFor } from '@shared/match'
+  import { matchPresetsFor, matchesUrl, originPermissionFor, parsePattern } from '@shared/match'
   import { send } from '@shared/messaging.svelte'
 import { editorOriginToRequest, permissionRequestsFor, requestAll } from '@shared/permissions'
   import CodeArea from './CodeArea.svelte'
@@ -63,10 +63,13 @@ import { editorOriginToRequest, permissionRequestsFor, requestAll } from '@share
    * from, which is all the presets are.
    */
   let presets = $derived.by(() => {
-    const host = match.split('/')[0] ?? ''
+    const { scheme, host, path } = parsePattern(match)
     if (!host) return []
-    const path = match.slice(host.length).replace(/\*+$/, '')
-    return matchPresetsFor(`https://${host.replace(/^\*\./, '')}${path || '/'}`)
+    // The presets keep the scheme the pattern names; `*://` and no scheme are
+    // rebuilt as https, the scheme the save flow offers by default.
+    return matchPresetsFor(
+      `${scheme === 'http' ? 'http' : 'https'}://${host.replace(/^\*\./, '')}${path.replace(/\*+$/, '') || '/'}`,
+    )
   })
 
   /*
@@ -76,9 +79,10 @@ import { editorOriginToRequest, permissionRequestsFor, requestAll } from '@share
    * to that page, so it is what gets checked.
    */
   let reaches = $derived.by(() => {
-    const host = savedMatch.split('/')[0]?.replace(/^\*\./, '') ?? ''
+    const saved = parsePattern(savedMatch)
+    const host = saved.host.replace(/^\*\./, '')
     if (!host || !match.trim()) return true
-    return matchesUrl(match.trim(), `https://${host}/`)
+    return matchesUrl(match.trim(), `${saved.scheme === 'http' ? 'http' : 'https'}://${host}/`)
   })
 
   /**
@@ -446,7 +450,7 @@ import { editorOriginToRequest, permissionRequestsFor, requestAll } from '@share
           exists to make visible elsewhere.
         -->
         <p class="warn">
-          This no longer covers {savedMatch.split('/')[0]}, where it was written.
+          This no longer covers {parsePattern(savedMatch).host}, where it was written.
         </p>
       {:else if match.trim() !== savedMatch}
         <p class="hint">
