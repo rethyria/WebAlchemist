@@ -267,6 +267,9 @@ deny(
   'Creates elements or attributes in a way this check cannot inspect.',
   'createElementNS', 'setAttributeNS', 'setAttributeNode', 'setAttributeNodeNS',
   'createAttribute', 'createAttributeNS', 'attributes', 'importNode', 'adoptNode',
+  // An attribute node is written through its own `value`, which skips every
+  // check made on setAttribute.
+  'getAttributeNode', 'getAttributeNodeNS',
 )
 deny(
   'Submits a form, which sends its contents to the form address.',
@@ -316,7 +319,7 @@ const OBJECT_ENUMERATORS = new Set(['entries', 'values', 'keys', 'getOwnProperty
  * `const c = document.createElement; c.call(document, 'script')`, would let
  * the call-site checks below be skipped.
  */
-const CALL_ONLY = new Set(['createElement', 'setAttribute', 'setProperty', 'assign', 'setTimeout', 'setInterval'])
+const CALL_ONLY = new Set(['createElement', 'setAttribute', 'toggleAttribute', 'setProperty', 'assign', 'setTimeout', 'setInterval'])
 
 /** Properties that run or build HTML when assigned. Reading them is harmless. */
 const WRITE_REFUSED = new Map<string, string>([
@@ -347,8 +350,14 @@ const INERT_TAGS = new Set((
 /** Elements that request the address they are given. Allowed only with network. */
 const LOADING_TAGS = new Set(['img', 'link', 'audio', 'video', 'source', 'track'])
 
-/** Methods whose first argument is a selector or tag name, checked for `script`. */
-const SELECTOR_METHODS = new Set(['querySelector', 'querySelectorAll', 'getElementsByTagName', 'closest', 'matches'])
+/**
+ * Methods that take a selector or tag name, checked for `script`, with the
+ * position of that argument. The namespaced form takes the namespace first.
+ */
+const SELECTOR_METHODS = new Map([
+  ['querySelector', 0], ['querySelectorAll', 0], ['getElementsByTagName', 0],
+  ['getElementsByTagNameNS', 1], ['closest', 0], ['matches', 0],
+])
 
 /** Functions that resolve to another value later, so a literal using one proves nothing. */
 const CSS_INDIRECT = /\b(var|env|attr)\s*\(/i
@@ -1049,21 +1058,23 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
           block(node, `createElement(${lower})`, `Creates a ${lower} element, which can load or run content or send data.`)
         }
       }
-    } else if (name === 'setAttribute') {
+    } else if (name === 'setAttribute' || name === 'toggleAttribute') {
+      // toggleAttribute creates or removes an attribute by name, so it can set
+      // `onclick` or `href` exactly as setAttribute can.
       const attr = literalText(args[0] ?? null)
       if (attr === null) {
-        block(node, 'setAttribute', 'Sets an attribute whose name is decided while running, so this check cannot tell whether it carries an address or code.')
+        block(node, name, 'Sets an attribute whose name is decided while running, so this check cannot tell whether it carries an address or code.')
       } else {
         const lower = attr.toLowerCase()
         if (lower.startsWith('on')) {
-          block(node, `setAttribute(${lower})`, 'Sets an event handler attribute, which runs text as code.')
+          block(node, `${name}(${lower})`, 'Sets an event handler attribute, which runs text as code.')
         } else if (lower === 'srcdoc') {
-          block(node, 'setAttribute(srcdoc)', 'Sets the page inside a frame from a text string, which can run content.')
+          block(node, `${name}(srcdoc)`, 'Sets the page inside a frame from a text string, which can run content.')
         } else if (ATTRIBUTE_URL.has(lower)) {
-          needsNetwork(node, `setAttribute(${lower})`, 'Sets an address on an element, which makes the browser request it or follow it.')
+          needsNetwork(node, `${name}(${lower})`, 'Sets an address on an element, which makes the browser request it or follow it.')
         } else if (lower === 'http-equiv') {
-          block(node, 'setAttribute(http-equiv)', 'Redirects the page from a meta element.')
-        } else if (isUrlBearingStyleName(lower)) {
+          block(node, `${name}(http-equiv)`, 'Redirects the page from a meta element.')
+        } else if (name === 'setAttribute' && isUrlBearingStyleName(lower)) {
           checkWrite(node, lower, args[1] ?? null, ctx.scope)
         }
       }
@@ -1123,7 +1134,7 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
     }
 
     if (SELECTOR_METHODS.has(name)) {
-      const selector = literalText(args[0] ?? null)
+      const selector = literalText(args[SELECTOR_METHODS.get(name)!] ?? null)
       // The tag name is matched in the position where a type selector can
       // stand, so `[style*="width"]` and `.script` do not match.
       const tag = selector === null ? null : /(?:^|[\s,>+~(])(script|style)(?![\w-])(?!\s*[*^$~|]?=)/i.exec(selector)
