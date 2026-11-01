@@ -40,6 +40,7 @@
 
 import type { CssUrlMode, StaticFinding } from '@shared/types'
 import { parsePattern } from '@shared/match'
+import { t } from '@shared/i18n'
 
 /* ------------------------------------------------------------------ */
 /* Tokenizer                                                           */
@@ -402,14 +403,14 @@ export function checkCss(css: string, options: CssCheckOptions): CssCheckResult 
 
     const own =
       kind === 'same-origin'
-        ? ' By default only data: URLs are allowed. A per-site setting allows URLs on the same origin as the page.'
+        ? ` ${t('saOwnSameOrigin')}`
         : mode === 'same-origin'
-          ? ' Only data: URLs and URLs on the same origin as the page are allowed.'
-          : ' By default only data: URLs are allowed.'
+          ? ` ${t('saOwnSameOriginOnly')}`
+          : ` ${t('saOwnDataOnly')}`
     block(
       token,
       api,
-      `This CSS asks the browser to load ${shown}. A stylesheet can use a request like this to send information about the page to another server.${own}`,
+      t('saThisCssAsksTheBrowserTo', shown, own),
     )
   }
 
@@ -427,7 +428,7 @@ export function checkCss(css: string, options: CssCheckOptions): CssCheckResult 
         block(
           token,
           '@import',
-          'This CSS imports another stylesheet. The imported file can change after the transform is approved, so @import is never allowed.',
+          t('saThisCssImportsAnotherStylesheetThe'),
         )
       }
       // There is no exemption for @namespace. Its URL names an XML namespace
@@ -456,7 +457,7 @@ export function checkCss(css: string, options: CssCheckOptions): CssCheckResult 
       block(
         token,
         'url()',
-        'This CSS contains a url() that could not be read, so it cannot be checked.',
+        t('saThisCssContainsAUrlThat'),
       )
       continue
     }
@@ -475,7 +476,7 @@ export function checkCss(css: string, options: CssCheckOptions): CssCheckResult 
           block(
             token,
             `${name}()`,
-            `This CSS builds a URL with ${name}() inside ${enclosing}(), which cannot be checked before it runs.`,
+            t('saThisCssBuildsAUrlWith', name, enclosing),
           )
         }
         continue
@@ -492,7 +493,7 @@ export function checkCss(css: string, options: CssCheckOptions): CssCheckResult 
           block(
             token,
             `${name}()`,
-            `This CSS has a ${name}() whose address is not a plain string, so it cannot be checked.`,
+            t('saThisCssHasAWhoseAddress', name),
           )
         }
       }

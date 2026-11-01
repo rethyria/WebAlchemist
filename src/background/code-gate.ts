@@ -11,6 +11,7 @@
 import { analyseJavaScript, applyCapabilityPolicy } from '@safety/static-analysis'
 import type { ReviewResult, Settings, Transform, TransformRuntimeState } from '@shared/types'
 import { checkCssTransform } from './css-gate'
+import { t } from '@shared/i18n'
 
 /**
  * The deterministic half of the review, on its own. Separated because it is
@@ -36,7 +37,7 @@ export function staticProblem(code: string, declared: Transform['capabilities'])
   if (check.passed) return null
   return (
     check.static.find((f) => f.severity === 'block')?.explanation ??
-    'A capability was used without being declared.'
+    t('bgACapabilityWasUsedWithoutBeing')
   )
 }
 
@@ -62,8 +63,8 @@ export function problemWithStoredCode(
 
   const reason =
     check.static.find((f) => f.severity === 'block')?.explanation ??
-    'It loads addresses outside the site that were not approved.'
-  return `Its code does not pass the safety check that is applied now, so it is not running. ${reason}`
+    t('bgItLoadsAddressesOutsideTheSite')
+  return t('bgItsCodeDoesNotPassThe', reason)
 }
 
 /**

@@ -4,6 +4,7 @@
  */
 
 import { excludedHostFor, normalizeExcludedEntry } from '@shared/excluded-sites'
+import { t } from '@shared/i18n'
 
 const KEY = 'wa-excluded-sites'
 
@@ -20,7 +21,7 @@ export async function setExcludedSites(entries: string[]): Promise<string[]> {
   const normalized: string[] = []
   for (const entry of entries) {
     const host = normalizeExcludedEntry(entry)
-    if (host === null) throw new Error(`"${entry}" is not a site name, so the list was not changed.`)
+    if (host === null) throw new Error(t('bgIsNotASiteNameSo', entry))
     if (!normalized.includes(host)) normalized.push(host)
   }
   await browser.storage.local.set({ [KEY]: normalized })

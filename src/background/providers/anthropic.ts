@@ -56,6 +56,7 @@ import { readUsage } from '@shared/usage'
  * the current Opus; users pick something cheaper in settings if they prefer.
  */
 import { DEFAULT_GENERATE_MODEL, DEFAULT_REVIEW_MODEL } from '@shared/types'
+import { t } from '@shared/i18n'
 export { DEFAULT_GENERATE_MODEL, DEFAULT_REVIEW_MODEL }
 
 /**
@@ -127,14 +128,14 @@ export async function createAnthropicProvider(
   const credential = await readCredentialOrProviderError(provider)
   if (!credential) {
     throw new ProviderError(
-      `No API key is configured for ${provider.label}.`,
+      t('bgNoApiKeyIsConfiguredFor', provider.label),
       'no-credential',
       false,
     )
   }
   if (credential.kind !== 'api_key') {
     throw new ProviderError(
-      'Anthropic supports API keys only. OAuth is restricted to Claude Code and Claude.ai.',
+      t('bgAnthropicSupportsApiKeysOnlyOauth'),
       'auth',
       false,
     )
@@ -483,7 +484,7 @@ function parseJsonResponse<T>(response: unknown): T {
   if (message.stop_reason === 'refusal') {
     throw new ProviderError(
       message.stop_details?.explanation ??
-        'The model declined this request. Try rewording what you asked for.',
+        t('bgTheModelDeclinedThisRequestTry'),
       'refusal',
       false,
     )
@@ -491,14 +492,14 @@ function parseJsonResponse<T>(response: unknown): T {
 
   const text = message.content?.find((block) => block.type === 'text')?.text
   if (!text) {
-    throw new ProviderError('The model returned no usable response.', 'bad-response', true)
+    throw new ProviderError(t('bgTheModelReturnedNoUsableResponse'), 'bad-response', true)
   }
 
   try {
     return JSON.parse(text) as T
   } catch (error) {
     throw new ProviderError(
-      'The model returned a response that could not be read.',
+      t('bgTheModelReturnedAResponseThat'),
       'bad-response',
       true,
       { cause: error },
@@ -547,7 +548,7 @@ function toProviderError(
     /\bmodel\b/i.test(String(error.message ?? ''))
   ) {
     return new ProviderError(
-      `The model ${modelDisplayName(context.model)} is not available from ${context.label}. Choose another model in settings.`,
+      t('bgTheModelIsNotAvailableFrom', modelDisplayName(context.model), context.label),
       'model-unavailable',
       false,
       { cause: error },
@@ -555,7 +556,7 @@ function toProviderError(
   }
   if (error instanceof Anthropic.APIError && isBillingError(error)) {
     return new ProviderError(
-      `${context.label} reports a billing problem, such as no remaining credit. Add credit or fix billing with the provider, then try again.`,
+      t('bgReportsABillingProblemSuchAs', context.label),
       'billing',
       false,
       { cause: error },
@@ -564,7 +565,7 @@ function toProviderError(
 
   if (error instanceof Anthropic.AuthenticationError) {
     return new ProviderError(
-      'That API key was rejected. Check it in settings.',
+      t('bgThatApiKeyWasRejectedCheck'),
       'auth',
       false,
       { cause: error },
@@ -580,15 +581,15 @@ function toProviderError(
     const seconds = retryAfterSeconds(error.headers as HeaderSource | undefined, Date.now())
     return new ProviderError(
       seconds === null
-        ? 'Rate limited by the provider. Wait a moment and try again.'
-        : `Rate limited by the provider. It asked for ${seconds} seconds.`,
+        ? t('bgRateLimitedByTheProviderWait')
+        : t('bgRateLimitedByTheProviderIt', seconds),
       'rate-limit',
       true,
       { cause: error, ...(seconds === null ? {} : { retryInSeconds: seconds }) },
     )
   }
   if (error instanceof Anthropic.APIConnectionError) {
-    return new ProviderError('Could not reach the provider.', 'network', true, {
+    return new ProviderError(t('bgCouldNotReachTheProvider'), 'network', true, {
       cause: error,
     })
   }
@@ -605,8 +606,8 @@ function toProviderError(
     const detail = String(error.message ?? '').trim()
     return new ProviderError(
       detail
-        ? `Provider returned an error (${error.status ?? 'unknown'}): ${detail}`
-        : `Provider returned an error (${error.status ?? 'unknown'}).`,
+        ? t('bgProviderReturnedAnError', error.status ?? 'unknown', detail)
+        : t('bgProviderReturnedAnError2', error.status ?? 'unknown'),
       'unknown',
       (error.status ?? 0) >= 500,
       { cause: error },

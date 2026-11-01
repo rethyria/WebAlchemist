@@ -1,3 +1,4 @@
+import { t } from '@shared/i18n'
 /**
  * Typed handle for the Manifest V3 `userScripts` API.
  *
@@ -75,7 +76,7 @@ function api(): Mv3UserScriptsApi {
   const namespace = (browser as unknown as { userScripts?: unknown }).userScripts
   if (!namespace) {
     throw new Error(
-      'Firefox has not granted the user scripts permission, so no script can be registered.',
+      t('bgFirefoxHasNotGrantedTheUser'),
     )
   }
   return namespace as Mv3UserScriptsApi

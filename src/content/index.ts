@@ -27,6 +27,7 @@ import type {
 import { captureAnchor, isBuildHashClass, resolveAnchor } from './anchor'
 import { extractContext, extractElementContext } from './context'
 import { LONG_PRESS_MS, TouchGesture } from './touch'
+import { t } from '@shared/i18n'
 
 /* ------------------------------------------------------------------ */
 /* Overlay                                                             */
@@ -400,15 +401,15 @@ class Overlay {
       for (const part of Array.from(this.hint.children).slice(1)) {
         part.setAttribute('style', 'display:none')
       }
-      if (lead) lead.textContent = 'Tap an element, or touch and hold to draw an area'
+      if (lead) lead.textContent = t('overlayHintTouch')
       return
     }
     if (lead) {
       lead.textContent = region
-        ? 'Drag the area to capture'
+        ? t('overlayHintRegion')
         : hasCrop
-          ? 'Confirm or redraw'
-          : 'Hover or drag'
+          ? t('overlayHintCrop')
+          : t('overlayHintHover')
     }
     this.hint.querySelector('.redraw')?.setAttribute(
       'style',
@@ -418,18 +419,18 @@ class Overlay {
 
   private buildHint(): HTMLDivElement {
     const bar = element('div', 'hint')
-    bar.append(text('span', 'Hover or drag'), element('span', 'rule'))
+    bar.append(text('span', t('overlayHintHover')), element('span', 'rule'))
 
     const keys = element('div', 'keys')
     for (const key of ['↑', '↓', '←', '→']) keys.append(text('kbd', key))
     bar.append(keys, element('span', 'rule'))
 
     const confirm = text('span', '')
-    confirm.append(text('kbd', '↵'), text('span', ' confirm'))
-    const redraw = text('span', 'redraw', 'muted redraw')
+    confirm.append(text('kbd', '↵'), text('span', ` ${t('overlayConfirm')}`))
+    const redraw = text('span', t('overlayRedraw'), 'muted redraw')
     redraw.setAttribute('style', 'display:none')
     const cancel = text('span', '', 'muted')
-    cancel.append(text('kbd', 'esc'), text('span', ' cancel'))
+    cancel.append(text('kbd', 'esc'), text('span', ` ${t('overlayCancel')}`))
 
     bar.append(confirm, redraw, cancel)
     return bar
@@ -1045,7 +1046,7 @@ function buildTree(current: Element): TreeRow[] {
       if (budget <= 0) {
         // No expand path: this is the list's own ceiling rather than this
         // node's cap, and asking again would not produce different rows.
-        out.push({ label: `+${children.length - index} more`, indent, relation: 'more' })
+        out.push({ label: t('overlayMore', children.length - index), indent, relation: 'more' })
         return
       }
       const path = pathFor(child)
@@ -1064,7 +1065,7 @@ function buildTree(current: Element): TreeRow[] {
     if (hidden > 0) {
       const path = pathFor(parent)
       out.push({
-        label: `+${hidden} more`,
+        label: t('overlayMore', hidden),
         indent,
         relation: 'more',
         ...(path ? { expand: path } : {}),
@@ -1098,7 +1099,7 @@ function buildTree(current: Element): TreeRow[] {
 
   if (from > 0) {
     rows.push({
-      label: `+${from} more`,
+      label: t('overlayMore', from),
       indent: level,
       relation: 'more',
       ...(parentPath ? { expand: parentPath } : {}),
@@ -1130,7 +1131,7 @@ function buildTree(current: Element): TreeRow[] {
 
   if (to < family.length) {
     rows.push({
-      label: `+${family.length - to} more`,
+      label: t('overlayMore', family.length - to),
       indent: level,
       relation: 'more',
       ...(parentPath ? { expand: parentPath } : {}),
@@ -1670,7 +1671,7 @@ async function runHealthCheck(
     states.push({
       id,
       status: 'broken',
-      brokenReason: `Nothing on this page matches ${transform.anchor.selector}`,
+      brokenReason: t('overlayNoMatch', transform.anchor.selector),
       ...(failed ? { failedAssumption: failed } : {}),
     })
   }

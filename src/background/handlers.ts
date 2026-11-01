@@ -21,6 +21,7 @@ import type { ReviewResult, Settings, Transform } from '@shared/types'
 import { isApproved, mayBeSaved, recordApproval, spendApproval, type ApprovalVerdict } from './approvals'
 import { blockedStates, problemWithStoredCode, runStaticAnalysis } from './code-gate'
 import { assertPreviewable, checkCssTransform } from './css-gate'
+import { t } from '@shared/i18n'
 
 type Of<T extends Message['type']> = Extract<Message, { type: T }>
 
@@ -69,7 +70,7 @@ export async function handleSaveTransform(message: Of<'save-transform'>, deps: S
   if (message.transform.kind === 'js') {
     const analysis = runStaticAnalysis(message.transform.code, message.transform.capabilities)
     if (!analysis.passed) {
-      throw new Error('Static analysis rejected this code, so it was not saved.')
+      throw new Error(t('bgStaticAnalysisRejectedThisCodeSo'))
     }
 
     /*
@@ -83,7 +84,7 @@ export async function handleSaveTransform(message: Of<'save-transform'>, deps: S
     const stored = (await deps.getAllTransforms()).find((t) => t.id === message.transform.id)
     if (!(await mayBeSaved(stored, message.transform, message.approvalToken))) {
       throw new Error(
-        'This code was not approved in this browser session, so it was not saved. Review it again and save.',
+        t('bgThisCodeWasNotApprovedIn'),
       )
     }
   }
@@ -118,7 +119,7 @@ export async function handleSaveTransform(message: Of<'save-transform'>, deps: S
       if (!check.passed) {
         throw new Error(
           check.static[0]?.explanation ??
-            'This CSS loads external addresses that were not approved, so it was not saved.',
+            t('bgThisCssLoadsExternalAddressesThat'),
         )
       }
     }
@@ -249,10 +250,10 @@ export async function handleApproveCode(
   trusted: boolean,
   deps: Pick<ReviewDeps, 'recordApproval'> = {},
 ): Promise<{ approvalToken: string }> {
-  if (!trusted) throw new Error('Only the extension can approve code.')
+  if (!trusted) throw new Error(t('bgOnlyTheExtensionCanApproveCode'))
   const analysis = runStaticAnalysis(message.code, message.declaredCapabilities)
   if (!analysis.passed) {
-    throw new Error('Static analysis rejected this code, so it was not approved.')
+    throw new Error(t('bgStaticAnalysisRejectedThisCodeSo2'))
   }
   const approvalToken = await (deps.recordApproval ?? recordApproval)(
     message.code,

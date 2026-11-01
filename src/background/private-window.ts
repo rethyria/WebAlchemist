@@ -1,3 +1,4 @@
+import { t } from '@shared/i18n'
 /**
  * Private windows (#127).
  *
@@ -10,10 +11,10 @@
  */
 
 export const TAB_UNKNOWN_MESSAGE =
-  'Web Alchemist could not tell which tab this request is for, or could not read that tab, so it did not send the page to a model. Close the sidebar, open it again from the tab you want to change, and try again.'
+  t('bgWebAlchemistCouldNotTellWhich')
 
 export const PRIVATE_WINDOW_MESSAGE =
-  'Web Alchemist does not pick, generate, capture or save in a private window, because a saved transform keeps text from the page after the window closes. Use a normal window to make a transform. Transforms you already saved still apply here.'
+  t('bgWebAlchemistDoesNotPickGenerate')
 
 /**
  * Throws PRIVATE_WINDOW_MESSAGE when the tab is in a private window.

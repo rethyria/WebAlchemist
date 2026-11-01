@@ -1,3 +1,4 @@
+import { t } from '@shared/i18n'
 /**
  * Optional passphrase encryption for stored credentials.
  *
@@ -186,7 +187,7 @@ export function saltOf(sealed: Sealed): Uint8Array {
 /** Raised when credentials are sealed and no key is in the session. */
 export class LockedError extends Error {
   constructor() {
-    super('Web Alchemist is locked. Enter your passphrase in settings to unlock it.')
+    super(t('bgWebAlchemistIsLockedEnterYour'))
     this.name = 'LockedError'
   }
 }

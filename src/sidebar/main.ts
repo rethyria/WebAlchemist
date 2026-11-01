@@ -1,6 +1,9 @@
 import { mount } from 'svelte'
 import App from './App.svelte'
+import { applyPageLanguage } from '@shared/i18n'
 import { panelPageKey, resolveBinding, setBoundTab } from '@shared/panel-binding'
+
+applyPageLanguage()
 
 const target = document.getElementById('app')
 if (!target) throw new Error('Sidebar root element is missing.')

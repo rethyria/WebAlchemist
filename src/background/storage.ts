@@ -78,6 +78,7 @@ import {
   type PlanDeps,
   type PlannedTransform,
 } from './transfer'
+import { t } from '@shared/i18n'
 
 const KEY_SETTINGS = 'settings'
 const KEY_TRANSFORMS = 'transforms'
@@ -107,7 +108,7 @@ export async function getSettings(): Promise<Settings> {
 async function writeSettings(settings: Settings): Promise<void> {
   const idle = settings.vaultIdleLockMinutes
   if (!Number.isInteger(idle) || idle < 0) {
-    throw new Error('The vault lock period must be a whole number of minutes, or 0 for never.')
+    throw new Error(t('bgTheVaultLockPeriodMustBe'))
   }
   const previous = (await browser.storage.local.get(KEY_SETTINGS))[KEY_SETTINGS] as
     | Partial<Settings>
@@ -138,7 +139,7 @@ async function writeSettings(settings: Settings): Promise<void> {
     if (price === undefined) continue
     const valid = (n: unknown) => typeof n === 'number' && Number.isFinite(n) && n >= 0
     if (!valid(price.input) || !valid(price.output)) {
-      throw new Error(`The price for ${provider.label} must be two numbers of 0 or more.`)
+      throw new Error(t('bgThePriceForMustBeTwo', provider.label))
     }
   }
   await browser.storage.local.set({ [KEY_SETTINGS]: settings })
@@ -214,7 +215,7 @@ export function changeSettings(
     switch (change.kind) {
       case 'add-provider':
         if (current.providers.some((p) => p.id === change.provider.id)) {
-          throw new Error('A provider with that id already exists.')
+          throw new Error(t('bgAProviderWithThatIdAlready'))
         }
         next = {
           ...current,
@@ -249,13 +250,13 @@ export function changeSettings(
           next.activeProviderId !== null &&
           !next.providers.some((p) => p.id === next.activeProviderId)
         ) {
-          throw new Error('The active provider must be one that is configured.')
+          throw new Error(t('bgTheActiveProviderMustBeOne'))
         }
         break
       }
       case 'update-provider': {
         const found = current.providers.find((p) => p.id === change.providerId)
-        if (!found) throw new Error('That provider is no longer configured.')
+        if (!found) throw new Error(t('bgThatProviderIsNoLongerConfigured'))
         // Only the listed fields are taken from the message, so a change cannot
         // alter the id, the type or the address of a provider.
         const updated: Provider = { ...found }
@@ -269,7 +270,7 @@ export function changeSettings(
         // would leave a provider that cannot be used or found.
         for (const key of change.unset ?? []) {
           if (!UNSETTABLE_PROVIDER_FIELDS.includes(key)) {
-            throw new Error(`The provider field "${String(key)}" cannot be removed.`)
+            throw new Error(t('bgTheProviderFieldCannotBeRemoved', String(key)))
           }
           delete updated[key]
         }
@@ -357,7 +358,7 @@ export function isValidTransform(value: unknown): value is Transform {
 export function assertValidTransform(value: unknown): asserts value is Transform {
   const problem = firstProblem(value)
   if (problem !== null) {
-    throw new Error(`This transform has no valid "${problem}" field, so it was not saved.`)
+    throw new Error(t('bgThisTransformHasNoValidField', problem))
   }
 }
 
@@ -754,7 +755,7 @@ export async function vaultState(): Promise<{ sealed: boolean; unlocked: boolean
 }
 
 const ALREADY_SEALED =
-  'The credentials are already protected by a passphrase. Remove that passphrase first to set a different one.'
+  t('bgTheCredentialsAreAlreadyProtectedBy')
 
 /**
  * Turns passphrase mode on, sealing whatever is already stored.
@@ -767,7 +768,7 @@ export async function enableVault(passphrase: string): Promise<void> {
   // a message that any extension context can send, and the page's check is
   // only a convenience for the person typing.
   if (passphrase.length < MIN_PASSPHRASE_LENGTH) {
-    throw new Error(`The passphrase must be at least ${MIN_PASSPHRASE_LENGTH} characters.`)
+    throw new Error(t('bgThePassphraseMustBeAtLeast2', MIN_PASSPHRASE_LENGTH))
   }
 
   // Refused rather than ignored. Returning silently here let the settings page
@@ -898,7 +899,7 @@ export async function discardVault(): Promise<void> {
   await withCredentialLock(async () => {
     const state = await vaultState()
     if (!state.sealed || state.unlocked) {
-      throw new Error('Stored credentials can be discarded only while they are sealed and locked.')
+      throw new Error(t('bgStoredCredentialsCanBeDiscardedOnly'))
     }
     await browser.storage.local.remove(KEY_CREDENTIALS)
     await forgetKey()
@@ -910,10 +911,10 @@ export class CredentialOriginError extends Error {
   constructor(label: string, entered: string | null, current: string | null) {
     super(
       current === null
-        ? `The key for ${label} cannot be used because the provider has no valid address. Fix the address in settings and enter the key again.`
+        ? t('bgTheKeyForCannotBeUsed', label)
         : entered === null
-          ? `The key for ${label} has no recorded address, so it was not sent. Enter it again in settings.`
-          : `The key for ${label} was entered for ${entered}, but the provider now sends requests to ${current}. The key was not sent. Enter it again in settings.`,
+          ? t('bgTheKeyForHasNoRecorded', label)
+          : t('bgTheKeyForWasEnteredFor', label, entered, current),
     )
     this.name = 'CredentialOriginError'
   }
@@ -1090,7 +1091,7 @@ export async function readStoredCredential(providerId: string): Promise<Credenti
  */
 export async function saveCredentialFor(provider: Provider, credential: Credential): Promise<void> {
   const boundTo = destinationOf(provider)
-  if (!boundTo) throw new Error(`${provider.label} has no valid address to bind the key to.`)
+  if (!boundTo) throw new Error(t('bgHasNoValidAddressToBind', provider.label))
   await setCredential(provider.id, { ...credential, boundTo })
 }
 
@@ -1360,13 +1361,13 @@ function assertReadableBundle(bundle: unknown): asserts bundle is ExportBundle {
     !Array.isArray(bundle.transforms) ||
     (bundle.format !== undefined && bundle.format !== EXPORT_FORMAT)
   ) {
-    throw new Error('This file is not a Web Alchemist export.')
+    throw new Error(t('bgThisFileIsNotAWeb'))
   }
   const tooMany = importCountProblem(bundle.transforms.length)
   if (tooMany !== null) throw new Error(tooMany)
   if (bundle.schemaVersion > SCHEMA_VERSION) {
     throw new Error(
-      `This file was made by a newer version of Web Alchemist (schema ${bundle.schemaVersion}). Update the extension to import it.`,
+      t('bgThisFileWasMadeByA', bundle.schemaVersion),
     )
   }
 }

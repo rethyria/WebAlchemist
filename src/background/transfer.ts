@@ -26,6 +26,7 @@ import {
   type Transform,
   type TransformKind,
 } from '@shared/types'
+import { t } from '@shared/i18n'
 
 /** Which kind of file an export is. A share carries no JavaScript code; a backup does. */
 export type ExportMode = 'share' | 'backup'
@@ -225,14 +226,14 @@ export async function planImport(
       const fallback = (field: string): string =>
         typeof raw === 'object' && raw !== null ? text((raw as Record<string, unknown>)[field]) : ''
       items.push({
-        name: fallback('name') || 'Unnamed record',
+        name: fallback('name') || t('bgUnnamedRecord'),
         kind: (raw as { kind?: unknown } | null)?.kind === 'js' ? 'js' : 'css',
         match: fallback('match'),
         sites: '',
         origin: null,
         intent: '',
         status: 'refused',
-        reason: 'The record is missing a field or has a field of the wrong type.',
+        reason: t('bgTheRecordIsMissingAField'),
         needsRegeneration: false,
         needsApproval: false,
       })
@@ -261,7 +262,7 @@ export async function planImport(
         sites: '',
         origin: null,
         status: 'refused',
-        reason: `The pattern reaches ${excluded}, which is on the list of excluded sites. Remove it from that list in the settings first if the transform should be imported.`,
+        reason: t('bgThePatternReachesWhichIsOn', excluded),
       })
       continue
     }
@@ -275,7 +276,7 @@ export async function planImport(
         sites: assessed.sites,
         origin: originPermissionFor(raw.match.trim()),
         status: 'duplicate',
-        reason: 'A transform with the same name, kind, sites and content is already saved.',
+        reason: t('bgATransformWithTheSameName'),
       })
       continue
     }
@@ -288,7 +289,7 @@ export async function planImport(
         sites: assessed.sites,
         origin: null,
         status: 'refused',
-        reason: `This file asks for access to more than ${MAX_IMPORT_ORIGINS} different sites. This record is not imported. Import a smaller file.`,
+        reason: t('bgThisFileAsksForAccessTo', MAX_IMPORT_ORIGINS),
       })
       continue
     }
@@ -302,7 +303,7 @@ export async function planImport(
       const problem = deps.cssProblem(record)
       if (problem !== null) {
         record.code = ''
-        reason = `The CSS is not imported because it fails the CSS check. ${problem}`
+        reason = t('bgTheCssIsNotImportedBecause', problem)
       }
     }
     if (record.kind === 'js' && record.code !== '') {
@@ -313,7 +314,7 @@ export async function planImport(
       if (problem !== null) {
         record.code = ''
         record.capabilities = []
-        reason = `The code is not restored because it fails the static analysis. ${problem}`
+        reason = t('bgTheCodeIsNotRestoredBecause', problem)
       } else {
         record.awaitsApproval = true
         needsApproval = true

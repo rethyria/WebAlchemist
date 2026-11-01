@@ -3,6 +3,7 @@ import { getSettings } from '../storage'
 import { createAnthropicProvider } from './anthropic'
 import { createOpenAiCompatibleProvider } from './openai-compatible'
 import { ProviderError, type AiProvider, type UsageListener } from './types'
+import { t } from '@shared/i18n'
 
 export * from './types'
 export { DEFAULT_GENERATE_MODEL, DEFAULT_REVIEW_MODEL } from './anthropic'
@@ -27,7 +28,7 @@ export async function resolveActiveProvider(
   const settings = await getSettings()
   if (settings.providers.length === 0) {
     throw new ProviderError(
-      'No AI provider is set up yet. Add one in settings to start generating transforms.',
+      t('bgNoAiProviderIsSetUp'),
       'no-credential',
       false,
     )
@@ -38,7 +39,7 @@ export async function resolveActiveProvider(
     settings.providers[0]
 
   if (!active) {
-    throw new ProviderError('No AI provider is selected.', 'no-credential', false)
+    throw new ProviderError(t('bgNoAiProviderIsSelected'), 'no-credential', false)
   }
   return createProvider(active, onUsage && ((call) => onUsage(call, active)))
 }

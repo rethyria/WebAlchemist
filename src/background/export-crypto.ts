@@ -16,6 +16,7 @@
 import { MIN_PASSPHRASE_LENGTH } from '@shared/vault-policy'
 import { EXPORT_FORMAT, isEncryptedExport, type EncryptedExport } from '@shared/export-envelope'
 import { deriveKey, randomSalt, saltOf, seal, unseal } from './vault'
+import { t } from '@shared/i18n'
 
 export async function encryptExport(
   bundle: { schemaVersion: number },
@@ -24,7 +25,7 @@ export async function encryptExport(
   // Checked here as well as on the page, as the vault does: a message can reach
   // the background without passing through the page.
   if (passphrase.length < MIN_PASSPHRASE_LENGTH) {
-    throw new Error(`The passphrase must be at least ${MIN_PASSPHRASE_LENGTH} characters long.`)
+    throw new Error(t('bgThePassphraseMustBeAtLeast', MIN_PASSPHRASE_LENGTH))
   }
   const salt = randomSalt()
   const key = await deriveKey(passphrase, salt)
@@ -47,11 +48,11 @@ export async function encryptExport(
  */
 export async function openExport(file: unknown, passphrase: string | undefined): Promise<unknown> {
   if (!isEncryptedExport(file)) return file
-  if (!passphrase) throw new Error('This file is encrypted. Enter its passphrase to import it.')
+  if (!passphrase) throw new Error(t('bgThisFileIsEncryptedEnterIts'))
   try {
     const key = await deriveKey(passphrase, saltOf(file.sealed))
     return JSON.parse(await unseal(key, file.sealed))
   } catch {
-    throw new Error('The file could not be decrypted. The passphrase is wrong, or the file was changed.')
+    throw new Error(t('bgTheFileCouldNotBeDecrypted'))
   }
 }

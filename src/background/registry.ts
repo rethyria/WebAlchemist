@@ -46,6 +46,7 @@ import { getOffHosts } from './site-off'
 import { getExcludedSites } from './excluded-sites'
 import { excludeMatchesFor } from '@shared/excluded-sites'
 import { getAllTransforms, getSettings } from './storage'
+import { t } from '@shared/i18n'
 
 /** Worlds are per-transform so transforms cannot collide with each other. */
 export function worldIdFor(transform: Transform): string {
@@ -250,7 +251,7 @@ async function registerTransformNow(
 
   if (!(await hasUserScriptsPermission())) {
     throw new Error(
-      'Running JavaScript transforms needs an extra permission. Grant it from the sidebar.',
+      t('bgRunningJavascriptTransformsNeedsAnExtra'),
     )
   }
 
@@ -304,14 +305,14 @@ async function registerPreviewNow(transform: Transform): Promise<void> {
   const settings = await getSettings()
   if (settings.aiJsKillSwitch) {
     throw new Error(
-      'Running transforms is switched off in the settings, so the JavaScript was not run. Turn that setting off to run it.',
+      t('bgRunningTransformsIsSwitchedOffIn'),
     )
   }
   // Restored code that waits for approval never runs, so a preview of it is
   // refused with that reason and not with the safety check's (#124). Checked
   // before the saved registration is paused.
   if (transform.awaitsApproval) {
-    throw new Error(`The code is waiting for approval, so it was not run. ${AWAITING_APPROVAL_NOTE}`)
+    throw new Error(t('bgTheCodeIsWaitingForApproval', AWAITING_APPROVAL_NOTE))
   }
   await unregisterTransformNow(transform.id)
   try {
@@ -346,7 +347,7 @@ async function registerPreviewScript(transform: Transform): Promise<void> {
     { exactPath: true },
   )
   if (!registered) {
-    throw new Error('This code did not pass the safety check, so it was not run.')
+    throw new Error(t('bgThisCodeDidNotPassThe'))
   }
 }
 

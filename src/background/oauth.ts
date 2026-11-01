@@ -27,6 +27,7 @@
 import type { Credential, OAuthConfig } from '@shared/types'
 import { assertEndpoint } from '@shared/endpoint-policy'
 import { ACCOUNT_SIGN_IN_UNAVAILABLE, hasAccountSignIn } from '@shared/android-limits'
+import { t } from '@shared/i18n'
 
 /** RFC 7636 §4.1: 43–128 characters from the unreserved set. */
 const VERIFIER_BYTES = 32
@@ -109,7 +110,7 @@ export function parseRedirect(returnedUrl: string, expectedState: string): strin
   try {
     url = new URL(returnedUrl)
   } catch {
-    throw new Error('The sign-in did not complete.')
+    throw new Error(t('bgTheSignInDidNotComplete'))
   }
 
   // Some servers answer in the fragment rather than the query.
@@ -120,17 +121,17 @@ export function parseRedirect(returnedUrl: string, expectedState: string): strin
   const error = get('error')
   if (error) {
     throw new Error(
-      get('error_description') ?? `The provider refused the sign-in (${error}).`,
+      get('error_description') ?? t('bgTheProviderRefusedTheSignIn', error),
     )
   }
 
   const state = get('state')
   if (state !== expectedState) {
-    throw new Error('The sign-in response did not match the request, so it was not accepted.')
+    throw new Error(t('bgTheSignInResponseDidNot'))
   }
 
   const code = get('code')
-  if (!code) throw new Error('The provider returned no authorization code.')
+  if (!code) throw new Error(t('bgTheProviderReturnedNoAuthorizationCode'))
   return code
 }
 
@@ -185,7 +186,7 @@ export function credentialFrom(
 ): Extract<Credential, { kind: 'oauth' }> {
   const refreshToken = payload.refresh_token ?? previousRefreshToken
   if (!payload.access_token) {
-    throw new Error('The provider did not return a usable token.')
+    throw new Error(t('bgTheProviderDidNotReturnA'))
   }
   /*
    * A missing refresh token is accepted. Some providers issue one only when an
@@ -263,14 +264,14 @@ export async function connect(config: OAuthConfig): Promise<Extract<Credential, 
     })
   } catch (error) {
     throw new Error(
-      'The sign-in server could not be reached, or it redirected the token request, which is not allowed. Check the token endpoint in settings.',
+      t('bgTheSignInServerCouldNot'),
       { cause: error },
     )
   }
 
   if (!response.ok) {
     throw new Error(
-      `The provider rejected the sign-in (${response.status}). Check the client id and endpoints in settings.`,
+      t('bgTheProviderRejectedTheSignIn', response.status),
     )
   }
 

@@ -687,4 +687,8 @@ export const optionsMessages = defineMessages({
     description: 'Button that imports the transforms of the file. $COUNT$ is a number.',
     placeholders: ['COUNT'],
   },
+  optPageTitle: {
+    message: 'Web Alchemist settings',
+    description: 'Title of the browser tab of the settings page.',
+  },
 })

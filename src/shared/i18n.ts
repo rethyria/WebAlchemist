@@ -39,3 +39,15 @@ export function fillEnglish(entry: CatalogueEntry, values: string[]): string {
     return index === -1 ? match : (values[index] ?? '')
   })
 }
+
+/**
+ * Sets the language of an extension page to the browser's interface language,
+ * so that assistive technology reads translated text in the right language.
+ * The pages declare English in their HTML, which is the language of the
+ * default catalogue.
+ */
+export function applyPageLanguage(): void {
+  const i18n = (globalThis as { browser?: { i18n?: typeof browser.i18n } }).browser?.i18n
+  const language = typeof i18n?.getUILanguage === 'function' ? i18n.getUILanguage() : ''
+  if (typeof language === 'string' && language !== '') document.documentElement.lang = language
+}

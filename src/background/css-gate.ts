@@ -9,6 +9,7 @@
 
 import { checkCss, hostOfPattern, modeForHost } from '@safety/css-check'
 import type { CssUrlMode, ReviewResult, Settings, Transform } from '@shared/types'
+import { t } from '@shared/i18n'
 
 /**
  * The page a check resolves relative URLs against.
@@ -102,6 +103,6 @@ export function assertPreviewable(
   if (check.passed) return
   throw new Error(
     check.static[0]?.explanation ??
-      'This CSS loads addresses outside the site that are not approved yet, so it was not applied to the page.',
+      t('bgThisCssLoadsAddressesOutsideThe'),
   )
 }

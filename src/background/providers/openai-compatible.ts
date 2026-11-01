@@ -47,6 +47,7 @@ import {
   type UsageListener,
 } from './types'
 import { readUsage } from '@shared/usage'
+import { t } from '@shared/i18n'
 
 export async function createOpenAiCompatibleProvider(
   provider: Provider,
@@ -54,7 +55,7 @@ export async function createOpenAiCompatibleProvider(
 ): Promise<AiProvider> {
   if (!provider.baseUrl) {
     throw new ProviderError(
-      `${provider.label} has no base URL configured.`,
+      t('bgHasNoBaseUrlConfigured', provider.label),
       'no-credential',
       false,
     )
@@ -62,7 +63,7 @@ export async function createOpenAiCompatibleProvider(
   const baseProblem = endpointProblem(provider.baseUrl)
   if (baseProblem) {
     throw new ProviderError(
-      `The base URL for ${provider.label} is not allowed. ${baseProblem} Change it in settings.`,
+      t('bgTheBaseUrlForIsNot', provider.label, baseProblem),
       'no-credential',
       false,
     )
@@ -79,7 +80,7 @@ export async function createOpenAiCompatibleProvider(
       // Local servers frequently accept unauthenticated requests.
       if (isLoopback(baseUrl)) return { headers: {} }
       throw new ProviderError(
-        `No credential is configured for ${provider.label}.`,
+        t('bgNoCredentialIsConfiguredFor', provider.label),
         'no-credential',
         false,
       )
@@ -136,7 +137,7 @@ export async function createOpenAiCompatibleProvider(
         // is no longer wanted. The count is unknown, so null is reported (#71).
         if (args.signal?.aborted) reportUnknownUsage()
         throw new ProviderError(
-          `Could not reach ${provider.label}.`,
+          t('bgCouldNotReach', provider.label),
           'network',
           true,
           { cause: error },
@@ -195,7 +196,7 @@ export async function createOpenAiCompatibleProvider(
       // response unread, so the usage is recorded as unknown (#71).
       if (args.signal?.aborted) reportUnknownUsage()
       throw new ProviderError(
-        `${provider.label} returned a response that is not JSON. Check the base URL in settings.`,
+        t('bgReturnedAResponseThatIsNot', provider.label),
         'bad-response',
         true,
         { cause: error },
@@ -213,7 +214,7 @@ export async function createOpenAiCompatibleProvider(
     const text = payload.choices?.[0]?.message?.content
     if (!text) {
       throw new ProviderError(
-        `${provider.label} returned no usable response.`,
+        t('bgReturnedNoUsableResponse', provider.label),
         'bad-response',
         true,
       )
@@ -223,7 +224,7 @@ export async function createOpenAiCompatibleProvider(
       return JSON.parse(text) as T
     } catch (error) {
       throw new ProviderError(
-        `${provider.label} returned a response that could not be read. It may not support structured output.`,
+        t('bgReturnedAResponseThatCouldNot', provider.label),
         'bad-response',
         true,
         { cause: error },
@@ -339,7 +340,7 @@ function refreshKey(provider: Provider): string {
 async function tokenAfterJoining(provider: Provider): Promise<string> {
   const credential = await readCredentialOrProviderError(provider)
   if (!credential) {
-    throw new ProviderError('The sign-in for this provider was removed. Reconnect it in settings.', 'no-credential', false)
+    throw new ProviderError(t('bgTheSignInForThisProvider'), 'no-credential', false)
   }
   return credential.kind === 'api_key' ? credential.value : credential.accessToken
 }
@@ -372,7 +373,7 @@ function ensureFreshToken(
     // Removed or replaced while this call was starting. Refreshing the old
     // copy would store it again and undo the removal.
     if (!latest) {
-      throw new ProviderError('The sign-in for this provider was removed. Reconnect it in settings.', 'no-credential', false)
+      throw new ProviderError(t('bgTheSignInForThisProvider'), 'no-credential', false)
     }
     // Replaced by an API key. Both are sent as a bearer token, and a call made
     // a moment later would use the key, so this one does too.
@@ -383,7 +384,7 @@ function ensureFreshToken(
       // with. Saying so is the point: the generic expiry message tells the
       // person to reconnect without saying that this is how it will always be.
       throw new ProviderError(
-        'The sign-in has ended and this provider issued no way to renew it. Sign in again in settings.',
+        t('bgTheSignInHasEndedAnd'),
         'auth',
         false,
       )
@@ -392,7 +393,7 @@ function ensureFreshToken(
     // Not stored when the sign-in was changed behind the lock's back. The token
     // belongs to a grant that is no longer the one on record, so it is not used.
     if (!(await store(refreshed))) {
-      throw new ProviderError('The sign-in for this provider changed while it was being renewed. Try again.', 'no-credential', false)
+      throw new ProviderError(t('bgTheSignInForThisProvider2'), 'no-credential', false)
     }
     return refreshed.accessToken
   }).finally(() => {
@@ -415,7 +416,7 @@ async function refreshAfterRejection(provider: Provider, rejected: string): Prom
   await refreshesInFlight.get(refreshKey(provider))
   const credential = await readCredentialOrProviderError(provider)
   if (!credential) {
-    throw new ProviderError('The sign-in for this provider was removed. Reconnect it in settings.', 'no-credential', false)
+    throw new ProviderError(t('bgTheSignInForThisProvider'), 'no-credential', false)
   }
   // Replaced by an API key after the rejected request was sent; retry with it.
   if (credential.kind === 'api_key') return credential.value
@@ -441,7 +442,7 @@ async function requestRefresh(
   const endpointIssue = endpointProblem(credential.tokenEndpoint)
   if (endpointIssue) {
     throw new ProviderError(
-      `The sign-in server address is not allowed. ${endpointIssue} Reconnect this provider in settings.`,
+      t('bgTheSignInServerAddressIs', endpointIssue),
       'auth',
       false,
     )
@@ -463,14 +464,14 @@ async function requestRefresh(
       signal: AbortSignal.timeout(TOKEN_REQUEST_TIMEOUT_MS),
     })
   } catch (error) {
-    throw new ProviderError('Could not reach the sign-in server.', 'network', true, {
+    throw new ProviderError(t('bgCouldNotReachTheSignIn'), 'network', true, {
       cause: error,
     })
   }
 
   if (!response.ok) {
     throw new ProviderError(
-      'Sign-in expired. Reconnect this provider in settings.',
+      t('bgSignInExpiredReconnectThisProvider'),
       'auth',
       false,
     )
@@ -487,7 +488,7 @@ async function requestRefresh(
     tokens = (await response.json()) as TokenPayload
   } catch (error) {
     throw new ProviderError(
-      'The sign-in server returned a response that is not JSON. Reconnect this provider in settings.',
+      t('bgTheSignInServerReturnedA'),
       'auth',
       false,
       { cause: error },
@@ -508,7 +509,7 @@ async function requestRefresh(
     )
   } catch (error) {
     throw new ProviderError(
-      'The sign-in server returned no access token. Reconnect this provider in settings.',
+      t('bgTheSignInServerReturnedNo'),
       'auth',
       false,
       { cause: error },
@@ -598,14 +599,14 @@ async function httpToProviderError(
   }
   if (status === 404 && isModelNotFound(fields)) {
     return new ProviderError(
-      `The model ${modelDisplayName(model)} is not available from ${label}. Choose another model in settings.`,
+      t('bgTheModelIsNotAvailableFrom', modelDisplayName(model), label),
       'model-unavailable',
       false,
     )
   }
   if (isBillingProblem(status, fields)) {
     return new ProviderError(
-      `${label} reports a billing problem, such as no remaining credit. Add credit or fix billing with the provider, then try again.`,
+      t('bgReportsABillingProblemSuchAs', label),
       'billing',
       false,
     )
@@ -613,7 +614,7 @@ async function httpToProviderError(
 
   if (status === 401 || status === 403) {
     return new ProviderError(
-      `${label} rejected the credential. Check it in settings.`,
+      t('bgRejectedTheCredentialCheckItIn', label),
       'auth',
       false,
     )
@@ -624,15 +625,15 @@ async function httpToProviderError(
     const seconds = retryAfterSeconds(headers, Date.now())
     return new ProviderError(
       seconds === null
-        ? `Rate limited by ${label}. Wait a moment and try again.`
-        : `Rate limited by ${label}. It asked for ${seconds} seconds.`,
+        ? t('bgRateLimitedByWaitAMoment', label)
+        : t('bgRateLimitedByItAskedFor', label, seconds),
       'rate-limit',
       true,
       seconds === null ? undefined : { retryInSeconds: seconds },
     )
   }
   return new ProviderError(
-    `${label} returned an error (${status}).`,
+    t('bgReturnedAnError', label, status),
     'unknown',
     status >= 500,
   )

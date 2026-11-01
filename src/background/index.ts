@@ -125,6 +125,7 @@ import {
   updateTransform,
   vaultState,
 } from './storage'
+import { t } from '@shared/i18n'
 
 /*
  * One chain for the work that changes which scripts are registered and which
@@ -542,7 +543,7 @@ browser.runtime.onMessage.addListener(
     if (!isExtensionPage(sender)) {
       return Promise.resolve({
         ok: false,
-        error: { message: 'This message is only accepted from the extension\'s own pages.' },
+        error: { message: t('bgThisMessageIsOnlyAcceptedFrom') },
       })
     }
 
@@ -643,13 +644,13 @@ async function handle(
       await refuseExcludedUrl(message.context.url)
       const transforms = await getAllTransforms()
       const existing = transforms.find((t) => t.id === message.transformId)
-      if (!existing) throw new Error('That transform no longer exists.')
+      if (!existing) throw new Error(t('bgThatTransformNoLongerExists'))
       // A repair sends the stored description to the model without showing it.
       // For an imported transform that description was written by the author
       // of the file, so it goes through Edit description, which shows it first.
       if (existing.origin === 'imported') {
         throw new Error(
-          'This transform came from an imported file. Use Edit description to read its description before it is used.',
+          t('bgThisTransformCameFromAnImported'),
         )
       }
 
@@ -717,9 +718,9 @@ async function handle(
     case 'restore-transform-version': {
       await refuseInPrivateWindow(message.tabId)
       const current = (await getAllTransforms()).find((t) => t.id === message.id)
-      if (!current) throw new Error('That transform no longer exists.')
+      if (!current) throw new Error(t('bgThatTransformNoLongerExists'))
       const version = (await getVersions(message.id)).find((v) => v.id === message.versionId)
-      if (!version) throw new Error('That version is no longer kept.')
+      if (!version) throw new Error(t('bgThatVersionIsNoLongerKept'))
       // The same handler as any other save, with no exemption, so a restored
       // script meets the static analysis as it is now (the rules may have
       // changed since it was saved) and needs an approval token for its code,
@@ -809,7 +810,7 @@ async function handle(
         ...(message.enabled ? { awaitsApproval: null } : {}),
         ...(approvedMain ? { mainApprovedByUser: true } : {}),
       })
-      if (!next) throw new Error('That transform no longer exists.')
+      if (!next) throw new Error(t('bgThatTransformNoLongerExists'))
       if (next.kind === 'js') {
         await inRegistryQueue(async () => {
           if (next.enabled) await registerTransform(next)
@@ -862,7 +863,7 @@ async function handle(
 
     case 'set-site-off': {
       const host = hostOfUrl(message.url)
-      if (host === null) throw new Error('That page is not a website, so it cannot be turned off.')
+      if (host === null) throw new Error(t('bgThatPageIsNotAWebsite'))
       await setHostOff(host, message.off)
       await reregister()
       const onHost = (url: string) => hostOfUrl(url) === host
@@ -891,7 +892,7 @@ async function handle(
       // The destination the key is bound to comes from the saved provider, not
       // from the message.
       const provider = (await getSettings()).providers.find((p) => p.id === message.providerId)
-      if (!provider) throw new Error('That provider is no longer configured.')
+      if (!provider) throw new Error(t('bgThatProviderIsNoLongerConfigured'))
       await saveCredentialFor(provider, message.credential)
       return true
     }
@@ -903,7 +904,7 @@ async function handle(
     case 'connect-oauth': {
       const settings = await getSettings()
       const provider = settings.providers.find((p) => p.id === message.providerId)
-      if (!provider) throw new Error('That provider is no longer configured.')
+      if (!provider) throw new Error(t('bgThatProviderIsNoLongerConfigured'))
 
       /*
        * Anthropic is refused here as well as in the adapter. Anthropic
@@ -914,12 +915,12 @@ async function handle(
        */
       if (provider.type === 'anthropic') {
         throw new Error(
-          'Anthropic does not offer sign-in to third-party applications. Use an API key.',
+          t('bgAnthropicDoesNotOfferSignIn'),
         )
       }
       if (!provider.oauth) {
         throw new Error(
-          'This provider has no sign-in endpoints configured. Add them in settings first.',
+          t('bgThisProviderHasNoSignIn'),
         )
       }
 
@@ -974,7 +975,7 @@ async function handle(
         message.transform.capabilities,
       )
       if (!analysis.passed) {
-        throw new Error('Static analysis rejected this code, so it was not run.')
+        throw new Error(t('bgStaticAnalysisRejectedThisCodeSo3'))
       }
       /*
        * Registered for the page in this tab only. The draft's own match pattern
@@ -986,17 +987,17 @@ async function handle(
       const tabUrl = await tabUrlOf(message.tabId)
       const previewMatch = exactPagePattern(tabUrl)
       if (tabUrl === undefined || previewMatch === null) {
-        throw new Error('This page cannot be previewed, so the script was not run.')
+        throw new Error(t('bgThisPageCannotBePreviewedSo'))
       }
       // The sidebar names the address it showed the user. A tab that has since
       // moved to another page is not the page the code was reviewed for.
       if (withoutFragment(message.expectedUrl) !== withoutFragment(tabUrl)) {
-        throw new Error('The tab has moved to another page, so the script was not run.')
+        throw new Error(t('bgTheTabHasMovedToAnother'))
       }
       // The draft's own pattern says where the code is meant to run, and the
       // preview is only for a page that pattern covers (#55).
       if (!matchesUrl(message.transform.match, tabUrl)) {
-        throw new Error("This page is not one that the transform's sites cover, so the script was not run.")
+        throw new Error(t('bgThisPageIsNotOneThat'))
       }
       await refuseExcludedUrl(tabUrl)
       // The model review must have matched this code, world, capabilities, id
@@ -1012,7 +1013,7 @@ async function handle(
           { verdict: 'match' },
         ))
       ) {
-        throw new Error('The model review did not match this code, so the script was not run.')
+        throw new Error(t('bgTheModelReviewDidNotMatch'))
       }
       const previewTransform = { ...message.transform, match: previewMatch }
 
@@ -1265,12 +1266,12 @@ async function handle(
 }
 
 /** The first reason CSS fails the check for the settings given, or null when it passes. */
-function cssProblemOf(t: Pick<Transform, 'code' | 'match'>, settings: Settings): string | null {
-  const check = checkCssTransform(t, settings)
+function cssProblemOf(transform: Pick<Transform, 'code' | 'match'>, settings: Settings): string | null {
+  const check = checkCssTransform(transform, settings)
   if (check.passed) return null
   return (
     check.static.find((f) => f.severity === 'block')?.explanation ??
-    'It loads addresses outside the site that were not approved.'
+    t('bgItLoadsAddressesOutsideTheSite')
   )
 }
 
@@ -1373,7 +1374,7 @@ function setPreviewCss(
     // that page and fail for the one the tab shows now, and insertCSS would put
     // it into whichever is there.
     if (documentOf(tabId) !== checkedDocument) {
-      throw new Error('The page changed while the preview was being prepared, so it was not shown.')
+      throw new Error(t('bgThePageChangedWhileThePreview'))
     }
     const existing = await readCss('preview', tabId)
     if (existing) {
@@ -1446,14 +1447,14 @@ async function clearCssPreviewsOn(include: (url: string) => boolean): Promise<vo
 async function refuseWhenOff(tabId: number): Promise<void> {
   if ((await getSettings()).aiJsKillSwitch) {
     throw new Error(
-      'Running transforms is switched off in the settings, so the preview was not shown. Turn that setting off to preview.',
+      t('bgRunningTransformsIsSwitchedOffIn2'),
     )
   }
   const url = (await browser.tabs.get(tabId).catch(() => undefined))?.url
   if (url) await refuseExcludedUrl(url)
   if (url && (await isUrlOff(url))) {
     throw new Error(
-      'Web Alchemist is turned off on this site, so the preview was not shown. Turn it on for this site to preview.',
+      t('bgWebAlchemistIsTurnedOffOn'),
     )
   }
 }
@@ -2170,14 +2171,14 @@ async function captureWithLockDown(
     if (now) {
       if (viewportChanged({ width: viewportWidth, devicePixelRatio }, now)) {
         throw new Error(
-          'The window size or zoom changed after you drew the area, so it no longer matches the page. Draw the area again.',
+          t('bgTheWindowSizeOrZoomChanged'),
         )
       }
       width = now.width
       const moved = regionAtScroll(rect, scrolledTo, now)
       if (!moved) {
         throw new Error(
-          'The area you drew is no longer on screen. Scroll it back into view, or draw it again.',
+          t('bgTheAreaYouDrewIsNo'),
         )
       }
       target = moved.rect
@@ -2218,11 +2219,11 @@ async function captureRegion(
   // rather than once when the request arrived.
   const tab = await browser.tabs.get(tabId).catch(() => undefined)
   if (!tab || tab.windowId === undefined) {
-    throw new Error('The page this run is about is no longer open, so nothing was captured.')
+    throw new Error(t('bgThePageThisRunIsAbout'))
   }
   if (!tab.active) {
     throw new Error(
-      'The page this run is about is not the tab in front, so nothing was captured. Switch back to it and try again.',
+      t('bgThePageThisRunIsAbout2'),
     )
   }
   // Origin and path, not the whole address: a page that changes its fragment or
@@ -2231,7 +2232,7 @@ async function captureRegion(
   // refused every capture on such pages.
   if (!samePage(tab.url, url)) {
     throw new Error(
-      'The page this run is about has moved to another address, so nothing was captured.',
+      t('bgThePageThisRunIsAbout3'),
     )
   }
   const full = await browser.tabs.captureVisibleTab(tab.windowId, { format: 'png' })
@@ -2241,7 +2242,7 @@ async function captureRegion(
   const after = await browser.tabs.get(tabId).catch(() => undefined)
   if (!after?.active || !samePage(after.url, url)) {
     throw new Error(
-      'The tab changed while the screenshot was being taken, so the image was discarded. Try again.',
+      t('bgTheTabChangedWhileTheScreenshot'),
     )
   }
 
@@ -2269,14 +2270,14 @@ async function captureRegion(
 
   const canvas = new OffscreenCanvas(Math.max(1, width), Math.max(1, height))
   const context = canvas.getContext('2d')
-  if (!context) throw new Error('Could not prepare the image.')
+  if (!context) throw new Error(t('bgCouldNotPrepareTheImage'))
   context.drawImage(bitmap, source.x, source.y, width, height, 0, 0, width, height)
   const cropped = await canvas.convertToBlob({ type: 'image/png' })
 
   const dataUrl = await new Promise<string>((resolve, reject) => {
     const reader = new FileReader()
     reader.onload = () => resolve(reader.result as string)
-    reader.onerror = () => reject(new Error('Could not read the image.'))
+    reader.onerror = () => reject(new Error(t('bgCouldNotReadTheImage')))
     reader.readAsDataURL(cropped)
   })
 

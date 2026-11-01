@@ -83,6 +83,7 @@
 import { parse } from 'acorn'
 import type { Node } from 'acorn'
 import type { Capability, StaticFinding } from '@shared/types'
+import { t } from '@shared/i18n'
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 /** An acorn node. The tree is walked generically, so fields are read by name. */
@@ -102,9 +103,9 @@ interface Rule {
   explanation: string
 }
 
-const NETWORK_SEND = 'Sends a network request.'
-const NETWORK_OPEN = 'Opens a persistent network connection.'
-const STORAGE_RW = "Reads or writes this site's stored data."
+const NETWORK_SEND = t('saSendsANetworkRequest')
+const NETWORK_OPEN = t('saOpensAPersistentNetworkConnection')
+const STORAGE_RW = t('saReadsOrWritesThisSiteS')
 
 /**
  * Names that always belong to a capability, whether reached as a free
@@ -120,21 +121,21 @@ const CAPABILITY_NAMES = new Map<string, Rule>([
   ['WebTransport', { api: 'WebTransport', capability: 'network', severity: 'warn', explanation: NETWORK_OPEN }],
   ['RTCPeerConnection', { api: 'RTCPeerConnection', capability: 'network', severity: 'warn', explanation: NETWORK_OPEN }],
   ['webkitRTCPeerConnection', { api: 'RTCPeerConnection', capability: 'network', severity: 'warn', explanation: NETWORK_OPEN }],
-  ['Image', { api: 'Image', capability: 'network', severity: 'warn', explanation: 'Creates an image element, which requests the address it is given.' }],
-  ['Audio', { api: 'Audio', capability: 'network', severity: 'warn', explanation: 'Creates an audio element, which requests the address it is given.' }],
-  ['sendBeacon', { api: 'navigator.sendBeacon', capability: 'network', severity: 'warn', explanation: 'Sends data to a server in the background.' }],
-  ['cookie', { api: 'document.cookie', capability: 'cookies', severity: 'warn', explanation: "Reads or writes this site's cookies, which can include your session." }],
-  ['cookieStore', { api: 'cookieStore', capability: 'cookies', severity: 'warn', explanation: "Reads or writes this site's cookies, which can include your session." }],
+  ['Image', { api: 'Image', capability: 'network', severity: 'warn', explanation: t('saCreatesAnImageElementWhichRequests') }],
+  ['Audio', { api: 'Audio', capability: 'network', severity: 'warn', explanation: t('saCreatesAnAudioElementWhichRequests') }],
+  ['sendBeacon', { api: 'navigator.sendBeacon', capability: 'network', severity: 'warn', explanation: t('saSendsDataToAServerIn') }],
+  ['cookie', { api: 'document.cookie', capability: 'cookies', severity: 'warn', explanation: t('saReadsOrWritesThisSiteS2') }],
+  ['cookieStore', { api: 'cookieStore', capability: 'cookies', severity: 'warn', explanation: t('saReadsOrWritesThisSiteS2') }],
   ['localStorage', { api: 'localStorage', capability: 'storage', severity: 'warn', explanation: STORAGE_RW }],
   ['sessionStorage', { api: 'sessionStorage', capability: 'storage', severity: 'warn', explanation: STORAGE_RW }],
-  ['indexedDB', { api: 'indexedDB', capability: 'storage', severity: 'warn', explanation: "Reads or writes this site's stored database." }],
-  ['caches', { api: 'caches', capability: 'storage', severity: 'warn', explanation: "Reads or writes this site's cached responses." }],
+  ['indexedDB', { api: 'indexedDB', capability: 'storage', severity: 'warn', explanation: t('saReadsOrWritesThisSiteS3') }],
+  ['caches', { api: 'caches', capability: 'storage', severity: 'warn', explanation: t('saReadsOrWritesThisSiteS4') }],
 ])
 
 /** Code-from-string constructs. They hide the real behaviour in text. */
 const CODE_FROM_STRING = new Map<string, string>([
-  ['eval', 'Runs code built at runtime, which cannot be reviewed before it executes.'],
-  ['Function', 'Builds a new function from text, which cannot be reviewed before it executes.'],
+  ['eval', t('saRunsCodeBuiltAtRuntimeWhich')],
+  ['Function', t('saBuildsANewFunctionFromText')],
 ])
 
 /**
@@ -143,28 +144,28 @@ const CODE_FROM_STRING = new Map<string, string>([
  * or intercept members by a computed name.
  */
 const REFUSED_GLOBALS = new Map<string, string>([
-  ['globalThis', 'Refers to the page global object, which can reach any browser feature under a name this check cannot see.'],
-  ['self', 'Refers to the page global object, which can reach any browser feature under a name this check cannot see.'],
-  ['top', 'Refers to the top-level window of the page, which can reach any browser feature.'],
-  ['parent', 'Refers to the parent window of the page, which can reach any browser feature.'],
-  ['frames', 'Refers to the page windows, which can reach any browser feature.'],
-  ['window', 'Uses the window as a value. Only direct reads such as window.innerWidth are allowed, because a copy of the window hides what is later done with it.'],
-  ['document', 'Uses the document as a value. Only direct calls and reads such as document.querySelector are allowed, because a copy of the document hides what is later done with it.'],
-  ['navigator', 'Uses navigator as a value. Only direct reads such as navigator.language are allowed, because a copy hides what is later done with it.'],
-  ['Reflect', 'Looks up and calls members by a computed name, which this check cannot follow.'],
-  ['Proxy', 'Intercepts property access, which this check cannot follow.'],
-  ['location', 'Navigates the page, which can send page data to another site in the address.'],
-  ['open', 'Opens a new window or document, which can send page data to another site.'],
-  ['postMessage', 'Sends data to another window.'],
-  ['history', 'Changes the address of the page.'],
-  ['Worker', 'Starts a separate script that this check cannot see.'],
-  ['SharedWorker', 'Starts a separate script that this check cannot see.'],
-  ['BroadcastChannel', 'Sends data to other tabs.'],
-  ['MessageChannel', 'Sends data to other windows.'],
-  ['Blob', 'Builds data that can be loaded as a script or a page.'],
-  ['DOMParser', 'Builds elements from a text string, which can load or run content.'],
-  ['WebAssembly', 'Runs compiled code that cannot be reviewed.'],
-  ['importScripts', 'Loads and runs code from another location.'],
+  ['globalThis', t('saRefersToThePageGlobalObject')],
+  ['self', t('saRefersToThePageGlobalObject')],
+  ['top', t('saRefersToTheTopLevelWindow')],
+  ['parent', t('saRefersToTheParentWindowOf')],
+  ['frames', t('saRefersToThePageWindowsWhich')],
+  ['window', t('saUsesTheWindowAsAValue')],
+  ['document', t('saUsesTheDocumentAsAValue')],
+  ['navigator', t('saUsesNavigatorAsAValueOnly')],
+  ['Reflect', t('saLooksUpAndCallsMembersBy')],
+  ['Proxy', t('saInterceptsPropertyAccessWhichThisCheck')],
+  ['location', t('saNavigatesThePageWhichCanSend')],
+  ['open', t('saOpensANewWindowOrDocument')],
+  ['postMessage', t('saSendsDataToAnotherWindow')],
+  ['history', t('saChangesTheAddressOfThePage')],
+  ['Worker', t('saStartsASeparateScriptThatThis')],
+  ['SharedWorker', t('saStartsASeparateScriptThatThis')],
+  ['BroadcastChannel', t('saSendsDataToOtherTabs')],
+  ['MessageChannel', t('saSendsDataToOtherWindows')],
+  ['Blob', t('saBuildsDataThatCanBeLoaded')],
+  ['DOMParser', t('saBuildsElementsFromATextString')],
+  ['WebAssembly', t('saRunsCompiledCodeThatCannotBe')],
+  ['importScripts', t('saLoadsAndRunsCodeFromAnother')],
 ])
 
 /**
@@ -246,36 +247,36 @@ function deny(reason: string, ...names: string[]) {
   for (const name of names) DENIED_NAMES.set(name, reason)
 }
 deny(
-  'Reaches the prototype chain, which can produce the Function constructor and run code built from text.',
+  t('saReachesThePrototypeChainWhichCan'),
   'constructor', 'prototype', '__proto__', 'caller', 'callee',
 )
 deny(
-  'Reads or changes how a property behaves, which can reach members that are otherwise refused.',
+  t('saReadsOrChangesHowAProperty'),
   'getOwnPropertyDescriptor', 'getOwnPropertyDescriptors', 'defineProperty', 'defineProperties',
   'getPrototypeOf', 'setPrototypeOf', 'lookupGetter', 'lookupSetter',
 )
 deny(
-  'Reaches the page global object or another document, which can reach any browser feature.',
+  t('saReachesThePageGlobalObjectOr'),
   'defaultView', 'contentWindow', 'contentDocument', 'ownerDocument', 'view', 'composedPath',
   'window', 'globalThis', 'document', 'frames', 'self', 'parent', 'opener',
   'scripts', 'currentScript',
 )
 deny(
-  'Navigates the page or opens a window, which can send page data to another site.',
+  t('saNavigatesThePageOrOpensA'),
   'location', 'history', 'postMessage', 'navigation', 'open',
 )
 deny(
-  'Returns the document, or a node whose parent chain leads to it, so the document would be held as a value that this check cannot follow.',
+  t('saReturnsTheDocumentOrANode'),
   'getRootNode', 'parentNode', 'anchorNode', 'focusNode', 'baseNode', 'extentNode',
   'commonAncestorContainer', 'startContainer', 'endContainer',
 )
 deny(
-  'Builds elements from a text string, which can load or run content.',
+  t('saBuildsElementsFromATextString'),
   'insertAdjacentHTML', 'setHTMLUnsafe', 'setHTML', 'parseHTMLUnsafe', 'createContextualFragment',
   'write', 'writeln', 'execCommand',
 )
 deny(
-  'Creates elements or attributes in a way this check cannot inspect.',
+  t('saCreatesElementsOrAttributesInA'),
   'createElementNS', 'setAttributeNS', 'setAttributeNode', 'setAttributeNodeNS',
   'createAttribute', 'createAttributeNS', 'attributes', 'importNode', 'adoptNode',
   // An attribute node is written through its own `value`, which skips every
@@ -286,28 +287,28 @@ deny(
   'setKeyframes',
 )
 deny(
-  'Returns the document inside an object or embed element, which is another document that this check cannot follow.',
+  t('saReturnsTheDocumentInsideAnObject'),
   'getSVGDocument',
 )
 deny(
-  'Submits a form, which sends its contents to the form address.',
+  t('saSubmitsAFormWhichSendsIts'),
   'submit', 'requestSubmit',
 )
 deny(
-  'Starts a separate script or builds a loadable address, which this check cannot see.',
+  t('saStartsASeparateScriptOrBuilds'),
   'createObjectURL', 'Worker', 'SharedWorker', 'importScripts', 'serviceWorker', 'Blob',
   'Function', 'eval', 'Reflect', 'Proxy', 'DOMParser', 'BroadcastChannel',
 )
 deny(
-  'Reaches a style sheet, where text such as an import rule makes the browser request an address.',
+  t('saReachesAStyleSheetWhereText'),
   'sheet', 'styleSheets', 'adoptedStyleSheets', 'insertRule', 'addRule', 'replaceSync',
 )
 deny(
-  'Sets styles through the Typed Object Model, whose values are not checked as the text of a style is.',
+  t('saSetsStylesThroughTheTypedObject'),
   'attributeStyleMap', 'styleMap',
 )
-deny('Sets the page inside a frame from a text string, which can run content.', 'srcdoc')
-deny('Redirects the page from a meta element.', 'httpEquiv', 'http-equiv')
+deny(t('saSetsThePageInsideAFrame'), 'srcdoc')
+deny(t('saRedirectsThePageFromAMeta'), 'httpEquiv', 'http-equiv')
 
 /**
  * Event properties that name the object an event was dispatched on. On an
@@ -388,10 +389,10 @@ const SCRIPT_STATE_PROPERTIES = new Set(['type', 'noModule', 'event'])
 
 /** Properties that run or build HTML when assigned. Reading them is harmless. */
 const WRITE_REFUSED = new Map<string, string>([
-  ['innerHTML', 'Replaces content by parsing a text string as HTML, which can load or run content.'],
-  ['outerHTML', 'Replaces content by parsing a text string as HTML, which can load or run content.'],
-  ['srcdoc', 'Sets the page inside a frame from a text string, which can run content.'],
-  ['text', 'Sets the source text of an element that may be a script.'],
+  ['innerHTML', t('saReplacesContentByParsingAText')],
+  ['outerHTML', t('saReplacesContentByParsingAText')],
+  ['srcdoc', t('saSetsThePageInsideAFrame')],
+  ['text', t('saSetsTheSourceTextOfAn')],
 ])
 /**
  * Properties that carry a URL. Setting one makes the browser request it or
@@ -676,7 +677,7 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
           api: '(hidden character)',
           capability: null,
           severity: 'block',
-          explanation: `This code contains the invisible or direction-changing character U+${code}, which can make the code display differently from what runs. Remove it.`,
+          explanation: t('saThisCodeContainsTheInvisibleOr', code),
         },
       ],
       usedCapabilities: [],
@@ -699,9 +700,10 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
           api: '(parse)',
           capability: null,
           severity: 'block',
-          explanation: `This code could not be parsed, so it cannot be checked: ${
-            error instanceof Error ? error.message : String(error)
-          }`,
+          explanation: t(
+            'saThisCodeCouldNotBeParsed',
+            error instanceof Error ? error.message : String(error),
+          ),
         },
       ],
       usedCapabilities: [],
@@ -775,7 +777,7 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
     block(
       target!,
       `${root['name']} (write)`,
-      `Writes to a member of ${root['name']}, a browser global. Code that replaces a member of a global can make a later call return a value this check assumed it could not.`,
+      t('saWritesToAMemberOfA', root['name']),
     )
   }
 
@@ -785,7 +787,7 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
     block(
       node,
       `${node['name']} (assignment)`,
-      `Assigns to ${node['name']}, a name the code does not declare. In a strict-mode script this either replaces a browser global or throws, and neither is a transform.`,
+      t('saAssignsToANameTheCode', node['name']),
     )
     return true
   }
@@ -874,7 +876,7 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
       block(
         node,
         'head traversal',
-        'Moves from the head or the root element to the nodes inside it, which include style elements whose text can be rewritten to load an address, and this check cannot see what is written.',
+        t('saMovesFromTheHeadOrThe'),
       )
     })
   }
@@ -906,7 +908,7 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
       block(
         node,
         `${api} (existing element)`,
-        'Changes what decides whether an element in the page runs or loads, on an element this code did not create. A script element that never ran (JSON data or a template, for example) can be made to run this way, and this check cannot tell which element it is.',
+        t('saChangesWhatDecidesWhetherAnElement'),
       )
     })
   }
@@ -936,7 +938,7 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
       block(
         node,
         'content (existing element)',
-        'Reads the content of an element the code did not create. The content of a template element holds script elements that have not started, and putting it in the page starts them, and this check cannot tell which element it is.',
+        t('saReadsTheContentOfAnElement'),
       )
     })
   }
@@ -1312,13 +1314,13 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
     const reason = DENIED_NAMES.get(name)
     if (reason) block(node, name, reason)
     else if (/^__.*__$/.test(name)) {
-      block(node, name, 'Reaches the prototype chain, which can produce the Function constructor and run code built from text.')
+      block(node, name, t('saReachesThePrototypeChainWhichCan'))
     }
     if (CALL_ONLY.has(name) && !callee) {
       block(
         node,
         name,
-        `Uses ${name} without calling it directly, so this check cannot see the arguments it is given.`,
+        t('saUsesWithoutCallingItDirectlySo', name),
       )
     }
   }
@@ -1331,10 +1333,10 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
 
   function checkOneText(node: N, text: string): void {
     if (CSS_LOADING_TEXT.test(text)) {
-      needsNetwork(node, 'url()', 'Contains style text that makes the browser request an address.')
+      needsNetwork(node, 'url()', t('saContainsStyleTextThatMakesThe'))
     }
     if (isJavascriptUrl(text)) {
-      block(node, 'javascript:', 'Contains an address that runs code when it is followed.')
+      block(node, 'javascript:', t('saContainsAnAddressThatRunsCode'))
     }
   }
 
@@ -1373,7 +1375,7 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
     if (!onStyle && /^on[a-z]/.test(name)) {
       deferred.push(() => {
         if (isPlainObject(object, scope)) return
-        block(target, `${name} (event handler property)`, 'Sets an event handler property, which can be called with the window as its `this` or as the target of its event. Use addEventListener instead.')
+        block(target, `${name} (event handler property)`, t('saSetsAnEventHandlerPropertyWhich'))
       })
     }
     if (!onStyle && (SCRIPT_STATE_PROPERTIES.has(name) || name === 'src')) {
@@ -1385,7 +1387,7 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
         // style property, handled below. On an element it is the obsolete
         // attribute that loads an image.
         if (name === 'background' && (onStyle || holdsOnly(object, scope, isStyleMember))) return
-        needsNetwork(target, name, 'Sets an address on an element, which makes the browser request it or follow it.')
+        needsNetwork(target, name, t('saSetsAnAddressOnAnElement'))
         // Network use is declared for an address, but `javascript:` is code and
         // is refused whatever is declared. An address that is not written out
         // could be one, so it is accepted only when its start is.
@@ -1393,7 +1395,7 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
           // A different api name from the network finding above: findings at the
           // same position with the same name are merged, and the merge kept the
           // warning that a declared capability unlocks.
-          block(target, `${name} (javascript: address)`, 'Sets an address that is not written out, or does not start with https://, http:// or a path, so this check cannot tell that it is not a javascript: address, which runs code.')
+          block(target, `${name} (javascript: address)`, t('saSetsAnAddressThatIsNot'))
         }
       })
     }
@@ -1408,11 +1410,11 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
           target,
           name,
           part
-            ? 'Sets part of an address, which changes where a link or form goes.'
-            : 'Sets data, which is an address on an object element and text on a text node, and this check cannot tell which this is.',
+            ? t('saSetsPartOfAnAddressWhich')
+            : t('saSetsDataWhichIsAnAddress'),
         )
         if (!part && (append || !provablyNotJavascript(value))) {
-          block(target, `${name} (javascript: address)`, 'Sets data to a value that is not written out, or does not start with https://, http:// or a path, so this check cannot tell that it is not a javascript: address.')
+          block(target, `${name} (javascript: address)`, t('saSetsDataToAValueThat'))
         }
       })
     }
@@ -1437,14 +1439,14 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
 
       if (isStyle) {
         if (texts === null) {
-          needsNetwork(target, name, 'Sets a style that can load an address, and the value is not written out, so this check cannot tell.')
+          needsNetwork(target, name, t('saSetsAStyleThatCanLoad'))
         } else if (texts.some((text) => CSS_INDIRECT.test(text) || CSS_INDIRECT.test(decodeCssEscapes(text)))) {
-          needsNetwork(target, name, 'Sets a style from a variable that can hold an address, so this check cannot tell what it loads.')
+          needsNetwork(target, name, t('saSetsAStyleFromAVariable'))
         }
       } else if (isCustom && texts === null && !isNumeric(value, scope)) {
         // A custom property can hold an address that a later rule uses. A
         // number cannot, so a computed number is accepted and anything else is not.
-        needsNetwork(target, name, 'Sets a custom style property to a value that is not written out, so this check cannot tell whether it holds an address.')
+        needsNetwork(target, name, t('saSetsACustomStylePropertyTo'))
       }
     })
   }
@@ -1492,7 +1494,7 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
       const first = (fn['params'] as N[])[0]
       if (first?.type === 'Identifier') scope.vars.get(first['name'])!.docEvent = true
       else if (first) {
-        block(first, 'event parameter', 'Takes the event of a window or document listener as something other than a plain name, so this check cannot follow where its target goes.')
+        block(first, 'event parameter', t('saTakesTheEventOfAWindow'))
       }
     }
     if (promiseExecutors.has(fn)) {
@@ -1550,7 +1552,7 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
           if (prop['computed'] === true) {
             const key = literalText(prop['key']) ?? (prop['key'].type === 'Literal' ? String(prop['key'].value) : null)
             if (key === null) {
-              block(prop, '(dynamic property access)', 'Reads a property whose name is decided while running, so this check cannot tell what it accesses.')
+              block(prop, '(dynamic property access)', t('saReadsAPropertyWhoseNameIs'))
               visit(prop['key'], ctx, prop)
             } else checkName(key, prop, false)
           } else {
@@ -1619,12 +1621,12 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
       if (members) {
         acceptedObjects.add(object)
         if (name === null) {
-          block(node, '(dynamic property access)', 'Reads a property whose name is decided while running, so this check cannot tell what it accesses.')
+          block(node, '(dynamic property access)', t('saReadsAPropertyWhoseNameIs'))
         } else if (!members.has(name) && !CAPABILITY_NAMES.has(name)) {
           block(
             node,
             `${object['name']}.${name}`,
-            `Uses ${object['name']}.${name}, which is not on the list of things a page transform may use.`,
+            t('saUsesWhichIsNotOnThe', object['name'], name),
           )
         }
       }
@@ -1644,7 +1646,7 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
     if (object.type === 'Identifier' && object['name'] === 'Object' && !ctx.scope.lookup('Object')) {
       acceptedObjects.add(object)
       if (name !== null && OBJECT_ENUMERATORS.has(name) && !isCallee) {
-        block(node, `Object.${name}`, `Uses Object.${name} without calling it directly, so this check cannot see the value it is given.`)
+        block(node, `Object.${name}`, t('saUsesObjectWithoutCallingItDirectly', name))
       }
     }
 
@@ -1658,7 +1660,7 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
             block(
               node,
               '(dynamic property access)',
-              'Reads a property whose name is decided while running, so this check cannot tell what it accesses.',
+              t('saReadsAPropertyWhoseNameIs'),
             )
           }
         })
@@ -1691,7 +1693,7 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
       block(
         node,
         name,
-        'Reads which object an event was sent to, inside a listener on the window or the document, where it can be the window or the document itself.',
+        t('saReadsWhichObjectAnEventWas'),
       )
     }
   }
@@ -1726,7 +1728,7 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
           block(
             node,
             `${calleeName}(string)`,
-            'Passes something other than a function written in this code to a timer. A text argument runs as code, which cannot be reviewed before it executes.',
+            t('saPassesSomethingOtherThanAFunction'),
           )
         }
       })
@@ -1748,7 +1750,7 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
         block(
           node,
           `${callee['object'].name}.addEventListener`,
-          `Gives ${callee['object'].name}.addEventListener something other than a function written out in this code, so this check cannot follow the event it receives.`,
+          t('saGivesAddeventlistenerSomethingOtherThanA', callee['object'].name),
         )
       }
     }
@@ -1767,7 +1769,7 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
       indexCallbacks.set(callback, { receiver: callee['object'], scope: ctx.scope, position, method: calleeName! })
     }
     if (calleeName === 'open') {
-      block(node, 'open', 'Opens a new window or document, which can send page data to another site.')
+      block(node, 'open', t('saOpensANewWindowOrDocument'))
     }
 
     visit(callee, ctx, node)
@@ -1781,7 +1783,7 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
    */
   function checkKeyframes(node: N, keyframes: N | null, scope: Scope): void {
     const notWritten = () =>
-      block(node, 'animate', 'Animates keyframes that are not written out in this code, so this check cannot tell which styles they set, and a style can load an address.')
+      block(node, 'animate', t('saAnimatesKeyframesThatAreNotWritten'))
     const checkFrame = (frame: N) => {
       if (frame.type !== 'ObjectExpression') return notWritten()
       for (const prop of frame['properties'] as N[]) {
@@ -1810,13 +1812,13 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
     if (name === 'createElement') {
       const tag = literalText(args[0] ?? null)
       if (tag === null) {
-        block(node, 'createElement', 'Creates an element whose type is decided while running, so this check cannot tell whether it loads or runs anything.')
+        block(node, 'createElement', t('saCreatesAnElementWhoseTypeIs'))
       } else {
         const lower = tag.toLowerCase()
         if (LOADING_TAGS.has(lower)) {
-          needsNetwork(node, `createElement(${lower})`, 'Creates an element that requests an address.')
+          needsNetwork(node, `createElement(${lower})`, t('saCreatesAnElementThatRequestsAn'))
         } else if (!INERT_TAGS.has(lower)) {
-          block(node, `createElement(${lower})`, `Creates a ${lower} element, which can load or run content or send data.`)
+          block(node, `createElement(${lower})`, t('saCreatesAElementWhichCanLoad', lower))
         }
       }
     } else if (name === 'setAttribute' || name === 'toggleAttribute') {
@@ -1824,23 +1826,23 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
       // `onclick` or `href` exactly as setAttribute can.
       const attr = literalText(args[0] ?? null)
       if (attr === null) {
-        block(node, name, 'Sets an attribute whose name is decided while running, so this check cannot tell whether it carries an address or code.')
+        block(node, name, t('saSetsAnAttributeWhoseNameIs'))
       } else {
         const lower = attr.toLowerCase()
         if (SCRIPT_STATE_ATTRIBUTES.has(lower) || lower === 'src') {
           requireCreatedElement(node, `${name}(${lower})`, callee['object'], ctx.scope)
         }
         if (lower.startsWith('on')) {
-          block(node, `${name}(${lower})`, 'Sets an event handler attribute, which runs text as code.')
+          block(node, `${name}(${lower})`, t('saSetsAnEventHandlerAttributeWhich'))
         } else if (lower === 'srcdoc') {
-          block(node, `${name}(srcdoc)`, 'Sets the page inside a frame from a text string, which can run content.')
+          block(node, `${name}(srcdoc)`, t('saSetsThePageInsideAFrame'))
         } else if (ATTRIBUTE_URL.has(lower)) {
-          needsNetwork(node, `${name}(${lower})`, 'Sets an address on an element, which makes the browser request it or follow it.')
+          needsNetwork(node, `${name}(${lower})`, t('saSetsAnAddressOnAnElement'))
           if (name === 'setAttribute' && !provablyNotJavascript(args[1] ?? null)) {
-            block(node, `setAttribute(${lower}) (javascript: address)`, 'Sets an address that is not written out, or does not start with https://, http:// or a path, so this check cannot tell that it is not a javascript: address, which runs code.')
+            block(node, `setAttribute(${lower}) (javascript: address)`, t('saSetsAnAddressThatIsNot'))
           }
         } else if (lower === 'http-equiv') {
-          block(node, `${name}(http-equiv)`, 'Redirects the page from a meta element.')
+          block(node, `${name}(http-equiv)`, t('saRedirectsThePageFromAMeta'))
         } else if (name === 'setAttribute' && isUrlBearingStyleName(lower)) {
           checkWrite(node, lower, args[1] ?? null, ctx.scope, { style: true })
         }
@@ -1848,7 +1850,7 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
     } else if (name === 'removeAttribute') {
       const attr = literalText(args[0] ?? null)
       if (attr === null) {
-        block(node, name, 'Removes an attribute whose name is decided while running, so this check cannot tell whether it is one that keeps a script element from running.')
+        block(node, name, t('saRemovesAnAttributeWhoseNameIs'))
       } else if (SCRIPT_STATE_ATTRIBUTES.has(attr.toLowerCase())) {
         requireCreatedElement(node, `removeAttribute(${attr.toLowerCase()})`, callee['object'], ctx.scope)
       }
@@ -1859,7 +1861,7 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
     } else if (name === 'setProperty') {
       const prop = literalText(args[0] ?? null)
       if (prop === null) {
-        block(node, 'setProperty', 'Sets a style whose name is decided while running, so this check cannot tell whether it can load an address.')
+        block(node, 'setProperty', t('saSetsAStyleWhoseNameIs'))
       } else {
         checkWrite(node, prop, args[1] ?? null, ctx.scope, { style: true })
       }
@@ -1877,7 +1879,7 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
       if (!fresh) {
         for (const source of args.slice(1)) {
           if (source.type !== 'ObjectExpression') {
-            block(node, 'Object.assign', 'Copies properties from a value whose names are not written out, so this check cannot tell which properties it sets.')
+            block(node, 'Object.assign', t('saCopiesPropertiesFromAValueWhose'))
             continue
           }
           for (const prop of source['properties'] as N[]) {
@@ -1885,7 +1887,7 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
               ? prop['key'].type === 'Identifier' ? prop['key'].name : String(prop['key'].value)
               : null
             if (key === null) {
-              block(prop, 'Object.assign', 'Copies properties whose names are not written out, so this check cannot tell which properties it sets.')
+              block(prop, 'Object.assign', t('saCopiesPropertiesWhoseNamesAreNot'))
             } else {
               checkName(key, prop, false)
               checkWrite(prop, key, prop['value'], ctx.scope, { object: target ?? null })
@@ -1918,7 +1920,7 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
       const arg = args[0] ?? null
       deferred.push(() => {
         if (!isWrittenOut(arg, ctx.scope)) {
-          block(node, `Object.${name}`, `Lists the names of a value that is not written out in this code, which can find members this check refuses by name.`)
+          block(node, `Object.${name}`, t('saListsTheNamesOfAValue'))
         }
       })
     }
@@ -1935,7 +1937,7 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
           block(
             node,
             `${name}(not written out)`,
-            'Selects elements with a selector or tag name that is not written out in this code, so this check cannot tell whether it selects a script or style element.',
+            t('saSelectsElementsWithASelectorOr'),
           )
           return
         }
@@ -1949,7 +1951,7 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
               block(
                 node,
                 `${name}(${tag[1]!.toLowerCase()})`,
-                'Selects a script or style element. Their text can be rewritten to run code or to load an address, and this check cannot see what is written, so they are not available to a page transform.',
+                t('saSelectsAScriptOrStyleElement'),
               )
             }
             // Every element of the page includes the style elements. The
@@ -1958,7 +1960,7 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
               block(
                 node,
                 `${name}(*)`,
-                'Selects every element, which includes script and style elements whose text can be rewritten, and this check cannot see what is written.',
+                t('saSelectsEveryElementWhichIncludesScript'),
               )
             }
           }
@@ -1976,20 +1978,20 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
       // carry its target out of the listener, where the target names below
       // are no longer checked.
       if (declared.docEvent && !(parent?.type === 'MemberExpression' && parent['object'] === node)) {
-        block(node, name, 'Uses the event of a window or document listener as a value. Only direct reads such as event.key are allowed, because its target can be the window or the document.')
+        block(node, name, t('saUsesTheEventOfAWindow'))
       }
       return
     }
     if (acceptedObjects.has(node)) return
     if (name === 'arguments' && ctx.inDocListener) {
-      return block(node, name, 'Reads the arguments of a window or document listener, which include its event, so this check cannot follow where the event target goes.')
+      return block(node, name, t('saReadsTheArgumentsOfAWindow'))
     }
     if (name === 'Object' || name === 'Math' || name === 'Array') {
       const asCallee =
         ((parent?.type === 'CallExpression' || parent?.type === 'NewExpression') && parent['callee'] === node) ||
         (parent?.type === 'BinaryExpression' && parent['operator'] === 'instanceof' && parent['right'] === node)
       if (!asCallee) {
-        block(node, name, `Uses ${name} as a value. Only direct uses such as Object.assign, Math.floor and Array.from are allowed, because a copy hides which member is later written or called.`)
+        block(node, name, t('saUsesAsAValueOnlyDirect', name))
       }
       return
     }
@@ -2002,7 +2004,7 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
     if (refused) return block(node, name, refused)
     if (TIMERS.has(name)) {
       if (!(parent?.type === 'CallExpression' && parent['callee'] === node)) {
-        block(node, name, `Uses ${name} without calling it directly, so this check cannot see the arguments it is given.`)
+        block(node, name, t('saUsesWithoutCallingItDirectlySo', name))
       }
       return
     }
@@ -2010,7 +2012,7 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
     block(
       node,
       name,
-      `Uses ${name}, which is not on the list of browser features a page transform may use, so this check cannot tell what it does.`,
+      t('saUsesWhichIsNotOnThe2', name),
     )
   }
 
@@ -2021,7 +2023,7 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
 
       case 'ThisExpression':
         if (!ctx.thisOk) {
-          block(node, 'this', 'Uses `this` outside a function, where it is the page global object, which can reach any browser feature.')
+          block(node, 'this', t('saUsesThisOutsideAFunctionWhere'))
         }
         return
 
@@ -2049,11 +2051,11 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
       }
 
       case 'ImportExpression':
-        block(node, 'import()', 'Loads and runs code from another location, which is never allowed.')
+        block(node, 'import()', t('saLoadsAndRunsCodeFromAnother2'))
         return
 
       case 'WithStatement':
-        block(node, 'with', 'Makes names resolve against an object chosen while running, so this check cannot tell what they refer to.')
+        block(node, 'with', t('saMakesNamesResolveAgainstAnObject'))
         return
 
       case 'Literal':
