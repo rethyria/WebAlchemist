@@ -43,7 +43,18 @@
  *    object. The check is on the name rather than the object because the
  *    analyser cannot know what an arbitrary value holds.
  *  - Computed access is accepted only when the key is a literal or provably a
- *    number.
+ *    number. A number is a numeric literal or operation, a counter, the index
+ *    parameter of forEach and its relatives on an array, or the result of
+ *    indexOf on an array.
+ *  - The window and the document are not reachable as values by another route
+ *    either (audit of 00cc5f7). `this` is refused except in class and
+ *    object-literal methods, the event of a listener on `window` or `document`
+ *    can be read only for its properties other than the target, and
+ *    `getRootNode`, `parentNode` chains, `Object.entries` and similar on
+ *    values not written out in the code are refused.
+ *  - A value written to an address property, or to a style that can load a
+ *    resource, is checked as written, after CSS escapes are decoded, and for
+ *    every text it can take through names and conditions between literals.
  *  - Elements that load or run things cannot be created, and attributes and
  *    properties that carry a URL cannot be set, unless the transform declares
  *    the network capability.
@@ -203,7 +214,7 @@ const DOCUMENT_MEMBERS = new Set([
   'createDocumentFragment', 'createComment', 'createTreeWalker', 'createNodeIterator',
   'body', 'head', 'documentElement', 'title', 'activeElement', 'scrollingElement',
   'readyState', 'hidden', 'visibilityState', 'hasFocus', 'contains', 'links', 'images',
-  'elementFromPoint', 'elementsFromPoint', 'getSelection',
+  'elementFromPoint', 'elementsFromPoint', 'getSelection', 'URL',
   'addEventListener', 'removeEventListener', 'dispatchEvent',
 ])
 const WINDOW_MEMBERS = new Set([
@@ -314,6 +325,31 @@ const PARENT_NODE_USES = new Set([
 ])
 
 /** `Object` methods that list names a value has, refused unless the value is written out in the code. */
+/**
+ * Array methods that call a function with the position of each item, and the
+ * position of that parameter. When the receiver is provably an array, that
+ * parameter is a number. On a `Map` or `Set` the second parameter is a key of
+ * any type, and on an object written in the code the method can call the
+ * function with anything, so the receiver has to be shown to be an array.
+ */
+const INDEX_PARAMETER = new Map([
+  ['forEach', 1], ['map', 1], ['filter', 1], ['some', 1], ['every', 1], ['find', 1],
+  ['findIndex', 1], ['findLast', 1], ['findLastIndex', 1], ['flatMap', 1],
+  ['reduce', 2], ['reduceRight', 2],
+])
+/** Methods that return a list, which makes their result an array or an array-like list of nodes. */
+const LIST_METHODS = new Set([
+  'querySelectorAll', 'getElementsByClassName', 'getElementsByTagName', 'getElementsByTagNameNS', 'getElementsByName',
+])
+/** Array methods whose result is an array when the receiver is one. */
+const CHAIN_METHODS = new Set([
+  'filter', 'map', 'slice', 'sort', 'concat', 'reverse', 'flat', 'flatMap', 'toSorted', 'toReversed', 'toSpliced', 'splice',
+])
+/** Methods that return a position in an array, or -1. */
+const POSITION_METHODS = new Set(['indexOf', 'lastIndexOf', 'findIndex', 'findLastIndex'])
+/** The properties of `location` that may be read. Writing them, or reading any other, is refused. */
+const LOCATION_READS = new Set(['pathname', 'search', 'hash', 'href'])
+
 const OBJECT_ENUMERATORS = new Set(['entries', 'values', 'keys', 'getOwnPropertyNames'])
 
 /**
@@ -452,6 +488,8 @@ interface Binding {
   functionDeclaration: boolean
   /** The event parameter of a listener on `window` or `document`. */
   docEvent?: boolean
+  /** The parameter that holds the position of each item, and the array it counts. */
+  indexOf?: { receiver: N; scope: Scope } | undefined
 }
 
 class Scope {
@@ -614,8 +652,27 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
   const acceptedObjects = new Set<N>()
   /** Functions passed directly to `new Promise`, whose first parameter is a function. */
   const promiseExecutors = new Set<N>()
+  /** Callback functions given to forEach and its relatives, with the array they walk. */
+  const indexCallbacks = new Map<N, { receiver: N; scope: Scope; position: number }>()
+  /**
+   * Names of members the code defines itself: object-literal keys, class
+   * members, and `x.name = ...` assignments. A method the code defines under
+   * the name of a built-in one (`querySelectorAll`, `slice`, `forEach`) can
+   * return or pass anything, so such a name proves nothing about its result.
+   */
+  const definedMembers = new Set<string>()
+  /** Set when members can be defined under names this check cannot read, which ends every array proof. */
+  let dynamicDefinitions = false
+  /**
+   * Keys that name a member by an expression: `x[k] = v` and `{ [k]: v }`. A
+   * number cannot name a method, so a key that is provably a number is
+   * ignored; any other can, and sets `dynamicDefinitions` before the proofs run.
+   */
+  const dynamicKeys: { key: N; scope: Scope }[] = []
   /** Function nodes written out as the listener of `window.addEventListener` or `document.addEventListener`. */
   const docListeners = new Set<N>()
+  /** `window.location` nodes accepted as the object of a read of its address. */
+  const acceptedLocations = new Set<N>()
 
   const record = (node: N, rule: Rule) => {
     const line = node.loc ? node.loc.start.line : 0
@@ -670,6 +727,15 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
             !scope.lookup(callee['name']) && ['Number', 'parseInt', 'parseFloat'].includes(callee['name'])
           )
         }
+        // `tabs.indexOf(x)` is a number when `tabs` is an array. A method of
+        // that name defined in this code could return anything.
+        if (
+          callee.type === 'MemberExpression' &&
+          POSITION_METHODS.has(staticName(callee) ?? '') &&
+          isArrayLike(callee['object'], scope)
+        ) {
+          return true
+        }
         return (
           callee.type === 'MemberExpression' &&
           callee['computed'] !== true &&
@@ -680,7 +746,12 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
       }
       case 'Identifier': {
         const binding = scope.lookup(expr['name'])
-        if (!binding || binding.opaque) return false
+        if (!binding) return false
+        // The index parameter of forEach and its relatives is a number when the
+        // receiver is an array. Any other parameter or destructured name is not.
+        if (binding.indexOf) {
+          if (!isArrayLike(binding.indexOf.receiver, binding.indexOf.scope)) return false
+        } else if (binding.opaque) return false
         // A name whose value depends on itself, as in `i = i + 1`, is numeric
         // if every other write to it is, so the cycle is not a reason to refuse.
         if (visiting.has(binding)) return true
@@ -761,6 +832,36 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
     return ok
   }
 
+  /**
+   * True when the expression is provably an array or a list of nodes, so that
+   * the position it passes to a callback, or returns from indexOf, is a number.
+   * It is an array literal, a result of `Array.from`, `Object.keys` and the
+   * like, a DOM list method, or an array method applied to one of these, or a
+   * name that only holds such values. A method whose name the code defines
+   * itself is not trusted, because the code can make it return anything.
+   */
+  function isArrayLike(expr: N | null, scope: Scope): boolean {
+    if (dynamicDefinitions) return false
+    return holdsOnly(expr, scope, (e, sc) => {
+      if (e.type === 'ArrayExpression') return true
+      if (e.type !== 'CallExpression' || e['callee'].type !== 'MemberExpression') return false
+      const callee = e['callee'] as N
+      const name = staticName(callee)
+      if (name === null || definedMembers.has(name)) return false
+      const object = callee['object'] as N
+      const named = object.type === 'Identifier' && !sc.lookup(object['name']) ? (object['name'] as string) : null
+      if (named === 'Array' && (name === 'from' || name === 'of')) return true
+      if (named === 'Object' && ['keys', 'values', 'entries'].includes(name)) return true
+      if (LIST_METHODS.has(name)) return true
+      return CHAIN_METHODS.has(name) && isArrayLike(object, sc)
+    })
+  }
+
+  /** `x.style`, the object of a style write. */
+  function isStyleMember(expr: N): boolean {
+    return expr.type === 'MemberExpression' && staticName(expr) === 'style'
+  }
+
   /** `new URL(...)`, which loads nothing. */
   function isNewUrl(expr: N, scope: Scope): boolean {
     return (
@@ -839,6 +940,70 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
     return null
   }
 
+  /**
+   * Every text a string expression can have when each part is written out, is
+   * a name that only holds such text, or is provably a number. A number is
+   * stood for by "0": it can add digits, a sign, a point and an exponent, none
+   * of which can complete `url(`, `@import` or `var(`, and the digits break any
+   * such word that they would sit inside. Null when any part is anything else,
+   * or when the combinations are too many to list.
+   */
+  function possibleTexts(expr: N | null, scope: Scope, visiting = new Set<Binding>()): string[] | null {
+    if (!expr) return null
+    if (expr.type === 'Literal' && typeof expr['value'] === 'string') return [expr['value']]
+    if (isNumeric(expr, scope)) return ['0']
+    const combine = (parts: (string[] | null)[]): string[] | null => {
+      let out = ['']
+      for (const part of parts) {
+        if (part === null) return null
+        out = out.flatMap((head) => part.map((tail) => head + tail))
+        if (out.length > 256) return null
+      }
+      return out
+    }
+    switch (expr.type) {
+      case 'TemplateLiteral': {
+        const quasis = expr['quasis'] as N[]
+        const expressions = expr['expressions'] as N[]
+        const parts: (string[] | null)[] = []
+        quasis.forEach((q, i) => {
+          parts.push([q['value'].cooked ?? ''])
+          if (i < expressions.length) parts.push(possibleTexts(expressions[i]!, scope, visiting))
+        })
+        return combine(parts)
+      }
+      case 'ConditionalExpression': {
+        const yes = possibleTexts(expr['consequent'], scope, visiting)
+        const no = possibleTexts(expr['alternate'], scope, visiting)
+        return yes && no ? [...yes, ...no] : null
+      }
+      case 'BinaryExpression':
+        return expr['operator'] === '+'
+          ? combine([possibleTexts(expr['left'], scope, visiting), possibleTexts(expr['right'], scope, visiting)])
+          : null
+      case 'Identifier': {
+        const binding = scope.lookup(expr['name'])
+        if (!binding || binding.opaque || visiting.has(binding) || binding.sources.length === 0) return null
+        visiting.add(binding)
+        const all: string[] = []
+        let ok = true
+        for (const src of binding.sources) {
+          // A compound assignment builds a new text from the old one, which
+          // this does not follow, so it ends the proof.
+          const texts = src.op === '=' ? possibleTexts(src.value, src.scope, visiting) : null
+          if (texts === null) {
+            ok = false
+            break
+          }
+          all.push(...texts)
+        }
+        visiting.delete(binding)
+        return ok ? all : null
+      }
+    }
+    return null
+  }
+
   /** The text of a string expression with exactly one possible value, or null. */
   function literalText(expr: N | null): string | null {
     const all = literalTexts(expr)
@@ -902,6 +1067,8 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
     append?: boolean
     /** The object the property is written on, when the code names it. */
     object?: N | null
+    /** The write is to a style, as `setProperty` and keyframes are. */
+    style?: boolean
   }
 
   /**
@@ -912,19 +1079,33 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
   function checkWrite(target: N, name: string, value: N | null, scope: Scope, options: WriteOptions = {}): void {
     const append = options.append === true
     const object = options.object ?? null
+    const onStyle = options.style === true
+
     const refused = WRITE_REFUSED.get(name)
-    if (refused) block(target, name, refused)
+    if (refused) {
+      // A plain object written in this code is not an element, so `state.text`
+      // is only a field. The object is known only after the walk.
+      deferred.push(() => {
+        if (!isPlainObject(object, scope)) block(target, name, refused)
+      })
+    }
     if (WRITE_URL.has(name)) {
-      needsNetwork(target, name, 'Sets an address on an element, which makes the browser request it or follow it.')
-      // Network use is declared for an address, but `javascript:` is code and
-      // is refused whatever is declared. An address that is not written out
-      // could be one, so it is accepted only when its start is.
-      if (append || !provablyNotJavascript(value)) {
-        // A different api name from the network finding above: findings at the
-        // same position with the same name are merged, and the merge kept the
-        // warning that a declared capability unlocks.
-        block(target, `${name} (javascript: address)`, 'Sets an address that is not written out, or does not start with https://, http:// or a path, so this check cannot tell that it is not a javascript: address, which runs code.')
-      }
+      deferred.push(() => {
+        // `background` is also a style, and `style.background = 'red'` is the
+        // style property, handled below. On an element it is the obsolete
+        // attribute that loads an image.
+        if (name === 'background' && (onStyle || holdsOnly(object, scope, isStyleMember))) return
+        needsNetwork(target, name, 'Sets an address on an element, which makes the browser request it or follow it.')
+        // Network use is declared for an address, but `javascript:` is code and
+        // is refused whatever is declared. An address that is not written out
+        // could be one, so it is accepted only when its start is.
+        if (append || !provablyNotJavascript(value)) {
+          // A different api name from the network finding above: findings at the
+          // same position with the same name are merged, and the merge kept the
+          // warning that a declared capability unlocks.
+          block(target, `${name} (javascript: address)`, 'Sets an address that is not written out, or does not start with https://, http:// or a path, so this check cannot tell that it is not a javascript: address, which runs code.')
+        }
+      })
     }
     if (ADDRESS_PARTS.has(name) || name === DATA_PROPERTY) {
       // Resolved after the walk, because it depends on what the object holds.
@@ -945,29 +1126,37 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
         }
       })
     }
-    // Text written out is checked whatever the property, because a custom
-    // property or a text node can carry CSS that another rule then applies.
-    const written = literalTexts(value)
-    if (written) for (const text of written) checkText(target, text)
-    // `+=` appends to a value that may already hold part of an address, so the
-    // right-hand side alone proves nothing about the result.
-    const texts = append ? null : written
 
-    if (isUrlBearingStyleName(name)) {
-      if (texts === null) {
-        needsNetwork(target, name, 'Sets a style that can load an address, and the value is not written out, so this check cannot tell.')
-      } else if (texts.some((text) => CSS_INDIRECT.test(text) || CSS_INDIRECT.test(decodeCssEscapes(text)))) {
-        needsNetwork(target, name, 'Sets a style from a variable that can hold an address, so this check cannot tell what it loads.')
+    const isStyle = isUrlBearingStyleName(name)
+    const isCustom = name.startsWith('--')
+    if (!isStyle && !isCustom && !value) return
+    // The values this write can set, known only after the walk because a value
+    // may be a name that is assigned later.
+    deferred.push(() => {
+      // `+=` appends to a value that may already hold part of an address, so
+      // the right-hand side alone proves nothing about the result.
+      const texts = append ? null : possibleTexts(value, scope)
+      // Every text the value can take is checked, so a name that holds
+      // 'ur' + 'l(' in two parts, or a condition between two texts, is read
+      // the way the browser will read the result.
+      if (texts) for (const text of texts) checkText(target, text)
+      else {
+        const written = literalTexts(value)
+        if (written) for (const text of written) checkText(target, text)
       }
-    } else if (name.startsWith('--') && texts === null) {
-      // A custom property can hold an address that a later rule uses. A number
-      // cannot, so a computed number is accepted and anything else is not.
-      deferred.push(() => {
-        if (!isNumeric(value, scope)) {
-          needsNetwork(target, name, 'Sets a custom style property to a value that is not written out, so this check cannot tell whether it holds an address.')
+
+      if (isStyle) {
+        if (texts === null) {
+          needsNetwork(target, name, 'Sets a style that can load an address, and the value is not written out, so this check cannot tell.')
+        } else if (texts.some((text) => CSS_INDIRECT.test(text) || CSS_INDIRECT.test(decodeCssEscapes(text)))) {
+          needsNetwork(target, name, 'Sets a style from a variable that can hold an address, so this check cannot tell what it loads.')
         }
-      })
-    }
+      } else if (isCustom && texts === null && !isNumeric(value, scope)) {
+        // A custom property can hold an address that a later rule uses. A
+        // number cannot, so a computed number is accepted and anything else is not.
+        needsNetwork(target, name, 'Sets a custom style property to a value that is not written out, so this check cannot tell whether it holds an address.')
+      }
+    })
   }
 
   // ----- The walk -----------------------------------------------------------
@@ -1002,6 +1191,13 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
       inDocListener: ctx.inDocListener || listener,
     }
     for (const param of fn['params'] as N[]) declarePattern(param, scope, false)
+    const counted = indexCallbacks.get(fn)
+    if (counted) {
+      const param = (fn['params'] as N[])[counted.position]
+      if (param?.type === 'Identifier') {
+        scope.vars.get(param['name'])!.indexOf = { receiver: counted.receiver, scope: counted.scope }
+      }
+    }
     if (listener) {
       const first = (fn['params'] as N[])[0]
       if (first?.type === 'Identifier') scope.vars.get(first['name'])!.docEvent = true
@@ -1037,8 +1233,11 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
       case 'Identifier':
         if (mode === 'assign') {
           const binding = ctx.scope.lookup(pattern['name'])
-          if (binding) binding.opaque = true
-          else visit(pattern, ctx, pattern)
+          if (binding) {
+            binding.opaque = true
+            // Assigned from a destructuring or a loop: no longer the position.
+            binding.indexOf = undefined
+          } else visit(pattern, ctx, pattern)
         }
         return
       case 'MemberExpression':
@@ -1088,6 +1287,32 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
     const property = node['property'] as N
     const isCallee = parent?.type === 'CallExpression' && parent['callee'] === node
     const name = staticName(node)
+
+    // `window.location` is accepted only as the object of a read of one of its
+    // address properties (see below), and then needs no further check.
+    if (acceptedLocations.has(node)) return
+
+    // Reading the address of the page is harmless: it gives text and nothing
+    // that can navigate. `location` as a value, any write to it, and every
+    // other member are still refused, because each can navigate or send data.
+    const base = locationBase(object, ctx)
+    if (
+      base !== null &&
+      name !== null &&
+      LOCATION_READS.has(name) &&
+      !isCallee &&
+      parent !== node &&
+      !(parent?.type === 'AssignmentExpression' && parent['left'] === node) &&
+      !(parent?.type === 'UpdateExpression') &&
+      !(parent?.type === 'UnaryExpression' && parent['operator'] === 'delete') &&
+      !((parent?.type === 'ForInStatement' || parent?.type === 'ForOfStatement') && parent['left'] === node)
+    ) {
+      if (base === 'bare') acceptedObjects.add(object)
+      else {
+        acceptedLocations.add(object)
+        acceptedObjects.add(object['object'])
+      }
+    }
 
     // `document`, `window` and `navigator` are accepted only here, as the
     // object of a member access to a member on their list.
@@ -1168,6 +1393,21 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
     }
   }
 
+  /** Whether an object is `location`, or `window.location`, as free names. */
+  function locationBase(object: N, ctx: Context): 'bare' | 'window' | null {
+    if (object.type === 'Identifier' && object['name'] === 'location' && !ctx.scope.lookup('location')) return 'bare'
+    if (
+      object.type === 'MemberExpression' &&
+      staticName(object) === 'location' &&
+      object['object'].type === 'Identifier' &&
+      object['object'].name === 'window' &&
+      !ctx.scope.lookup('window')
+    ) {
+      return 'window'
+    }
+    return null
+  }
+
   function visitCall(node: N, ctx: Context): void {
     const callee = node['callee'] as N
     const args = node['arguments'] as N[]
@@ -1213,6 +1453,16 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
     if (callee.type === 'MemberExpression' && calleeName !== null) {
       checkMethodCall(node, callee, calleeName, args, ctx)
     }
+    const position = calleeName === null ? undefined : INDEX_PARAMETER.get(calleeName)
+    const callback = args[0]
+    if (
+      position !== undefined &&
+      callee.type === 'MemberExpression' &&
+      callback &&
+      (callback.type === 'ArrowFunctionExpression' || callback.type === 'FunctionExpression')
+    ) {
+      indexCallbacks.set(callback, { receiver: callee['object'], scope: ctx.scope, position })
+    }
     if (calleeName === 'open') {
       block(node, 'open', 'Opens a new window or document, which can send page data to another site.')
     }
@@ -1239,7 +1489,7 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
         const values = prop['value'].type === 'ArrayExpression' ? (prop['value']['elements'] as (N | null)[]) : [prop['value']]
         for (const value of values) {
           if (!value || value.type === 'SpreadElement') return notWritten()
-          checkWrite(prop, key, value, scope)
+          checkWrite(prop, key, value, scope, { style: true })
         }
       }
     }
@@ -1286,7 +1536,7 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
         } else if (lower === 'http-equiv') {
           block(node, `${name}(http-equiv)`, 'Redirects the page from a meta element.')
         } else if (name === 'setAttribute' && isUrlBearingStyleName(lower)) {
-          checkWrite(node, lower, args[1] ?? null, ctx.scope)
+          checkWrite(node, lower, args[1] ?? null, ctx.scope, { style: true })
         }
       }
     } else if (name === 'setProperty') {
@@ -1294,7 +1544,7 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
       if (prop === null) {
         block(node, 'setProperty', 'Sets a style whose name is decided while running, so this check cannot tell whether it can load an address.')
       } else {
-        checkWrite(node, prop, args[1] ?? null, ctx.scope)
+        checkWrite(node, prop, args[1] ?? null, ctx.scope, { style: true })
       }
     } else if (
       name === 'assign' &&
@@ -1328,6 +1578,15 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
     }
 
     if (name === 'animate') checkKeyframes(node, args[0] ?? null, ctx.scope)
+    // These build an object whose member names come from data, so a method
+    // under any name can exist afterwards.
+    if (
+      (name === 'fromEntries' || name === 'create') &&
+      callee['object'].type === 'Identifier' &&
+      callee['object'].name === 'Object'
+    ) {
+      dynamicDefinitions = true
+    }
 
     if (
       OBJECT_ENUMERATORS.has(name) &&
@@ -1538,8 +1797,15 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
 
       case 'MethodDefinition':
       case 'PropertyDefinition': {
-        if (node['computed'] === true) visit(node['key'], ctx, node)
-        else if (node['key'].type === 'Identifier') checkName(node['key'].name, node['key'], false)
+        if (node['computed'] === true) {
+          visit(node['key'], ctx, node)
+          const key = literalText(node['key'])
+          if (key === null) dynamicKeys.push({ key: node['key'], scope: ctx.scope })
+          else definedMembers.add(key)
+        } else if (node['key'].type === 'Identifier') {
+          checkName(node['key'].name, node['key'], false)
+          definedMembers.add(node['key'].name)
+        }
         if (node['value']) {
           // A field initialiser runs with `this` set to the instance.
           const inner: Context = { ...ctx, thisOk: true }
@@ -1549,7 +1815,15 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
       }
 
       case 'Property':
-        if (node['computed'] === true) visit(node['key'], ctx, node)
+        if (node['computed'] === true) {
+          visit(node['key'], ctx, node)
+          const key = literalText(node['key'])
+          if (key === null) dynamicKeys.push({ key: node['key'], scope: ctx.scope })
+          else definedMembers.add(key)
+        } else {
+          const key = node['key'] as N
+          definedMembers.add(key.type === 'Identifier' ? key['name'] : String(key['value']))
+        }
         return visit(node['value'], ctx, node)
 
       case 'VariableDeclaration':
@@ -1573,6 +1847,8 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
         } else if (left.type === 'MemberExpression') {
           visit(left, ctx, node)
           const name = staticName(left)
+          if (name !== null) definedMembers.add(name)
+          else dynamicKeys.push({ key: left['property'], scope: ctx.scope })
           if (name !== null) {
             const op = node['operator'] as string
             // The logical operators assign the right-hand side as it is, so it
@@ -1634,6 +1910,9 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
   // wraps code in an arrow function inside a strict-mode IIFE, which keeps
   // that meaning, so it is refused rather than assumed to be undefined.
   visit(root, { scope: programScope, thisOk: false }, null)
+  for (const { key, scope } of dynamicKeys) {
+    if (!isNumeric(key, scope)) dynamicDefinitions = true
+  }
   for (const check of deferred) check()
 
   const usedCapabilities = [

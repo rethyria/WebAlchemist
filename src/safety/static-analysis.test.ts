@@ -866,3 +866,197 @@ describe('audit of 00cc5f7 (#48): URL setters and runtime javascript: URLs', () 
     expect(blocks(`const n = document.querySelector('p').firstChild; n.data = 'x'`)).toBe(true)
   })
 })
+
+/**
+ * Patterns that the allowlist refused although they are ordinary, with the
+ * variants that must stay refused so that each relaxation has a control.
+ */
+describe('allowlist (#48): ordinary patterns that pass', () => {
+  const PASS: Record<string, string> = {
+    'index parameter of forEach': `
+      const labels = ['a', 'b', 'c'];
+      document.querySelectorAll('li').forEach((el, i) => { el.textContent = labels[i]; });`,
+    'index parameter of map over Array.from': `
+      const labels = ['a', 'b'];
+      const items = Array.from(document.querySelectorAll('li'));
+      items.map((el, index) => labels[index]);`,
+    'index parameter of reduce, written as a function': `
+      const w = [1, 2, 3];
+      [4, 5, 6].reduce(function (sum, x, i) { return sum + w[i] * x }, 0);`,
+    'index parameter of filter over a chain': `
+      const keep = [true, false];
+      Array.from(document.querySelectorAll('li')).slice(0, 5).filter((el, i) => keep[i]);`,
+    'index parameter through a name that holds an array': `
+      const labels = ['a'];
+      let rows = [];
+      rows = Array.from(document.querySelectorAll('tr'));
+      rows.forEach((row, n) => { row.dataset.n = labels[n]; });`,
+    'tabs[tabs.indexOf(cur) + 1]': `
+      const tabs = Array.from(document.querySelectorAll('.tab'));
+      const cur = document.querySelector('.tab.active');
+      const next = tabs[tabs.indexOf(cur) + 1];
+      if (next) next.click();`,
+    'previous item with lastIndexOf and a spread array': `
+      const tabs = [...document.querySelectorAll('.tab')];
+      const cur = document.querySelector('.tab.active');
+      const prev = tabs[tabs.lastIndexOf(cur) - 1];`,
+    '.text written on a plain object held in a const': `
+      const state = { text: '', count: 0 };
+      state.text = document.title;
+      state.count += 1;`,
+    '.text written on an object that is filled later': `
+      const state = {};
+      state.text = 'a';`,
+    'location.pathname, search, hash and href read': `
+      const p = location.pathname, s = location.search, h = location.hash, u = location.href;
+      if (p.startsWith('/watch') && new URLSearchParams(s).has('v')) document.body.dataset.v = h.slice(1) + u.length;`,
+    'window.location.pathname and document.URL read': `
+      if (window.location.pathname === '/' || document.URL.includes('?')) document.body.dataset.home = '1';
+      const x = window.location.href.split('#')[0];`,
+    'style.filter with a numeric value': `
+      const el = document.body;
+      const n = Math.min(window.scrollY / 100, 8);
+      el.style.filter = 'blur(' + n + 'px)';
+      el.style.backdropFilter = \`blur(\${n * 2}px)\`;`,
+    'style.filter with an index parameter': `
+      document.querySelectorAll('li').forEach((el, i) => { el.style.filter = 'blur(' + i + 'px)'; });`,
+    'style.background chosen between written-out values': `
+      const el = document.body;
+      const dark = matchMedia('(prefers-color-scheme: dark)').matches;
+      const c = dark ? '#111' : '#eee';
+      el.style.background = c;
+      let d; if (dark) d = 'black'; else d = 'white';
+      el.style.background = d;
+      el.style.background = dark ? 'red' : 'blue';`,
+    'style.background and setProperty with a literal': `
+      document.body.style.background = 'red';
+      document.body.style.setProperty('background', 'blue');
+      Object.assign(document.body.style, { background: 'green' });`,
+  }
+
+  for (const [name, code] of Object.entries(PASS)) {
+    it(`passes: ${name}`, () => {
+      const { findings } = applyCapabilityPolicy(analyseJavaScript(code), [])
+      expect(findings, JSON.stringify(findings)).toEqual([])
+    })
+    it(`passes inside the harness: ${name}`, () => {
+      const wrapped = wrapTransform({
+        name: 'test',
+        anchor: { landmarks: ['main'] },
+        code,
+      } as unknown as Parameters<typeof wrapTransform>[0])
+      expect(blocks(wrapped)).toBe(false)
+    })
+  }
+
+  it('still refuses a key that is not provably a number', () => {
+    for (const source of [
+      // A parameter that is not the index.
+      `const o = ['a']; document.querySelectorAll('li').forEach((el, i) => o[el])`,
+      `const o = ['a']; Array.from(document.querySelectorAll('li')).map((el) => o[el.dataset.k])`,
+      `const o = ['a']; new Map().forEach((v, k) => o[k])`,
+      `const o = ['a']; const m = new Map(); m.forEach((v, k) => o[k])`,
+      `const o = ['a']; document.querySelectorAll('li').forEach((el, i) => { i = el.id; o[i] })`,
+      `const o = ['a']; document.querySelectorAll('li').forEach((el, i) => { i += el.id; o[i] })`,
+      `const o = ['a']; document.querySelectorAll('li').forEach((el, i = el.id) => o[i])`,
+      `const o = ['a']; document.querySelectorAll('li').forEach((el, i) => { [i] = [el.id]; o[i] })`,
+      `const o = ['a']; document.querySelectorAll('li').forEach((el, i) => { ({ i } = { i: el.id }); o[i] })`,
+      `const o = ['a']; document.querySelectorAll('li').forEach((el, i) => { for (i of [el.id]) o[i] })`,
+      `const o = ['a']; document.querySelectorAll('li').forEach((el, ...i) => o[i])`,
+      `const o = ['a']; document.querySelectorAll('li').forEach(function (el, { i }) { return o[i] })`,
+      // A receiver that is not provably an array.
+      `const o = ['a']; getList().forEach((v, i) => o[i]); function getList() { return new Map() }`,
+      `const o = ['a']; const x = { forEach(cb) { cb(0, 'constructor') } }; x.forEach((v, i) => o[i])`,
+      `const o = ['a']; const f = (el, i) => o[i]; f(1, 'constructor')`,
+      `const o = ['a']; Array.from(document.querySelectorAll('li')).forEach(handler); function handler(el, i) { return o[i] }`,
+      // A method with the name of a list method, defined in the code.
+      `const o = ['a']; const x = { querySelectorAll() { return new Map() } }; x.querySelectorAll('li').forEach((v, i) => o[i])`,
+      `class A { querySelectorAll() { return new Map() } } const o = ['a']; new A().querySelectorAll('li').forEach((v, i) => o[i])`,
+      `const o = ['a']; const x = {}; x.slice = () => new Map(); x.slice().forEach((v, i) => o[i])`,
+      `const o = ['a']; const x = { [document.title]: 1 }; [1].forEach((v, i) => o[i])`,
+      `const o = ['a']; const x = Object.fromEntries([['forEach', 1]]); [1].forEach((v, i) => o[i])`,
+      `const o = ['a']; const k = { indexOf() { return 'constructor' } }; o[k.indexOf()]`,
+      `const o = ['a']; const t = 'abc'; o[t.indexOf('b')]`,
+      `const o = ['a']; const t = document.title; o[t.indexOf('b')]`,
+      `const o = ['a']; const tabs = [1]; const x = { indexOf() { return 'a' } }; o[tabs.indexOf(1) + x.indexOf()]`,
+      // The bypass the earlier tests used.
+      `[][document.title][document.title]('return 1')()`,
+    ]) {
+      expect(blocks(source), source).toBe(true)
+    }
+  })
+
+  it('still refuses writing .text on anything that is not a plain object', () => {
+    for (const source of [
+      `document.querySelector('x').text = 'a'`,
+      `const s = document.createElement('div'); s.text = 'a'`,
+      `let state = { text: '' }; state = document.querySelector('x'); state.text = 'a'`,
+      `const state = { text: '' }; document.querySelector('x').text = state.text`,
+      `function f(o) { o.text = 'a' } f({})`,
+      `const state = { text: '' }; state.innerHTML = ''; document.querySelector('x').innerHTML = ''`,
+    ]) {
+      expect(blocks(source), source).toBe(true)
+    }
+  })
+
+  it('still refuses writing to location and calling its methods', () => {
+    for (const source of [
+      `location.href = 'https://evil.example/'`,
+      `location.href += '#x'`,
+      `location.pathname = '/x'`,
+      `location.search = '?q=1'`,
+      `location.hash = '#x'`,
+      `location.assign('https://evil.example/')`,
+      `location.replace('https://evil.example/')`,
+      `location.reload()`,
+      `window.location = 'https://evil.example/'`,
+      `window.location.href = 'https://evil.example/'`,
+      `window.location.assign('https://evil.example/')`,
+      `document.location.pathname`,
+      `document.location = 'https://evil.example/'`,
+      `const l = location`,
+      `const l = window.location`,
+      `const { href } = location`,
+      `const { pathname } = window.location`,
+      `[location.href] = ['https://evil.example/']`,
+      `({ a: location.href } = { a: 'https://evil.example/' })`,
+      `for (location.href of ['https://evil.example/']) {}`,
+      `location.href++`,
+      `location.origin`,
+      `location.host`,
+      `location.toString()`,
+      `location.href()`,
+      `f(location)`,
+      `typeof location`,
+      `location[document.title]`,
+      `window.location[document.title]`,
+      `window.location.pathname = '/x'`,
+    ]) {
+      expect(blocks(source), source).toBe(true)
+    }
+  })
+
+  it('still refuses style values that are not provably free of an address', () => {
+    for (const source of [
+      `document.body.style.filter = 'blur(' + document.title + 'px)'`,
+      `document.querySelectorAll('li').forEach((el, i) => { el.style.filter = 'url(' + i + ')' })`,
+      `const n = document.title; document.body.style.filter = 'blur(' + n + 'px)'`,
+      `const n = 1; document.body.style.filter = 'ur' + n + 'l(https://evil.example/)'.slice(1)`,
+      `const c = document.title ? 'red' : document.body.id; document.body.style.background = c`,
+      `const c = 'url(https://evil.example/x)'; document.body.style.background = c`,
+      `const c = document.title ? 'red' : 'url(https://evil.example/x)'; document.body.style.background = c`,
+      `let c = 'ur'; c += 'l(https://evil.example/x)'; document.body.style.background = c`,
+      `let c = 'ur'; c = c + 'l(https://evil.example/x)'; document.body.style.background = c`,
+      `let c = 'red'; c = document.title; document.body.style.background = c`,
+      `function f(c) { document.body.style.background = c } f('red')`,
+      `const c = 'var(--u)'; document.body.style.background = c`,
+      `const { c } = { c: 'red' }; document.body.style.background = c`,
+      `document.body.style.background = document.title`,
+      // The obsolete background attribute of body and table is an address.
+      `document.body.background = 'red'`,
+      `const t = document.createElement('table'); t.background = 'red'`,
+    ]) {
+      expect(blocks(source), source).toBe(true)
+    }
+  })
+})
