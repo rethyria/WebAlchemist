@@ -309,6 +309,45 @@ describe('capture-region (#135, #119)', () => {
     expect(captureCalls).toEqual([])
   })
 
+  it('still captures when only the fragment or the query changed during the run (#135)', async () => {
+    for (const changed of ['https://www.example.com/#section-2', 'https://www.example.com/?t=42']) {
+      captureCalls.length = 0
+      tabHooks.tab = (tabId) => ({ id: tabId, active: true, windowId: 3, url: changed })
+      expect(((await request()) as any).ok).toBe(true)
+      expect(captureCalls).toHaveLength(1)
+    }
+  })
+
+  it('refuses a different path on the same site (control for the looser comparison)', async () => {
+    tabHooks.tab = (tabId) => ({ id: tabId, active: true, windowId: 3, url: 'https://www.example.com/other' })
+    expect(((await request()) as any).ok).toBe(false)
+    expect(captureCalls).toEqual([])
+  })
+
+  it('discards the image when the tab stopped being active during the capture', async () => {
+    // Active before the capture call, in the background after it.
+    tabHooks.tab = (tabId) => ({
+      id: tabId,
+      active: captureCalls.length === 0,
+      windowId: 3,
+      url: 'https://www.example.com/',
+    })
+    const reply = (await request()) as any
+    expect(reply.ok).toBe(false)
+    expect(reply.error.message).toMatch(/changed while the screenshot/)
+    expect(reply.data).toBeUndefined()
+  })
+
+  it('discards the image when the tab moved to another page during the capture', async () => {
+    tabHooks.tab = (tabId) => ({
+      id: tabId,
+      active: true,
+      windowId: 3,
+      url: captureCalls.length === 0 ? 'https://www.example.com/' : 'https://other.example.org/',
+    })
+    expect(((await request()) as any).ok).toBe(false)
+  })
+
   it('refuses when the run tab is gone', async () => {
     tabHooks.tab = () => {
       throw new Error('no such tab')

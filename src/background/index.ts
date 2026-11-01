@@ -1497,6 +1497,18 @@ async function captureWithLockDown(
   }
 }
 
+/** True when both addresses have the same origin and path. */
+function samePage(a: string | undefined, b: string | undefined): boolean {
+  if (a === undefined || b === undefined) return false
+  try {
+    const x = new URL(a)
+    const y = new URL(b)
+    return x.origin === y.origin && x.pathname === y.pathname
+  } catch {
+    return a === b
+  }
+}
+
 async function captureRegion(
   tabId: number,
   url: string,
@@ -1516,12 +1528,25 @@ async function captureRegion(
       'The page this run is about is not the tab in front, so nothing was captured. Switch back to it and try again.',
     )
   }
-  if (tab.url !== url) {
+  // Origin and path, not the whole address: a page that changes its fragment or
+  // query while it is in use (scroll-spy navigation, a video player writing the
+  // playback time) is still the same page, and comparing the whole address
+  // refused every capture on such pages.
+  if (!samePage(tab.url, url)) {
     throw new Error(
       'The page this run is about has moved to another address, so nothing was captured.',
     )
   }
   const full = await browser.tabs.captureVisibleTab(tab.windowId, { format: 'png' })
+
+  // The tab can change while the capture runs. The image is dropped if it no
+  // longer shows the page this run is about.
+  const after = await browser.tabs.get(tabId).catch(() => undefined)
+  if (!after?.active || !samePage(after.url, url)) {
+    throw new Error(
+      'The tab changed while the screenshot was being taken, so the image was discarded. Try again.',
+    )
+  }
 
   // Cropping happens here so the full-viewport capture never leaves this scope.
   const blob = await (await fetch(full)).blob()
