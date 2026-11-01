@@ -238,6 +238,24 @@ describe('handleSaveTransform: CSS', () => {
   })
 })
 
+describe('handleSaveTransform: CSS and the match pattern (#50)', () => {
+  it('checks unchanged CSS again when its match pattern changed', async () => {
+    const stored = transform({ kind: 'css', code: BAD_CSS })
+    const { deps, calls } = saveDeps([stored])
+    await expect(
+      handleSaveTransform(saveMessage(transform({ kind: 'css', code: BAD_CSS, match: 'other.example/*' })), deps),
+    ).rejects.toThrow(/load/)
+    expect(calls).toEqual([])
+  })
+
+  it('lets unchanged CSS through when the match pattern is the same (control)', async () => {
+    const stored = transform({ kind: 'css', code: BAD_CSS })
+    const { deps, calls } = saveDeps([stored])
+    await handleSaveTransform(saveMessage(transform({ kind: 'css', code: BAD_CSS })), deps)
+    expect(calls).toContain('save:t')
+  })
+})
+
 describe('handlePreviewCss', () => {
   const previewDeps = (settings: Settings = DEFAULT_SETTINGS) => {
     const injected: (string | null)[] = []

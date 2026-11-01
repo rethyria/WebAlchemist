@@ -101,6 +101,10 @@ export async function handleSaveTransform(message: Of<'save-transform'>, deps: S
     const unchanged =
       stored !== undefined &&
       stored.code === message.transform.code &&
+      // The CSS check depends on the site, through the per-site setting and the
+      // origin that same-origin addresses are judged against, so moving the CSS
+      // to another match pattern is not a rename.
+      stored.match === message.transform.match &&
       JSON.stringify(stored.approvedCssUrls ?? []) ===
         JSON.stringify(message.transform.approvedCssUrls ?? [])
     if (!unchanged) {
