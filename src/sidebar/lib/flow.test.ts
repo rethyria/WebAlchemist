@@ -898,17 +898,36 @@ describe('events from the page', () => {
     expect(flow.references).toHaveLength(1)
   })
 
-  it('ignores an event from the run tab when no run is waiting for one', () => {
-    const flow = newFlow()
-    flow.receive(elementPicked, fromRunTab)
-    expect(flow.step).toBe('list')
-    expect(flow.picked).toBeNull()
+  it('ignores every kind of event from the run tab when no run is waiting for one', () => {
+    /*
+     * Reverting the awaitingPageEvent gate in receive alone does not fail this
+     * test, and cannot: each case in the switch already checks the step or
+     * flag it needs, so the gate is a second check with no behaviour of its
+     * own. The test therefore covers the contract (no event changes a flow
+     * that is not waiting) and was measured by removing the gate together with
+     * the per-case checks, which does fail it.
+     */
+    const events = [
+      elementPicked,
+      { type: 'element-referenced', element: { selector: 'a.b' } },
+      { type: 'region-selected', rect: crop, viewportWidth: 800, clipped: false },
+      { type: 'element-hovered', target: targetInfo },
+      { type: 'picking-cancelled' },
+    ] as any[]
 
-    // On refining with no reference or region pick open, a pick is ignored too.
-    const refining = flowAtRefining()
-    refining.receive(elementPicked, fromRunTab)
-    expect(refining.step).toBe('refining')
-    expect(refining.picked?.anchor.selector).toBe('div.x')
+    for (const make of [newFlow, flowAtRefining]) {
+      for (const event of events) {
+        const flow = make()
+        const step = flow.step
+        const picked = flow.picked
+        flow.receive(event, fromRunTab)
+        expect(flow.step).toBe(step)
+        expect(flow.picked).toBe(picked)
+        expect(flow.references).toEqual([])
+        expect(flow.hover).toBeNull()
+      }
+    }
+    expect(calls.some((c) => c.type === 'capture-region')).toBe(false)
   })
 })
 
