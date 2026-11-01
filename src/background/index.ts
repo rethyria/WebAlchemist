@@ -29,6 +29,7 @@ import {
   applyCssTransforms as applyCssTransformsFor,
   fromExtensionPage,
   handleApproveCode,
+  handleBlockedCount,
   handlePreviewCss,
   handleReview,
   handleSaveSettings,
@@ -246,6 +247,9 @@ async function handle(
 
     case 'get-blocked-states':
       return blockedStates(await matchingTransforms(message.url), await getSettings(), message.url)
+
+    case 'get-blocked-count':
+      return handleBlockedCount({ getAllTransforms, getSettings })
 
     case 'get-credential-statuses':
       return getAllCredentialStatuses()

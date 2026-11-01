@@ -17,7 +17,7 @@
 import type { Message } from '@shared/messages'
 import type { ReviewResult, Settings, Transform } from '@shared/types'
 import { mayBeSaved, recordApproval, spendApproval, type ApprovalVerdict } from './approvals'
-import { problemWithStoredCode, runStaticAnalysis } from './code-gate'
+import { blockedStates, problemWithStoredCode, runStaticAnalysis } from './code-gate'
 import { assertPreviewable, checkCssTransform } from './css-gate'
 
 type Of<T extends Message['type']> = Extract<Message, { type: T }>
@@ -201,6 +201,25 @@ export async function handleApproveCode(
  */
 export function fromExtensionPage(sender: { url?: string | undefined }, extensionUrl: string): boolean {
   return sender.url?.startsWith(extensionUrl) === true
+}
+
+/* ------------------------------------------------------------------ */
+/* Blocked transforms                                                  */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The number of enabled transforms, on any site, that the checks applied now
+ * keep from running. A transform that the re-check blocks is otherwise shown
+ * only as a broken row on a page it matches, so a user who does not visit that
+ * page never learns of it. A disabled transform is not counted: it is not
+ * running by the user's choice, and the check runs again when it is enabled.
+ */
+export async function handleBlockedCount(deps: {
+  getAllTransforms: () => Promise<Transform[]>
+  getSettings: () => Promise<Settings>
+}): Promise<number> {
+  const enabled = (await deps.getAllTransforms()).filter((t) => t.enabled)
+  return blockedStates(enabled, await deps.getSettings()).length
 }
 
 /* ------------------------------------------------------------------ */

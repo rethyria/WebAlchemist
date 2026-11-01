@@ -106,6 +106,12 @@ export type Message =
    */
   | { type: 'get-blocked-states'; url: string }
   /**
+   * How many enabled transforms, on any site, are stored but not running
+   * because their code no longer passes the checks. Lets the list view say so
+   * without the user visiting each page the transform matches.
+   */
+  | { type: 'get-blocked-count' }
+  /**
    * `approvalToken` is the one returned by `review` or `approve-code` for this
    * code, transform and match pattern. JavaScript whose code differs from what
    * is stored is refused without it, and the token is deleted by a successful
@@ -410,6 +416,7 @@ export interface Responses {
   'clear-lock': boolean
   'check-now': TransformRuntimeState[]
   'get-blocked-states': TransformRuntimeState[]
+  'get-blocked-count': number
   'run-csp-probe': boolean
   'clear-csp-probe': boolean
 }

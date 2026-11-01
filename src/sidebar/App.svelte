@@ -42,6 +42,8 @@
   let loadError = $state<{ message: string; retryable: boolean } | null>(null)
   let checking = $state(false)
   let showSettings = $state(false)
+  /* Enabled transforms on any site that the safety check keeps from running. */
+  let blockedCount = $state(0)
 
   const flow = new Flow(() => void afterSave())
 
@@ -123,6 +125,7 @@
   }
 
   async function refresh() {
+    await refreshBlockedCount()
     if (!transformable) {
       transforms = []
       conflicts = []
@@ -141,9 +144,20 @@
     document.documentElement.dataset['accent'] = next.accent
   }
 
+  async function refreshBlockedCount() {
+    try {
+      blockedCount = await send<number>({ type: 'get-blocked-count' })
+    } catch {
+      // The count is a notice; failing to read it must not stop the list loading.
+      blockedCount = 0
+    }
+  }
+
   async function saveSettings(next: Settings) {
     applySettings(next)
     await send({ type: 'save-settings', settings: next })
+    // A site setting can change which stored CSS passes the check.
+    await refreshBlockedCount()
   }
 
   async function load() {
@@ -495,6 +509,14 @@
       onsettings={openSettingsPage}
       ondismiss={() => flow.dismissError()}
     />
+  {/if}
+
+  {#if blockedCount > 0 && !showSettings && transformable && flow.step === 'list' && !flow.awayFromOwner}
+    <p class="broken-banner" role="status">
+      {blockedCount}
+      {blockedCount === 1 ? 'transform is' : 'transforms are'} blocked by the current safety check and
+      {blockedCount === 1 ? 'is' : 'are'} not running. This count covers every site.
+    </p>
   {/if}
 
   {#if showSettings && settings}

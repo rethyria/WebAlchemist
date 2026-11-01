@@ -10,6 +10,7 @@ import {
   applyCssTransforms,
   fromExtensionPage,
   handleApproveCode,
+  handleBlockedCount,
   handlePreviewCss,
   handleReview,
   handleSaveSettings,
@@ -421,5 +422,34 @@ describe('handleSaveSettings', () => {
       deps,
     )
     expect(calls).not.toContain('reapply-all')
+  })
+})
+
+describe('handleBlockedCount', () => {
+  const count = (stored: Transform[], settings: Settings = DEFAULT_SETTINGS) =>
+    handleBlockedCount({ getAllTransforms: async () => stored, getSettings: async () => settings })
+
+  it('counts enabled transforms on any site that fail the check now', async () => {
+    const stored = [
+      transform({ id: 'a', kind: 'css', code: BAD_CSS, match: 'one.example/*' }),
+      transform({ id: 'b', kind: 'css', code: BAD_CSS, match: 'two.example/*' }),
+      transform({ id: 'c', kind: 'js', code: BAD_JS, match: 'three.example/*' }),
+    ]
+    expect(await count(stored)).toBe(3)
+  })
+
+  it('control: passing transforms and disabled ones are not counted', async () => {
+    const stored = [
+      transform({ id: 'a', kind: 'css', code: GOOD_CSS }),
+      transform({ id: 'b', kind: 'js', code: GOOD_JS }),
+      transform({ id: 'c', kind: 'css', code: BAD_CSS, enabled: false }),
+    ]
+    expect(await count(stored)).toBe(0)
+  })
+
+  it('follows the site setting: CSS that the setting allows is not counted', async () => {
+    const stored = [transform({ id: 'a', kind: 'css', code: 'a { background: url(/x.png) }', match: 'shop.example.com/*' })]
+    expect(await count(stored)).toBe(1)
+    expect(await count(stored, { ...DEFAULT_SETTINGS, cssUrlPolicy: { 'shop.example.com': 'same-origin' } })).toBe(0)
   })
 })
