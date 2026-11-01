@@ -10,6 +10,7 @@
    * The field is therefore always empty on open. Typing into it replaces
    * whatever is stored; leaving it alone changes nothing.
    */
+  import { REVOKE_KEY_NOTICE } from '@shared/disclosure'
   import {
     ANTHROPIC_MODELS,
     DEFAULT_GENERATE_MODEL,
@@ -521,6 +522,8 @@
       </div>
     </div>
   {/if}
+
+  <p class="revoke">{REVOKE_KEY_NOTICE}</p>
 </section>
 
 <style>
@@ -543,6 +546,13 @@
     padding: var(--sp-13);
     border: 1px solid var(--border);
     border-radius: var(--r-card);
+  }
+
+  .revoke {
+    margin: var(--sp-11) 0 0;
+    max-width: 60ch;
+    font: 11.5px/1.5 var(--font-ui);
+    color: var(--text-faint);
   }
 
   .none p {

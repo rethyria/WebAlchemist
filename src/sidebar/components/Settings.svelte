@@ -8,6 +8,7 @@
    * form, a key field and room to read a disclosure, which is a poor fit for a
    * 320px column.
    */
+  import { REVOKE_KEY_NOTICE } from '@shared/disclosure'
   import { ACCENTS, type Accent, type CredentialStatus, type HealthCheckMode, type Settings } from '@shared/types'
   import { ACCENT_COLOURS } from '@shared/accents'
   import Label from './Label.svelte'
@@ -148,6 +149,7 @@
       Plain text in this browser profile. Browsers give extensions no keychain, so
       file permissions on the profile directory are the only protection.
     </span>
+    <span class="note">{REVOKE_KEY_NOTICE}</span>
   </div>
 
   <footer>
