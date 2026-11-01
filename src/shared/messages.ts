@@ -130,7 +130,7 @@ export type Message =
    */
 
   /* --- page-side operations ----------------------------------------- */
-  | { type: 'preview-css'; tabId: number; css: string }
+  | { type: 'preview-css'; tabId: number; css: string; approvedUrls?: string[] }
   | { type: 'clear-preview-css'; tabId: number; css: string }
   /**
    * Registers an unsaved transform and reloads the tab, so the preview runs in

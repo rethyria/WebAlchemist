@@ -65,3 +65,27 @@ export function checkCssTransform(
     transform.approvedCssUrls,
   )
 }
+
+/**
+ * Throws unless CSS may be applied to the page as a preview.
+ *
+ * A preview is the one place CSS reaches the live page before the user has
+ * read it or approved it. A request a rule causes is sent at once, and
+ * discarding the preview afterwards does not take it back, so a rule that
+ * fails the check is never applied. CSS that is only waiting for the user to
+ * approve external addresses fails here too, since those approvals are given
+ * in the approval panel, after the preview.
+ */
+export function assertPreviewable(
+  css: string,
+  settings: Settings,
+  tabUrl: string | undefined,
+  approvedUrls: readonly string[] | undefined,
+): void {
+  const check = checkCssForPage(css, settings, tabUrl, approvedUrls)
+  if (check.passed) return
+  throw new Error(
+    check.static[0]?.explanation ??
+      'This CSS loads addresses outside the site that are not approved yet, so it was not applied to the page.',
+  )
+}

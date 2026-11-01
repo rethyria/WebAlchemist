@@ -23,7 +23,7 @@ import type {
 import type { RefinementTurn } from './providers/types'
 import { overlayPaletteFor } from '@shared/accents'
 import * as badge from './badge'
-import { checkCssForPage, checkCssTransform, pageUrlFor } from './css-gate'
+import { assertPreviewable, checkCssForPage, checkCssTransform, pageUrlFor } from './css-gate'
 import { reconcile as reconcileContentScripts } from './content-scripts'
 import { buildProbeTransform } from './csp-probe'
 import { forgetSession, runHealthCheck, shouldCheck } from './health'
@@ -449,9 +449,14 @@ async function handle(
       await discardVault()
       return true
 
-    case 'preview-css':
+    case 'preview-css': {
+      // Before anything is injected, and enforced here rather than in the
+      // sidebar: the sidebar's own check is only a courtesy to the user.
+      const tab = await browser.tabs.get(message.tabId).catch(() => undefined)
+      assertPreviewable(message.css, await getSettings(), tab?.url, message.approvedUrls)
       await setPreviewCss(message.tabId, message.css)
       return true
+    }
 
     case 'clear-preview-css':
       await setPreviewCss(message.tabId, null)

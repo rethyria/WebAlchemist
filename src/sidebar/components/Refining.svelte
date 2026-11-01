@@ -90,7 +90,9 @@
   <header>
     <span class="live" class:idle={isJs && !jsRan} aria-hidden="true"></span>
     <span class="status">
-      {#if !isJs}
+      {#if !isJs && blocked}
+        Not applied to the page
+      {:else if !isJs}
         Live on the page
       {:else if jsRan}
         Ran once on this page
@@ -107,11 +109,19 @@
 
   {#if blocked}
     <div class="notice block">
-      <span class="notice-title">This code was not run</span>
-      <p>Static analysis rejected it before anything reached the page.</p>
+      <span class="notice-title">
+        {isJs ? 'This code was not run' : 'This CSS was not applied'}
+      </span>
+      <p>
+        {isJs ? 'Static analysis' : 'The CSS check'} rejected it before anything reached the
+        page.
+      </p>
       <ul>
         {#each analysis?.static.filter((f) => f.severity === 'block') ?? [] as finding}
           <li><code>{finding.api}</code> on line {finding.line} — {finding.explanation}</li>
+        {/each}
+        {#each analysis?.pendingUrls ?? [] as url}
+          <li>Loads <code>{url}</code>, which needs approval before it can be applied.</li>
         {/each}
       </ul>
       <p class="quiet">Say what to change below, or discard it.</p>

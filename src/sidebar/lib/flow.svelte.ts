@@ -1228,7 +1228,17 @@ export class Flow {
   private async applyPreview(result: GenerationResult): Promise<void> {
     if (result.kind !== 'css' || this.tabId === null) return
     await this.clearPreview()
-    await send({ type: 'preview-css', tabId: this.tabId, css: result.code })
+    // Nothing reaches the page until the CSS check has passed. A request a
+    // rule causes is sent at once and cannot be recalled by discarding it, so
+    // the preview is skipped and the panel says why. The background repeats
+    // the check before injecting.
+    if (!this.analysis?.passed) return
+    await send({
+      type: 'preview-css',
+      tabId: this.tabId,
+      css: result.code,
+      approvedUrls: this.approvedCssUrls,
+    })
     this.previewedCss = result.code
   }
 
