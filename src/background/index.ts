@@ -142,11 +142,23 @@ browser.webNavigation.onCommitted.addListener(async (details) => {
   // the old document sees that it is out of date. The forget steps are queued
   // behind it for the same reason every other CSS change is: one that finished
   // late would store a string for a document that is gone.
+  const restored = details.transitionQualifiers?.includes('forward_back') ?? false
   startDocument(details.tabId)
   await inTabQueue(details.tabId, async () => {
     await forgetCss('applied', details.tabId)
-    // The same goes for a preview: the document it was injected into is gone.
-    await forgetCss('preview', details.tabId)
+    /*
+     * The same goes for a preview, except when the document came back from the
+     * back-forward cache: that document is restored as it was, with the
+     * preview's stylesheet still in it, and forgetting the string would leave
+     * nothing that can remove it. The applied string is forgotten either way.
+     * If it is still stored for a document that was loaded afresh, a later
+     * removal finds nothing to remove and the next preview replaces it, so
+     * keeping it is the harmless mistake. Forgetting it for a restored document
+     * is not harmless, and applied CSS cannot be kept the same way: its
+     * comparison with the stored string would skip inserting into a document
+     * that does not have it.
+     */
+    if (!restored) await forgetCss('preview', details.tabId)
   })
   await evaluateTab(details.tabId, details.url, { navigated: true })
 })
