@@ -44,7 +44,7 @@ import { isSidebarPortName, ownerOfSidebarPort, panelOwner } from '@shared/sideb
 import { isApproved, spendApproval } from './approvals'
 import { encryptExport, openExport } from './export-crypto'
 import { blockedStates, runStaticAnalysis, staticProblem } from './code-gate'
-import { checkCssForPage, checkCssTransform, pageUrlFor, sameCssContext } from './css-gate'
+import { assertPreviewable, checkCssForPage, checkCssTransform, pageUrlFor, sameCssContext } from './css-gate'
 import {
   applyCssTransforms as applyCssTransformsFor,
   fromExtensionPage,
@@ -430,6 +430,10 @@ browser.webNavigation.onCommitted.addListener(async (details) => {
         // and the cached document still has the stylesheet. Making it the tab's
         // preview again would leave a preview nothing owns, so it is removed
         // below, outside this task because removal is queued too (#80).
+        orphaned = back.css
+      } else if (back && (await restoredPreviewRefused(details.tabId, details.url, back.css))) {
+        // The kill switch, the site's off switch, the excluded list or the CSS
+        // setting refuses it now, as it would refuse a new preview (#146).
         orphaned = back.css
       } else if (back) {
         await writeCss('preview', details.tabId, back.css)
@@ -1434,6 +1438,23 @@ async function clearCssPreviewsOn(include: (url: string) => boolean): Promise<vo
   for (const tabId of await previewedTabIds()) {
     const url = (await browser.tabs.get(tabId).catch(() => undefined))?.url
     if (url && include(url)) await clearPreviewCss(tabId)
+  }
+}
+
+/**
+ * Whether a preview restored from the back-forward cache would be refused as a
+ * new preview for the same page: the switches, the excluded list, and the CSS
+ * check for the page and its site setting. Approvals given for the original
+ * preview are not kept in the archive, so CSS that needs approved addresses is
+ * refused here too.
+ */
+async function restoredPreviewRefused(tabId: number, url: string, css: string): Promise<boolean> {
+  try {
+    await refuseWhenOff(tabId)
+    assertPreviewable(css, await getSettings(), url, undefined)
+    return false
+  } catch {
+    return true
   }
 }
 
