@@ -291,3 +291,90 @@ describe('binding keys stored before bindings existed, in one pass', () => {
     })
   })
 })
+
+describe('after the binding pass has run', () => {
+  async function withProvider(provider: Provider | null) {
+    const settings = await storage.getSettings()
+    await storage.saveSettings({
+      ...settings,
+      providers: provider ? [provider] : [],
+      activeProviderId: provider?.id ?? null,
+    })
+  }
+
+  // The pass skips a key whose provider is gone. Before the change, a provider
+  // with that id added later got the key bound to its address on first read.
+  it('refuses a key the pass skipped instead of binding it to a provider added later', async () => {
+    await storage.setCredential('p1', KEY)
+    await storage.bindStoredCredentials()
+    await withProvider(remote({ baseUrl: 'https://later.example.net/v1' }))
+
+    const error = await storage
+      .readCredentialForRequest(remote({ baseUrl: 'https://later.example.net/v1' }))
+      .catch((e: unknown) => e)
+
+    expect(error).toBeInstanceOf(storage.CredentialOriginError)
+    expect((error as Error).message).toMatch(/no recorded address/)
+    expect((await storage.readStoredCredential('p1'))?.boundTo).toBeUndefined()
+  })
+
+  // Control: with no pass recorded the same read binds, which is the legacy
+  // behaviour that is kept until the pass has run.
+  it('still binds on first read while no pass has run', async () => {
+    await storage.setCredential('p1', KEY)
+    const found = await storage.readCredentialForRequest(remote())
+    expect(found?.boundTo?.origin).toBe('https://api.example.com')
+  })
+
+  // Control: a bound key is not affected by the record.
+  it('still returns a bound key', async () => {
+    await storage.saveCredentialFor(remote(), KEY)
+    await storage.bindStoredCredentials()
+    expect(await storage.readCredentialForRequest(remote())).toMatchObject({ value: 'sk-secret' })
+  })
+
+  it('refuses the key in a request through the adapter and sends nothing', async () => {
+    await storage.setCredential('p1', KEY)
+    await storage.bindStoredCredentials()
+    const spy = stubFetch()
+
+    const adapter = await createOpenAiCompatibleProvider(remote())
+    const error = await adapter.review({ code: 'x', intent: 'y' }).catch((e: unknown) => e)
+
+    expect((error as ProviderError).kind).toBe('no-credential')
+    expect(spy).not.toHaveBeenCalled()
+  })
+
+  it('reports an unbound key as needing to be entered again, and not before the pass', async () => {
+    await withProvider(remote())
+    await storage.setCredential('p1', KEY)
+    expect((await storage.getAllCredentialStatuses())[0]!.needsReentry).toBeUndefined()
+
+    // A key whose provider was not configured when the pass ran stays unbound.
+    await withProvider(null)
+    await storage.bindStoredCredentials()
+    await withProvider(remote())
+
+    expect((await storage.getAllCredentialStatuses())[0]!).toMatchObject({ needsReentry: true })
+    expect(await storage.getCredentialStatus('p1')).toMatchObject({ needsReentry: true })
+  })
+
+  it('records the pass even when there is nothing to bind', async () => {
+    await storage.bindStoredCredentials()
+    expect(localArea.raw()['credentialBindingPassDone']).toBe(true)
+  })
+
+  // Control for the two tests above: a pass that throws records nothing, so it
+  // runs again at the next unlock.
+  it('does not record a pass that failed on a locked vault', async () => {
+    await withProvider(remote())
+    await storage.setCredential('p1', KEY)
+    await storage.enableVault('correct horse battery')
+    await storage.lockVault()
+    await expect(storage.bindStoredCredentials()).rejects.toThrow()
+    expect(localArea.raw()['credentialBindingPassDone']).toBeUndefined()
+
+    await storage.unlockVault('correct horse battery')
+    expect(localArea.raw()['credentialBindingPassDone']).toBe(true)
+  })
+})

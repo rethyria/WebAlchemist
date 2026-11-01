@@ -99,6 +99,20 @@ async function reregister(): Promise<void> {
 /* ------------------------------------------------------------------ */
 
 browser.runtime.onInstalled.addListener(async (details) => {
+  // First, before anything that reads settings or credentials. Keys stored
+  // before bindings existed are bound now, while the settings are still the
+  // ones they were entered under. A sealed vault is locked after a restart; its
+  // keys are bound when it is unlocked. A failure is logged and does not stop
+  // the registrations below; the pass runs again at the next unlock or update.
+  // Only the message is logged, never a credential.
+  if (details.reason === 'update' || details.reason === 'install') {
+    await bindStoredCredentials().catch((error: unknown) => {
+      console.error(
+        'Binding stored credentials failed:',
+        error instanceof Error ? error.message : 'unknown error',
+      )
+    })
+  }
   // The platform wipes every userScripts registration on update, and drops
   // dynamic content scripts too. Without this, transforms silently stop
   // working after an extension update — with no error, which is the worst
@@ -107,10 +121,6 @@ browser.runtime.onInstalled.addListener(async (details) => {
     await reregister()
     await reconcileContentScripts()
   }
-  // Keys stored before bindings existed are bound now, while the settings are
-  // still the ones they were entered under. A sealed vault is locked after a
-  // restart; its keys are bound when it is unlocked.
-  if (details.reason === 'update') await bindStoredCredentials().catch(() => {})
 })
 
 /*

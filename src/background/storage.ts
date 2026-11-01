@@ -72,6 +72,8 @@ const KEY_SETTINGS = 'settings'
 const KEY_TRANSFORMS = 'transforms'
 const KEY_CREDENTIALS = 'credentials'
 const KEY_USAGE = 'usage'
+/** Set to true once bindStoredCredentials has finished a pass. */
+const KEY_BINDING_PASS = 'credentialBindingPassDone'
 
 type CredentialMap = Record<string, Credential>
 
@@ -690,11 +692,13 @@ export async function discardVault(): Promise<void> {
 
 /** A stored credential was entered for a different destination than the provider's current one. */
 export class CredentialOriginError extends Error {
-  constructor(label: string, entered: string, current: string | null) {
+  constructor(label: string, entered: string | null, current: string | null) {
     super(
       current === null
         ? `The key for ${label} cannot be used because the provider has no valid address. Fix the address in settings and enter the key again.`
-        : `The key for ${label} was entered for ${entered}, but the provider now sends requests to ${current}. The key was not sent. Enter it again in settings.`,
+        : entered === null
+          ? `The key for ${label} has no recorded address, so it was not sent. Enter it again in settings.`
+          : `The key for ${label} was entered for ${entered}, but the provider now sends requests to ${current}. The key was not sent. Enter it again in settings.`,
     )
     this.name = 'CredentialOriginError'
   }
@@ -712,23 +716,26 @@ export class CredentialOriginError extends Error {
  * fall through to the unauthenticated path that loopback providers use.
  *
  * Migration: credentials written before binding existed carry no `boundTo`.
- * The first read binds one to the provider's destination at that moment and
- * saves it. That trusts the current settings, which is the only information
- * available, and it is the same trust the old code placed in them on every
- * request. A credential read for the first time after an unwanted edit is
- * therefore bound to the unwanted address; the other choice was to discard
- * every stored key on upgrade.
+ * bindStoredCredentials binds them in one pass when the extension is updated,
+ * or when a sealed vault is first unlocked afterwards, and records that the
+ * pass has run. Until it has run, a read still binds an unbound credential to
+ * the provider's destination at that moment and saves it, which trusts the
+ * current settings. After it has run, an unbound credential is refused, because
+ * the pass skipped it for a reason (its provider was removed or had no valid
+ * address) and binding it now would attach it to whatever address the settings
+ * hold at some later time.
  */
 export async function readCredentialForRequest(provider: Provider): Promise<Credential | null> {
   const found = (await readCredentialMap(true))[provider.id]
   if (!found) return null
-  if (found.boundTo) return checkedForProvider(provider, found)
+  if (found.boundTo) return checkedForProvider(provider, found, true)
 
   return withCredentialLock(async () => {
     const map = await readCredentialMap()
     const current = map[provider.id]
     if (!current) return null
-    const checked = checkedForProvider(provider, current)
+    const passDone = await bindingPassDone()
+    const checked = checkedForProvider(provider, current, passDone)
     if (!current.boundTo) {
       map[provider.id] = checked
       await writeCredentialMap(map)
@@ -737,18 +744,29 @@ export async function readCredentialForRequest(provider: Provider): Promise<Cred
   })
 }
 
+/** Whether bindStoredCredentials has finished a pass. */
+async function bindingPassDone(): Promise<boolean> {
+  return (await browser.storage.local.get(KEY_BINDING_PASS))[KEY_BINDING_PASS] === true
+}
+
 /**
- * Returns the credential bound to the provider's destination, binding a legacy
- * one that has no binding, or throws when the binding names another destination.
- * Does not write; the caller stores the bound copy when it has a reason to.
+ * Returns the credential bound to the provider's destination, or throws when
+ * the binding names another destination. A credential with no binding is bound
+ * to the destination while the binding pass has not run, and refused once it
+ * has. Does not write; the caller stores the bound copy when it has a reason to.
  */
-function checkedForProvider(provider: Provider, credential: Credential): Credential {
+function checkedForProvider(
+  provider: Provider,
+  credential: Credential,
+  passDone: boolean,
+): Credential {
   const destination = destinationOf(provider)
+  const refusedUnbound = passDone && !credential.boundTo
   const bound = credential.boundTo ?? destination ?? undefined
-  if (!destination || !bound || !sameBinding(bound, destination)) {
+  if (!destination || !bound || refusedUnbound || !sameBinding(bound, destination)) {
     throw new CredentialOriginError(
       provider.label,
-      credential.boundTo?.origin ?? '(unknown)',
+      credential.boundTo?.origin ?? null,
       destination?.origin ?? null,
     )
   }
@@ -757,7 +775,7 @@ function checkedForProvider(provider: Provider, credential: Credential): Credent
 
 /**
  * Binds every stored credential that has no binding to its provider's current
- * destination, in one pass.
+ * destination, in one pass, and records that the pass has run.
  *
  * Without this a key stored before bindings existed was bound by whichever
  * request read it first, which could be months after the upgrade and after the
@@ -765,7 +783,10 @@ function checkedForProvider(provider: Provider, credential: Credential): Credent
  * entered for. Doing it once, at the first point the extension runs after the
  * upgrade (a plaintext store) or the first point the sealed map can be written
  * (unlock), keeps that window short. A credential whose provider has been
- * removed, or has no valid address, is left unbound and is refused on use.
+ * removed, or has no valid address, is left unbound. Once the pass has run,
+ * reads refuse an unbound credential instead of binding it (see
+ * readCredentialForRequest). The record is written only when the pass finishes,
+ * so a pass that throws, for example on a locked vault, runs again later.
  * Throws LockedError for a sealed vault that is locked.
  */
 export async function bindStoredCredentials(): Promise<void> {
@@ -782,6 +803,7 @@ export async function bindStoredCredentials(): Promise<void> {
       changed = true
     }
     if (changed) await writeCredentialMap(map)
+    await browser.storage.local.set({ [KEY_BINDING_PASS]: true })
   })
 }
 
@@ -814,7 +836,8 @@ export function withCredentialForRequest<T>(
 ): Promise<T> {
   return withCredentialLock(async () => {
     const found = (await readCredentialMap())[provider.id]
-    const credential = found ? checkedForProvider(provider, found) : null
+    const passDone = await bindingPassDone()
+    const credential = found ? checkedForProvider(provider, found, passDone) : null
     const store = async (replacement: Credential): Promise<boolean> => {
       const map = await readCredentialMap()
       const current = map[provider.id]
@@ -893,15 +916,20 @@ function oauthStatus(
 
 /**
  * True when requests would refuse this credential because of where it was
- * entered. A credential with no binding is not a mismatch: it is bound on its
- * first read, so reporting it here would flag every key stored before binding
- * existed. Uses the same comparison as the request path so the two cannot
+ * entered. Before the binding pass has run, a credential with no binding is
+ * not a mismatch, because a read binds it, so reporting it would flag every
+ * key stored before binding existed. After the pass it is refused, and is
+ * reported. Uses the same comparison as the request path so the two cannot
  * disagree.
  */
-function refusedForProvider(provider: Provider | undefined, credential: Credential): boolean {
+function refusedForProvider(
+  provider: Provider | undefined,
+  credential: Credential,
+  passDone: boolean,
+): boolean {
   if (!provider) return false
   try {
-    checkedForProvider(provider, credential)
+    checkedForProvider(provider, credential, passDone)
     return false
   } catch (error) {
     if (error instanceof CredentialOriginError) return true
@@ -913,13 +941,14 @@ function statusFor(
   providerId: string,
   provider: Provider | undefined,
   credential: Credential | undefined,
+  passDone: boolean,
 ): CredentialStatus {
   if (!credential) return { providerId, configured: false }
   const base: CredentialStatus =
     credential.kind === 'oauth'
       ? oauthStatus(providerId, credential)
       : { providerId, configured: true, kind: 'api_key' }
-  return refusedForProvider(provider, credential) ? { ...base, needsReentry: true } : base
+  return refusedForProvider(provider, credential, passDone) ? { ...base, needsReentry: true } : base
 }
 
 /** The only credential shape any other context is allowed to see. */
@@ -928,13 +957,16 @@ export async function getCredentialStatus(providerId: string): Promise<Credentia
   const provider = credential
     ? (await getSettings()).providers.find((p) => p.id === providerId)
     : undefined
-  return statusFor(providerId, provider, credential)
+  return statusFor(providerId, provider, credential, await bindingPassDone())
 }
 
 export async function getAllCredentialStatuses(): Promise<CredentialStatus[]> {
   const map = await readCredentialMap()
   const settings = await getSettings()
-  return settings.providers.map((provider) => statusFor(provider.id, provider, map[provider.id]))
+  const passDone = await bindingPassDone()
+  return settings.providers.map((provider) =>
+    statusFor(provider.id, provider, map[provider.id], passDone),
+  )
 }
 
 /* ------------------------------------------------------------------ */
