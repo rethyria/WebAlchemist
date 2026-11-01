@@ -353,3 +353,55 @@ describe('capture-region (#135, #119)', () => {
     })
   })
 })
+
+describe('closing the sidebar removes the picker and the lock outline (#108)', () => {
+  const closeSidebar = async (name: string) => {
+    const port = { name, sender: extensionPage, onDisconnect: { addListener: vi.fn() } }
+    onConnect(port)
+    await port.onDisconnect.addListener.mock.calls[0]![0]()
+    return port
+  }
+  const overlayMessages = () =>
+    sentToTabs.filter((m) => m.message.type === 'cancel-picking' || m.message.type === 'clear-lock')
+
+  it('sends cancel-picking and clear-lock to the tab the window used for picking', async () => {
+    await onMessage({ type: 'start-picking', tabId: 9 }, extensionPage)
+    await closeSidebar('wa-sidebar:3')
+    await vi.waitFor(() =>
+      expect(overlayMessages()).toEqual([
+        { tabId: 9, message: { type: 'cancel-picking' } },
+        { tabId: 9, message: { type: 'clear-lock' } },
+      ]),
+    )
+  })
+
+  it('also covers a tab used only to edit a description', async () => {
+    await onMessage({ type: 'context-for-anchor', tabId: 12, anchor: {} }, extensionPage)
+    await closeSidebar('wa-sidebar:3')
+    await vi.waitFor(() => expect(overlayMessages().map((m) => m.tabId)).toEqual([12, 12]))
+  })
+
+  it('leaves the tab of another window alone (control)', async () => {
+    tabHooks.tab = (tabId) => ({ id: tabId, active: true, windowId: 4, url: 'https://www.example.com/' })
+    await onMessage({ type: 'start-picking', tabId: 9 }, extensionPage)
+    await closeSidebar('wa-sidebar:3')
+    await new Promise((r) => setTimeout(r, 20))
+    expect(overlayMessages()).toEqual([])
+  })
+
+  it('sends nothing when the sidebar never started a run (control)', async () => {
+    await closeSidebar('wa-sidebar:3')
+    await new Promise((r) => setTimeout(r, 20))
+    expect(overlayMessages()).toEqual([])
+  })
+
+  it('sends nothing twice for one run', async () => {
+    await onMessage({ type: 'start-picking', tabId: 9 }, extensionPage)
+    await closeSidebar('wa-sidebar:3')
+    await vi.waitFor(() => expect(overlayMessages()).toHaveLength(2))
+    sentToTabs.length = 0
+    await closeSidebar('wa-sidebar:3')
+    await new Promise((r) => setTimeout(r, 20))
+    expect(overlayMessages()).toEqual([])
+  })
+})

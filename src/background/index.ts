@@ -28,6 +28,7 @@ import type {
 import type { RefinementTurn } from './providers/types'
 import { overlayPaletteFor } from '@shared/accents'
 import * as badge from './badge'
+import { recordRunTab, takeRunTabs } from './run-tabs'
 import { isSidebarPortName, windowOfSidebarPort } from '@shared/sidebar-port'
 import { documentOf, forgetTab, inTabQueue, startDocument } from './tab-queue'
 import { reconcile as reconcileContentScripts } from './content-scripts'
@@ -650,6 +651,7 @@ async function handle(
       return true
 
     case 'start-picking': {
+      await recordRunTabOf(message.tabId)
       // Inject only when nothing is answering. executeScript re-runs the file
       // unconditionally, and a second instance brings a second overlay and a
       // second set of listeners — see the guard in the content script.
@@ -683,6 +685,7 @@ async function handle(
       return askContent(message.tabId, { type: 'recapture' })
 
     case 'context-for-anchor': {
+      await recordRunTabOf(message.tabId)
       // The page keeps the palette from the last start-picking, and a page
       // that has had no pick has none, so Edit description drew no outline.
       const settings = await getSettings()
@@ -951,6 +954,23 @@ void (async () => {
   await clearPreviewsWhere(ownerIsGone)
 })()
 
+/** Records the tab of a run under the window it is in, so closing that window's sidebar can clean it. */
+async function recordRunTabOf(tabId: number): Promise<void> {
+  const tab = await browser.tabs.get(tabId).catch(() => undefined)
+  if (tab?.windowId !== undefined) await recordRunTab(tab.windowId, tabId).catch(() => {})
+}
+
+/**
+ * Removes the picker and the lock outline from the tabs this window's sidebar
+ * used. Both messages are harmless on a page that has neither.
+ */
+async function clearPageOverlays(windowId: number): Promise<void> {
+  for (const tabId of await takeRunTabs(windowId)) {
+    await sendToContent(tabId, { type: 'cancel-picking' })
+    await sendToContent(tabId, { type: 'clear-lock' })
+  }
+}
+
 /**
  * The sidebar holds a port open for exactly as long as it is on screen. Its
  * disconnect is the only reliable signal that the panel closed — which is the
@@ -980,6 +1000,7 @@ browser.runtime.onConnect.addListener((port) => {
         // at this moment: right after a start-up the other windows' sidebars
         // have not reconnected yet, and they are still open.
         void clearPreviewsWhere((owner) => owner === windowId)
+        void clearPageOverlays(windowId)
       }
     })
     return
