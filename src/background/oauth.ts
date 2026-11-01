@@ -228,17 +228,32 @@ export async function connect(config: OAuthConfig): Promise<Extract<Credential, 
 
   const code = parseRedirect(returned, state)
 
-  const response = await fetch(config.tokenEndpoint, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
-      grant_type: 'authorization_code',
-      code,
-      redirect_uri: redirectUri,
-      client_id: config.clientId,
-      code_verifier: verifier,
-    }),
-  })
+  /*
+   * `redirect: 'error'`: the default follows a 307 or 308 and sends the same
+   * body to the new location, which would hand the code and the verifier to any
+   * address the token endpoint named, including plain http. The endpoint was
+   * checked above; a redirect target was not.
+   */
+  let response: Response
+  try {
+    response = await fetch(config.tokenEndpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      redirect: 'error',
+      body: new URLSearchParams({
+        grant_type: 'authorization_code',
+        code,
+        redirect_uri: redirectUri,
+        client_id: config.clientId,
+        code_verifier: verifier,
+      }),
+    })
+  } catch (error) {
+    throw new Error(
+      'The sign-in server could not be reached, or it redirected the token request, which is not allowed. Check the token endpoint in settings.',
+      { cause: error },
+    )
+  }
 
   if (!response.ok) {
     throw new Error(

@@ -112,6 +112,9 @@ export async function createOpenAiCompatibleProvider(
         return await fetch(`${baseUrl}/chat/completions`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', ...auth },
+          // A redirect would re-send the bearer token and the prompt to a
+          // location the base URL check never saw.
+          redirect: 'error',
           body,
         })
       } catch (error) {
@@ -428,6 +431,8 @@ async function requestRefresh(
         refresh_token: credential.refreshToken,
         client_id: credential.clientId,
       }),
+      // A 307 or 308 would send the refresh token to the new location.
+      redirect: 'error',
       // The caller holds the credential lock while this waits.
       signal: AbortSignal.timeout(TOKEN_REQUEST_TIMEOUT_MS),
     })
