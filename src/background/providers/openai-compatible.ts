@@ -398,12 +398,27 @@ async function refreshToken(
       { cause: error },
     )
   }
-  const refreshed = credentialFrom(
-    tokens,
-    { authorizationEndpoint: '', tokenEndpoint: credential.tokenEndpoint, clientId: credential.clientId, scopes: [] },
-    Date.now(),
-    credential.refreshToken,
-  )
+  /*
+   * `credentialFrom` raises a plain Error when the response has no access
+   * token. Left as it is, that reached the sidebar with no kind, which shows a
+   * generic failure instead of the reconnect state this one needs.
+   */
+  let refreshed: ReturnType<typeof credentialFrom>
+  try {
+    refreshed = credentialFrom(
+      tokens,
+      { authorizationEndpoint: '', tokenEndpoint: credential.tokenEndpoint, clientId: credential.clientId, scopes: [] },
+      Date.now(),
+      credential.refreshToken,
+    )
+  } catch (error) {
+    throw new ProviderError(
+      'The sign-in server returned no access token. Reconnect this provider in settings.',
+      'auth',
+      false,
+      { cause: error },
+    )
+  }
   // Carried over: the refreshed token goes to the same destination as the one
   // it replaces, and dropping the binding would send it back through migration.
   await setCredential(providerId, {
