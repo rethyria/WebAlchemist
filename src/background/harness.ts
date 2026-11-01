@@ -15,9 +15,36 @@
 import { pathMatcherFor } from '@shared/match'
 import type { Transform } from '@shared/types'
 import { errorAttributeName } from '@shared/script-errors'
+import { runtimeGuardSource } from './runtime-guard'
 
 function jsString(value: string): string {
   return JSON.stringify(value)
+}
+
+/**
+ * The source that is registered for a transform: the runtime guard, when there
+ * is one, followed by the wrapped transform.
+ *
+ * The guard is joined to the wrapper here and is not part of `wrapTransform`.
+ * The static analysis is tested against the wrapper's text, and the guard has
+ * to name the window, the prototype chain and `constructor` to do its work,
+ * which the analysis refuses in model-written code. The guard is this
+ * extension's own fixed code and is not analysed. It is one source and not two
+ * so that a guard that fails stops the transform: separate sources run one
+ * after another, and an error in the first would not prevent the second.
+ *
+ * `guard` is false for a world that is not USER_SCRIPT, because the page's own
+ * world is the page, and removing its `fetch` would break the page. It is also
+ * false for the CSP probe, which exists to measure what the CSP alone allows.
+ */
+export function scriptSourceFor(
+  transform: Transform,
+  errorToken: string,
+  options: { guard: boolean },
+): string {
+  const wrapped = wrapTransform(transform, errorToken)
+  if (!options.guard) return wrapped
+  return `${runtimeGuardSource(transform.capabilities, errorAttributeName(errorToken))}\n${wrapped}`
 }
 
 /**

@@ -83,7 +83,7 @@ A saved transform keeps three text fields that are not merged.
 
 ## Safety design
 
-Model-written code runs on pages where the user is signed in, so the extension decides whether to save and run code before any of it runs. Four measures apply to JavaScript, and a fifth applies to CSS. None of them is a complete defence, and the design does not claim that one is.
+Model-written code runs on pages where the user is signed in, so the extension decides whether to save and run code before any of it runs. Five measures apply to JavaScript, and a sixth applies to CSS. None of them is a complete defence, and the design does not claim that one is.
 
 ### Static analysis
 
@@ -114,6 +114,10 @@ CSS can make the browser request an address, and the request can carry page data
 ### The content security policy of the script world
 
 Each transform runs in its own user script world with a content security policy that is built from its declared capabilities. The policy is set, but it is not a security boundary. A measurement on 2026-08-07 in Firefox 145 showed that Firefox does not apply `connect-src` in a user script world: `fetch`, `XMLHttpRequest`, `sendBeacon`, `WebSocket` and `EventSource` all reached a server with `connect-src 'none'` in force. Only image requests were stopped, by `img-src`. The result and the method are in `test/csp/README.md`. The declared capabilities (`network`, `storage` and `cookies`) are therefore disclosures that the user sees at approval, and the control over them is that the static analysis refuses code that uses a capability it did not declare.
+
+### The runtime guard
+
+Before a transform runs in its user script world, a guard (`src/background/runtime-guard.ts`) defines throwing properties on the window for every feature that the transform did not declare a capability for: the network features, storage, cookies, workers, `open`, `eval`, `Function`, strings given to timers, the page's real window and the windows of frames. It works independently of the static analysis. Measurements in Firefox 159 on 2026-11-01 showed that it hides these features from the routes to the window that were tried and that the page's own use is unaffected. They also showed what it does not cover: windows reached by index (`window[0]`) for iframes that the transform creates, and requests made by inserted `style` and `iframe` elements. The method, the controls and the list are in `test/runtime-guard/README.md`. The guard is not applied to the MAIN world.
 
 ### Other protections
 

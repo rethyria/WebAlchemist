@@ -40,7 +40,7 @@ import { AWAITING_APPROVAL_NOTE } from '@shared/transform-state'
 import { errorTokenFor, forgetErrorTokens } from './error-tokens'
 import { parsePattern } from '@shared/match'
 import { problemWithStoredCode } from './code-gate'
-import { wrapTransform } from './harness'
+import { scriptSourceFor } from './harness'
 import { userScripts, type ExecutionWorld, type Mv3RegisteredUserScript } from './userscripts-api'
 import { getOffHosts } from './site-off'
 import { getExcludedSites } from './excluded-sites'
@@ -212,8 +212,17 @@ async function registrationFor(
       // stays, so that turning a site back on needs no re-registration of
       // anything else.
       ...(excludeMatches ? { excludeMatches } : {}),
-      // Wrapped so the transform re-applies after framework re-renders.
-      js: [{ code: wrapTransform(transform, await errorTokenFor(transform.id)) }],
+      // Wrapped so the transform re-applies after framework re-renders, and
+      // preceded by the guard that removes the features it did not declare a
+      // capability for (#139). The CSP probe is left unguarded: it measures
+      // what the CSP alone stops.
+      js: [
+        {
+          code: scriptSourceFor(transform, await errorTokenFor(transform.id), {
+            guard: world === 'USER_SCRIPT' && !options.skipAnalysis,
+          }),
+        },
+      ],
       world: world satisfies ExecutionWorld,
       ...(world === 'USER_SCRIPT' ? { worldId } : {}),
       runAt: 'document_idle',

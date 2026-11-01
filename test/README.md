@@ -47,6 +47,10 @@ node test/contrast/probe.mjs
 | `suspend/probe.mjs` | Does suspend take a transform off the page, and resume put it back? |
 | `contrast/probe.mjs` | Does every surface meet WCAG in both schemes? (#38) |
 | `csp/server.mjs` | Does the user script world enforce `connect-src`? (#21) |
+| `vault-session/probe.mjs` | Can a content script read `storage.session`? (#79) |
+| `runtime-guard/probe.mjs` | Does the runtime guard hide undeclared features from every route to a window, and leave the page alone? (#139) |
+| `runtime-guard/techniques.mjs` | Which way of removing a feature from a world works? (#139) |
+| `runtime-guard/integration.mjs` | Is the guard in the registration the extension makes? (#139) |
 
 The CSP one is separate — `npm run verify:csp` — because it needs a probe-only
 build.
@@ -70,6 +74,9 @@ nothing rather than as a pass.
 
 ## Things worth knowing before writing another one
 
+- **`web-ext run` picks a random debugging port.** The probes read it from
+  `WA_RDP_PORT` and default to 41365. Find the port with `ss -ltnp` while the
+  development Firefox runs.
 - **A message from the background does not reach the background's own
   listener.** `runtime.sendMessage` and `runtime.connect` exclude the sender, so
   anything testing a message handler has to send from another extension
