@@ -21,7 +21,9 @@ import {
   GENERATE_SYSTEM_PROMPT,
   REVIEW_SYSTEM_PROMPT,
   fencePageContent,
+  fenceSavedTransform,
   pageDataSections,
+  randomNonce,
   repairPrompt,
   reviewContent,
   scopeInstruction,
@@ -236,9 +238,10 @@ export async function createOpenAiCompatibleProvider(
     },
 
     async generate(request: GenerateRequest): Promise<GenerationResult> {
-      const instruction = request.repair
-        ? repairPrompt(request.repair)
-        : request.instruction
+      // One value for every fence and section name in this request, so the
+      // instruction can name sections the page's own text cannot imitate.
+      const nonce = randomNonce()
+      const instruction = request.repair ? repairPrompt(nonce) : request.instruction
 
       /*
        * Two fixes in one line. The page content is fenced, for the reason in
@@ -254,8 +257,12 @@ export async function createOpenAiCompatibleProvider(
        */
       const text = [
         instruction,
-        scopeInstruction(request.scopeDepth, request.scopeContainer ?? null),
-        fencePageContent(JSON.stringify(request.context, null, 2) + pageDataSections(request)),
+        scopeInstruction(request.scopeDepth, request.scopeContainer ?? null, nonce),
+        ...(request.repair ? [fenceSavedTransform(request.repair, nonce)] : []),
+        fencePageContent(
+          JSON.stringify(request.context, null, 2) + pageDataSections(request, nonce),
+          nonce,
+        ),
       ].join('\n\n')
 
       const shot = request.context.screenshot

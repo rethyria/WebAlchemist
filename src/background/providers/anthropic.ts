@@ -24,7 +24,9 @@ import {
   GENERATE_SYSTEM_PROMPT,
   REVIEW_SYSTEM_PROMPT,
   fencePageContent,
+  fenceSavedTransform,
   pageDataSections,
+  randomNonce,
   repairPrompt,
   reviewContent,
   scopeInstruction,
@@ -354,20 +356,23 @@ export async function createAnthropicProvider(
 export function buildGenerationContent(
   request: GenerateRequest,
 ): Anthropic.MessageParam['content'] {
-  const instruction = request.repair
-    ? repairPrompt(request.repair)
-    : request.instruction
+  // One value for every fence and section name in this request, so the
+  // instruction can name sections the page's own text cannot imitate.
+  const nonce = randomNonce()
+  const instruction = request.repair ? repairPrompt(nonce) : request.instruction
 
   /*
-   * Instruction first, then the page, fenced. The order matters as much as the
+   * Instruction first, then the data, fenced. The order matters as much as the
    * fence: what the user asked for is stated before any page-controlled text
    * has been read, so the request cannot be reframed by content arriving after
-   * it. See `fencePageContent`.
+   * it. On repair the saved transform is data too, in its own block. See
+   * `fencePageContent` and `fenceSavedTransform`.
    */
   const text = [
     instruction,
-    scopeInstruction(request.scopeDepth, request.scopeContainer ?? null),
-    fencePageContent(describeContext(request.context) + pageDataSections(request)),
+    scopeInstruction(request.scopeDepth, request.scopeContainer ?? null, nonce),
+    ...(request.repair ? [fenceSavedTransform(request.repair, nonce)] : []),
+    fencePageContent(describeContext(request.context) + pageDataSections(request, nonce), nonce),
   ].join('\n\n')
 
   const shot = request.context.screenshot
