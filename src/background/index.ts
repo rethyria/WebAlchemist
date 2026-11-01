@@ -27,6 +27,7 @@ import { reconcile as reconcileContentScripts } from './content-scripts'
 import { buildProbeTransform } from './csp-probe'
 import { forgetSession, runHealthCheck, shouldCheck } from './health'
 import { withKeepalive } from './keepalive'
+import { isContentEvent as isContentEventType, isExtensionPage } from './sender'
 import { connect as connectOAuth } from './oauth'
 import { resolveActiveProvider, ProviderError } from './providers'
 import {
@@ -153,12 +154,7 @@ browser.webNavigation.onCommitted.addListener(async (details) => {
  * switch and answer a page-side event with a bare `{ ok: true }`.
  */
 function isContentEvent(message: Message | ContentEvent): message is ContentEvent {
-  return (
-    message.type === 'element-hovered' ||
-    message.type === 'element-picked' ||
-    message.type === 'picking-cancelled' ||
-    message.type === 'health-check-result'
-  )
+  return isContentEventType(message) || message.type === 'health-check-result'
 }
 
 browser.runtime.onMessage.addListener(
@@ -167,6 +163,15 @@ browser.runtime.onMessage.addListener(
     sender,
   ): Promise<MessageResponse<unknown>> | undefined => {
     if (isContentEvent(message)) return undefined
+
+    // Everything past this point is privileged. See sender.ts for why the
+    // check is on the URL.
+    if (!isExtensionPage(sender)) {
+      return Promise.resolve({
+        ok: false,
+        error: { message: 'This message is only accepted from the extension\'s own pages.' },
+      })
+    }
 
     return handle(message, sender).then(
       (data) => ({ ok: true, data }),
@@ -633,6 +638,13 @@ async function clearAllPreviews(): Promise<void> {
  * moment every preview has to come back out.
  */
 browser.runtime.onConnect.addListener((port) => {
+  // Both ports start paid model calls or clear previews, so neither is open to
+  // a content script. The port is closed so the sender sees a disconnect.
+  if (!isExtensionPage(port.sender)) {
+    port.disconnect()
+    return
+  }
+
   if (port.name === 'wa-sidebar') {
     port.onDisconnect.addListener(() => {
       void clearAllPreviews()
