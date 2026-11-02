@@ -6,11 +6,11 @@ Measured on 2026-11-01 in Firefox 159.0 (flatpak build, SteamOS) with the window
 
 ## Result
 
-The screenshot path works as designed in every case that was driven, with two exceptions that the measurements show. The paid end-to-end call, which would show how a real model answers a screenshot, is not part of this and comes later.
+The screenshot path works as designed in every case that was driven, with the defects that the sections below list. The crop was fixed on 2026-11-02 and is measured before and after. The paid end-to-end call, which would show how a real model answers a screenshot, is not part of this and comes later.
 
 | Question | Result |
 |---|---|
-| Does the image match the drawn region? | Yes within 1 CSS pixel on every edge at device pixel ratios of 1, 1.5 and 2, after the page scrolled, and for a region drawn with the "Add a screenshot" button. Exception: a region of 640 by 680 CSS pixels at a ratio of 2 is 1.06 CSS pixels short at its right and bottom edges. |
+| Does the image match the drawn region? | Yes, to within one device pixel on every edge, at page zooms that give ratios of 1.0, 1.5, 1.8 and 2.0, with a region of 640 by 680 CSS pixels and one of 200 by 150, and after the page scrolled. This was not so before the fix of the crop: see the section on the crop. |
 | Is the wrong tab ever captured? | No. A request for a tab that is not in front, and a request with another address than the tab's, are refused with a message and return no image. |
 | Is the all-sites grant handed back? | Yes. It is not held before the screenshot, is held while the image is taken, and is not held after the panel's Cancel button ends the run. |
 | Is anything sent without Generate? | No. The stub provider received no request while the screenshot was taken. After Generate it received one request, and the image in it is byte-identical to the one the panel showed. |
@@ -43,7 +43,7 @@ Zoom is set with `tabs.setZoom`, which gives device pixel ratios of 1.0, 1.5 and
 
 The edges are page positions in CSS pixels at which the image starts and ends, read from the cell edges inside it, so the region's own edges are the values in the second column added together. In the scrolled cases the page scrolled after the region was drawn, and the expected edges are the page position the region had when it was drawn, so the panel's move of the region by the scroll amount is part of what is measured. The panel showed its note that the area moved in both cases and not in the others.
 
-The large region has cell edges 1.995 device pixels per CSS pixel apart where 2.000 is expected, so the image is resampled by about 0.25 percent. Its width is 1276 pixels where 1280 is expected, and the edge position drifts by 1.5 CSS pixels from one side of the image to the other. The request was sent with a viewport width of 686, which is the rounded value of 685.5, and the crop uses that number to convert CSS pixels to device pixels (`captureRegion` in `src/background/index.ts`). The cause was not isolated further than that.
+The large region has cell edges 1.995 device pixels per CSS pixel apart where 2.000 was expected. The first version of this note took that for resampling by the crop. It is the scale of the capture itself, as the section on the crop shows. The edge positions in the table above were computed with a scale of 2.000 and are therefore off by up to 1 CSS pixel at the far side of a large region; the section on the crop gives the positions again with the scale that was measured.
 
 ## Controls
 
@@ -61,6 +61,61 @@ The large region has cell edges 1.995 device pixels per CSS pixel apart where 2.
 | A model that reads images gets the screenshot controls | Passes |
 | The settings after the run are identical to the saved copy | Passes |
 
+## The crop (#37, fixed)
+
+The first measurement reported a region of 640 by 680 CSS pixels at a ratio of 2 as 4 device pixels short (1276 by 1356 where 1280 by 1360 were expected) and as resampled. Re-measured on 2026-11-02 in Firefox 159.0 with `crop.mjs`, which asks for each region the way the panel does and analyses the image that comes back.
+
+### What the capture is
+
+The scale of a capture is not the page's device pixel ratio. `crop.mjs` fits the scale from the cell edges in a raw `captureVisibleTab` image of the whole viewport (17 to 34 edges across), and finds these values.
+
+| Page zoom | Page's ratio | Capture, device pixels | Capture's scale, pixels per CSS pixel |
+|---|---|---|---|
+| 2/3 | 1.0000 | 1377 × 1440 | 1.0051 |
+| 1 | 1.5000 | 1371 × 1434 | 1.5000 |
+| 6/5 | 1.8182 | 1359 × 1420 | 1.8000 |
+| 4/3 | 2.0000 | 1368 × 1430 | 1.9951 |
+
+At a page zoom of 4/3 the capture has 1.9951 pixels for each CSS pixel, so a region of 640 CSS pixels is 1276.9 pixels wide in it, and an image of 1276 pixels is correct for the scale that Firefox used. The 4 pixels were not lost by the extension. Firefox's own crop does the same: `captureVisibleTab` with its `rect` option returned 1276 by 1356 for the same region (measured, and not used). The measured scale is close to 1.5 × 1.33, which suggests that the capture uses the zoom step of 133 percent where the page's ratio uses 4/3; that was not checked in Firefox's code.
+
+### Cause of the error that the extension did add
+
+The crop scaled the region by `bitmap.width / viewportWidth`, where the width is the content script's `window.innerWidth`. A content script reads that as a whole number, and the page reads it with its fraction: 686 against 685.5 at a ratio of 2. The source rectangle that this gave was fractional, and `drawImage` with a fractional source rectangle resamples. Measured before the fix with the scale of the capture as the reference:
+
+| Case | Region, CSS px | Image | Image ends at, CSS px | Error at the far edge |
+|---|---|---|---|---|
+| Ratio 1.0 | 20, 20, 640 × 680 | 642 × 682 | 658.75, 698.64 | 1.37 px short |
+| Ratio 2.0 | 20, 20, 640 × 680 | 1276 × 1356 | 659.60, 699.65 | 0.80 px short |
+| Ratio 2.0 | 120, 80, 200 × 150 | 398 × 299 | 319.12, 229.75 | 1.75 px short |
+| Ratio 2.0, scrolled 80 | 20, 100, 640 × 600 | 1276 × 1196 | 659.60, 699.53 | 0.95 px short |
+
+The images at ratios 1.0 and 2.0 had at least one pixel between two cells at some edge, and the images at ratios 1.5 and 1.8 had none (the metric counts pixels that are more than 3 levels from both cell values, so it is crude). The images at ratios 1.0 and 2.0 are the ones with a fractional source rectangle.
+
+### Fix
+
+The content script now also reports the viewport size without rounding (`visualViewport` plus the scrollbar width, from `get-viewport`), and the background asks for it at capture time. `cropWindow` in `src/shared/region.ts` scales by the size of the capture over that size, taken from the width and the height together, and rounds the four edges to whole device pixels, so the copy is pixel for pixel. A region that reaches more than one CSS pixel past the capture is reported as clipped.
+
+### Measurements after the fix
+
+The reference is the scale in the first table. An error is in device pixels. A case passes when the image starts and ends at the region's edges within one device pixel, its sides are the region's sides times the scale within one device pixel, no edge is blurred (at most one pixel between two cells), and no pixel is outside the grid colours.
+
+| Case | Region, CSS px | Image before | Image after | Image ends at after, CSS px | Error at the far edge after |
+|---|---|---|---|---|---|
+| Ratio 1.0 | 20, 20, 640 × 680 | 642 × 682 | 643 × 683 | 659.68, 699.57 | 0.43 px |
+| Ratio 1.5 | 20, 20, 640 × 680 | 960 × 1020 | 960 × 1020 | 660.00, 700.00 | 0.00 px |
+| Ratio 1.8 | 20, 20, 640 × 680 | 1153 × 1225 | 1153 × 1225 | 660.56, 700.56 | 1.00 px |
+| Ratio 2.0 | 20, 20, 640 × 680 | 1276 × 1356 | 1277 × 1357 | 660.16, 700.22 | 0.43 px |
+| Ratio 1.5 | 120, 80, 200 × 150 | 300 × 225 | 300 × 225 | 320.00, 230.00 | 0.00 px |
+| Ratio 2.0 | 120, 80, 200 × 150 | 398 × 299 | 400 × 299 | 320.30, 230.00 | 0.60 px |
+| Ratio 1.5, scrolled 80 | 20, 100, 640 × 600 | 960 × 900 | 960 × 900 | 660.00, 700.00 | 0.00 px |
+| Ratio 2.0, scrolled 80 | 20, 100, 640 × 600 | 1276 × 1196 | 1277 × 1197 | 660.16, 700.09 | 0.32 px |
+
+All eight cases pass after the fix, and no image has a pixel between two cells. Before it, three cases failed a one-pixel test: ratio 1.0 and the small region at ratio 2.0 failed both the far edge and the sides, and the scrolled region at ratio 2.0 failed the sides. The largest remaining error is 1.00 pixel, at ratio 1.8 (this one was 1.00 before as well), and the image starts 1.00 pixel off for the small region at ratio 2.0. These errors come from the sides of the capture being whole numbers: at a ratio of 1.8 the capture is 1359 pixels wide for a viewport of 754.05 CSS pixels, which is 1.8022, where the true scale is 1.8000. A crop that is exact to the pixel needs the capture's true scale, which the page and the extension cannot read.
+
+The whole of `probe.mjs`, which drives the real sidebar and picker, passes after the fix, with the large region now 1277 by 1357 pixels and the edge checks made against the fitted scale and a tolerance of one device pixel (they were made against the page's ratio and a tolerance of one CSS pixel, which is why the large region failed before).
+
+Controls: the scale is taken from a raw capture and not from a small region's few edges (a small region at ratio 2 gave a fitted scale of 2.0000 from five edges where the viewport's 17 edges give 1.9951); the images at ratios 1.5 and 1.8, which a fractional rectangle does not affect at these sizes, are the control that shows the blur metric returns none for an image that was copied cleanly; the grant that `captureVisibleTab` needs is held only for the run and the probe checks that it is back as before; the unit tests in `src/shared/region.test.ts` and `src/background/capture.test.ts` check the same sizes from the numbers in the first table.
+
 ## Clipped regions and the model gate
 
 A region that ends below the viewport (120, 700, 200 × 500 at a ratio of 1.5) is reported as clipped, and the image is 254.7 CSS pixels tall where the region is 500. That image contains 1500 pixels that are not grid colours. They are the page's horizontal scrollbar, which the region reaches, and the probe reports the count without asserting it. A provider whose model does not read images (`supportsVision` false) gets no screenshot controls in the panel.
@@ -68,7 +123,7 @@ A region that ends below the viewport (120, 700, 200 × 500 at a ratio of 1.5) i
 ## What was found
 
 - Two overlapping capture requests can return an image that contains the extension's lock fill. In one run the test harness sent every click twice by mistake. Two `capture-region` requests were sent about 2 milliseconds apart, and the page showed the extension's overlay removed at the first request's start and added again before the second request's capture, so the second image was tinted (a 10 percent fill of the accent colour over the whole region). A deliberate double click in a later run sent two requests and returned a clean image, so the race is real in the code and was seen once. `captureWithLockDown` in `src/background/index.ts` hides the layer and shows it again for each request, and nothing serialises two requests.
-- A large region at a device pixel ratio of 2 comes back resampled, as described above.
+- A large region at a device pixel ratio of 2 came back 4 device pixels short of 1280. The cause was not a defect of that size alone; see the section on the crop.
 - No limit applies to the size of an image. The largest one in this run was 1276 × 1356 pixels and 50 KB, which is small because the grid is flat colour. A photograph of the same size would be larger by a factor that was not measured.
 
 ## What was not verified
@@ -88,12 +143,14 @@ The probe needs the development Firefox from `npm run start:firefox`, the host p
 ```
 WA_RDP_PORT=<port> node test/screenshot/probe.mjs
 CASES=shot-zoom-100 WA_RDP_PORT=<port> node test/screenshot/probe.mjs
+WA_RDP_PORT=<port> node test/screenshot/crop.mjs
 ```
 
-`CASES` takes a comma-separated list of case labels and skips the second and third parts of the run. A full run takes about seven minutes. The exit status is 1 when a row of the verdict fails, which is the case for the large region at present.
+`CASES` takes a comma-separated list of case labels and skips the second and third parts of the run. A full run takes about seven minutes. The exit status is 1 when a row of the verdict fails.
 
 | File | Purpose |
 |---|---|
 | `probe.mjs` | The run, the controls and the verdict |
-| `drive.mjs` | Trusted input, image analysis and the placement of an image on the page |
+| `drive.mjs` | Trusted input, image analysis and the placement of an image on the page, with a fit of the scale from the cell edges |
+| `crop.mjs` | The image against the region at five page zooms, with and without scrolling, from the message that the panel sends |
 | `server.mjs` | The grid page, a second page, and the stub provider |

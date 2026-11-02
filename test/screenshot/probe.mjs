@@ -23,7 +23,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { open, uniqueUrl, verdict, sleep } from '../crypto/rdp.mjs'
 import { startServers, PAGE_PORT, PROVIDER_PORT, CELL } from './server.mjs'
-import { inWindow, trustedClick, trustedDrag, trustedPageClick, ANALYSE, placeOnPage } from './drive.mjs'
+import { inWindow, trustedClick, trustedDrag, trustedPageClick, ANALYSE, fitOnPage } from './drive.mjs'
 
 const STUB_ID = 'wa-shot-stub'
 const ALL_SITES = "{ origins: ['<all_urls>'] }"
@@ -306,24 +306,32 @@ try {
         console.log('first pixels of the middle row:', JSON.stringify(r.analysis.row.slice(0, 3)), 'middle column:', JSON.stringify(r.analysis.column.slice(0, 3)))
         const rect = sentCapture?.rect
         const scroll = sentCapture?.scrolledTo ?? { x: 0, y: 0 }
-        // The image is the cropped region, so its scale is the page's device pixel ratio, not width over viewport.
+        // The scale of the image is fitted from the cell edges in it, and is not the page's pixel ratio: at a page
+        // zoom of 133 percent Firefox captured 1.9949 pixels for each CSS pixel while the page reported 2.
         const scale = r.pageDpr
         const nearStart = { x: rect.x + scroll.x, y: rect.y + scroll.y }
-        const where = placeOnPage(r.analysis, scale, nearStart)
-        console.log('image', `${r.analysis.width}x${r.analysis.height}`, 'scale', scale.toFixed(3), 'placed on page at', JSON.stringify({ x: where.x && [where.x.start.toFixed(2), where.x.end.toFixed(2)], y: where.y && [where.y.start.toFixed(2), where.y.end.toFixed(2)], edgesX: where.x?.edges, edgesY: where.y?.edges, spreadX: where.x?.spread, spreadY: where.y?.spread }))
+        const fitted = fitOnPage(r.analysis, nearStart)
+        const where = {
+          x: fitted.x && { start: fitted.x.start, end: fitted.x.end, edges: fitted.x.edges, measuredScale: fitted.x.slope, spread: 0 },
+          y: fitted.y && { start: fitted.y.start, end: fitted.y.end, edges: fitted.y.edges, measuredScale: fitted.y.slope, spread: 0 },
+        }
+        const fitScale = where.x?.measuredScale ?? scale
+        console.log('image', `${r.analysis.width}x${r.analysis.height}`, 'page ratio', scale.toFixed(3), 'scale fitted from the edges', fitScale.toFixed(4), 'placed on page at', JSON.stringify({ x: where.x && [where.x.start.toFixed(2), where.x.end.toFixed(2)], y: where.y && [where.y.start.toFixed(2), where.y.end.toFixed(2)], edgesX: where.x?.edges, edgesY: where.y?.edges, blendX: fitted.x?.blend, blendY: fitted.y?.blend }))
         // The page position the drawn region had when it was drawn (scroll at pick time is scrolledTo, if sent).
         const expected = { x0: rect.x + scroll.x, y0: rect.y + scroll.y, x1: rect.x + rect.width + scroll.x, y1: rect.y + rect.height + scroll.y }
-        // One CSS pixel on each edge, the criterion; the crop is rounded to whole device pixels, which adds at most half a device pixel.
-        const tol = 1
+        // One device pixel on each edge: the crop is rounded to whole device pixels, and the capture itself has whole-pixel sides.
+        const tol = 1 / fitScale
         note(`${c.label}: the request's rectangle is the region that was dragged (within 1 CSS pixel)`, rect && Math.abs(rect.x - intended[0]) <= 1 && Math.abs(rect.y - intended[1]) <= 1 && Math.abs(rect.width - (intended[2] - intended[0])) <= 1 && Math.abs(rect.height - (intended[3] - intended[1])) <= 1, JSON.stringify(rect))
-        note(`${c.label}: the image's left and top edges are the region's, within 1 CSS pixel`, where.x && where.y && Math.abs(where.x.start - expected.x0) <= tol && Math.abs(where.y.start - expected.y0) <= tol, `image starts at ${where.x?.start.toFixed(2)},${where.y?.start.toFixed(2)}; region ${expected.x0},${expected.y0}`)
+        note(`${c.label}: the image's left and top edges are the region's, within one device pixel`, where.x && where.y && Math.abs(where.x.start - expected.x0) <= tol && Math.abs(where.y.start - expected.y0) <= tol, `image starts at ${where.x?.start.toFixed(2)},${where.y?.start.toFixed(2)}; region ${expected.x0},${expected.y0}`)
         if (c.expectClipped) {
-          note(`${c.label}: the panel says the region was clipped, and the image is shorter than the region`, /Clipped at the viewport/.test(r.text) && r.analysis.height / scale < rect.height - 1, `region height ${rect.height}, image height ${(r.analysis.height / scale).toFixed(1)} CSS pixels`)
+          note(`${c.label}: the panel says the region was clipped, and the image is shorter than the region`, /Clipped at the viewport/.test(r.text) && r.analysis.height / fitScale < rect.height - 1, `region height ${rect.height}, image height ${(r.analysis.height / fitScale).toFixed(1)} CSS pixels`)
         } else {
-          note(`${c.label}: the image's right and bottom edges are the region's, within 1 CSS pixel`, where.x && where.y && Math.abs(where.x.end - expected.x1) <= tol && Math.abs(where.y.end - expected.y1) <= tol, `image ends at ${where.x?.end.toFixed(2)},${where.y?.end.toFixed(2)}; region ${expected.x1},${expected.y1}`)
+          note(`${c.label}: the image's right and bottom edges are the region's, within one device pixel`, where.x && where.y && Math.abs(where.x.end - expected.x1) <= tol && Math.abs(where.y.end - expected.y1) <= tol, `image ends at ${where.x?.end.toFixed(2)},${where.y?.end.toFixed(2)}; region ${expected.x1},${expected.y1}`)
         }
-        if (c.label === 'shot-large') console.log(`INFORMATION shot-large: the image is ${r.analysis.width}x${r.analysis.height} pixels and ${Math.round((r.dataUrl.length * 3) / 4 / 1024)} KB, and the panel offered it unchanged (no size limit was applied)`)
-        note(`${c.label}: the cell edges in the image are ${CELL} CSS pixels apart at the page's device pixel ratio`, where.x?.measuredScale && Math.abs(where.x.measuredScale - scale) < 0.02, `measured ${where.x?.measuredScale}, expected ${scale.toFixed(3)}`)
+        if (c.label === 'shot-large') console.log(`INFORMATION shot-large: the image is ${r.analysis.width}x${r.analysis.height} pixels and ${Math.round((r.dataUrl.length * 3) / 4 / 1024)} KB`)
+        // A region that reaches the bottom of the viewport also contains the page's horizontal scrollbar, which is not grid colours.
+        note(`${c.label}: no edge in the image is blurred (an image copied pixel for pixel has at most one pixel between two cells)`, c.expectClipped || (fitted.x?.blend <= 1 && fitted.y?.blend <= 1), `most pixels at an edge: ${fitted.x?.blend} across, ${fitted.y?.blend} down`)
+        note(`${c.label}: the scale of the image is within 1 percent of the page's device pixel ratio (information: they differ by up to 0.25 percent at some zooms)`, where.x?.measuredScale && Math.abs(where.x.measuredScale / scale - 1) < 0.01, `fitted ${where.x?.measuredScale?.toFixed(4)}, page ratio ${scale.toFixed(3)}`)
         if (r.analysis.anomalies > 0 && !c.expectClipped) console.log('TINTED. capture timing:', JSON.stringify(r.times), 'changes to the page body and root while the panel ran:', JSON.stringify(r.dom))
         // A region that reaches the bottom of the viewport also contains the page's horizontal
         // scrollbar (the grid is wider than the window), which is not the extension's, so that

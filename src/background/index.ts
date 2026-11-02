@@ -17,7 +17,7 @@ import { exactPagePattern, matchesUrl, originPermissionForUrl } from '@shared/ma
 import { CAPTURE_GRANT_KEY } from '@shared/capture-grant'
 import { appliesInContainer } from '@shared/container'
 import { refuseInPrivateWindow, requireNormalWindow } from './private-window'
-import { regionAtScroll, viewportChanged, type ScrollOffset, type Viewport } from '@shared/region'
+import { cropWindow, regionAtScroll, viewportChanged, type PixelSize, type ScrollOffset, type Viewport } from '@shared/region'
 import type {
   Accent,
   GenerationResult,
@@ -2172,6 +2172,14 @@ const saveDeps: SaveDeps = {
  * thing being described. Down for the shot, back up after, rebuilt rather than
  * restored so the boxes return where the elements are now.
  */
+/** What a capture returns to the panel. */
+interface CaptureResult {
+  dataUrl: string
+  rect: Rect
+  clipped: boolean
+  moved: boolean
+}
+
 async function captureWithLockDown(
   tabId: number,
   rect: Rect,
@@ -2179,42 +2187,50 @@ async function captureWithLockDown(
   url: string,
   scrolledTo?: ScrollOffset,
   devicePixelRatio?: number,
-): Promise<{ dataUrl: string; rect: Rect; clipped: boolean; moved: boolean }> {
+): Promise<CaptureResult> {
   /*
    * A rectangle stored from a pick is in viewport coordinates, so it is moved
    * by however far the page has scrolled since. Asked of the page, because
    * the background cannot read it. Without a reply the rectangle is used as
    * it is, which is what happened before and is right when nothing scrolled.
+   *
+   * The page is asked even when it did not scroll, for the size of the
+   * viewport without rounding, which the crop scales by.
    */
   let target = rect
   let moveClipped = false
   let pageScrolled = false
-  // The width the rectangle is scaled by when the capture is cropped.
-  let width = viewportWidth
-  if (scrolledTo) {
-    const now = (await askContent(tabId, { type: 'get-viewport' })) as Viewport | undefined
-    if (now) {
-      if (viewportChanged({ width: viewportWidth, devicePixelRatio }, now)) {
-        throw new Error(
-          t('bgTheWindowSizeOrZoomChanged'),
-        )
-      }
-      width = now.width
-      const moved = regionAtScroll(rect, scrolledTo, now)
-      if (!moved) {
-        throw new Error(
-          t('bgTheAreaYouDrewIsNo'),
-        )
-      }
-      target = moved.rect
-      moveClipped = moved.clipped
-      pageScrolled = now.x !== scrolledTo.x || now.y !== scrolledTo.y
+  const now = (await askContent(tabId, { type: 'get-viewport' })) as Viewport | undefined
+  // The size the capture is cropped by: the viewport as it is now, without
+  // rounding, and otherwise the width that was stored when the region was drawn.
+  const viewport: { width: number; height?: number } = now
+    ? { width: now.exactWidth ?? now.width, height: now.exactHeight ?? now.height }
+    : { width: viewportWidth }
+  if (scrolledTo && now) {
+    if (viewportChanged({ width: viewportWidth, devicePixelRatio }, now)) {
+      throw new Error(
+        t('bgTheWindowSizeOrZoomChanged'),
+      )
     }
+    const moved = regionAtScroll(rect, scrolledTo, now)
+    if (!moved) {
+      throw new Error(
+        t('bgTheAreaYouDrewIsNo'),
+      )
+    }
+    target = moved.rect
+    moveClipped = moved.clipped
+    pageScrolled = now.x !== scrolledTo.x || now.y !== scrolledTo.y
   }
   await sendToContent(tabId, { type: 'set-lock-visible', visible: false })
   try {
-    const shot = await captureRegion(tabId, url, target, width)
-    return { ...shot, clipped: shot.clipped || moveClipped, rect: target, moved: pageScrolled }
+    const shot = await captureRegion(tabId, url, target, viewport)
+    return {
+      ...shot,
+      clipped: shot.clipped || moveClipped,
+      rect: target,
+      moved: pageScrolled,
+    }
   } finally {
     await sendToContent(tabId, { type: 'set-lock-visible', visible: true })
   }
@@ -2236,7 +2252,7 @@ async function captureRegion(
   tabId: number,
   url: string,
   rect: Rect,
-  viewportWidth: number,
+  viewport: { width: number; height?: number },
 ): Promise<{ dataUrl: string; clipped: boolean }> {
   // captureVisibleTab photographs whichever tab is active in a window, which
   // after the user switches tabs is not the run's tab, and can be a different
@@ -2276,27 +2292,23 @@ async function captureRegion(
   const bitmap = await createImageBitmap(blob)
 
   // The capture comes back in device pixels; the rectangle was measured in CSS
-  // pixels. On a HiDPI display those differ, and cropping without the
-  // correction silently returns the wrong part of the page.
-  const scale = bitmap.width / Math.max(1, viewportWidth)
+  // pixels. The scale between them is the size of the image over the size of
+  // the viewport, and is not the pixel ratio (see cropWindow). Without a height
+  // the shape of the image gives one.
+  const viewportSize: PixelSize = {
+    width: viewport.width,
+    height: viewport.height ?? (viewport.width * bitmap.height) / Math.max(1, bitmap.width),
+  }
 
   // captureVisibleTab only sees the viewport, so a region taller or wider than
   // it comes back cut. Clamp to what actually exists and say that we did,
   // rather than drawing past the edge and sending transparent padding.
-  const source = {
-    x: Math.max(0, rect.x * scale),
-    y: Math.max(0, rect.y * scale),
-    width: rect.width * scale,
-    height: rect.height * scale,
-  }
-  const width = Math.min(source.width, bitmap.width - source.x)
-  const height = Math.min(source.height, bitmap.height - source.y)
-  const clipped = width < source.width - 1 || height < source.height - 1
+  const { source, clipped } = cropWindow(rect, { width: bitmap.width, height: bitmap.height }, viewportSize)
 
-  const canvas = new OffscreenCanvas(Math.max(1, width), Math.max(1, height))
+  const canvas = new OffscreenCanvas(source.width, source.height)
   const context = canvas.getContext('2d')
   if (!context) throw new Error(t('bgCouldNotPrepareTheImage'))
-  context.drawImage(bitmap, source.x, source.y, width, height, 0, 0, width, height)
+  context.drawImage(bitmap, source.x, source.y, source.width, source.height, 0, 0, source.width, source.height)
   const cropped = await canvas.convertToBlob({ type: 'image/png' })
 
   const dataUrl = await new Promise<string>((resolve, reject) => {

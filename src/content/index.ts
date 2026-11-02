@@ -1592,6 +1592,27 @@ function startPicking(palette: OverlayPalette): void {
   }
 }
 
+/**
+ * The size of the viewport without rounding. A content script reads
+ * `innerWidth` and `innerHeight` as whole numbers, and the page reads them with
+ * a fraction (685.5 by 716.5 at a page zoom of 133 percent in the measured case),
+ * so the crop of a screenshot, which scales by the viewport size, uses these.
+ * `visualViewport` has the fraction but leaves out scrollbars, which the capture
+ * includes, so the width of the scrollbars is added back from the difference of
+ * two whole numbers. When the page is pinch-zoomed the visual viewport is not
+ * the area that the capture shows, and the whole numbers are used instead.
+ */
+function exactViewportSize(): { exactWidth: number; exactHeight: number } {
+  const visual = window.visualViewport
+  const root = document.documentElement
+  if (!visual || visual.scale !== 1 || !root) {
+    return { exactWidth: window.innerWidth, exactHeight: window.innerHeight }
+  }
+  const barX = Math.max(0, window.innerWidth - root.clientWidth)
+  const barY = Math.max(0, window.innerHeight - root.clientHeight)
+  return { exactWidth: visual.width + barX, exactHeight: visual.height + barY }
+}
+
 function stopPicking(): void {
   picking = false
   atSeed = false
@@ -1860,6 +1881,7 @@ async function handleMessage(message: ContentMessage) {
         width: window.innerWidth,
         height: window.innerHeight,
         devicePixelRatio: window.devicePixelRatio,
+        ...exactViewportSize(),
       }
     case 'url-changed':
       // Re-evaluation is driven from the background script, which owns the

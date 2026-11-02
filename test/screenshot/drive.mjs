@@ -127,7 +127,7 @@ const HIGH = 230
  * blends of the two cells, and the share of the first cell in them is how far
  * the edge lies beyond the last full pixel of that cell.
  */
-function edgesAlong(line, channel) {
+export function edgesAlong(line, channel) {
   const value = (pixel) => pixel[channel]
   const plateau = (v) => (Math.abs(v - LOW) <= 3 ? LOW : Math.abs(v - HIGH) <= 3 ? HIGH : null)
   const edges = []
@@ -166,6 +166,59 @@ export function placeOnPage(analysis, scale, near) {
   return {
     x: place(analysis.row, 0, analysis.width, near.x),
     y: place(analysis.column, 1, analysis.height, near.y),
+  }
+}
+
+/**
+ * Where an image of the grid starts and ends on the page, from the image alone.
+ *
+ * The scale of a capture is not the device pixel ratio that the page reports
+ * (Firefox captured 1.9949 pixels for each CSS pixel at a page zoom of 133
+ * percent while the page reported 2), so the scale is fitted from the edges:
+ * each edge lies at a multiple of CELL on the page, and a line through them
+ * gives the pixels per CSS pixel and where the image starts. `near` is roughly
+ * where the image should start, in page CSS pixels, and only decides which
+ * multiple of CELL each edge is. `blend` is the most pixels that lie between two
+ * plateaus at one edge: an image copied pixel for pixel has 1 at most, and one
+ * that was resampled has 2 or more.
+ */
+export function fitOnPage(analysis, near) {
+  const fit = (line, channel, length, from, nominalScale) => {
+    const edges = edgesAlong(line, channel)
+    if (edges.length < 2) return null
+    const pts = edges.map((e) => [Math.round((e / nominalScale + from) / CELL), e])
+    const n = pts.length
+    const mx = pts.reduce((sum, p) => sum + p[0] * CELL, 0) / n
+    const my = pts.reduce((sum, p) => sum + p[1], 0) / n
+    let num = 0
+    let den = 0
+    for (const [k, e] of pts) {
+      num += (k * CELL - mx) * (e - my)
+      den += (k * CELL - mx) ** 2
+    }
+    const slope = num / den
+    const offset = my - slope * mx
+    const start = -offset / slope
+    // The number of pixels between two plateaus, for the sharpest and the softest edge.
+    const plateau = (v) => (Math.abs(v - LOW) <= 3 ? LOW : Math.abs(v - HIGH) <= 3 ? HIGH : null)
+    let blend = 0
+    let last = -1
+    for (let i = 0; i < line.length; i += 1) {
+      const p = plateau(line[i][channel])
+      if (p === null) continue
+      if (last >= 0 && i - last > 1) blend = Math.max(blend, i - last - 1)
+      last = i
+    }
+    return { slope, start, end: start + length / slope, edges: n, blend }
+  }
+  const first = (line, channel, length, from) => {
+    const rough = edgesAlong(line, channel)
+    if (rough.length < 2) return null
+    return fit(line, channel, length, from, (rough[rough.length - 1] - rough[0]) / (rough.length - 1) / CELL)
+  }
+  return {
+    x: first(analysis.row, 0, analysis.width, near.x),
+    y: first(analysis.column, 1, analysis.height, near.y),
   }
 }
 

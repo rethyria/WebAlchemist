@@ -75,6 +75,10 @@ export interface Harness {
   privateTabs: Set<number>
   /** Tabs that `tabs.get` rejects for, as it does for a tab that has closed. */
   closedTabs: Set<number>
+  /** Tabs that `tabs.get` reports as not being the active tab of their window. */
+  inactiveTabs: Set<number>
+  /** The picture `tabs.captureVisibleTab` returns, as a data address. */
+  captureVisibleTab: (windowId: number, options: unknown) => Promise<string>
   /** When true `tabs.get` leaves out cookieStoreId, as Firefox does without the cookies permission. */
   cookiesWithheld: boolean
   /** The container of each tab; a tab not listed is in 'firefox-default'. */
@@ -144,6 +148,8 @@ export function createHarness(): Harness {
     tabWindows: new Map(),
     privateTabs: new Set(),
     closedTabs: new Set(),
+    inactiveTabs: new Set(),
+    captureVisibleTab: async () => 'data:image/png;base64,AAAA',
     cookiesWithheld: false,
     tabContainers: new Map(),
     calls: { insertCSS: [], removeCSS: [], unregister: [], registry: [], setBadgeText: [], sendMessage: [], reload: [], runtimeMessages: [], sidebarOpen: 0, tabsCreate: [], tabsUpdate: [] },
@@ -246,12 +252,14 @@ export function createHarness(): Harness {
         id,
         url: h.tabUrls.get(id),
         windowId: h.tabWindows.get(id) ?? 1,
+        active: !h.inactiveTabs.has(id),
         incognito: h.privateTabs.has(id),
         ...(h.cookiesWithheld
           ? {}
           : { cookieStoreId: h.tabContainers.get(id) ?? 'firefox-default' }),
       }
     },
+    'browser.tabs.captureVisibleTab': (windowId: number, options: unknown) => h.captureVisibleTab(windowId, options),
     'browser.tabs.query': async () => [...h.tabUrls].map(([id, url]) => ({ id, url })),
     'browser.tabs.reload': async (tabId: number) => {
       h.calls.reload.push(tabId)
