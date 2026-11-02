@@ -300,7 +300,13 @@ export class Flow {
    * earlier, for the preview, and its approval token is not used for saving.
    */
   previewReview = $state<ReviewResult | null>(null)
-  private previewReviewFor: string | null = null
+  /*
+   * State, not a plain field: currentPreviewReview reads it, and the panel's
+   * Run button is derived from that getter. As a plain field, assigning it
+   * after previewReview left the derived value computed while it was still
+   * null, so a review that returned "match" never enabled Run (#154).
+   */
+  private previewReviewFor = $state<string | null>(null)
   previewReviewing = $state(false)
   /**
    * External CSS URLs the user approved in the approval panel, for a site set
