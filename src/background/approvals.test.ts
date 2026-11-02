@@ -148,3 +148,55 @@ describe('mayBeSaved', () => {
     expect(await mayBeSaved(stored, transform({ capabilities: [] }), undefined)).toBe(true)
   })
 })
+
+describe('approvals and the settings of an elixir', () => {
+  const field = (over: Record<string, unknown> = {}) => ({ key: 'words', label: 'Words', type: 'list' as const, default: ['a'], ...over })
+  const FIELDS = [field()]
+
+  it('covers the fields in the hash', async () => {
+    const without = await hashCode('x', 'USER_SCRIPT')
+    expect(await hashCode('x', 'USER_SCRIPT', [])).toBe(without)
+    expect(await hashCode('x', 'USER_SCRIPT', undefined)).toBe(without)
+    const withFields = await hashCode('x', 'USER_SCRIPT', FIELDS)
+    expect(withFields).not.toBe(without)
+    expect(await hashCode('x', 'USER_SCRIPT', [field({ default: ['b'] })])).not.toBe(withFields)
+    expect(await hashCode('x', 'USER_SCRIPT', [field({ type: 'text', default: 'a' })])).not.toBe(withFields)
+    expect(await hashCode('x', 'USER_SCRIPT', [field({ key: 'other' })])).not.toBe(withFields)
+    expect(await hashCode('x', 'USER_SCRIPT', [field({ label: 'Other' })])).not.toBe(withFields)
+  })
+
+  it('gives the same hash for the same fields written with their keys in another order', async () => {
+    const reordered = { default: ['a'], type: 'list' as const, label: 'Words', key: 'words' }
+    expect(await hashCode('x', 'USER_SCRIPT', [reordered])).toBe(await hashCode('x', 'USER_SCRIPT', FIELDS))
+  })
+
+  it('does not take the values into account', async () => {
+    const stored = transform({ configFields: FIELDS })
+    const token = await recordApproval(stored.code, undefined, [], 'match', { ...BIND, configFields: FIELDS })
+    const withValues = transform({ configFields: FIELDS, configValues: { words: ['x', 'y'] } })
+    expect(await isApproved(token, withValues.code, undefined, [], { ...BIND, configFields: withValues.configFields })).toBe(true)
+    expect(await hashCode(withValues.code, undefined, withValues.configFields)).toBe(await hashCode(stored.code, undefined, stored.configFields))
+  })
+
+  it('refuses a token that was issued for other fields', async () => {
+    const token = await recordApproval('a()', undefined, [], 'match', { ...BIND, configFields: FIELDS })
+    expect(await isApproved(token, 'a()', undefined, [], { ...BIND, configFields: FIELDS })).toBe(true)
+    expect(await isApproved(token, 'a()', undefined, [], { ...BIND, configFields: [field({ default: ['b'] })] })).toBe(false)
+    expect(await isApproved(token, 'a()', undefined, [], BIND)).toBe(false)
+  })
+
+  it('needs a token when the fields change, and none when only the values change', async () => {
+    const stored = transform({ configFields: FIELDS, configValues: { words: ['x'] } })
+    expect(await mayBeSaved(stored, transform({ configFields: FIELDS, configValues: { words: ['changed'] } }), undefined)).toBe(true)
+    expect(await mayBeSaved(stored, transform({ configFields: FIELDS, name: 'Renamed' }), undefined)).toBe(true)
+    expect(await mayBeSaved(stored, transform({ configFields: [field({ default: ['b'] })] }), undefined)).toBe(false)
+    expect(await mayBeSaved(stored, transform({}), undefined)).toBe(false)
+    expect(await mayBeSaved(transform({}), transform({ configFields: FIELDS }), undefined)).toBe(false)
+  })
+
+  it('accepts the changed fields with a token for them', async () => {
+    const next = transform({ configFields: [field({ default: ['b'] })] })
+    const token = await recordApproval(next.code, undefined, [], 'match', { ...BIND, configFields: next.configFields })
+    expect(await mayBeSaved(transform({ configFields: FIELDS }), next, token)).toBe(true)
+  })
+})

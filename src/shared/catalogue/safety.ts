@@ -196,6 +196,10 @@ export const safetyMessages = defineMessages({
     description: 'A finding of the safety check, shown to the user before code is saved. Placeholders: NAME.',
     placeholders: ['NAME'],
   },
+  saDeclaresTheSettingsName: {
+    message: 'Declares CONFIG, the name that holds the settings of the elixir. A declaration would hide the values that the user sets.',
+    description: 'A finding of the safety check, shown to the user before code is saved.',
+  },
   saAssignsToANameTheCode: {
     message: 'Assigns to $NAME$ without declaring it. This either replaces a built-in browser name or fails with an error, and neither changes the page.',
     description: 'A finding of the safety check, shown to the user before code is saved. Placeholders: NAME.',

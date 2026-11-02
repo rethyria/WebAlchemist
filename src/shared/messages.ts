@@ -15,6 +15,7 @@ import type { PickerAction } from './picker-keys'
 import type {
   Anchor,
   Credential,
+  ConfigField,
   ConfigValue,
   CredentialStatus,
   ElementContext,
@@ -89,6 +90,8 @@ export type Message =
        */
       instructions: ReviewInstruction[]
       declaredCapabilities: Transform['capabilities']
+      /** The settings the code reads. Part of what the approval token is tied to. */
+      configFields?: ConfigField[]
       /** Part of what the approval is tied to. Absent means USER_SCRIPT. */
       world?: Transform['world']
       /**
@@ -109,6 +112,8 @@ export type Message =
       type: 'approve-code'
       code: string
       declaredCapabilities: Transform['capabilities']
+      /** The settings the code reads. Part of what the approval token is tied to. */
+      configFields?: ConfigField[]
       world?: Transform['world']
       /** The transform and match pattern the approval token is tied to. */
       transformId: string
@@ -117,7 +122,13 @@ export type Message =
   /** Recorded token usage, for the settings page. */
   | { type: 'get-usage' }
   /** Static analysis alone — no model call, so it is free to run before preview. */
-  | { type: 'analyse'; code: string; declaredCapabilities: Transform['capabilities'] }
+  | {
+      type: 'analyse'
+      code: string
+      declaredCapabilities: Transform['capabilities']
+      /** The settings the code reads, which the code may refer to only by their keys. */
+      configFields?: ConfigField[]
+    }
   /**
    * The CSS check, which loads nothing and costs nothing. `tabId` names the
    * page the CSS would apply to; without it the page is taken from `match`

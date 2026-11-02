@@ -16,6 +16,16 @@ const blocks = (source: string, declared: Capability[] = []) => {
   return findings.some((f) => f.severity === 'block')
 }
 
+/**
+ * Like `blocks`, for the text of the harness wrapper. The wrapper declares
+ * CONFIG itself, which the analysis refuses in model-written code, so that one
+ * finding is left out. Every other finding still counts.
+ */
+const blocksWrapper = (source: string) => {
+  const { findings } = applyCapabilityPolicy(analyseJavaScript(source), [])
+  return findings.some((f) => f.severity === 'block' && f.api !== 'CONFIG (declaration)')
+}
+
 describe('analyseJavaScript', () => {
   it('passes an ordinary DOM transform with no findings', () => {
     const result = analyseJavaScript(`
@@ -449,7 +459,7 @@ describe('allowlist (#48): legitimate transforms still pass', () => {
         anchor: { landmarks: ['main', '[role="main"]'] },
         code,
       } as unknown as Parameters<typeof wrapTransform>[0], 'a1b2c3')
-      expect(blocks(wrapped)).toBe(false)
+      expect(blocksWrapper(wrapped)).toBe(false)
     })
   }
 
@@ -947,7 +957,7 @@ describe('allowlist (#48): ordinary patterns that pass', () => {
         anchor: { landmarks: ['main'] },
         code,
       } as unknown as Parameters<typeof wrapTransform>[0], 'a1b2c3')
-      expect(blocks(wrapped)).toBe(false)
+      expect(blocksWrapper(wrapped)).toBe(false)
     })
   }
 
@@ -1487,4 +1497,183 @@ describe('the Xray waiver and the sandbox helpers (#139)', () => {
       expect(blocks(snippet, ['network', 'storage', 'cookies'])).toBe(true)
     })
   }
+})
+
+/**
+ * The settings of an elixir (CONFIG). A user can change a value later without
+ * a new review, which is safe only while every member of CONFIG is treated as
+ * arbitrary text at every sink, the way text read from the page is. These
+ * tests are that guard: each sink is tried with CONFIG.x and with page text,
+ * and both must be refused the same way.
+ */
+describe('CONFIG: values are arbitrary text at every sink', () => {
+  const sinks: [string, (value: string) => string, Capability[]][] = [
+    ['an address property', (v) => `document.querySelector('a').href = ${v}`, []],
+    ['an image address', (v) => `document.querySelector('img').src = ${v}`, []],
+    ['a selector', (v) => `document.querySelector(${v})`, []],
+    ['a selector list', (v) => `document.querySelectorAll(${v}).forEach((e) => { e.hidden = true })`, []],
+    ['innerHTML', (v) => `document.body.innerHTML = ${v}`, []],
+    ['outerHTML', (v) => `document.body.outerHTML = ${v}`, []],
+    ['insertAdjacentHTML', (v) => `document.body.insertAdjacentHTML('beforeend', ${v})`, []],
+    ['document.write', (v) => `document.write(${v})`, []],
+    ['a tag name', (v) => `document.createElement(${v})`, []],
+    ['an attribute name', (v) => `document.body.setAttribute(${v}, 'x')`, []],
+    ['a property name', (v) => `const o = {}; o[${v}] = 1`, []],
+    ['a property read by name', (v) => `const o = { a: 1 }; o[${v}]`, []],
+    ['a timer', (v) => `setTimeout(${v}, 10)`, []],
+    ['a style value that can carry a URL', (v) => `document.body.style.background = ${v}`, []],
+    ['a style value that can carry a URL (backgroundImage)', (v) => `document.body.style.backgroundImage = ${v}`, []],
+    ['a custom property', (v) => `document.body.style.setProperty('--x', ${v})`, []],
+    ['a custom property name', (v) => `document.body.style.setProperty(${v}, '1')`, []],
+    ['a style sheet text', (v) => `const s = document.createElement('style'); s.textContent = ${v}`, []],
+    ['an event handler attribute', (v) => `document.body.setAttribute('onclick', ${v})`, []],
+    ['a form action', (v) => `document.querySelector('form').action = ${v}`, []],
+    ['a fetch address without the capability', (v) => `fetch(${v})`, []],
+    ['a dynamic import', (v) => `import(${v})`, []],
+    ['a Function constructor', (v) => `new Function(${v})`, []],
+    ['eval', (v) => `eval(${v})`, []],
+  ]
+
+  for (const [name, build, capabilities] of sinks) {
+    it(`treats CONFIG.x like page text for ${name}`, () => {
+      const fromPage = build('document.body.textContent')
+      const fromConfig = build('CONFIG.x')
+      const fromIndex = build("CONFIG['x']")
+      // Every sink that refuses page text refuses CONFIG, and with the same findings.
+      expect(blocks(fromPage, capabilities)).toBe(true)
+      expect(blocks(fromConfig, capabilities)).toBe(true)
+      expect(blocks(fromIndex, capabilities)).toBe(true)
+      expect(findingApis(fromConfig).sort()).toEqual(findingApis(fromPage).sort())
+    })
+
+    it(`treats a value that is read through an alias like CONFIG.x for ${name}`, () => {
+      expect(blocks(`const c = CONFIG; ${build('c.x')}`, capabilities)).toBe(true)
+      expect(blocks(`const { x } = CONFIG; ${build('x')}`, capabilities)).toBe(true)
+      expect(blocks(`const x = CONFIG.x; ${build('x')}`, capabilities)).toBe(true)
+      expect(blocks(`const x = 'a' + CONFIG.x; ${build('x')}`, capabilities)).toBe(true)
+    })
+  }
+
+  it('needs the network capability for an address that is built from a value', () => {
+    const built = `document.querySelector('a').href = 'https://example.com/' + CONFIG.u`
+    const fromPage = `document.querySelector('a').href = 'https://example.com/' + document.title`
+    // An address that is not entirely written out needs the capability, for a value as for page text.
+    for (const source of [built, fromPage]) {
+      expect(blocks(source, [])).toBe(true)
+      expect(blocks(source, ['network'])).toBe(false)
+    }
+    expect(blocks(`document.querySelector('a').href = CONFIG.u`, ['network'])).toBe(true)
+  })
+
+  it('refuses a key that is a value, as it refuses a key that is page text', () => {
+    expect(blocks(`const o = {}; o[CONFIG.k] = 1`)).toBe(true)
+    expect(blocks(`const o = {}; o[document.title] = 1`)).toBe(true)
+    expect(blocks(`Object.keys(CONFIG)`)).toBe(true)
+    expect(blocks(`Object.entries(CONFIG.words)`)).toBe(true)
+  })
+
+  it('refuses CONFIG members that are used as names or as code in other forms', () => {
+    expect(blocks(`document.body[CONFIG.p] = 1`)).toBe(true)
+    expect(blocks(`document.body.addEventListener(CONFIG.e, () => {})`)).toBe(false)
+    expect(blocks(`document.body.classList.add(CONFIG.c)`)).toBe(false)
+    expect(blocks(`window[CONFIG.w]`)).toBe(true)
+  })
+
+  it('refuses code that reaches the prototype of CONFIG', () => {
+    expect(blocks(`CONFIG.constructor`)).toBe(true)
+    expect(blocks(`CONFIG.__proto__`)).toBe(true)
+    expect(blocks(`Object.getPrototypeOf(CONFIG)`)).toBe(true)
+    expect(blocks(`CONFIG['constructor']`)).toBe(true)
+  })
+
+  it('passes the uses that are meant', () => {
+    for (const source of [
+      `document.body.style.color = CONFIG.c`,
+      `document.body.style.backgroundColor = CONFIG.c`,
+      `document.body.style.filter = 'blur(' + Number(CONFIG.n) + 'px)'`,
+      `const m = new Map(CONFIG.words.map((row) => [row.from, row.to])); document.body.textContent = m.get('a') || ''`,
+      `document.body.textContent = CONFIG.t`,
+      `if (CONFIG.on) { document.body.hidden = true }`,
+      `const { words, colour } = CONFIG; document.body.style.color = colour; document.body.title = String(words.length)`,
+    ]) {
+      expect(blocks(source), source).toBe(false)
+    }
+  })
+
+  it('treats CONFIG as a free name, so the controls above do not pass because the name is refused', () => {
+    expect(findingApis(`document.body.textContent = CONFIG.t`)).toEqual([])
+    expect(findingApis(`document.body.textContent = SETTINGS.t`).length).toBeGreaterThan(0)
+  })
+})
+
+describe('CONFIG: writes and declarations are refused', () => {
+  it.each([
+    'CONFIG.x = 1',
+    'CONFIG["x"] = 1',
+    'CONFIG = {}',
+    'CONFIG.x += 1',
+    'CONFIG.x++',
+    'delete CONFIG.x',
+    'Object.assign(CONFIG, { x: 1 })',
+    'Object.defineProperty(CONFIG, "x", { value: 1 })',
+    'CONFIG.words[0].from = "x"',
+    '[CONFIG.x] = [1]',
+    '({ a: CONFIG.x } = { a: 1 })',
+    'for (CONFIG.x of [1]) {}',
+    'for (CONFIG of [1]) {}',
+  ])('refuses %s', (source) => {
+    expect(blocks(source)).toBe(true)
+  })
+
+  it.each([
+    'const CONFIG = { x: 1 }',
+    'let CONFIG',
+    'var CONFIG = 1',
+    'function CONFIG() {}',
+    'class CONFIG {}',
+    'const f = (CONFIG) => CONFIG',
+    'const f = function (CONFIG) {}',
+    'const f = function CONFIG() {}',
+    'const { CONFIG } = window',
+    'const [CONFIG] = [1]',
+    'try {} catch (CONFIG) {}',
+    'if (true) { const CONFIG = 1 }',
+    'document.querySelectorAll("a").forEach((CONFIG) => {})',
+    'const f = ({ CONFIG } = {}) => CONFIG',
+  ])('refuses the declaration in %s', (source) => {
+    const apis = findingApis(source)
+    expect(apis.some((api) => api.includes('CONFIG'))).toBe(true)
+    expect(blocks(source)).toBe(true)
+  })
+
+  it('does not refuse a member named CONFIG on another object', () => {
+    expect(blocks(`const o = { CONFIG: 1 }; document.body.title = String(o.CONFIG)`)).toBe(false)
+  })
+})
+
+describe('CONFIG: the harness wrapper still passes the analysis with settings in it', () => {
+  it('passes with a populated CONFIG that holds hostile text', () => {
+    const wrapped = wrapTransform({
+      name: 'test',
+      match: 'https://example.com/*',
+      anchor: { landmarks: ['main'] },
+      code: `document.body.textContent = CONFIG.label`,
+      configFields: [
+        { key: 'label', label: 'Label', type: 'text', default: 'x' },
+        {
+          key: 'words',
+          label: 'Words',
+          type: 'table',
+          columns: [{ key: 'from', label: 'From' }, { key: 'to', label: 'To' }],
+          default: [{ from: 'a', to: 'b' }],
+        },
+      ],
+      configValues: {
+        label: 'a.innerHTML = fetch("https://e.example"); eval("x"); import("y")',
+        words: [{ from: 'innerHTML', to: '</script>' }],
+      },
+    } as unknown as Parameters<typeof wrapTransform>[0], 'a1b2c3')
+    expect(wrapped).toContain('Object.freeze')
+    expect(blocksWrapper(wrapped)).toBe(false)
+  })
 })

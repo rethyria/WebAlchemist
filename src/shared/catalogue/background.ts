@@ -194,6 +194,11 @@ export const backgroundMessages = defineMessages({
     message: 'This message is only accepted from the extension\'s own pages.',
     description: 'Text that the background returns to the interface, which shows it to the user.',
   },
+  bgCodeReadsAnUndefinedSetting: {
+    message: 'The code reads the setting "$KEY$", which this elixir does not define.',
+    description: 'Why code is refused. $KEY$ is a setting key that the code reads.',
+    placeholders: ['KEY'],
+  },
   bgThatTransformNoLongerExists: {
     message: 'That elixir no longer exists.',
     description: 'Text that the background returns to the interface, which shows it to the user.',

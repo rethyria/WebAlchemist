@@ -30,7 +30,7 @@ vi.mock('./userscripts-api', () => ({
   },
 }))
 
-const { blockedStates, problemWithStoredCode } = await import('./code-gate')
+const { analyseWithConfig, blockedStates, configProblem, problemWithStoredCode } = await import('./code-gate')
 const { registerTransform, reregisterAll } = await import('./registry')
 
 const base = (over: Partial<Transform>): Transform => ({
@@ -173,5 +173,47 @@ describe('code in the MAIN world without the record of approval (#151)', () => {
     stored = records
     expect(await reregisterAll()).toMatchObject({ registered: 1, skipped: 1 })
     expect(registered).toEqual(['ok'])
+  })
+})
+
+describe('the settings check', () => {
+  const fields = [
+    { key: 'label', label: 'Label', type: 'text' as const, default: 'x' },
+    { key: 'on', label: 'On', type: 'yes-no' as const, default: true },
+  ]
+  const js = (code: string, configFields: Transform['configFields'] = fields) => ({ kind: 'js' as const, code, ...(configFields ? { configFields } : {}) })
+
+  it('passes code that reads keys the fields define', () => {
+    expect(configProblem(js('document.title = CONFIG.label; if (CONFIG.on) {}'))).toBeNull()
+    expect(configProblem(js("const { label, on } = CONFIG; document.title = label; CONFIG['on']"))).toBeNull()
+  })
+
+  it('refuses code that reads a key the fields do not define', () => {
+    expect(configProblem(js('document.title = CONFIG.nope'))).toContain('nope')
+    expect(configProblem(js('document.title = CONFIG.nope', []))).toContain('nope')
+    expect(configProblem(js("const { other } = CONFIG"))).toContain('other')
+  })
+
+  it('refuses fields that are not valid', () => {
+    expect(configProblem(js('1', [{ key: '__proto__', label: 'x', type: 'text', default: '' }]))).not.toBeNull()
+    expect(configProblem({ kind: 'js', code: '', configFields: [{ key: 'a', label: '', type: 'text', default: '' } as never] })).not.toBeNull()
+  })
+
+  it('does not see a read through an alias, which only affects correctness', () => {
+    expect(configProblem(js('const c = CONFIG; document.title = c.nope'))).toBeNull()
+  })
+
+  it('adds the problem to the analysis as a block, so every gate refuses it', () => {
+    const result = analyseWithConfig('document.title = CONFIG.nope', [], fields)
+    expect(result.passed).toBe(false)
+    expect(result.static.some((f) => f.severity === 'block' && f.api === 'CONFIG')).toBe(true)
+    expect(analyseWithConfig('document.title = CONFIG.label', [], fields).passed).toBe(true)
+  })
+
+  it('stops stored code from running when its fields are invalid or it reads an undefined key', () => {
+    const record = (over: Partial<Transform>) => base({ kind: 'js', world: 'USER_SCRIPT', origin: 'ai', code: 'document.title = CONFIG.label', ...over })
+    expect(problemWithStoredCode(record({ configFields: fields }), settings)).toBeNull()
+    expect(problemWithStoredCode(record({}), settings)).toContain('label')
+    expect(problemWithStoredCode(record({ configFields: [{ key: 'Bad', label: 'x', type: 'text', default: '' }] }), settings)).not.toBeNull()
   })
 })

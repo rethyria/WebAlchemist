@@ -65,6 +65,7 @@ async function approvedSave(transform: any) {
     type: 'approve-code',
     code: transform.code,
     declaredCapabilities: transform.capabilities,
+    ...(transform.configFields ? { configFields: transform.configFields } : {}),
     world: transform.world,
     transformId: transform.id,
     match: transform.match,
@@ -396,5 +397,102 @@ describe('the separate settings file', () => {
     expect(await fails({ type: 'import-config-values', id: 'c1', file: file({ size: 15 }), tabId: TAB })).toBe(PRIVATE_WINDOW_MESSAGE)
     h.privateTabs.delete(TAB)
     await fails({ type: 'import-config-values', id: 'missing', file: file({ size: 15 }) })
+  })
+})
+
+describe('JavaScript that reads settings, through the real save, preview and registration paths', () => {
+  const reading = (over: Record<string, unknown> = {}) =>
+    js({ code: 'document.title = CONFIG.label', configFields: [{ key: 'label', label: 'Label', type: 'text', default: 'dflt' }], ...over })
+  const sourceOf = (id: string): string => String(h.userScriptsHeld.get(id)?.js?.map((j: any) => j.code).join('\n') ?? '')
+
+  it('refuses to save code that reads a setting the fields do not define', async () => {
+    await boot([])
+    await expect(approvedSave(reading({ code: 'document.title = CONFIG.nope' }))).rejects.toThrow()
+    expect(stored('j1')).toBeUndefined()
+  })
+
+  it('refuses to approve code whose fields it does not match', async () => {
+    await boot([])
+    const reply = await h.onMessage({
+      type: 'approve-code',
+      code: 'document.title = CONFIG.nope',
+      declaredCapabilities: [],
+      configFields: [],
+      transformId: 'j1',
+      match: 'example.com/*',
+    })
+    expect(reply.ok).toBe(false)
+  })
+
+  it('refuses a save of changed fields without a token for them, and accepts it with one', async () => {
+    await boot([])
+    await approvedSave(reading())
+    const changed = reading({ configFields: [{ key: 'label', label: 'Label', type: 'text', default: 'other default' }] })
+    const refused = await h.onMessage({ type: 'save-transform', transform: changed, tabId: TAB })
+    expect(refused.ok).toBe(false)
+    expect(stored('j1').configFields[0].default).toBe('dflt')
+    await approvedSave(changed)
+    expect(stored('j1').configFields[0].default).toBe('other default')
+  })
+
+  it('accepts a rename with a changed value and no token', async () => {
+    await boot([])
+    await approvedSave(reading())
+    await ask({ type: 'set-config-values', id: 'j1', values: { label: 'mine' } })
+    const saved = await h.onMessage({ type: 'save-transform', transform: { ...stored('j1'), name: 'New name' }, tabId: TAB })
+    expect(saved.ok).toBe(true)
+    expect(stored('j1')).toMatchObject({ name: 'New name', configValues: { label: 'mine' } })
+  })
+
+  it('registers the script with the effective values, and registers it again when a value changes', async () => {
+    await boot([])
+    await approvedSave(reading())
+    expect(sourceOf('j1')).toContain('const CONFIG = Object.freeze({"label": "dflt"})')
+    await ask({ type: 'set-config-values', id: 'j1', values: { label: 'changed "text"' }, tabId: TAB })
+    expect(sourceOf('j1')).toContain('const CONFIG = Object.freeze({"label": "changed \\"text\\""})')
+    await ask({ type: 'set-config-values', id: 'j1', values: {}, reset: ['label'], tabId: TAB })
+    expect(sourceOf('j1')).toContain('"label": "dflt"')
+  })
+
+  it('does not run stored code whose stored values are invalid, but uses the default for them', async () => {
+    await boot([reading({ configValues: { label: 5 } })])
+    expect(sourceOf('j1')).toContain('"label": "dflt"')
+  })
+
+  it('does not register code that reads a setting the stored fields lack', async () => {
+    await boot([reading({ code: 'document.title = CONFIG.nope' })])
+    expect(h.userScriptsHeld.has('j1')).toBe(false)
+  })
+
+  it('previews with the stored values, never with the values in the message', async () => {
+    await boot([reading({ configValues: { label: 'stored value' } })])
+    const draft = reading({ id: 'j1', configValues: { label: 'sent value' }, world: 'USER_SCRIPT' })
+    const reply = await h.onMessage(await h.approvedPreview({ type: 'preview-js', tabId: TAB, transform: draft }))
+    expect(reply.ok).toBe(true)
+    const source = sourceOf('preview-j1')
+    expect(source).toContain('stored value')
+    expect(source).not.toContain('sent value')
+  })
+
+  it('previews an unsaved draft with the defaults, never with the values in the message', async () => {
+    await boot([])
+    const draft = reading({ id: 'draft', configValues: { label: 'sent value' }, world: 'USER_SCRIPT' })
+    const reply = await h.onMessage(await h.approvedPreview({ type: 'preview-js', tabId: TAB, transform: draft }))
+    expect(reply.ok).toBe(true)
+    const source = sourceOf('preview-draft')
+    expect(source).toContain('"label": "dflt"')
+    expect(source).not.toContain('sent value')
+  })
+
+  it('refuses a preview whose approval was given for other fields', async () => {
+    await boot([])
+    const draft = reading({ id: 'draft', world: 'USER_SCRIPT' })
+    const message = await h.approvedPreview({ type: 'preview-js', tabId: TAB, transform: draft })
+    const tampered = {
+      ...message,
+      transform: { ...draft, configFields: [{ key: 'label', label: 'Label', type: 'text', default: 'changed' }] },
+    }
+    const reply = await h.onMessage(tampered)
+    expect(reply.ok).toBe(false)
   })
 })

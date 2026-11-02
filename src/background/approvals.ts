@@ -31,7 +31,8 @@
  * ask for an approval itself.
  */
 
-import type { Capability, ExecutionWorld, Transform } from '@shared/types'
+import { stableJson } from '@shared/config'
+import type { Capability, ConfigField, ExecutionWorld, Transform } from '@shared/types'
 
 const KEY = 'wa-approvals'
 /** Enough for many sessions of work; bounded so session storage cannot grow without limit. */
@@ -43,6 +44,12 @@ export type ApprovalVerdict = 'match' | 'mismatch' | 'uncertain' | 'user-written
 export interface ApprovalBinding {
   transformId: string
   match: string
+  /**
+   * The settings the code reads. They are part of what was reviewed, so the
+   * hash covers them. The values the user sets are not: a value edit needs no
+   * review, because the analysis treats every value as arbitrary text.
+   */
+  configFields?: ConfigField[] | undefined
 }
 
 interface Approval {
@@ -55,8 +62,16 @@ interface Approval {
   at: number
 }
 
-export async function hashCode(code: string, world: ExecutionWorld | undefined): Promise<string> {
-  const bytes = new TextEncoder().encode(JSON.stringify([code, world ?? 'USER_SCRIPT']))
+export async function hashCode(
+  code: string,
+  world: ExecutionWorld | undefined,
+  configFields?: readonly ConfigField[] | undefined,
+): Promise<string> {
+  // The fields are written with their keys in sorted order, so two copies of
+  // the same fields give the same hash. Setting values are not in the hash.
+  const bytes = new TextEncoder().encode(
+    `[${JSON.stringify(code)},${JSON.stringify(world ?? 'USER_SCRIPT')},${stableJson(configFields ?? [])}]`,
+  )
   const digest = await crypto.subtle.digest('SHA-256', bytes)
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('')
 }
@@ -78,7 +93,7 @@ export async function recordApproval(
   verdict: ApprovalVerdict,
   binding: ApprovalBinding,
 ): Promise<string> {
-  const hash = await hashCode(code, world)
+  const hash = await hashCode(code, world, binding.configFields)
   const token = crypto.randomUUID()
   const kept = (await read()).filter(
     (a) =>
@@ -117,7 +132,7 @@ export async function isApproved(
   options: { verdict?: ApprovalVerdict } = {},
 ): Promise<boolean> {
   if (!token) return false
-  const hash = await hashCode(code, world)
+  const hash = await hashCode(code, world, binding.configFields)
   return (await read()).some(
     (a) =>
       a.token === token &&
@@ -163,12 +178,16 @@ export async function mayBeSaved(
     // pattern is not a rename.
     stored.match === incoming.match &&
     (stored.world ?? 'USER_SCRIPT') === world &&
+    // The fields are part of what was reviewed, so a change to them is a change
+    // of code. The values are not, and are not compared.
+    stableJson(stored.configFields ?? []) === stableJson(incoming.configFields ?? []) &&
     incoming.capabilities.every((c) => stored.capabilities.includes(c))
   return (
     unchanged ||
     isApproved(token, incoming.code, incoming.world, incoming.capabilities, {
       transformId: incoming.id,
       match: incoming.match,
+      configFields: incoming.configFields,
     })
   )
 }

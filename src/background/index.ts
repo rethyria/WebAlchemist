@@ -16,11 +16,13 @@ import type {
 import { exactPagePattern, matchesUrl, originPermissionForUrl } from '@shared/match'
 import { CAPTURE_GRANT_KEY } from '@shared/capture-grant'
 import { appliesInContainer } from '@shared/container'
+import { reconcileValues } from '@shared/config'
 import { refuseInPrivateWindow, requireNormalWindow } from './private-window'
 import { cropWindow, reducedSize, regionAtScroll, viewportChanged, type PixelSize, type ScrollOffset, type Viewport } from '@shared/region'
 import { createSerialQueue } from '@shared/serial'
 import type {
   Accent,
+  ConfigField,
   GenerationResult,
   ModelReview,
   PageContext,
@@ -46,7 +48,7 @@ import { hostOfUrl } from '@shared/site-off'
 import { isSidebarPortName, ownerOfSidebarPort, panelOwner } from '@shared/sidebar-port'
 import { isApproved, spendApproval } from './approvals'
 import { encryptExport, openExport } from './export-crypto'
-import { blockedStates, problemWithStoredCode, runStaticAnalysis, staticProblem } from './code-gate'
+import { analyseWithConfig, blockedStates, problemWithStoredCode, staticProblem } from './code-gate'
 import { assertPreviewable, checkCssForPage, checkCssTransform, pageUrlFor, sameCssContext } from './css-gate'
 import {
   applyCssTransforms as applyCssTransformsFor,
@@ -720,7 +722,7 @@ async function handle(
       return getUsage()
 
     case 'analyse':
-      return runStaticAnalysis(message.code, message.declaredCapabilities)
+      return analyseWithConfig(message.code, message.declaredCapabilities, message.configFields)
 
     case 'analyse-css': {
       const tab =
@@ -823,9 +825,9 @@ async function handle(
             stored.code,
             stored.world,
             stored.capabilities,
-            { transformId: stored.id, match: stored.match },
+            { transformId: stored.id, match: stored.match, configFields: stored.configFields },
           )
-          if (!approved || !runStaticAnalysis(stored.code, stored.capabilities).passed) {
+          if (!approved || !analyseWithConfig(stored.code, stored.capabilities, stored.configFields).passed) {
             throw new Error(AWAITING_APPROVAL_NOTE)
           }
           await spendApproval(message.approvalToken!)
@@ -1018,9 +1020,10 @@ async function handle(
       // Re-run static analysis here rather than trusting that the caller did.
       // This is the last point before arbitrary generated code is registered to
       // run on a real page, so it is the one that has to hold.
-      const analysis = runStaticAnalysis(
+      const analysis = analyseWithConfig(
         message.transform.code,
         message.transform.capabilities,
+        message.transform.configFields,
       )
       if (!analysis.passed) {
         throw new Error(t('bgStaticAnalysisRejectedThisCodeSo3'))
@@ -1057,13 +1060,29 @@ async function handle(
           message.transform.code,
           message.transform.world,
           message.transform.capabilities,
-          { transformId: message.transform.id, match: message.transform.match },
+          {
+            transformId: message.transform.id,
+            match: message.transform.match,
+            configFields: message.transform.configFields,
+          },
           { verdict: 'match' },
         ))
       ) {
         throw new Error(t('bgTheModelReviewDidNotMatch'))
       }
-      const previewTransform = { ...message.transform, match: previewMatch }
+      // The values are not taken from the message: the preview uses the values
+      // stored for this elixir, reconciled to the draft's fields, or the
+      // defaults when it is not saved yet.
+      const savedForPreview = (await getAllTransforms()).find((t) => t.id === message.transform.id)
+      const { configValues: _sentValues, ...draft } = message.transform
+      const previewValues = savedForPreview
+        ? reconcileValues(savedForPreview.configFields, draft.configFields, savedForPreview.configValues).values
+        : {}
+      const previewTransform: Transform = {
+        ...draft,
+        match: previewMatch,
+        ...(Object.keys(previewValues).length > 0 ? { configValues: previewValues } : {}),
+      }
 
       // Recorded before registering: registerPreview pauses the saved script
       // first, so a close of the sidebar during or after a failed registration
@@ -1264,7 +1283,7 @@ async function handle(
       const settings = await getSettings()
       return previewImport(await openExport(message.bundle, message.passphrase), {
         cssProblem: (t) => cssProblemOf(t, settings),
-        jsProblem: (t) => staticProblem(t.code, t.capabilities),
+        jsProblem: (t) => staticProblem(t.code, t.capabilities, t.configFields),
       })
     }
 
@@ -1282,7 +1301,7 @@ async function handle(
         await openExport(message.bundle, message.passphrase),
         {
           cssProblem: (t) => cssProblemOf(t, settings),
-          jsProblem: (t) => staticProblem(t.code, t.capabilities),
+          jsProblem: (t) => staticProblem(t.code, t.capabilities, t.configFields),
         },
         message.restoreSettings === true,
       )
@@ -1969,8 +1988,9 @@ async function runReview(
   declared: Transform['capabilities'],
   transformId?: string,
   intentImported = false,
+  configFields?: ConfigField[],
 ): Promise<ReviewResult> {
-  const analysis = runStaticAnalysis(code, declared)
+  const analysis = analyseWithConfig(code, declared, configFields)
   if (!analysis.passed) return analysis
 
   const usage = createUsageRecorder(transformId)

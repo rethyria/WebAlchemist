@@ -15,13 +15,13 @@
  */
 
 import { appliesInContainer } from '@shared/container'
-import { checkValueSet, valuesFitSize } from '@shared/config'
+import { checkValueSet, stableJson, valuesFitSize } from '@shared/config'
 import { readSettingsFile, settingsFileFor, type SettingsFile } from '@shared/config-file'
 import type { Message } from '@shared/messages'
 import type { ReviewInstruction } from './providers/types'
-import type { ConfigValue, ReviewResult, Settings, Transform } from '@shared/types'
+import type { ConfigField, ConfigValue, ReviewResult, Settings, Transform } from '@shared/types'
 import { isApproved, mayBeSaved, recordApproval, spendApproval, type ApprovalVerdict } from './approvals'
-import { blockedStates, problemWithStoredCode, runStaticAnalysis } from './code-gate'
+import { analyseWithConfig, blockedStates, problemWithStoredCode } from './code-gate'
 import { assertPreviewable, checkCssForPage, checkCssTransform } from './css-gate'
 import { t } from '@shared/i18n'
 
@@ -70,7 +70,11 @@ export async function handleSaveTransform(message: Of<'save-transform'>, deps: S
   const before = (await deps.getAllTransforms()).find((t) => t.id === message.transform.id)
 
   if (message.transform.kind === 'js') {
-    const analysis = runStaticAnalysis(message.transform.code, message.transform.capabilities)
+    const analysis = analyseWithConfig(
+      message.transform.code,
+      message.transform.capabilities,
+      message.transform.configFields,
+    )
     if (!analysis.passed) {
       throw new Error(t('bgStaticAnalysisRejectedThisCodeSo'))
     }
@@ -111,7 +115,9 @@ export async function handleSaveTransform(message: Of<'save-transform'>, deps: S
       // to another match pattern is not a rename.
       stored.match === message.transform.match &&
       JSON.stringify(stored.approvedCssUrls ?? []) ===
-        JSON.stringify(message.transform.approvedCssUrls ?? [])
+        JSON.stringify(message.transform.approvedCssUrls ?? []) &&
+      // The fields decide what the CSS says once the values are put in.
+      stableJson(stored.configFields ?? []) === stableJson(message.transform.configFields ?? [])
     if (!unchanged) {
       const check = checkCssTransform(
         message.transform,
@@ -143,7 +149,7 @@ export async function handleSaveTransform(message: Of<'save-transform'>, deps: S
       incoming.code,
       incoming.world,
       incoming.capabilities,
-      { transformId: incoming.id, match: incoming.match },
+      { transformId: incoming.id, match: incoming.match, configFields: incoming.configFields },
     )
     const keptFromStored = stored?.world === 'MAIN' && stored.mainApprovedByUser === true
     if (grantedNow || keptFromStored) outgoing = { ...incoming, mainApprovedByUser: true }
@@ -208,6 +214,8 @@ export interface ReviewDeps {
     transformId?: string,
     /** True when `intent` came from an imported file. */
     intentImported?: boolean,
+    /** The settings the code reads. */
+    configFields?: ConfigField[],
   ) => Promise<ReviewResult>
   recordApproval?: typeof recordApproval
 }
@@ -234,12 +242,14 @@ export async function handleReview(
     message.declaredCapabilities,
     message.transformId,
     message.intentImported ?? false,
+    message.configFields,
   )
   if (result.model && trusted) {
     const verdict: ApprovalVerdict = result.model.verdict
     const approvalToken = await record(message.code, message.world, message.declaredCapabilities, verdict, {
       transformId: message.transformId,
       match: message.match,
+      configFields: message.configFields,
     })
     return { ...result, approvalToken }
   }
@@ -253,7 +263,7 @@ export async function handleApproveCode(
   deps: Pick<ReviewDeps, 'recordApproval'> = {},
 ): Promise<{ approvalToken: string }> {
   if (!trusted) throw new Error(t('bgOnlyTheExtensionCanApproveCode'))
-  const analysis = runStaticAnalysis(message.code, message.declaredCapabilities)
+  const analysis = analyseWithConfig(message.code, message.declaredCapabilities, message.configFields)
   if (!analysis.passed) {
     throw new Error(t('bgStaticAnalysisRejectedThisCodeSo2'))
   }
@@ -262,7 +272,7 @@ export async function handleApproveCode(
     message.world,
     message.declaredCapabilities,
     'user-written',
-    { transformId: message.transformId, match: message.match },
+    { transformId: message.transformId, match: message.match, configFields: message.configFields },
   )
   return { approvalToken }
 }

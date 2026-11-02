@@ -30,7 +30,7 @@ export async function approvedPreviewMessage(
     token,
     transformId: message.transform.id,
     match: message.transform.match,
-    hash: await hashCode(message.transform.code, message.transform.world),
+    hash: await hashCode(message.transform.code, message.transform.world, message.transform.configFields),
     capabilities: [...(message.transform.capabilities ?? [])],
     verdict,
     at: Date.now(),

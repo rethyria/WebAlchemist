@@ -192,6 +192,19 @@ const ALLOWED_GLOBALS = new Set([
   'Node', 'Element', 'NodeFilter', 'NodeList', 'HTMLCollection', 'DocumentFragment', 'Text', 'DOMRect',
   'Event', 'CustomEvent', 'KeyboardEvent', 'MouseEvent', 'FocusEvent', 'InputEvent', 'PointerEvent', 'WheelEvent',
   'clearTimeout', 'clearInterval',
+  // The settings of the elixir: a frozen object that the harness declares
+  // (see wrapTransform). Every member of it is arbitrary text, because the
+  // analysis answers "not written out" for any member expression (see
+  // possibleTexts, literalTexts and isNumeric). That is what lets the user
+  // change a value later without a new review: a value reaches each sink the
+  // way text read from a hostile page does, and every sink already has to be
+  // safe for that. A rule that started to trust the text of a member
+  // expression would break this exemption, and the sink tests for CONFIG in
+  // static-analysis.test.ts would fail. Writes to it are refused by
+  // checkGlobalWrite and checkUndeclaredWrite, because it is not declared in
+  // the code, and a declaration of the name is refused by
+  // refuseConfigDeclarations.
+  'CONFIG',
 ])
 /**
  * Assignment operators whose result can be the right-hand side itself or text
@@ -2032,6 +2045,12 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
         }
         return
 
+      case 'UnaryExpression':
+        // `delete Math.max` and `delete CONFIG.x` change a global object that
+        // the code did not declare, as an assignment to a member does.
+        if (node['operator'] === 'delete') checkGlobalWrite(node['argument'], ctx.scope)
+        break
+
       case 'MemberExpression':
         return visitMember(node, ctx, parent)
 
@@ -2274,7 +2293,42 @@ export function analyseJavaScript(source: string): AnalysisOutcome {
     }
   }
 
+  /**
+   * Refuses any declaration of the name CONFIG: a variable, function, class,
+   * parameter or catch parameter. A declaration would hide the user's values
+   * from the code without an error, and would give the analysis a name that
+   * looks like the settings object and is not.
+   */
+  function refuseConfigDeclarations(node: unknown): void {
+    if (Array.isArray(node)) {
+      for (const item of node) refuseConfigDeclarations(item)
+      return
+    }
+    if (!node || typeof node !== 'object') return
+    const n = node as N
+    if (typeof n.type !== 'string') return
+    const names: string[] = []
+    if (n.type === 'VariableDeclarator') patternNames(n['id'], names)
+    if (n.type === 'CatchClause') patternNames(n['param'], names)
+    if (
+      n.type === 'FunctionDeclaration' ||
+      n.type === 'FunctionExpression' ||
+      n.type === 'ArrowFunctionExpression' ||
+      n.type === 'ClassDeclaration' ||
+      n.type === 'ClassExpression'
+    ) {
+      if (n['id']) patternNames(n['id'], names)
+      for (const param of (n['params'] ?? []) as N[]) patternNames(param, names)
+    }
+    if (names.includes('CONFIG')) block(n, 'CONFIG (declaration)', t('saDeclaresTheSettingsName'))
+    for (const key of Object.keys(n)) {
+      if (key === 'loc' || key === 'type' || key === 'start' || key === 'end') continue
+      refuseConfigDeclarations(n[key])
+    }
+  }
+
   const root = ast as unknown as N
+  refuseConfigDeclarations(root)
   const programScope = new Scope(null)
   // `this` at the top of the program is the page global object. The harness
   // wraps code in an arrow function inside a strict-mode IIFE, which keeps

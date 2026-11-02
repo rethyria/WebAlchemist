@@ -9,7 +9,8 @@
  */
 
 import { analyseJavaScript, applyCapabilityPolicy } from '@safety/static-analysis'
-import type { ReviewResult, Settings, Transform, TransformRuntimeState } from '@shared/types'
+import { configReferences, fieldsAreClean, parseConfigFields } from '@shared/config'
+import type { ConfigField, ReviewResult, Settings, Transform, TransformRuntimeState } from '@shared/types'
 import { checkCssTransform } from './css-gate'
 import { t } from '@shared/i18n'
 
@@ -31,9 +32,61 @@ export function runStaticAnalysis(
   }
 }
 
+/**
+ * Why the settings of an elixir and the code that reads them do not fit
+ * together, or null when they do. The fields must be valid, and JavaScript may
+ * read only keys that the fields define.
+ *
+ * This is a correctness check and not a safety control: code that reads
+ * CONFIG through an alias, such as `const c = CONFIG; c.x`, is not seen here,
+ * and it only means that such a key reads undefined. What a value can do is
+ * limited by the static analysis, which treats every member of CONFIG as
+ * arbitrary text.
+ */
+export function configProblem(
+  transform: Pick<Transform, 'kind' | 'code' | 'configFields'>,
+): string | null {
+  if (!fieldsAreClean(transform.configFields)) {
+    return t('configFieldsNotValid', parseConfigFields(transform.configFields).problems[0] ?? '').trim()
+  }
+  if (transform.kind === 'js' && transform.code) {
+    const defined = new Set((transform.configFields ?? []).map((field) => field.key))
+    const unknown = configReferences(transform.code, 'js').keys.find((key) => !defined.has(key))
+    if (unknown !== undefined) return t('bgCodeReadsAnUndefinedSetting', unknown)
+  }
+  return null
+}
+
+/**
+ * Static analysis of JavaScript together with the settings check, as one
+ * result, so that every place that analyses code before it is approved,
+ * previewed, saved or registered applies both.
+ */
+export function analyseWithConfig(
+  code: string,
+  declared: Transform['capabilities'],
+  configFields: ConfigField[] | undefined,
+): ReviewResult {
+  const result = runStaticAnalysis(code, declared)
+  const problem = configProblem({ kind: 'js', code, ...(configFields === undefined ? {} : { configFields }) })
+  if (problem === null) return result
+  return {
+    ...result,
+    static: [
+      ...result.static,
+      { line: 0, column: 0, api: 'CONFIG', capability: null, severity: 'block', explanation: problem },
+    ],
+    passed: false,
+  }
+}
+
 /** The first reason JavaScript fails static analysis, or null when it passes. */
-export function staticProblem(code: string, declared: Transform['capabilities']): string | null {
-  const check = runStaticAnalysis(code, declared)
+export function staticProblem(
+  code: string,
+  declared: Transform['capabilities'],
+  configFields?: ConfigField[],
+): string | null {
+  const check = analyseWithConfig(code, declared, configFields)
   if (check.passed) return null
   return (
     check.static.find((f) => f.severity === 'block')?.explanation ??
@@ -61,6 +114,9 @@ export function problemWithStoredCode(
   if (transform.kind === 'js' && transform.world === 'MAIN' && transform.mainApprovedByUser !== true) {
     return t('bgSetToRunInMainNotApproved')
   }
+
+  const configIssue = configProblem(transform)
+  if (configIssue !== null) return t('bgItsCodeDoesNotPassThe', configIssue)
 
   const check =
     transform.kind === 'js'

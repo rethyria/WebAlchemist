@@ -177,3 +177,97 @@ describe('the wrapper agrees with the CSS side on which pages it runs on', () =>
     expect(runsOn('example.com/axb', 'https://example.com/axb')).toBe(1)
   })
 })
+
+describe('CONFIG, the settings of the elixir', () => {
+  const fields: Transform['configFields'] = [
+    { key: 'label', label: 'Label', type: 'text', default: 'default label' },
+    { key: 'size', label: 'Size', type: 'number', default: 10, min: 1, max: 20 },
+    {
+      key: 'words',
+      label: 'Words',
+      type: 'table',
+      columns: [
+        { key: 'from', label: 'From' },
+        { key: 'to', label: 'To' },
+      ],
+      default: [{ from: 'a', to: 'b' }],
+    },
+  ]
+
+  /** Runs the code with the given settings and returns what it stored on the fake document and the error marker. */
+  function runWithConfig(code: string, configValues?: Transform['configValues'], configFieldsOverride = fields) {
+    const transform = {
+      ...cssTransform({ id: 'abc-1', kind: 'js', code }),
+      configFields: configFieldsOverride,
+      ...(configValues ? { configValues } : {}),
+    } as unknown as Transform
+    const attributes = new Map<string, string>()
+    const result: Record<string, unknown> = {}
+    const documentElement = {
+      setAttribute: (name: string, value: string) => attributes.set(name, value),
+      removeAttribute: (name: string) => attributes.delete(name),
+    }
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      new Function('location', 'document', 'requestAnimationFrame', 'MutationObserver', 'console', wrapTransform(transform, TOKEN))(
+        { pathname: '/', search: '' },
+        { documentElement, querySelector: () => null, body: {}, result },
+        () => {},
+        class {
+          observe() {}
+        },
+        console,
+      )
+    } finally {
+      consoleError.mockRestore()
+    }
+    return { result, marker: attributes.get(NAME) }
+  }
+
+  it('holds the defaults when the user has set nothing', () => {
+    const { result } = runWithConfig('document.result.label = CONFIG.label; document.result.rows = CONFIG.words.length')
+    expect(result).toEqual({ label: 'default label', rows: 1 })
+  })
+
+  it('holds the values the user set, and the default for a field with none', () => {
+    const { result } = runWithConfig(
+      'document.result.label = CONFIG.label; document.result.size = CONFIG.size; document.result.to = CONFIG.words[0].to',
+      { label: 'mine', words: [{ from: 'x', to: 'y' }] },
+    )
+    expect(result).toEqual({ label: 'mine', size: 10, to: 'y' })
+  })
+
+  it('falls back to the default for a stored value that fails its field', () => {
+    const { result } = runWithConfig('document.result.size = CONFIG.size', { size: 99 })
+    expect(result.size).toBe(10)
+  })
+
+  it('is defined and empty for an elixir without settings', () => {
+    const { result } = runWithConfig('document.result.keys = Object.keys(CONFIG).length', undefined, [])
+    expect(result.keys).toBe(0)
+  })
+
+  it('refuses writes, and the error marker records the first one', () => {
+    for (const code of [
+      'CONFIG.label = "x"',
+      'CONFIG.words.push({ from: "a", to: "b" })',
+      'CONFIG.words[0].to = "x"',
+      'delete CONFIG.label',
+      'Object.defineProperty(CONFIG, "z", { value: 1 })',
+    ]) {
+      const { marker } = runWithConfig(code)
+      expect(marker, code).toMatch(/read only|not extensible|frozen|Cannot|object is not/i)
+    }
+  })
+
+  // Control: the same code without a write leaves no marker.
+  it('control: reading leaves no marker', () => {
+    expect(runWithConfig('document.result.label = CONFIG.label').marker).toBeUndefined()
+  })
+
+  it('keeps hostile text inside the literal', () => {
+    const hostile = '"; document.result.escaped = true; //'
+    const { result } = runWithConfig('document.result.label = CONFIG.label', { label: hostile })
+    expect(result).toEqual({ label: hostile })
+  })
+})

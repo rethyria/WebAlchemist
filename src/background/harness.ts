@@ -12,6 +12,7 @@
  * performance problem on precisely the heavy sites that need transforms most.
  */
 
+import { scriptLiteral } from '@shared/config'
 import { pathMatcherFor } from '@shared/match'
 import type { Transform } from '@shared/types'
 import { errorAttributeName } from '@shared/script-errors'
@@ -73,6 +74,14 @@ export function wrapTransform(transform: Transform, errorToken: string): string 
   return `(() => {
   'use strict';
   const NAME = ${jsString(transform.name)};
+  // The settings of this elixir, as the effective values: the user's value
+  // where it passes the field's validation, the default otherwise. It is built
+  // once per registration, with every object and array frozen, so the code can
+  // read it and cannot change it, and it is always defined (an elixir with no
+  // settings gets an empty object). Every string is written with JSON.stringify
+  // and every key matches the key pattern, so no value can end the literal or
+  // set a prototype. The static analysis treats each member as arbitrary text.
+  const CONFIG = ${scriptLiteral(transform.configFields, transform.configValues)};
   // The last error is recorded in an attribute for the content script to read.
   // The page can read and forge it, so it is for diagnostics only (see
   // script-errors.ts). The attribute name is written out at each use and is

@@ -284,7 +284,7 @@ export function parseConfigFields(raw: unknown): { fields: ConfigField[]; proble
 }
 
 /** JSON text with the keys of every object in sorted order, so that two equal values give equal text. */
-function stableJson(value: unknown): string {
+export function stableJson(value: unknown): string {
   return JSON.stringify(value, (_key, inner: unknown) =>
     isPlainObject(inner)
       ? Object.fromEntries(Object.keys(inner).sort().map((key) => [key, inner[key]]))
