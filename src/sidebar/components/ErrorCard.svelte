@@ -115,7 +115,12 @@
     </div>
     <p>{error.message}</p>
     <div class="actions">
-      <Button variant="primary" small onclick={ondiscard}>{t('discard')}</Button>
+      {#if error.subject === 'question'}
+        <!-- A refused question does not end the run, so the way out is closing the card. -->
+        <Button variant="primary" small onclick={ondismiss}>{t('dismiss')}</Button>
+      {:else}
+        <Button variant="primary" small onclick={ondiscard}>{t('discard')}</Button>
+      {/if}
     </div>
   {:else if error.kind === 'rate-limited'}
     <!--

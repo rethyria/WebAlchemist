@@ -56,7 +56,8 @@ import {
 } from '@shared/excluded-sites'
 import { readCaptureGrant, recordCaptureGrant } from '@shared/capture-grant'
 import type { PickerAction } from '@shared/picker-keys'
-import { BackgroundError, generateOverPort, send } from './messaging.svelte'
+import { BackgroundError, askOverPort, generateOverPort, send } from './messaging.svelte'
+import type { TranscriptEntry } from './transcript'
 import { screenshotsAvailable } from '@shared/panel-binding'
 import { jsPreviewGate, reviewKey } from './preview-gate'
 import { t } from '@shared/i18n'
@@ -119,7 +120,7 @@ export type FlowError =
    * be declined again, so there is no retry. `subject` says which request it
    * was, because the two cases tell the user different things.
    */
-  | { kind: 'refused'; subject: 'review' | 'generation'; message: string }
+  | { kind: 'refused'; subject: 'review' | 'generation' | 'question'; message: string }
   /**
    * The page has a password or payment field. The retry action of the card is
    * "send the page content anyway", and dismissing it sends nothing.
@@ -171,6 +172,9 @@ interface CapturedShot {
   moved?: boolean
   reduced?: { from: PixelSize; to: PixelSize }
 }
+
+/** The most questions that can be asked while refining one run. */
+export const MAX_QUESTIONS = 20
 
 export class Flow {
   step = $state<Step>('list')
@@ -252,6 +256,39 @@ export class Flow {
 
   history = $state<RefinementTurn[]>([])
   followUp = $state('')
+
+  /**
+   * Questions asked about the draft and the answers given, oldest first. They
+   * are kept apart from `history` on purpose: the history holds changes only,
+   * several rules depend on its length and on its first entry, and a question
+   * must never reach the model that makes changes or the reviewer. They are
+   * sent to the model that answers questions and nowhere else, they are not
+   * stored, and the run ends them.
+   */
+  exchanges = $state<{ question: string; answer: string }[]>([])
+  /**
+   * What the Refining step shows as the conversation. It is for display only
+   * and nothing in it is sent. An entry is added when an attempt or a question
+   * has succeeded, so a failed one leaves no trace in it.
+   */
+  transcript = $state<TranscriptEntry[]>([])
+  /** True from the moment a question is sent until its answer is stored or it fails. */
+  asking = $state(false)
+  /** The question that is being answered, shown as a bubble until the answer is stored. */
+  askingQuestion = $state<string | null>(null)
+  /** The part of the answer that has arrived, on providers that stream. */
+  askPartial = $state('')
+  /**
+   * Counts the questions that have been sent. A question is current while its
+   * number is the latest and `generation` has not moved, so a Stop, a reset
+   * and a new generation each end it.
+   */
+  private askToken = 0
+  private cancelAskPort: (() => void) | null = null
+
+  get askLimitReached(): boolean {
+    return this.exchanges.length >= MAX_QUESTIONS
+  }
 
   /**
    * Extra elements pointed at while refining, sent alongside the target.
@@ -1127,6 +1164,7 @@ export class Flow {
       this.stage = 'preview'
       await this.applyPreview(result)
       if (!current()) return
+      this.logAttempt(false)
       this.step = 'refining'
       this.startReviewForNewResult()
     } catch (cause) {
@@ -1333,6 +1371,7 @@ export class Flow {
 
       await this.applyPreview(this.result)
       if (!current()) return
+      this.logAttempt(false)
       this.step = 'refining'
       void this.checkVisionSupport()
     } catch (cause) {
@@ -1358,6 +1397,8 @@ export class Flow {
    */
   private refinement: {
     history: RefinementTurn[]
+    /** How long the transcript was, so a failed or cancelled attempt leaves nothing in it. */
+    transcriptLength: number
     instruction: string
     followUp: string
     importedDescription: string | null
@@ -1416,6 +1457,21 @@ export class Flow {
     })
   }
 
+  /**
+   * Adds the current request and its result to the transcript. `shown` is false
+   * for an attempt whose text is not shown once a later attempt replaces it: a
+   * saved or imported description, and the rationale of a stored transform.
+   */
+  private logAttempt(shown: boolean): void {
+    const result = this.result
+    if (!result) return
+    this.transcript = [
+      ...this.transcript,
+      { kind: 'request', text: shown ? this.instruction : '' },
+      { kind: 'result', text: shown ? result.rationale.approach : '' },
+    ]
+  }
+
   private undoRefinement(): void {
     const held = this.refinement
     this.refinement = null
@@ -1428,6 +1484,7 @@ export class Flow {
       this.intentBaseline = held.previous.intentBaseline
     }
     this.history = held.history
+    this.transcript = this.transcript.slice(0, held.transcriptLength)
     this.instruction = held.instruction
     this.followUp = held.followUp
     this.importedDescription = held.importedDescription
@@ -1625,6 +1682,15 @@ export class Flow {
         await this.removeLatePreview(starts)
         return
       }
+      // The first request of a run that began from a saved or imported
+      // description is not shown once it is replaced, as in regenerate().
+      this.logAttempt(
+        !(
+          this.savedInstruction !== null &&
+          this.instruction === this.savedInstruction &&
+          this.history.length === 0
+        ),
+      )
       this.refinement = null
       this.step = 'refining'
       this.startReviewForNewResult()
@@ -2131,6 +2197,8 @@ export class Flow {
   async regenerate(): Promise<void> {
     const text = this.followUp.trim()
     if (!text || !this.result) return
+    // The answer to a question is still arriving; Regenerate is disabled then.
+    if (this.asking) return
     // A script that has run has already altered the page, and a second one
     // would run on top of it. The panel hides Regenerate in this state, but
     // Ctrl+Enter in the follow-up field reached this method directly. The
@@ -2139,6 +2207,7 @@ export class Flow {
 
     this.refinement = {
       history: this.history,
+      transcriptLength: this.transcript.length,
       instruction: this.instruction,
       followUp: this.followUp,
       importedDescription: this.importedDescription,
@@ -2187,11 +2256,147 @@ export class Flow {
     if (this.tabId === null) return
     // regenerate() ignores an empty follow-up, so without this the preview was
     // cleared and the page reloaded and then nothing was generated.
-    if (!this.followUp.trim() || !this.result) return
+    if (!this.followUp.trim() || !this.result || this.asking) return
     await this.clearPreview()
     this.ourReload = 'pending'
     await browser.tabs.reload(this.tabId)
     await this.regenerate()
+  }
+
+  /**
+   * Asks the model a question about the draft, using the text in the follow-up
+   * box. This is a side conversation: the draft, the result, the step, the
+   * preview, the review and the history are not touched, and the question and
+   * the answer are never sent to the model that makes changes or to the
+   * reviewer. The user types the change they want afterwards and presses
+   * Regenerate.
+   */
+  async ask(): Promise<void> {
+    const picked = this.picked
+    const result = this.result
+    const question = this.followUp.trim()
+    if (!picked || !result || this.step !== 'refining' || this.asking || !question) return
+    if (this.askLimitReached) return
+
+    const gen = this.generation
+    const token = ++this.askToken
+    const current = () => token === this.askToken && gen === this.generation
+
+    this.dismissError()
+    this.asking = true
+    this.askingQuestion = question
+    this.askPartial = ''
+    this.followUp = ''
+    let sentShot = false
+
+    /** Puts the panel back as it was before the question, with the text in the box. */
+    const restore = () => {
+      this.asking = false
+      this.askingQuestion = null
+      this.askPartial = ''
+      this.cancelAskPort = null
+      if (!this.followUp.trim()) this.followUp = question
+    }
+
+    try {
+      const context: PageContext = { ...(await this.liveContext(picked)) }
+      // The address stays the one the panel has been showing, as in generate().
+      context.url = picked.context.url
+      if (!current()) return
+      if (this.references.length > 0) context.references = [...this.references]
+
+      if (await this.needsSensitiveConfirmation()) {
+        if (!current()) return
+        restore()
+        this.warnAboutSensitivePage(() => this.ask())
+        return
+      }
+      if (!current()) return
+
+      // The same opt-in as a generation: sent once, then spent.
+      if (this.sendScreenshot && this.visionSupported && this.shot) {
+        context.screenshot = this.shot
+        sentShot = true
+      }
+
+      const run = askOverPort(
+        {
+          context,
+          instruction: this.instruction,
+          instructionImported:
+            this.savedImported &&
+            this.savedInstruction !== null &&
+            this.instruction === this.savedInstruction &&
+            this.history.length === 0,
+          instructionSaved:
+            !this.savedImported &&
+            this.savedInstruction !== null &&
+            this.instruction === this.savedInstruction &&
+            this.history.length === 0,
+          ...(this.importedDescription === null ? {} : { importedDescription: this.importedDescription }),
+          ...(this.savedDescription === null ? {} : { savedDescription: this.savedDescription }),
+          history: this.history,
+          scopeDepth: this.scopeDepth,
+          scopeContainer: this.scopeContainer,
+          draft: { code: result.code, rationale: result.rationale },
+          exchanges: this.exchanges,
+          question,
+          tabId: this.tabId ?? undefined,
+          transformId: this.transformKey(),
+        },
+        {
+          onSent: () => {},
+          onUsage: (usage) => {
+            if (current() && usage) this.lastUsage = usage
+          },
+          onChunk: (accumulated) => {
+            if (!current()) return
+            const partial = extractPartialString(accumulated, 'answer')
+            if (partial !== null) this.askPartial = partial
+          },
+        },
+      )
+      this.cancelAskPort = run.cancel
+      const reply = (await run.result) as { answer?: unknown } | null
+      this.cancelAskPort = null
+      if (!current()) return
+
+      const answer = typeof reply?.answer === 'string' ? reply.answer : ''
+      if (!answer.trim()) throw new Error(t('flowAskEmptyAnswer'))
+
+      this.exchanges = [...this.exchanges, { question, answer }]
+      this.transcript = [
+        ...this.transcript,
+        { kind: 'question', text: question },
+        { kind: 'answer', text: answer },
+      ]
+      this.asking = false
+      this.askingQuestion = null
+      this.askPartial = ''
+    } catch (cause) {
+      if (!current()) return
+      restore()
+      // No retry: the question is back in the box, and Ask sends it again.
+      this.fail(cause, null, 'question')
+    } finally {
+      if (sentShot) this.clearShot()
+    }
+  }
+
+  /**
+   * Stops the answer that is arriving. The unfinished answer is dropped, the
+   * question goes back into the box and nothing is added to the conversation.
+   */
+  cancelAsk(): void {
+    if (!this.asking) return
+    const question = this.askingQuestion
+    this.askToken += 1
+    this.cancelAskPort?.()
+    this.cancelAskPort = null
+    this.asking = false
+    this.askingQuestion = null
+    this.askPartial = ''
+    if (question !== null && !this.followUp.trim()) this.followUp = question
   }
 
   async discard(): Promise<void> {
@@ -2256,6 +2461,7 @@ export class Flow {
   /* ---------------------------------------------------------------- */
 
   toSaving(): void {
+    this.cancelAsk()
     this.stopSecondaryPicker()
     this.step = 'saving'
   }
@@ -2553,7 +2759,7 @@ export class Flow {
   fail(
     cause: unknown,
     retry: (() => Promise<void>) | null = null,
-    subject: 'review' | 'generation' = 'generation',
+    subject: 'review' | 'generation' | 'question' = 'generation',
   ): void {
     if (!(cause instanceof BackgroundError)) {
       this.show({ kind: 'request-failed', message: String(cause) }, retry)
@@ -2587,7 +2793,13 @@ export class Flow {
         this.show({
           kind: 'refused',
           subject,
-          message: t(subject === 'review' ? 'errRefusedReview' : 'errRefusedGeneration'),
+          message: t(
+            subject === 'review'
+              ? 'errRefusedReview'
+              : subject === 'question'
+                ? 'errRefusedQuestion'
+                : 'errRefusedGeneration',
+          ),
         })
         return
       case 'rate-limit':
@@ -2707,6 +2919,16 @@ export class Flow {
     // calling retry() with nothing to repeat.
     this.dismissError()
     this.refinement = null
+    // The questions belong to the run, so an answer still arriving is ignored
+    // and its request is dropped.
+    this.askToken += 1
+    this.cancelAskPort?.()
+    this.cancelAskPort = null
+    this.asking = false
+    this.askingQuestion = null
+    this.askPartial = ''
+    this.exchanges = []
+    this.transcript = []
     this.keptInstruction = null
     this.rePickFrom = null
     this.generation += 1

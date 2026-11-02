@@ -7,6 +7,7 @@
   import type { GenerationResult, ReviewResult } from '@shared/types'
   import type { ElementContext } from '@shared/types'
   import { attemptNumber } from '../lib/attempt'
+  import { transcriptBubbles, type TranscriptEntry } from '../lib/transcript'
   import { autogrow } from '../lib/autogrow'
   import Button from './Button.svelte'
   import AddressNote from './AddressNote.svelte'
@@ -18,7 +19,19 @@
     analysis: ReviewResult | null
     intent: string
     history: RefinementTurn[]
+    /** The conversation as shown: attempts and side questions in the order they happened. */
+    transcript: TranscriptEntry[]
     followUp: string
+    /** True while the answer to a question is arriving. */
+    asking: boolean
+    /** The question being answered, or null. */
+    askingQuestion: string | null
+    /** The part of the answer that has arrived. */
+    askPartial: string
+    /** True when no more questions can be asked in this run. */
+    askLimitReached: boolean
+    /** How many questions a run allows, for the note shown at the limit. */
+    questionLimit: number
     /** JS only: whether the draft has been registered and the page reloaded. */
     jsRan: boolean
     /** Extra elements pointed at, sent with the next attempt. */
@@ -39,6 +52,10 @@
     onremovereference: (selector: string) => void
     onscreenshot: (value: boolean) => void
     onregenerate: () => void
+    /** Sends the text in the box as a question. It does not change the draft. */
+    onask: () => void
+    /** Stops the answer that is arriving. */
+    onstopask: () => void
     /** The model review run for the preview, or null when none has run for this code. */
     previewReview: ReviewResult | null
     previewReviewing: boolean
@@ -56,7 +73,13 @@
     analysis,
     intent,
     history,
+    transcript,
     followUp,
+    asking,
+    askingQuestion,
+    askPartial,
+    askLimitReached,
+    questionLimit,
     jsRan,
     references,
     awaitingReference,
@@ -72,6 +95,8 @@
     onremovereference,
     onscreenshot,
     onregenerate,
+    onask,
+    onstopask,
     previewReview,
     previewReviewing,
     previewAllowed,
@@ -94,16 +119,20 @@
 
   /*
    * The transcript is the conversation as the user experienced it: their
-   * instruction, then what the model says it did. `rationale.approach` is that
-   * second half — it is written for a reader, not for the next request.
+   * instruction, then what the model says it did, with the questions they
+   * asked and the answers in the order they happened. `rationale.approach` is
+   * the second half of an attempt: it is written for a reader, not for the next
+   * request.
    */
   let bubbles = $derived(
-    [
-      ...history.map((turn) => ({ role: turn.role, text: turn.content })),
-      { role: 'user' as const, text: intent },
-      { role: 'assistant' as const, text: result.rationale.approach },
-    ].filter((bubble) => bubble.text),
+    transcriptBubbles(
+      transcript,
+      intent,
+      result.rationale.approach,
+      askingQuestion === null ? null : { question: askingQuestion, answer: askPartial },
+    ),
   )
+  let canAsk = $derived(followUp.trim().length > 0 && !askLimitReached)
 
   let codeOpen = $state(false)
   let lineCount = $derived(result.code.split('\n').length)
@@ -113,6 +142,7 @@
       event.preventDefault()
       // The same choice the buttons make: after a script ran, the page has to
       // be reloaded before another attempt.
+      if (asking) return
       if (isJs && jsRan) onreload()
       else onregenerate()
     }
@@ -210,8 +240,23 @@
     {/if}
     <div class="bubbles">
       {#each bubbles as bubble}
-        <p class="bubble {bubble.role}">{bubble.text}</p>
+        {#if bubble.side}
+          <p class="bubble {bubble.role} side">
+            <span class="prefix"
+              >{bubble.side === 'question' ? t('refQuestionPrefix') : t('refAnswerPrefix')}</span
+            >
+            {bubble.text}
+          </p>
+          {#if bubble.firstAnswer}
+            <p class="side-note">{t('refAskNote')}</p>
+          {/if}
+        {:else}
+          <p class="bubble {bubble.role}">{bubble.text}</p>
+        {/if}
       {/each}
+      {#if asking && !askPartial}
+        <p class="side-note" role="status">{t('refAskWaiting')}</p>
+      {/if}
     </div>
 
     <details bind:open={codeOpen}>
@@ -241,6 +286,7 @@
         use:autogrow={followUp}
         value={followUp}
         placeholder={t('refPlaceholder')}
+        readonly={asking}
         oninput={(event) => onfollowup(event.currentTarget.value)}
         onkeydown={onKeyDown}
       ></textarea>
@@ -301,20 +347,38 @@
           </button>
         {/if}
       {/if}
-      {#if isJs && jsRan}
-        <Button variant="primary" full onclick={onreload}>
-          {t('refReloadAndTry')}
-        </Button>
-      {:else}
-        <button
-          type="button"
-          class="regenerate"
-          class:ready={followUp.trim().length > 0}
-          disabled={!followUp.trim()}
-          onclick={onregenerate}
-        >
-          {t('refRegenerate')}
-        </button>
+      <div class="pair">
+        {#if asking}
+          <button type="button" class="ask ready" onclick={onstopask}>{t('refStop')}</button>
+        {:else}
+          <button
+            type="button"
+            class="ask"
+            class:ready={canAsk}
+            disabled={!canAsk}
+            onclick={onask}
+          >
+            {t('refAsk')}
+          </button>
+        {/if}
+        {#if isJs && jsRan}
+          <Button variant="primary" grow={1} disabled={asking} onclick={onreload}>
+            {t('refReloadAndTry')}
+          </Button>
+        {:else}
+          <button
+            type="button"
+            class="regenerate"
+            class:ready={followUp.trim().length > 0 && !asking}
+            disabled={!followUp.trim() || asking}
+            onclick={onregenerate}
+          >
+            {t('refRegenerate')}
+          </button>
+        {/if}
+      </div>
+      {#if askLimitReached}
+        <p class="side-note">{t('refAskLimit', questionLimit)}</p>
       {/if}
     </section>
 
@@ -495,6 +559,25 @@
     color: var(--text-dim);
   }
 
+  /* A side conversation: dashed outline, and the prefix is text, not colour. */
+  .bubble.side {
+    border: 1px dashed var(--border-strong);
+    background: transparent;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+
+  .bubble.side .prefix {
+    font-weight: 600;
+    color: var(--text-faint);
+  }
+
+  .side-note {
+    margin: 0;
+    font: 11px/1.45 var(--font-ui);
+    color: var(--text-faint);
+  }
+
   summary {
     display: flex;
     align-items: center;
@@ -656,8 +739,21 @@
 
   /* Outlined rather than filled: the filled button on this screen is the one
      that ends the loop, and there should only be one of those. */
-  .regenerate {
-    width: 100%;
+  .pair {
+    display: flex;
+    gap: var(--sp-7);
+  }
+
+  /* Two half-width buttons. min-width lets a long label wrap on a narrow screen. */
+  .pair > :global(button),
+  .regenerate,
+  .ask {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .regenerate,
+  .ask {
     padding: 8px;
     border: 1px solid var(--border);
     border-radius: var(--r-button);
@@ -667,10 +763,15 @@
     cursor: default;
   }
 
-  .regenerate.ready {
+  .regenerate.ready,
+  .ask.ready {
     border-color: var(--accent-fg);
     color: var(--accent-fg);
     cursor: pointer;
+  }
+
+  .pair > :global(button) {
+    white-space: normal;
   }
 
   .actions {

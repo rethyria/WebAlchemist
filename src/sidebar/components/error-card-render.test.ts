@@ -30,6 +30,14 @@ describe('the card for a refused request', () => {
     expect(body).not.toContain('Try again')
   })
 
+  it('offers Dismiss and not Discard for a refused question, since the run goes on', () => {
+    const body = html({ kind: 'refused', subject: 'question', message: 'The provider declined to answer this question.' }, null)
+    expect(body).toContain('The provider declined to answer this question.')
+    expect(body).toContain('Dismiss')
+    expect(body).not.toContain('Discard')
+    expect(body).not.toContain('Try again')
+  })
+
   it('offers no retry even when a retry action is supplied', () => {
     const body = html({ kind: 'refused', subject: 'review', message: 'm' }, () => {})
     expect(body).not.toContain('Try again')

@@ -44,6 +44,7 @@ const { Flow } = await import('./flow.svelte')
 const { BackgroundError } = await import('./messaging.svelte')
 const { setBoundTab } = await import('@shared/panel-binding')
 const { reviewKey } = await import('./preview-gate')
+const transcriptModule = await import('./transcript')
 
 const URL_ = 'https://www.example.com/'
 const anchor = { tag: 'div', classes: [], path: 'html>body>div', landmarks: [], selector: 'div.x' }
@@ -501,6 +502,7 @@ describe('resetting the flow', () => {
 /* -------------------------------------------------------------------- */
 
 type FakePort = {
+  name: string
   request: any
   disconnected: boolean
   emit: (message: any) => void
@@ -509,9 +511,10 @@ const ports: FakePort[] = []
 const realConnect = (globalThis as any).browser.runtime.connect
 
 /** Stands in for the `wa-generate` port: the test decides what it answers. */
-function fakeConnect() {
+function fakeConnect(info?: { name: string }) {
   const listeners: ((message: any) => void)[] = []
   const port: FakePort & Record<string, any> = {
+    name: info?.name ?? '',
     request: null,
     disconnected: false,
     emit: (message) => listeners.forEach((listener) => listener(message)),
@@ -2961,5 +2964,386 @@ describe('the code check starts by itself for new JavaScript', () => {
     await vi.waitFor(() => expect(flow.previewReviewing).toBe(false))
     expect(flow.currentPreviewReview).toBeNull()
     expect(flow.error).toBeNull()
+  })
+})
+
+/* -------------------------------------------------------------------- */
+/* Side questions while refining                                         */
+/* -------------------------------------------------------------------- */
+
+describe('questions asked while refining', () => {
+  const { transcriptBubbles } = transcriptModule
+  const FORGED = 'QUESTION-MARKER-7f3a'
+  const ANSWERED = 'ANSWER-MARKER-91bc'
+
+  beforeEach(() => {
+    ports.length = 0
+    ;(globalThis as any).browser.runtime.connect = fakeConnect
+  })
+  afterEach(() => {
+    ;(globalThis as any).browser.runtime.connect = realConnect
+  })
+
+  /** A first generation that went through the flow, so the transcript is the real one. */
+  async function refining() {
+    const flow = newFlow()
+    flow.picked = { ...found, cropDrawn: false } as any
+    flow.instruction = 'first'
+    flow.step = 'describing'
+    const run = flow.generate()
+    ;(await nextPort(ports.length + 1)).emit({ type: 'done', result: cssResult('A1') })
+    await run
+    return flow
+  }
+
+  /** Asks a question and answers it from the fake port. */
+  async function askAndAnswer(flow: InstanceType<typeof Flow>, question: string, answer: string) {
+    flow.followUp = question
+    const run = flow.ask()
+    const port = await nextPort(ports.length + 1)
+    port.emit({ type: 'done', result: { answer } })
+    await run
+    return port
+  }
+
+  function bubbles(flow: InstanceType<typeof Flow>, pending = false) {
+    return transcriptBubbles(
+      flow.transcript,
+      flow.instruction,
+      flow.result!.rationale.approach,
+      pending && flow.askingQuestion !== null
+        ? { question: flow.askingQuestion, answer: flow.askPartial }
+        : null,
+    ).map((b) => `${b.side ?? b.role}:${b.text}`)
+  }
+
+  it('sends the question on its own port with the draft, the history and the earlier exchanges', async () => {
+    const flow = await refining()
+    await askAndAnswer(flow, 'Why CSS?', 'It is enough.')
+    flow.followUp = 'And on mobile?'
+    const run = flow.ask()
+    const port = await nextPort(ports.length + 1)
+    expect(port.name).toBe('wa-ask')
+    expect(port.request.question).toBe('And on mobile?')
+    expect(port.request.exchanges).toEqual([{ question: 'Why CSS?', answer: 'It is enough.' }])
+    expect(port.request.draft.code).toBe('/* A1 */')
+    expect(port.request.instruction).toBe('first')
+    expect(port.request.history).toEqual([])
+    port.emit({ type: 'done', result: { answer: 'Same.' } })
+    await run
+  })
+
+  it('leaves the step, the result, the draft, the history and the review unchanged', async () => {
+    const flow = await refining()
+    const before = {
+      step: flow.step,
+      result: flow.result,
+      draft: flow.draft,
+      analysis: flow.analysis,
+      history: [...flow.history],
+      jsRan: flow.jsRan,
+      previewReview: flow.currentPreviewReview,
+      instruction: flow.instruction,
+      previewedCss: flow.previewedCss,
+    }
+    const messagesBefore = calls.length
+    await askAndAnswer(flow, 'Why CSS?', 'It is enough.')
+    expect({
+      step: flow.step,
+      result: flow.result,
+      draft: flow.draft,
+      analysis: flow.analysis,
+      history: [...flow.history],
+      jsRan: flow.jsRan,
+      previewReview: flow.currentPreviewReview,
+      instruction: flow.instruction,
+      previewedCss: flow.previewedCss,
+    }).toEqual(before)
+    // Nothing was asked of the page or the background besides reading the page.
+    const sent = calls.slice(messagesBefore).map((c) => c.type)
+    expect(sent.every((type) => type === 'recapture' || type === 'page-has-sensitive-fields')).toBe(true)
+    expect(flow.exchanges).toEqual([{ question: 'Why CSS?', answer: 'It is enough.' }])
+    expect(flow.followUp).toBe('')
+  })
+
+  it('does not put a question or an answer in a generation, a regeneration or a review', async () => {
+    const flow = await refining()
+    const firstPorts = ports.length
+    await askAndAnswer(flow, `why ${FORGED}`, `because ${ANSWERED}`)
+
+    flow.followUp = 'make it bigger'
+    const run = flow.regenerate()
+    const port = await nextPort(firstPorts + 2)
+    expect(port.name).toBe('wa-generate')
+    const wire = JSON.stringify(port.request)
+    expect(wire).not.toContain(FORGED)
+    expect(wire).not.toContain(ANSWERED)
+    expect(port.request.history.map((turn: any) => turn.content)).toEqual(['first', 'A1'])
+    port.emit({ type: 'done', result: cssResult('A2') })
+    await run
+
+    // The reviewer is given the typed requests only.
+    flow.draft = { ...saved, kind: 'js', id: 'OLD' }
+    flow.result = { ...jsResultBase, code: 'x' } as any
+    handler = (m) => ({ ok: true, data: m.type === 'review' ? { static: [], undeclaredCapabilities: [], passed: true } : null })
+    await flow.toReview()
+    const review = calls.filter((c) => c.type === 'review')
+    expect(review.length).toBeGreaterThan(0)
+    expect(JSON.stringify(review)).not.toContain(FORGED)
+    expect(JSON.stringify(review)).not.toContain(ANSWERED)
+    expect(review.at(-1).instructions.map((i: any) => i.text)).toEqual(['first', 'make it bigger'])
+    // The exchanges stay available for later questions.
+    expect(flow.exchanges).toHaveLength(1)
+  })
+
+  it('does not put a question in the request of a repair', async () => {
+    const flow = await refining()
+    await askAndAnswer(flow, `why ${FORGED}`, ANSWERED)
+    await flow.discard()
+    handler = (m) => {
+      if (m.type === 'context-for-anchor') return { ok: true, data: found }
+      if (m.type === 'repair') return { ok: true, data: { result: cssResult('R') } }
+      return { ok: true, data: null }
+    }
+    await flow.repair(saved, 'broken')
+    const sent = JSON.stringify(calls.filter((c) => c.type === 'repair'))
+    expect(sent).not.toContain(FORGED)
+    expect(flow.exchanges).toEqual([])
+  })
+
+  it('puts the question back in the box and removes its bubble when the request fails', async () => {
+    const flow = await refining()
+    flow.followUp = 'Why CSS?'
+    const run = flow.ask()
+    const port = await nextPort(ports.length + 1)
+    expect(flow.asking).toBe(true)
+    expect(bubbles(flow, true)).toContain('question:Why CSS?')
+    expect(flow.followUp).toBe('')
+    port.emit({ type: 'error', error: { message: 'down', kind: 'network', retryable: true } })
+    await run
+    expect(flow.asking).toBe(false)
+    expect(flow.followUp).toBe('Why CSS?')
+    expect(flow.exchanges).toEqual([])
+    expect(bubbles(flow, true).some((b) => b.startsWith('question:'))).toBe(false)
+    expect(flow.step).toBe('refining')
+    expect(flow.error).toMatchObject({ kind: 'request-failed' })
+    expect(flow.canRetry).toBe(false)
+  })
+
+  it('shows a refusal as a card for the question that does not end the run', async () => {
+    const flow = await refining()
+    flow.followUp = 'Why CSS?'
+    const run = flow.ask()
+    ;(await nextPort(ports.length + 1)).emit({ type: 'error', error: { message: 'x', kind: 'refusal', retryable: false } })
+    await run
+    expect(flow.error).toEqual({
+      kind: 'refused',
+      subject: 'question',
+      message: 'The provider declined to answer this question.',
+    })
+    expect(flow.canRetry).toBe(false)
+    expect(flow.step).toBe('refining')
+    expect(flow.result).not.toBeNull()
+    expect(flow.followUp).toBe('Why CSS?')
+    flow.dismissError()
+    expect(flow.error).toBeNull()
+    expect(flow.step).toBe('refining')
+  })
+
+  it('asks for the confirmation a generation asks for on a page with a password field', async () => {
+    const flow = await refining()
+    const before = ports.length
+    handler = (m) => ({ ok: true, data: m.type === 'page-has-sensitive-fields' ? true : null })
+    flow.followUp = 'Why CSS?'
+    await flow.ask()
+    expect(ports.length).toBe(before)
+    expect(flow.error).toMatchObject({ kind: 'sensitive-page' })
+    expect(flow.followUp).toBe('Why CSS?')
+    expect(flow.asking).toBe(false)
+
+    const again = flow.retry()
+    const port = await nextPort(before + 1)
+    port.emit({ type: 'done', result: { answer: 'Because.' } })
+    await again
+    expect(flow.exchanges).toEqual([{ question: 'Why CSS?', answer: 'Because.' }])
+  })
+
+  it('refuses a twenty-first question and does not open a port', async () => {
+    const flow = await refining()
+    flow.exchanges = Array.from({ length: 19 }, (_, i) => ({ question: `q${i}`, answer: `a${i}` }))
+    expect(flow.askLimitReached).toBe(false)
+    await askAndAnswer(flow, 'the twentieth', 'ok')
+    expect(flow.exchanges).toHaveLength(20)
+    expect(flow.askLimitReached).toBe(true)
+
+    const before = ports.length
+    flow.followUp = 'the twenty-first'
+    await flow.ask()
+    expect(ports.length).toBe(before)
+    expect(flow.followUp).toBe('the twenty-first')
+  })
+
+  it('does nothing before the first generation or with an empty box', async () => {
+    const flow = newFlow()
+    flow.picked = { ...found, cropDrawn: false } as any
+    flow.instruction = 'first'
+    flow.step = 'describing'
+    flow.followUp = 'Why?'
+    await flow.ask()
+    expect(ports.length).toBe(0)
+
+    const refined = await refining()
+    const before = ports.length
+    refined.followUp = '   '
+    await refined.ask()
+    expect(ports.length).toBe(before)
+  })
+
+  it('is cleared by a reset, a discard and a save, and ignores an answer that arrives later', async () => {
+    const flow = await refining()
+    await askAndAnswer(flow, 'Why CSS?', 'It is enough.')
+    expect(flow.exchanges).toHaveLength(1)
+    flow.reset()
+    expect(flow.exchanges).toEqual([])
+    expect(flow.transcript).toEqual([])
+    expect(flow.asking).toBe(false)
+
+    const second = await refining()
+    await askAndAnswer(second, 'Q', 'A')
+    await second.discard()
+    expect(second.exchanges).toEqual([])
+    expect(second.transcript).toEqual([])
+
+    const third = await refining()
+    third.followUp = 'Pending'
+    const run = third.ask()
+    const port = await nextPort(ports.length + 1)
+    third.reset()
+    expect(port.disconnected).toBe(true)
+    port.emit({ type: 'done', result: { answer: 'late' } })
+    await Promise.race([run, new Promise((resolve) => setTimeout(resolve, 20))])
+    expect(third.exchanges).toEqual([])
+    expect(third.asking).toBe(false)
+  })
+
+  it('is cleared when the transform is saved', async () => {
+    const flow = await refining()
+    await askAndAnswer(flow, 'Why CSS?', 'It is enough.')
+    handler = (m) => ({ ok: true, data: m.type === 'save-transform' ? undefined : null })
+    flow.toSaving()
+    flow.draft = { ...saved, kind: 'css', id: 'NEW' }
+    await flow.save()
+    expect(flow.exchanges).toEqual([])
+    expect(flow.transcript).toEqual([])
+  })
+
+  it('stops an answer that is arriving, drops the partial answer and restores the question', async () => {
+    const flow = await refining()
+    flow.followUp = 'Why CSS?'
+    const run = flow.ask()
+    const port = await nextPort(ports.length + 1)
+    port.emit({ type: 'sent' })
+    port.emit({ type: 'chunk', text: '{"answer":"It is' })
+    expect(flow.askPartial).toBe('It is')
+    expect(bubbles(flow, true).at(-1)).toBe('answer:It is')
+
+    flow.cancelAsk()
+    expect(port.disconnected).toBe(true)
+    expect(flow.asking).toBe(false)
+    expect(flow.askPartial).toBe('')
+    expect(flow.followUp).toBe('Why CSS?')
+    expect(flow.exchanges).toEqual([])
+    expect(flow.transcript.some((e) => e.kind === 'question' || e.kind === 'answer')).toBe(false)
+
+    port.emit({ type: 'done', result: { answer: 'late' } })
+    await Promise.race([run, new Promise((resolve) => setTimeout(resolve, 20))])
+    expect(flow.exchanges).toEqual([])
+    expect(flow.error).toBeNull()
+  })
+
+  it('disables Regenerate while an answer arrives and leaves it working afterwards', async () => {
+    const flow = await refining()
+    flow.followUp = 'Why CSS?'
+    const run = flow.ask()
+    const port = await nextPort(ports.length + 1)
+    const before = ports.length
+    flow.followUp = 'make it bigger'
+    await flow.regenerate()
+    expect(ports.length).toBe(before)
+    expect(flow.step).toBe('refining')
+    port.emit({ type: 'done', result: { answer: 'Because.' } })
+    await run
+    expect(flow.followUp).toBe('make it bigger')
+  })
+
+  it('keeps the conversation in the order it happened across a regeneration', async () => {
+    const flow = await refining()
+    await askAndAnswer(flow, 'Why CSS?', 'It is enough.')
+    flow.followUp = 'second'
+    const run = flow.regenerate()
+    ;(await nextPort(ports.length + 1)).emit({ type: 'done', result: cssResult('A2') })
+    await run
+    await askAndAnswer(flow, 'Is that fast?', 'Yes.')
+    expect(bubbles(flow)).toEqual([
+      'user:first',
+      'assistant:A1',
+      'question:Why CSS?',
+      'answer:It is enough.',
+      'user:second',
+      'assistant:A2',
+      'question:Is that fast?',
+      'answer:Yes.',
+    ])
+    expect(flow.history.map((turn) => turn.content)).toEqual(['first', 'A1'])
+    expect(flow.exchanges.map((e) => e.question)).toEqual(['Why CSS?', 'Is that fast?'])
+  })
+
+  it('removes nothing from the conversation when a regeneration is cancelled or fails', async () => {
+    const flow = await refining()
+    await askAndAnswer(flow, 'Why CSS?', 'It is enough.')
+    const before = bubbles(flow)
+
+    flow.followUp = 'second'
+    const failing = flow.regenerate()
+    ;(await nextPort(ports.length + 1)).emit({ type: 'error', error: { message: 'x', kind: 'network' } })
+    await failing
+    expect(bubbles(flow)).toEqual(before)
+
+    flow.dismissError()
+    flow.followUp = 'third'
+    const cancelled = flow.regenerate()
+    const port = await nextPort(ports.length + 1)
+    flow.cancelGenerating()
+    port.emit({ type: 'done', result: cssResult('A3') })
+    await Promise.race([cancelled, new Promise((resolve) => setTimeout(resolve, 20))])
+    expect(bubbles(flow)).toEqual(before)
+    expect(flow.exchanges).toHaveLength(1)
+  })
+
+  it('restores the transcript length saved when the attempt began if the attempt is undone', async () => {
+    const flow = await refining()
+    await askAndAnswer(flow, 'Why CSS?', 'It is enough.')
+    const length = flow.transcript.length
+    flow.followUp = 'second'
+    const run = flow.regenerate()
+    const port = await nextPort(ports.length + 1)
+    // Entries added while the attempt is running are taken back with it.
+    flow.transcript = [...flow.transcript, { kind: 'request', text: 'stray' }, { kind: 'result', text: 'stray' }]
+    port.emit({ type: 'error', error: { message: 'x', kind: 'network' } })
+    await run
+    expect(flow.transcript).toHaveLength(length)
+  })
+
+  it('shows what the screen showed before for a draft opened with Edit with AI', async () => {
+    const flow = newFlow()
+    handler = (m) => {
+      if (m.type === 'context-for-anchor') return { ok: true, data: found }
+      return { ok: true, data: null }
+    }
+    await flow.editWithAi(saved)
+    expect(flow.step).toBe('refining')
+    expect(bubbles(flow)).toEqual(['user:old intent', 'assistant:a'])
+    await askAndAnswer(flow, 'Why?', 'Because.')
+    expect(bubbles(flow)).toEqual(['user:old intent', 'assistant:a', 'question:Why?', 'answer:Because.'])
   })
 })

@@ -20,7 +20,7 @@
   import { changedFields } from '@shared/settings-fields'
   import { activeTab, BackgroundError, send } from './lib/messaging.svelte'
   import { isForTab, type HealthCheckResult } from './lib/health-result'
-  import { Flow } from './lib/flow.svelte'
+  import { Flow, MAX_QUESTIONS } from './lib/flow.svelte'
   import { boundTab } from '@shared/panel-binding'
   import {
     isPageOfPanel,
@@ -856,7 +856,13 @@
       analysis={flow.analysis}
       intent={flow.instruction}
       history={flow.history}
+      transcript={flow.transcript}
       followUp={flow.followUp}
+      asking={flow.asking}
+      askingQuestion={flow.askingQuestion}
+      askPartial={flow.askPartial}
+      askLimitReached={flow.askLimitReached}
+      questionLimit={MAX_QUESTIONS}
       jsRan={flow.jsRan}
       references={flow.references}
       awaitingReference={flow.awaitingReference}
@@ -873,6 +879,8 @@
       onscreenshot={(value) =>
         value ? void flow.chooseScreenshotRegion() : flow.cancelScreenshot()}
       onregenerate={() => void flow.regenerate()}
+      onask={() => void flow.ask()}
+      onstopask={() => flow.cancelAsk()}
       previewReview={flow.currentPreviewReview}
       previewReviewing={flow.previewReviewing}
       previewAllowed={flow.jsPreviewAllowed}

@@ -597,8 +597,8 @@ export const sidebarMessages = defineMessages({
     message: 'Assumes',
   },
   refAskLabel: {
-    message: 'Not right yet? Say what to change',
-    description: 'Label above the box for a follow-up request.',
+    message: 'Ask a question, or say what to change',
+    description: 'Label above the box that takes either a question about the draft or a follow-up request to change it.',
   },
   refPlaceholder: {
     message: 'keep the header light though',
@@ -637,6 +637,43 @@ export const sidebarMessages = defineMessages({
   refReloadAndTry: {
     message: 'Reload page and try again',
     description: 'Button that reloads the page and generates again.',
+  },
+  refAsk: {
+    message: 'Ask',
+    description: 'Button that sends the text in the box to the model as a question about the draft. It does not change the draft.',
+  },
+  refStop: {
+    message: 'Stop',
+    description: 'Button that stops the answer to a question while it arrives.',
+  },
+  refQuestionPrefix: {
+    message: 'Question:',
+    description: 'Word before a question that the user asked about the draft, in the conversation.',
+  },
+  refAnswerPrefix: {
+    message: 'Answer:',
+    description: 'Word before the answer to a question about the draft, in the conversation.',
+  },
+  refAskNote: {
+    message: 'Questions and answers are not sent to the model that makes the change. Type the change you want and press Regenerate.',
+    description: 'One line under the first answer to a question, saying that the conversation is separate from the changes.',
+  },
+  refAskWaiting: {
+    message: 'Waiting for the answer…',
+    description: 'Status line shown after a question was sent and before any of the answer has arrived.',
+  },
+  refAskLimit: {
+    message: 'The limit of $COUNT$ questions has been reached for this draft.',
+    description: 'Note shown beside the Ask button when no more questions can be asked. $COUNT$ is a number.',
+    placeholders: ['COUNT'],
+  },
+  errRefusedQuestion: {
+    message: 'The provider declined to answer this question.',
+    description: 'Text of an error card shown when the provider refused to answer a question about the draft.',
+  },
+  flowAskEmptyAnswer: {
+    message: 'The model returned no answer to the question.',
+    description: 'Error shown when the model replied to a question with no text.',
   },
   refRegenerate: {
     message: 'Regenerate',
