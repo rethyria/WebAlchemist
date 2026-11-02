@@ -2790,3 +2790,176 @@ describe('a request the provider refused (#153)', () => {
     expect(flow.canRetry).toBe(true)
   })
 })
+
+describe('the code check starts by itself for new JavaScript', () => {
+  const jsOut = { ...jsResult, code: 'document.body.remove()' }
+  const passed = { static: [], undeclaredCapabilities: [], passed: true }
+  const reviews = () => calls.filter((c) => c.type === 'review')
+  let analysis: any
+  let reviewAnswer: any
+
+  beforeEach(() => {
+    ports.length = 0
+    analysis = passed
+    reviewAnswer = {
+      ...passed,
+      model: { verdict: 'match', explanation: '' },
+      approvalToken: 'review-token',
+    }
+    ;(globalThis as any).browser.runtime.connect = fakeConnect
+    handler = (m: any) => {
+      if (m.type === 'analyse') return { ok: true, data: analysis }
+      if (m.type === 'review') return { ok: true, data: reviewAnswer }
+      return { ok: true, data: null }
+    }
+  })
+  afterEach(() => {
+    ;(globalThis as any).browser.runtime.connect = realConnect
+  })
+
+  async function firstGeneration() {
+    const flow = newFlow()
+    flow.picked = { ...found, cropDrawn: false } as any
+    flow.instruction = 'first'
+    flow.step = 'describing'
+    const run = flow.generate()
+    ;(await nextPort(1)).emit({ type: 'done', result: jsOut })
+    await run
+    return flow
+  }
+
+  it('reviews the code after the first generation', async () => {
+    const flow = await firstGeneration()
+    expect(flow.step).toBe('refining')
+    await vi.waitFor(() => expect(flow.jsPreviewAllowed).toBe(true))
+    expect(reviews().length).toBe(1)
+  })
+
+  it('reviews the code after a refinement', async () => {
+    const flow = newFlow()
+    flow.picked = { ...found, cropDrawn: false } as any
+    flow.instruction = 'first'
+    flow.result = cssResult('A1')
+    flow.step = 'refining'
+    flow.followUp = 'second'
+    const run = flow.regenerate()
+    ;(await nextPort(1)).emit({ type: 'done', result: jsOut })
+    await run
+    await vi.waitFor(() => expect(flow.jsPreviewAllowed).toBe(true))
+    expect(reviews().length).toBe(1)
+  })
+
+  it('reviews the code after a repair', async () => {
+    const flow = newFlow()
+    handler = (m: any) => {
+      if (m.type === 'context-for-anchor') return { ok: true, data: found }
+      if (m.type === 'repair') return { ok: true, data: { result: jsOut } }
+      if (m.type === 'analyse') return { ok: true, data: analysis }
+      if (m.type === 'review') return { ok: true, data: reviewAnswer }
+      return { ok: true, data: null }
+    }
+    await flow.repair({ ...saved, kind: 'js' }, 'broken')
+    await vi.waitFor(() => expect(flow.jsPreviewAllowed).toBe(true))
+    expect(reviews().length).toBe(1)
+  })
+
+  it('does not review when the analysis failed', async () => {
+    analysis = { ...passed, passed: false }
+    const flow = await firstGeneration()
+    expect(flow.step).toBe('refining')
+    expect(reviews()).toEqual([])
+    expect(flow.previewReviewing).toBe(false)
+  })
+
+  it('does not review CSS', async () => {
+    const flow = newFlow()
+    flow.picked = { ...found, cropDrawn: false } as any
+    flow.instruction = 'first'
+    flow.step = 'describing'
+    handler = (m: any) => ({ ok: true, data: m.type === 'analyse' ? passed : null })
+    const run = flow.generate()
+    ;(await nextPort(1)).emit({ type: 'done', result: cssResult('A') })
+    await run
+    expect(reviews()).toEqual([])
+  })
+
+  it('does not review a flow that is set up without a new result, as when a session is restored', async () => {
+    const flow = newFlow()
+    flow.draft = { ...saved, kind: 'js' }
+    flow.result = jsOut
+    flow.analysis = passed as any
+    flow.step = 'refining'
+    await Promise.resolve()
+    expect(reviews()).toEqual([])
+    expect(flow.jsPreviewAllowed).toBe(false)
+  })
+
+  it('does not send a second review for a key that already has one, and offers it again after an intent edit', async () => {
+    const flow = await firstGeneration()
+    await vi.waitFor(() => expect(flow.jsPreviewAllowed).toBe(true))
+    await flow.reviewForPreview()
+    expect(reviews().length).toBe(1)
+    flow.intent = 'something else'
+    expect(flow.jsPreviewAllowed).toBe(false)
+    await flow.reviewForPreview()
+    expect(reviews().length).toBe(2)
+  })
+
+  it('does not send a second review while one is in progress', async () => {
+    let release!: () => void
+    const gate = new Promise<void>((r) => (release = r))
+    handler = (m: any) => {
+      if (m.type === 'analyse') return gate.then(() => ({ ok: true, data: passed })) as any
+      return { ok: true, data: reviewAnswer }
+    }
+    const flow = newFlow()
+    flow.picked = { ...found, cropDrawn: false } as any
+    flow.instruction = 'first'
+    flow.step = 'describing'
+    const run = flow.generate()
+    ;(await nextPort(1)).emit({ type: 'done', result: jsOut })
+    release()
+    await run
+    void flow.reviewForPreview()
+    await vi.waitFor(() => expect(flow.jsPreviewAllowed).toBe(true))
+    expect(reviews().length).toBe(1)
+  })
+
+  it('keeps the explanation of a verdict other than match and does not retry', async () => {
+    reviewAnswer = { ...reviewAnswer, model: { verdict: 'mismatch', explanation: 'It removes more.' } }
+    const flow = await firstGeneration()
+    await vi.waitFor(() => expect(flow.currentPreviewReview).not.toBeNull())
+    expect(flow.currentPreviewReview?.model?.explanation).toBe('It removes more.')
+    expect(flow.jsPreviewAllowed).toBe(false)
+    expect(reviews().length).toBe(1)
+  })
+
+  it('shows the error card with a retry when the request fails', async () => {
+    handler = (m: any) => {
+      if (m.type === 'analyse') return { ok: true, data: passed }
+      if (m.type === 'review') return failure('network')
+      return { ok: true, data: null }
+    }
+    const flow = await firstGeneration()
+    await vi.waitFor(() => expect(flow.error).not.toBeNull())
+    expect(flow.error).toMatchObject({ kind: 'request-failed' })
+    expect(flow.canRetry).toBe(true)
+  })
+
+  it('ignores an automatic review that returns after a discard', async () => {
+    let release!: () => void
+    const gate = new Promise<void>((r) => (release = r))
+    handler = (m: any) => {
+      if (m.type === 'analyse') return { ok: true, data: passed }
+      if (m.type === 'review') return gate.then(() => ({ ok: true, data: reviewAnswer })) as any
+      return { ok: true, data: null }
+    }
+    const flow = await firstGeneration()
+    await vi.waitFor(() => expect(flow.previewReviewing).toBe(true))
+    await flow.discard()
+    release()
+    await vi.waitFor(() => expect(flow.previewReviewing).toBe(false))
+    expect(flow.currentPreviewReview).toBeNull()
+    expect(flow.error).toBeNull()
+  })
+})

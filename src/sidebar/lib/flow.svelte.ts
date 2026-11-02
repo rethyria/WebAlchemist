@@ -1128,6 +1128,7 @@ export class Flow {
       await this.applyPreview(result)
       if (!current()) return
       this.step = 'refining'
+      this.startReviewForNewResult()
     } catch (cause) {
       if (!current()) return
       /*
@@ -1626,6 +1627,7 @@ export class Flow {
       }
       this.refinement = null
       this.step = 'refining'
+      this.startReviewForNewResult()
     } catch (cause) {
       if (!current()) return
       // Back where they started, with what they typed intact — a failed
@@ -1961,6 +1963,19 @@ export class Flow {
   }
 
   /**
+   * Starts the review for a JavaScript result that has just arrived in the
+   * refining step. The review is required before a preview is offered, so the
+   * user has no choice to make about it. It is called from the code paths that
+   * set a new result, and not from an effect on the intent, so that editing
+   * the intent does not start a review per keystroke. A saved session that is
+   * restored does not call it, and the manual button covers that case.
+   */
+  private startReviewForNewResult(): void {
+    if (this.result?.kind !== 'js') return
+    void this.reviewForPreview()
+  }
+
+  /**
    * Runs the model review for the preview. The preview button is offered only
    * after this has completed with a verdict of match (issue 55), because the
    * preview runs the code on the page before anything is saved.
@@ -1970,8 +1985,10 @@ export class Flow {
     const draft = this.draft
     if (!result || result.kind !== 'js' || !draft || this.previewReviewing) return
     if (!this.analysis?.passed) return
-    const token = this.generation
     const key = reviewKey(result, this.intent)
+    // A review of this code and intent is stored already.
+    if (this.previewReviewFor === key) return
+    const token = this.generation
     this.previewReviewing = true
     try {
       const review = await send<ReviewResult>({
