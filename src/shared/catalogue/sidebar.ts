@@ -655,7 +655,7 @@ export const sidebarMessages = defineMessages({
     description: 'Word before the answer to a question about the draft, in the conversation.',
   },
   refAskNote: {
-    message: 'Questions and answers are not sent to the model that makes the change. Type the change you want and press Regenerate.',
+    message: 'Questions and answers are not sent with the request that makes the change. Type the change you want and press Regenerate.',
     description: 'One line under the first answer to a question, saying that the conversation is separate from the changes.',
   },
   refAskWaiting: {
@@ -663,8 +663,8 @@ export const sidebarMessages = defineMessages({
     description: 'Status line shown after a question was sent and before any of the answer has arrived.',
   },
   refAskLimit: {
-    message: 'The limit of $COUNT$ questions has been reached for this draft.',
-    description: 'Note shown beside the Ask button when no more questions can be asked. $COUNT$ is a number.',
+    message: 'The most questions allowed ($COUNT$) have been asked. The count restarts after saving or discarding.',
+    description: 'Note shown beside the Ask button when no more questions can be asked in the current run. $COUNT$ is a number.',
     placeholders: ['COUNT'],
   },
   errRefusedQuestion: {

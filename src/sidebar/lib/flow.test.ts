@@ -3320,6 +3320,118 @@ describe('questions asked while refining', () => {
     expect(flow.exchanges).toHaveLength(1)
   })
 
+  it('spends the screenshot opt-in when Stop ends a question that carried it', async () => {
+    const flow = await refining()
+    flow.visionSupported = true
+    flow.sendScreenshot = true
+    ;(flow as any).shot = { dataUrl: 'data:image/png;base64,AAAA', rect: crop, clipped: false }
+    flow.followUp = 'Why?'
+    const run = flow.ask()
+    const port = await nextPort(ports.length + 1)
+    expect(port.request.context.screenshot).toBeDefined()
+    flow.cancelAsk()
+    expect(flow.sendScreenshot).toBe(false)
+    expect((flow as any).shot).toBeNull()
+    expect(flow.asking).toBe(false)
+    expect(flow.askPartial).toBe('')
+    expect(flow.askingQuestion).toBeNull()
+    // The promise of the stopped run never settles, and nothing else waits on it.
+    await Promise.race([run, new Promise((resolve) => setTimeout(resolve, 20))])
+    // A new question is allowed at once and does not carry the screenshot.
+    flow.followUp = 'Again?'
+    const next = flow.ask()
+    const second = await nextPort(ports.length + 1)
+    expect(second.request.context.screenshot).toBeUndefined()
+    second.emit({ type: 'done', result: { answer: 'ok' } })
+    await next
+  })
+
+  it('cuts the streamed answer at 6000 characters so the text on screen never shrinks', async () => {
+    const flow = await refining()
+    flow.followUp = 'Why?'
+    const run = flow.ask()
+    const port = await nextPort(ports.length + 1)
+    port.emit({ type: 'chunk', text: JSON.stringify({ answer: 'x'.repeat(7000) }).slice(0, -2) })
+    expect(flow.askPartial).toHaveLength(6000)
+    port.emit({ type: 'done', result: { answer: 'x'.repeat(6000) } })
+    await run
+    expect(flow.exchanges[0]!.answer).toHaveLength(6000)
+  })
+
+  it('does not start a question while the page is being reloaded for a new attempt', async () => {
+    const flow = await refining()
+    flow.result = { ...jsResultBase, code: 'x' } as any
+    flow.draft = { ...saved, kind: 'js', id: 'OLD' }
+    flow.jsRan = true
+    flow.followUp = 'change it'
+    let release!: () => void
+    const gate = new Promise<void>((r) => (release = r))
+    const realReload = (globalThis as any).browser.tabs.reload
+    ;(globalThis as any).browser.tabs.reload = () => gate
+    try {
+      const run = flow.reloadAndRetry()
+      await vi.waitFor(() => expect(flow.reloading).toBe(true))
+      const before = ports.length
+      await flow.ask()
+      expect(ports.length).toBe(before)
+      expect(flow.asking).toBe(false)
+      release()
+      const port = await nextPort(before + 1)
+      expect(port.name).toBe('wa-generate')
+      expect(port.request.instruction).toBe('change it')
+      port.emit({ type: 'done', result: cssResult('A2') })
+      await run
+      expect(flow.reloading).toBe(false)
+    } finally {
+      ;(globalThis as any).browser.tabs.reload = realReload
+    }
+  })
+
+  describe('cards', () => {
+    it('keeps a card for something else when a question fails, and shows the failure beside the box', async () => {
+      const flow = await refining()
+      flow.show({ kind: 'request-failed', message: 'The check failed.' }, async () => {})
+      flow.followUp = 'Why?'
+      const run = flow.ask()
+      expect(flow.error).toMatchObject({ message: 'The check failed.' })
+      expect(flow.canRetry).toBe(true)
+      ;(await nextPort(ports.length + 1)).emit({ type: 'error', error: { message: 'Network down.', kind: 'network' } })
+      await run
+      expect(flow.error).toMatchObject({ message: 'The check failed.' })
+      expect(flow.canRetry).toBe(true)
+      expect(flow.askNotice).toBe('Network down.')
+      expect(flow.followUp).toBe('Why?')
+    })
+
+    it('keeps a card that appeared while the answer was arriving, also for a refusal', async () => {
+      const flow = await refining()
+      flow.followUp = 'Why?'
+      const run = flow.ask()
+      const port = await nextPort(ports.length + 1)
+      flow.show({ kind: 'refused', subject: 'review', message: 'Review declined.' })
+      port.emit({ type: 'error', error: { message: 'x', kind: 'refusal' } })
+      await run
+      expect(flow.error).toMatchObject({ kind: 'refused', subject: 'review' })
+      expect(flow.askNotice).toBe('The provider declined to answer this question.')
+    })
+
+    it('replaces the card of an earlier question when the next question starts, and clears the notice', async () => {
+      const flow = await refining()
+      flow.followUp = 'Why?'
+      let run = flow.ask()
+      ;(await nextPort(ports.length + 1)).emit({ type: 'error', error: { message: 'x', kind: 'refusal' } })
+      await run
+      expect(flow.error).toMatchObject({ subject: 'question' })
+      flow.followUp = 'Why?'
+      run = flow.ask()
+      const port = await nextPort(ports.length + 1)
+      expect(flow.error).toBeNull()
+      port.emit({ type: 'done', result: { answer: 'ok' } })
+      await run
+      expect(flow.askNotice).toBeNull()
+    })
+  })
+
   it('restores the transcript length saved when the attempt began if the attempt is undone', async () => {
     const flow = await refining()
     await askAndAnswer(flow, 'Why CSS?', 'It is enough.')

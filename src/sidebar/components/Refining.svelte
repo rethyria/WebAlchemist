@@ -28,6 +28,10 @@
     askingQuestion: string | null
     /** The part of the answer that has arrived. */
     askPartial: string
+    /** True while the page is being reloaded for a new attempt; Ask waits. */
+    reloading: boolean
+    /** A message about a failed question, shown while another card stays on screen. */
+    askNotice: string | null
     /** True when no more questions can be asked in this run. */
     askLimitReached: boolean
     /** How many questions a run allows, for the note shown at the limit. */
@@ -78,6 +82,8 @@
     asking,
     askingQuestion,
     askPartial,
+    reloading,
+    askNotice,
     askLimitReached,
     questionLimit,
     jsRan,
@@ -132,7 +138,7 @@
       askingQuestion === null ? null : { question: askingQuestion, answer: askPartial },
     ),
   )
-  let canAsk = $derived(followUp.trim().length > 0 && !askLimitReached)
+  let canAsk = $derived(followUp.trim().length > 0 && !askLimitReached && !reloading)
 
   let codeOpen = $state(false)
   let lineCount = $derived(result.code.split('\n').length)
@@ -377,6 +383,9 @@
           </button>
         {/if}
       </div>
+      {#if askNotice}
+        <p class="side-note" role="alert">{askNotice}</p>
+      {/if}
       {#if askLimitReached}
         <p class="side-note">{t('refAskLimit', questionLimit)}</p>
       {/if}

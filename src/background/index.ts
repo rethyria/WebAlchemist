@@ -31,6 +31,7 @@ import type {
   TransformRuntimeState,
 } from '@shared/types'
 import { AWAITING_APPROVAL_NOTE, NEEDS_REGENERATING_NOTE, needsRegenerating } from '@shared/transform-state'
+import { MAX_ANSWER_CHARACTERS } from '@shared/ask-limit'
 import type { AiProvider, AskRequest, RefinementTurn, ReviewInstruction } from './providers/types'
 import { overlayPaletteFor } from '@shared/accents'
 import * as badge from './badge'
@@ -1730,8 +1731,6 @@ async function runGeneration(
   })
 }
 
-/** The longest answer to a side question that is passed on, in characters. */
-const MAX_ANSWER_CHARACTERS = 6000
 
 interface AskOverPort {
   context: PageContext

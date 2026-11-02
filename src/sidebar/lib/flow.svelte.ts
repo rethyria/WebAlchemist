@@ -58,6 +58,7 @@ import { readCaptureGrant, recordCaptureGrant } from '@shared/capture-grant'
 import type { PickerAction } from '@shared/picker-keys'
 import { BackgroundError, askOverPort, generateOverPort, send } from './messaging.svelte'
 import type { TranscriptEntry } from './transcript'
+import { MAX_ANSWER_CHARACTERS } from '@shared/ask-limit'
 import { screenshotsAvailable } from '@shared/panel-binding'
 import { jsPreviewGate, reviewKey } from './preview-gate'
 import { t } from '@shared/i18n'
@@ -261,8 +262,8 @@ export class Flow {
    * Questions asked about the draft and the answers given, oldest first. They
    * are kept apart from `history` on purpose: the history holds changes only,
    * several rules depend on its length and on its first entry, and a question
-   * must never reach the model that makes changes or the reviewer. They are
-   * sent to the model that answers questions and nowhere else, they are not
+   * must never be part of the request that makes changes or of a review
+   * request. They are sent with questions and nowhere else, they are not
    * stored, and the run ends them.
    */
   exchanges = $state<{ question: string; answer: string }[]>([])
@@ -285,6 +286,8 @@ export class Flow {
    */
   private askToken = 0
   private cancelAskPort: (() => void) | null = null
+  /** True when the question in flight carried the screenshot. */
+  private askShotSent = false
 
   get askLimitReached(): boolean {
     return this.exchanges.length >= MAX_QUESTIONS
@@ -2257,32 +2260,53 @@ export class Flow {
     // regenerate() ignores an empty follow-up, so without this the preview was
     // cleared and the page reloaded and then nothing was generated.
     if (!this.followUp.trim() || !this.result || this.asking) return
-    await this.clearPreview()
-    this.ourReload = 'pending'
-    await browser.tabs.reload(this.tabId)
-    await this.regenerate()
+    // Ask is not available between the awaits below, where the text in the
+    // box is the change request and is about to be sent as one.
+    this.reloading = true
+    try {
+      await this.clearPreview()
+      this.ourReload = 'pending'
+      await browser.tabs.reload(this.tabId)
+      await this.regenerate()
+    } finally {
+      this.reloading = false
+    }
   }
+
+  /** True while reloadAndRetry() is running. Ask is disabled during it. */
+  reloading = $state(false)
+
+  /**
+   * A message about a failed question, shown beside the box when another card
+   * is on screen and must stay. Null otherwise.
+   */
+  askNotice = $state<string | null>(null)
+  /** True while the card on screen is the failure of a question. */
+  private questionCard = false
 
   /**
    * Asks the model a question about the draft, using the text in the follow-up
    * box. This is a side conversation: the draft, the result, the step, the
    * preview, the review and the history are not touched, and the question and
-   * the answer are never sent to the model that makes changes or to the
-   * reviewer. The user types the change they want afterwards and presses
+   * the answer are never part of the request that makes changes or of a
+   * review request. The user types the change they want afterwards and presses
    * Regenerate.
    */
   async ask(): Promise<void> {
     const picked = this.picked
     const result = this.result
     const question = this.followUp.trim()
-    if (!picked || !result || this.step !== 'refining' || this.asking || !question) return
+    if (!picked || !result || this.step !== 'refining' || this.asking || this.reloading || !question) return
     if (this.askLimitReached) return
 
     const gen = this.generation
     const token = ++this.askToken
     const current = () => token === this.askToken && gen === this.generation
 
-    this.dismissError()
+    // Only the card of an earlier question is removed. Another card, such as a
+    // failed review with its retry, stays.
+    if (this.questionCard) this.dismissError()
+    this.askNotice = null
     this.asking = true
     this.askingQuestion = question
     this.askPartial = ''
@@ -2309,6 +2333,7 @@ export class Flow {
         if (!current()) return
         restore()
         this.warnAboutSensitivePage(() => this.ask())
+        this.questionCard = true
         return
       }
       if (!current()) return
@@ -2317,6 +2342,7 @@ export class Flow {
       if (this.sendScreenshot && this.visionSupported && this.shot) {
         context.screenshot = this.shot
         sentShot = true
+        this.askShotSent = true
       }
 
       const run = askOverPort(
@@ -2352,7 +2378,8 @@ export class Flow {
           onChunk: (accumulated) => {
             if (!current()) return
             const partial = extractPartialString(accumulated, 'answer')
-            if (partial !== null) this.askPartial = partial
+            // Cut at the limit the background applies to the final answer.
+            if (partial !== null) this.askPartial = partial.slice(0, MAX_ANSWER_CHARACTERS)
           },
         },
       )
@@ -2376,10 +2403,22 @@ export class Flow {
     } catch (cause) {
       if (!current()) return
       restore()
-      // No retry: the question is back in the box, and Ask sends it again.
-      this.fail(cause, null, 'question')
+      if (this.error !== null && !this.questionCard) {
+        // A card for something else is on screen and stays. The failure is
+        // shown beside the box instead. No retry: Ask sends the question again.
+        this.askNotice =
+          cause instanceof BackgroundError && cause.kind === 'refusal'
+            ? t('errRefusedQuestion')
+            : cause instanceof Error
+              ? cause.message
+              : String(cause)
+      } else {
+        this.fail(cause, null, 'question')
+        this.questionCard = true
+      }
     } finally {
       if (sentShot) this.clearShot()
+      this.askShotSent = false
     }
   }
 
@@ -2393,6 +2432,10 @@ export class Flow {
     this.askToken += 1
     this.cancelAskPort?.()
     this.cancelAskPort = null
+    // The cancelled run never settles, so the cleanup in ask() does not run.
+    // The screenshot was sent, so its opt-in is spent here.
+    if (this.askShotSent) this.clearShot()
+    this.askShotSent = false
     this.asking = false
     this.askingQuestion = null
     this.askPartial = ''
@@ -2732,6 +2775,7 @@ export class Flow {
 
   /** Records an error that has no request to repeat. */
   show(error: FlowError, retry: (() => Promise<void>) | null = null): void {
+    this.questionCard = false
     this.error =
       (error.kind === 'request-failed' ||
         error.kind === 'model-unavailable' ||
@@ -2761,6 +2805,7 @@ export class Flow {
     retry: (() => Promise<void>) | null = null,
     subject: 'review' | 'generation' | 'question' = 'generation',
   ): void {
+    this.questionCard = false
     if (!(cause instanceof BackgroundError)) {
       this.show({ kind: 'request-failed', message: String(cause) }, retry)
       return
@@ -2821,12 +2866,14 @@ export class Flow {
   }
 
   dismissError(): void {
+    this.questionCard = false
     this.cancelRetryCountdown()
     this.error = null
     this.retryAction = null
   }
 
   async retry(): Promise<void> {
+    this.questionCard = false
     const action = this.retryAction
     this.cancelRetryCountdown()
     this.error = null
@@ -2927,6 +2974,9 @@ export class Flow {
     this.asking = false
     this.askingQuestion = null
     this.askPartial = ''
+    this.askNotice = null
+    this.askShotSent = false
+    this.reloading = false
     this.exchanges = []
     this.transcript = []
     this.keptInstruction = null

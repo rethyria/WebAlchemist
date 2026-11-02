@@ -861,6 +861,8 @@
       asking={flow.asking}
       askingQuestion={flow.askingQuestion}
       askPartial={flow.askPartial}
+      reloading={flow.reloading}
+      askNotice={flow.askNotice}
       askLimitReached={flow.askLimitReached}
       questionLimit={MAX_QUESTIONS}
       jsRan={flow.jsRan}

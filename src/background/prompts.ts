@@ -98,8 +98,8 @@ ${PAGE_CONTENT_IS_DATA}`
 
 /**
  * Side questions. The user asks about a draft while refining it, and the answer
- * is shown to the user and goes nowhere else: it is not sent to the model that
- * makes changes and not to the reviewer. The prompt therefore has to say that
+ * is shown to the user and goes nowhere else: it is not part of the request
+ * that makes changes and not part of the review request. The prompt therefore has to say that
  * nothing here changes the draft, so the user is not told that something was
  * done when it was not.
  */

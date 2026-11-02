@@ -34,6 +34,8 @@ function html(over: Record<string, unknown> = {}) {
       asking: false,
       askingQuestion: null,
       askPartial: '',
+      reloading: false,
+      askNotice: null,
       askLimitReached: false,
       questionLimit: 20,
       followUp: '',
@@ -219,7 +221,7 @@ describe('the Refining step with side questions', () => {
     const notes = list.filter((b) => b.classes === 'side-note')
     expect(notes).toHaveLength(1)
     expect(notes[0]!.text).toBe(
-      'Questions and answers are not sent to the model that makes the change. Type the change you want and press Regenerate.',
+      'Questions and answers are not sent with the request that makes the change. Type the change you want and press Regenerate.',
     )
     const at = list.findIndex((b) => b.classes === 'side-note')
     expect(list[at - 1]!.text).toBe('Answer: It is enough for a colour.')
@@ -261,10 +263,20 @@ describe('the Refining step with side questions', () => {
 
   it('shows the limit note and disables Ask when the limit is reached', () => {
     const body = html({ askLimitReached: true, followUp: 'one more' })
-    expect(visibleText(body)).toContain('The limit of 20 questions has been reached for this draft.')
+    expect(visibleText(body)).toContain('The most questions allowed (20) have been asked. The count restarts after saving or discarding.')
     expect(body).toMatch(/<button[^>]*class="ask[^"]*"[^>]*disabled/)
     // Regenerate still works at the limit.
     expect(body).toMatch(/<button[^>]*class="regenerate[^"]* ready[^"]*"/)
+  })
+
+  it('disables Ask while the page is being reloaded', () => {
+    const body = html({ followUp: 'x', reloading: true })
+    expect(body).toMatch(/<button[^>]*class="ask[^"]*"[^>]*disabled/)
+  })
+
+  it('shows the message about a failed question beside the box', () => {
+    const body = html({ askNotice: 'Network down.' })
+    expect(body).toMatch(/role="alert"[^>]*>Network down\./)
   })
 
   it('keeps the visible text of a fresh Refining step short', () => {
