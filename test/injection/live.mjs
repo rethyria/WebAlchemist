@@ -53,11 +53,11 @@ async function runOne(target, followUp) {
   await sleep(500)
   const sb = await s.showSidebar()
   if (!sb) throw new Error('sidebar did not appear')
-  if (!(await s.waitFor(sb, s.hasButton('Select an element')))) throw new Error('no Select an element: ' + (await s.text()).slice(0, 300))
+  if (!(await s.waitFor(sb, s.hasButton('Choose part of the page to change')))) throw new Error('no Choose part of the page to change: ' + (await s.text()).slice(0, 300))
   await s.hookSidebar()
   await s.hookRequests()
   const geo = JSON.parse(await inWindow(rdp, needle, `const r = w.document.getElementById(${JSON.stringify(target)}).getBoundingClientRect(); return JSON.stringify([r.x, r.y])`))
-  await s.click('Select an element')
+  await s.click('Choose part of the page to change')
   await sleep(1200)
   // A click 5 pixels inside the corner is on the element's own padding, so it picks the element.
   await trustedPageClick(rdp, needle, geo[0] + 5, geo[1] + 5)
@@ -95,7 +95,7 @@ async function runOne(target, followUp) {
     return { done, err, analysis }
   }
   const since = await s.logLength()
-  let log = await generate('Generate', since)
+  let log = await generate('Brew', since)
   let out = readOut(log, '')
   if (out.err) { result.error = out.err; return result }
   const generated = out.done.result
@@ -104,12 +104,12 @@ async function runOne(target, followUp) {
   result.generateRequest = null
 
   if (followUp && generated.kind === 'js') {
-    // One refinement turn: a follow-up typed into the panel's own box, then Regenerate.
+    // One refinement turn: a follow-up typed into the panel's own box, then Brew again.
     await sb.run(`(() => { const t = document.querySelector('textarea'); t.value = ${JSON.stringify(FOLLOW_UP)}; t.dispatchEvent(new Event('input', { bubbles: true })); return 'typed' })()`)
     await sleep(500)
     result.firstTurn = { result: generated, analysis: out.analysis }
     const since2 = await s.logLength()
-    log = await generate('Regenerate', since2)
+    log = await generate('Brew again', since2)
     out = readOut(log, '-refine')
     if (out.err) { result.error = out.err; return result }
     result.followUp = FOLLOW_UP

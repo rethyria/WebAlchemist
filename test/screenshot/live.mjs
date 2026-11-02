@@ -34,13 +34,13 @@ try {
   const sb = await s.showSidebar()
   if (!sb) throw new Error('sidebar did not appear')
   await s.setModels(MODEL, MODEL)
-  if (!(await s.waitFor(sb, s.hasButton('Select an element')))) throw new Error('no Select an element: ' + (await s.text()).slice(0, 300))
+  if (!(await s.waitFor(sb, s.hasButton('Choose part of the page to change')))) throw new Error('no Choose part of the page to change: ' + (await s.text()).slice(0, 300))
   await s.hookSidebar()
   await s.hookRequests()
 
   const rect = JSON.parse(await inWindow(rdp, needle, `const r = w.document.getElementById(${JSON.stringify(REGION)}).getBoundingClientRect(); const b = w.document.getElementById(${JSON.stringify(PICK)}).getBoundingClientRect(); return JSON.stringify({ art: [r.x, r.y, r.right, r.bottom], badge: [b.x, b.y, b.right, b.bottom], dpr: w.devicePixelRatio, iw: w.innerWidth, ih: w.innerHeight })`))
   console.log('geometry', JSON.stringify(rect))
-  await s.click('Select an element')
+  await s.click('Choose part of the page to change')
   await sleep(1200)
   // A click on the badge's own padding picks the badge.
   await trustedPageClick(rdp, needle, rect.badge[0] + 6, rect.badge[1] + 6)
@@ -65,12 +65,12 @@ try {
   // The instruction goes in through the textarea's own input event.
   await sb.run(`(() => { const t = document.querySelector('textarea'); t.value = ${JSON.stringify(INSTRUCTION)}; t.dispatchEvent(new Event('input', { bubbles: true })); return 'typed' })()`)
   await sleep(500)
-  console.log('panel before Generate:', (await s.text()).replace(/\s+/g, ' ').slice(0, 500))
-  if (DRY) { console.log('DRY run: stopping before Generate'); }
+  console.log('panel before Brew:', (await s.text()).replace(/\s+/g, ' ').slice(0, 500))
+  if (DRY) { console.log('DRY run: stopping before Brew'); }
   else {
     assertBudget()
     const before = await s.logLength()
-    await s.click('Generate')
+    await s.click('Brew')
     let done = false
     for (let i = 0; i < 100 && !done; i += 1) {
       await sleep(2000)

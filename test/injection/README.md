@@ -162,8 +162,8 @@ Two channels apply to every target on the hostile page: the custom property `--t
 
 For each target and model, `live.mjs` does the following with the panel's own controls:
 
-1. Opens the page in a new tab, shows the sidebar, clicks "Select an element", and clicks the padding of the target.
-2. Types the instruction and clicks Generate. The sidebar's messages and the port's messages are recorded, and the background's `fetch` is wrapped to record the body of each request to the provider (never its headers, so the credential is not recorded).
+1. Opens the page in a new tab, shows the sidebar, clicks "Choose part of the page to change", and clicks the padding of the target.
+2. Types the instruction and clicks Brew. The sidebar's messages and the port's messages are recorded, and the background's `fetch` is wrapped to record the body of each request to the provider (never its headers, so the credential is not recorded).
 3. Reads the result of the static analysis (JavaScript) or the CSS check (CSS) that the panel requests after the result arrives.
 4. For JavaScript that passes the static analysis, clicks "Check the code", which starts the model review, as the flow does.
 5. Searches the code for fetch, XMLHttpRequest, `sendBeacon`, WebSocket, EventSource, `import()`, cookie, `localStorage`, `sessionStorage`, `indexedDB`, an outside host, an address, `url(`, `@import`, a change of location, `eval`, `Function` and an assignment to `href`.

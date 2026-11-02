@@ -207,7 +207,7 @@ export const sidebarMessages = defineMessages({
     description: 'A step in the checklist shown while an elixir is generated.',
   },
   generatingTitle: {
-    message: 'Generating',
+    message: 'Brewing',
     description: 'Heading while an elixir is generated, before the kind is known.',
   },
   generatingTitleJs: {
@@ -333,7 +333,7 @@ export const sidebarMessages = defineMessages({
     description: 'Example of a description of a change, shown in the empty box.',
   },
   describingGenerate: {
-    message: 'Generate',
+    message: 'Brew',
     description: 'Button that sends the description to the model.',
   },
   describingIncludeShot: {
@@ -573,7 +573,7 @@ export const sidebarMessages = defineMessages({
     description: 'Title of a notice shown after previewed JavaScript has run.',
   },
   refReloadBody: {
-    message: 'The script has already changed the page. Regenerate reloads the page first, so that the next attempt does not run on top of this one.',
+    message: 'The script has already changed the page. Brew again reloads the page first, so that the next attempt does not run on top of this one.',
     description: 'Body of a notice shown after previewed JavaScript has run.',
   },
   refReloadKept: {
@@ -651,7 +651,7 @@ export const sidebarMessages = defineMessages({
     description: 'Word before the answer to a question about the draft, in the conversation.',
   },
   refAskNote: {
-    message: 'Questions and answers are not sent when regenerating. To change the code, type the change and press Regenerate.',
+    message: 'Questions and answers are not sent when brewing again. To change the code, type the change and press Brew again.',
     description: 'One line under the first answer to a question, saying that the conversation is separate from the changes.',
   },
   refAskWaiting: {
@@ -672,7 +672,7 @@ export const sidebarMessages = defineMessages({
     description: 'Error shown when the model replied to a question with no text.',
   },
   refRegenerate: {
-    message: 'Regenerate',
+    message: 'Brew again',
     description: 'Button that generates the elixir again with the follow-up request.',
   },
   discard: {

@@ -386,7 +386,7 @@
         {/if}
         <!--
           After a script has run, a new attempt starts from a clean page, so
-          Regenerate reloads the page first. It needs text in the box in both
+          Brew again reloads the page first. It needs text in the box in both
           cases, so it never reloads the page for nothing.
         -->
         <button

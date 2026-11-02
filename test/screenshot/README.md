@@ -13,7 +13,7 @@ The screenshot path works as designed in every case that was driven, with the de
 | Does the image match the drawn region? | Yes, to within one device pixel on every edge, at page zooms that give ratios of 1.0, 1.5, 1.8 and 2.0, with a region of 640 by 680 CSS pixels and one of 200 by 150, and after the page scrolled. This was not so before the fix of the crop: see the section on the crop. |
 | Is the wrong tab ever captured? | No. A request for a tab that is not in front, and a request with another address than the tab's, are refused with a message and return no image. |
 | Is the all-sites grant handed back? | Yes. It is not held before the screenshot, is held while the image is taken, and is not held after the panel's Cancel button ends the run. |
-| Is anything sent without Generate? | No. The stub provider received no request while the screenshot was taken. After Generate it received one request, and the image in it is byte-identical to the one the panel showed. |
+| Is anything sent without Brew? | No. The stub provider received no request while the screenshot was taken. After Brew it received one request, and the image in it is byte-identical to the one the panel showed. |
 | Does the next request carry the image? | No. After a failed first request the panel no longer shows the image, and the second request has none. |
 | Do the extension's own overlays appear in the image? | No. In one earlier run an action that was triggered twice by accident returned an image with the lock fill in it. That was not reproduced in 136 images from pairs of overlapping requests, and requests for one tab now wait for each other (see the section on overlapping capture requests). |
 
@@ -162,7 +162,7 @@ The runs above end at a stub provider. This one uses the provider of the develop
 ### Method
 
 - `live.mjs` serves `live-server.mjs`, a page with a section (`#badge`) that holds a 320 by 200 canvas. The canvas draws an orange circle (#e8590c, the largest shape), a small blue square (#1c7ed6) and the word ZEBRA-42. The canvas has no text, alt text or label, so none of this is in the page's markup or text.
-- The script clicks "Select an element" and then the badge's own padding with trusted input, clicks "Add a screenshot", and drags over the canvas. It types the instruction into the panel's box and clicks Generate. The instruction asks for a 6px solid border and a background in the colour of the largest shape in the picture, and for a caption, in the badge's `::after` content, with the word written in the picture.
+- The script clicks "Choose part of the page to change" and then the badge's own padding with trusted input, clicks "Add a screenshot", and drags over the canvas. It types the instruction into the panel's box and clicks Brew. The instruction asks for a 6px solid border and a background in the colour of the largest shape in the picture, and for a caption, in the badge's `::after` content, with the word written in the picture.
 - The background's `fetch` is wrapped for the run so that the body of each request to the provider is recorded as sent. Headers are never read, so the credential is not in the record. For each request the script records the content blocks, the image's media type and base64 length, a SHA-256 of the image data, and every text block.
 - The control is the same pick and instruction with no screenshot.
 

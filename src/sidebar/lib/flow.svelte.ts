@@ -3,7 +3,7 @@
  *
  *   list ──Choose part of the page to change──▶ picking
  *   picking ──↵────────────────▶ describing
- *   describing ──Generate──────▶ generating
+ *   describing ──Brew──────────▶ generating
  *   generating ──stream ends───▶ refining
  *   refining ──Keep it─────────▶ saving
  *   saving ──Continue──────────▶ reviewing

@@ -87,3 +87,15 @@ describe('the picking step', () => {
     expect(EN_CATALOGUE.pickingTouchHelp.message).toContain('Tap the part of the page you want to change.')
   })
 })
+
+describe('the button names Brew and Brew again', () => {
+  it('replace Generate and Regenerate in the visible text', async () => {
+    const { EN_CATALOGUE } = await import('@shared/catalogue')
+    expect(EN_CATALOGUE.describingGenerate.message).toBe('Brew')
+    expect(EN_CATALOGUE.refRegenerate.message).toBe('Brew again')
+    expect(EN_CATALOGUE.generatingTitle.message).toBe('Brewing')
+    for (const entry of Object.values(EN_CATALOGUE)) {
+      expect(entry.message).not.toMatch(/\bRegenerate\b|\bGenerate\b/)
+    }
+  })
+})

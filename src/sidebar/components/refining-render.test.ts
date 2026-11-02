@@ -169,35 +169,35 @@ const conversation = [
 ]
 
 describe('the Refining step with side questions', () => {
-  it('labels the box for questions and for changes and shows Ask beside Regenerate', () => {
+  it('labels the box for questions and for changes and shows Ask beside Brew again', () => {
     const body = html({ followUp: 'x' })
     const text = visibleText(body)
     expect(text).toContain('Ask a question, or say what to change')
     expect(body).toMatch(/<button[^>]*class="ask[^"]* ready[^"]*"[^>]*>\s*Ask\s*<\/button>/)
-    expect(body).toMatch(/<button[^>]*class="regenerate[^"]* ready[^"]*"[^>]*>\s*Regenerate\s*<\/button>/)
+    expect(body).toMatch(/<button[^>]*class="regenerate[^"]* ready[^"]*"[^>]*>\s*Brew again\s*<\/button>/)
     expect(body).toMatch(/class="pair[^"]*"/)
   })
 
-  it('disables Ask and Regenerate while the box is empty', () => {
+  it('disables Ask and Brew again while the box is empty', () => {
     const body = html()
     expect(body).toMatch(/<button[^>]*class="ask[^"]*"[^>]*disabled/)
     expect(body).toMatch(/<button[^>]*class="regenerate[^"]*"[^>]*disabled/)
   })
 
-  it('shows Stop in place of Ask and disables Regenerate while an answer arrives', () => {
+  it('shows Stop in place of Ask and disables Brew again while an answer arrives', () => {
     const body = html({ asking: true, askingQuestion: 'Why?', askPartial: 'Part', followUp: '' })
     expect(body).toMatch(/<button[^>]*class="ask[^"]* ready[^"]*"[^>]*>\s*Stop\s*<\/button>/)
     expect(body).not.toMatch(/>\s*Ask\s*<\/button>/)
     expect(body).toMatch(/<button[^>]*class="regenerate[^"]*"[^>]*disabled/)
   })
 
-  it('keeps Ask beside Regenerate after JavaScript has run, and disables both with an empty box', () => {
+  it('keeps Ask beside Brew again after JavaScript has run, and disables both with an empty box', () => {
     const typed = html({ jsRan: true, followUp: 'x' })
     expect(typed).toMatch(/>\s*Ask\s*<\/button>/)
-    expect(typed).toMatch(/<button[^>]*class="regenerate[^"]* ready"[^>]*>\s*Regenerate\s*<\/button>/)
+    expect(typed).toMatch(/<button[^>]*class="regenerate[^"]* ready"[^>]*>\s*Brew again\s*<\/button>/)
     expect(typed).not.toContain('Reload page and try again')
     const empty = html({ jsRan: true, followUp: '' })
-    expect(empty).toMatch(/<button[^>]*class="regenerate[^"]*"[^>]*disabled[^>]*>\s*Regenerate\s*<\/button>/)
+    expect(empty).toMatch(/<button[^>]*class="regenerate[^"]*"[^>]*disabled[^>]*>\s*Brew again\s*<\/button>/)
   })
 
   it('puts the action buttons above the box for asking or changing', () => {
@@ -229,7 +229,7 @@ describe('the Refining step with side questions', () => {
     const notes = list.filter((b) => b.classes === 'side-note')
     expect(notes).toHaveLength(1)
     expect(notes[0]!.text).toBe(
-      'Questions and answers are not sent when regenerating. To change the code, type the change and press Regenerate.',
+      'Questions and answers are not sent when brewing again. To change the code, type the change and press Brew again.',
     )
     const at = list.findIndex((b) => b.classes === 'side-note')
     expect(list[at - 1]!.text).toBe('Answer: It is enough for a colour.')
@@ -273,7 +273,7 @@ describe('the Refining step with side questions', () => {
     const body = html({ askLimitReached: true, followUp: 'one more' })
     expect(visibleText(body)).toContain('The limit of 20 questions has been reached. The count restarts after saving or discarding.')
     expect(body).toMatch(/<button[^>]*class="ask[^"]*"[^>]*disabled/)
-    // Regenerate still works at the limit.
+    // Brew again still works at the limit.
     expect(body).toMatch(/<button[^>]*class="regenerate[^"]* ready[^"]*"/)
   })
 
