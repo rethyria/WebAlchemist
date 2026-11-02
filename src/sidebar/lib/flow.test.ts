@@ -3516,4 +3516,21 @@ describe('the settings of an elixir in the flow', () => {
     expect(reviewKey(a, 'i')).not.toBe(reviewKey({ ...a, config: [{ ...fields[0], default: 'changed' }] }, 'i'))
     expect(reviewKey(a, 'i')).not.toBe(reviewKey({ ...a, config: [] }, 'i'))
   })
+
+  it('lists the values of a saved elixir that the new version does not keep, and none for a new elixir', async () => {
+    const flow = newFlow()
+    handler = settingsHandler
+    const stored = { ...saved, kind: 'js', code: 'document.title = CONFIG.label', configFields: fields, configValues: { label: 'mine', size: 7 } } as any
+    await flow.editWithAi(stored)
+    expect(flow.configNotKept).toEqual([])
+    // The new version drops the size setting and changes the type of the label.
+    flow.result = { ...flow.result!, config: [{ key: 'label', label: 'Label', type: 'number', default: 1 }] } as any
+    expect(flow.configNotKept).toEqual([
+      { key: 'label', label: 'Label', reason: 'type' },
+      { key: 'size', label: 'Size', reason: 'removed' },
+    ])
+    await flow.discard()
+    expect(flow.storedConfig).toBeNull()
+    expect(flow.configNotKept).toEqual([])
+  })
 })

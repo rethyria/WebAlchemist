@@ -16,9 +16,9 @@ const html = (confirmed: boolean) =>
 const unescape = (text: string) => text.replace(/&#39;/g, "'").replace(/&apos;/g, "'")
 
 describe('the MAIN restore confirmation', () => {
-  it('lists every one of the four risks', () => {
+  it('lists every one of the five risks', () => {
     const body = unescape(html(false))
-    expect(MAIN_WORLD_RISKS).toHaveLength(4)
+    expect(MAIN_WORLD_RISKS).toHaveLength(5)
     for (const risk of MAIN_WORLD_RISKS) expect(body).toContain(unescape(risk))
   })
 

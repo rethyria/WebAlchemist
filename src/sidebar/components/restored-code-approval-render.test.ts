@@ -68,3 +68,25 @@ describe('restored code that runs in the isolated world (control)', () => {
     expect(body).not.toMatch(/<button[^>]*disabled[^>]*>\s*Approve and turn on/)
   })
 })
+
+describe('restored code with settings', () => {
+  const fields = [
+    { key: 'label', label: 'Label', type: 'text', default: 'Hello' },
+    { key: 'words', label: 'Words', type: 'list', default: [] },
+  ]
+
+  it('lists the settings with the values that came in the file', () => {
+    const body = html({ ...base, world: 'USER_SCRIPT', configFields: fields, configValues: { label: 'From the file', words: ['a', 'b', 'c'] } })
+    expect(body).toContain('Settings: Label (text), Words (list)')
+    expect(body).toContain('Label: From the file')
+    expect(body).toContain('Words: 3 items')
+  })
+
+  it('shows the default for a setting that the file has no value for', () => {
+    expect(html({ ...base, world: 'USER_SCRIPT', configFields: fields })).toContain('Label: Hello')
+  })
+
+  it('mentions no settings for code without them (control)', () => {
+    expect(html({ ...base, world: 'USER_SCRIPT' })).not.toContain('Settings:')
+  })
+})

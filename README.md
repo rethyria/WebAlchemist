@@ -75,6 +75,8 @@ A saved elixir keeps three text fields that are not merged.
 | `rationale` | model | The targets, the approach and the assumptions. It is written again on every repair. |
 | `code` | model, or the user in the editor | The implementation. |
 
+An elixir can also offer settings. The model proposes a short list of fields (a key, a label, a type and a default) together with the code, and the code reads their values. The types are text, number, yes or no, choice, colour, list and table. An elixir has at most 20 fields, and the stored values take at most 64 KB. The fields are stored in `configFields` and are part of what the approval covers. The values that the user sets are stored apart from them, in `configValues`, as overrides: a field without a value uses its default. When a Refine or a repair changes the fields, a value is kept only if its field has the same key and type and the value is still valid, and the approval panel names each value that is not kept. The user changes values in a "Settings" section that is closed by default on the elixir's row in the sidebar and on the editor page. JavaScript reads them through a frozen object named `CONFIG`. A script cannot change a page that is already open, so after the values of a JavaScript elixir change, the row offers a "Reload page" button.
+
 An elixir also stores an `anchor`, a set of signals that identify the elements the code targets. The health check tests the anchor on each visit. `rationale.assumptions` states the same conditions in words, and the user sees them when the check fails. The last five versions of an elixir are kept, and the editor can restore one after a confirmation.
 
 ## Safety design
@@ -97,9 +99,19 @@ The code check receives the user's own typed instructions, the generating model'
 
 A code check returns a one-time approval token. The token is tied to the exact code, its execution world, the access it asks for (network, storage or cookies), the elixir and the match pattern, which is the pattern of addresses the elixir runs on. A JavaScript preview needs a token from a code check with the verdict "match", and it runs the script only on the exact address of the page being edited. Saving also needs the token and deletes it, so a token cannot be used twice, for other code, or for another elixir or site. Tokens are kept in session storage. The approval panel shows the code, the world, the sites and the full code check before the user can approve. When the user removes some of the access that the code asks for, the existing token still applies, because a smaller set allows less.
 
+### Settings
+
+A user can change the values of an elixir's settings later without a new code check. The reason is that the safety check already treats every member of `CONFIG` as arbitrary text at every place where text matters, in the same way as text read from the page. A value therefore cannot become a selector, an address, a tag name, an attribute name, a property name, HTML or code, and it cannot add a style value that can load an address. A value that is used where the check refuses text from the page is refused for `CONFIG` as well. Writing to `CONFIG`, and declaring a name `CONFIG` in the code, are refused. The `CONFIG` object is frozen, so a write that the check does not see throws an error at run time.
+
+The approval token covers the fields, with their keys, types, options and defaults, and does not cover the values. A change of fields needs a new code check and a new token, and a change of values needs neither. A value edit changes only `configValues`: it cannot change the code, the world, the access, the match pattern or the fields. The background validates every value against the stored fields on every write, and again when a script is registered, and a stored value that is not valid is replaced by the default. A value is a single line of at most 2,000 characters for text, and a list or table has at most 1,000 entries of at most 500 characters.
+
+The code check is told that values can change after the review and is asked to judge the code for every value that a field can hold. The fields, including the labels and help texts, were written by the generating model, and the code check receives them in a block that is marked as data. The values that the user sets are never sent to any model: not to the model that writes code, not to the code check, and not to the model that answers questions.
+
+One risk remains in the MAIN world: the page can replace the functions that the code calls and so read the values that the code passes to them. The approval panel lists this with the other MAIN risks. A value used to build a regular expression can make a page slow, and the generation prompt asks the model to escape such values. A value that the code writes into the page is visible to the page.
+
 ### Execution world
 
-JavaScript runs in the isolated user script world by default. The model can ask for the MAIN world, which is the page's own world, where the code can use everything the page's scripts can, and must give a reason. The request has no effect until the user approves it. The panel and the editor then show four risks of MAIN: the page can change the code, the code can read what the page keeps in memory, the safety check cannot see what the page's own functions do, and the restriction on image requests does not apply. Restoring an earlier version or a backup that runs in MAIN needs a separate confirmation. A JavaScript elixir that runs in MAIN with no record of the user's approval is moved to the isolated world once, when the extension starts.
+JavaScript runs in the isolated user script world by default. The model can ask for the MAIN world, which is the page's own world, where the code can use everything the page's scripts can, and must give a reason. The request has no effect until the user approves it. The panel and the editor then show five risks of MAIN: the page can change the code, the code can read what the page keeps in memory, the safety check cannot see what the page's own functions do, the restriction on image requests does not apply, and the page can read the values of the elixir's settings. Restoring an earlier version or a backup that runs in MAIN needs a separate confirmation. A JavaScript elixir that runs in MAIN with no record of the user's approval is moved to the isolated world once, when the extension starts.
 
 ### Stored code is checked again
 
@@ -142,18 +154,19 @@ When the user generates, refines or repairs an elixir, or asks a question about 
 - the matching CSS rules, the custom properties in scope and a fixed set of computed style values;
 - the same details for each reference element the user adds;
 - for a repair, the saved code, its description and rationale, and the reason that the elixir stopped working;
+- for a refinement, a repair or a question, the settings of the elixir (their keys, labels, types, options and defaults), and never the values that the user set;
 - for a question, the question, the earlier questions and answers of the same session, and the current draft's code and explanation;
 - the page address, with the part after # and the query values removed, and parts that look like tokens removed;
 - a screenshot, only when the user adds one.
 
-Questions go to the model that writes the code. Their answers are shown to the user and are not added to the requests that write or check code. The code check of JavaScript sends the code, the user's typed instructions, the generating model's summary and the saved description, and never the page. Each of these calls is billed by the AI provider. Nothing is sent to the developer, and the extension has no analytics or error reporting. A first-run disclosure with this information is shown before a credential can be entered, and again when its version changes.
+Questions go to the model that writes the code. Their answers are shown to the user and are not added to the requests that write or check code. The code check of JavaScript sends the code, the user's typed instructions, the generating model's summary, the saved description and the settings (without values), and never the page. Each of these calls is billed by the AI provider. Nothing is sent to the developer, and the extension has no analytics or error reporting. A first-run disclosure with this information is shown before a credential can be entered, and again when its version changes.
 
 ## Import, export and backup
 
 The settings page has an "Export and import" section with three actions: "Export to share", "Back up" and "Import from file". Both kinds of export are JSON files, and either can be encrypted with a passphrase of at least 12 characters (PBKDF2 and AES-GCM). Neither file contains credentials or provider settings, and a backup does not contain provider addresses. Both hold text and addresses taken from the pages the elixirs were written for.
 
-- A shared export carries CSS code, and for JavaScript only the description (the intent), without code.
-- A backup also carries JavaScript code, the access it asks for, the world it runs in, and two settings, the accent colour and the health check mode.
+- A shared export carries CSS code with its settings fields and their defaults, and for JavaScript only the description (the intent), without code or settings. It never carries the values that the user set, because they can hold personal words.
+- A backup also carries JavaScript code, the access it asks for, the world it runs in, the settings fields and the values that the user set, and two settings, the accent colour and the health check mode. On a restore, each value is checked against its field and a value that is not valid is dropped, so that the default applies. The approval panel for restored code lists the fields and the values from the file.
 
 An import shows what it would add before anything is saved, and the elixirs that it adds are always turned off. The importing extension rebuilds each record from the fields that an import may take, so a file cannot set an approval or an elixir's enabled state. A shared file cannot set the world either: its JavaScript always runs in the isolated world.
 
@@ -162,6 +175,8 @@ What happens to imported code depends on its kind:
 - JavaScript from a shared file has no code until the importer's own model has written code that passes the importer's safety check and code check.
 - JavaScript code from a backup must pass the safety check, and it stays off until the user has read and approved it. Code that the backup marks for the MAIN world keeps that world, and the approval panel shows the MAIN risks and asks for their confirmation.
 - CSS from either file is kept only if it passes the CSS check under the importer's settings.
+
+The values of one elixir's settings can also be shared apart from the elixir. "Export settings" in the Settings section writes a small file that holds only that elixir's values, with the elixir's name and the key and type of each setting. "Import settings" applies such a file to an elixir. Each value is checked against the target elixir's own fields with the rules that a normal change of values uses. A key that the elixir does not have is ignored, a value whose type differs or that is not valid is skipped, and the panel lists what was applied and what was skipped. The file cannot change the code, the fields, the world, the access or the match pattern.
 
 A pattern in a file is refused when it covers every site, when it starts with a wildcard host, when it names a local or private address, or when it reaches a site on the importer's excluded list. An import is limited to 20 sites, 1000 records and 5 MB. A restore applies only the accent colour and the health check mode from a backup's settings.
 

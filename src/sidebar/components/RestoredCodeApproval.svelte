@@ -7,6 +7,8 @@
    */
   import type { Transform } from '@shared/types'
   import { MAIN_WORLD_RISKS, WORLD_NAMES, worldOf } from '@shared/world'
+  import { effectiveValues } from '@shared/config'
+  import { describeValue, summaryOf } from '@shared/config-text'
 
   interface Props {
     transform: Transform
@@ -19,6 +21,9 @@
 
   let risksRead = $state(false)
   const inMain = $derived(worldOf(transform) === 'MAIN')
+  const fields = $derived(transform.configFields ?? [])
+  /* The values came from the file, which someone else may have written. */
+  const restored = $derived(effectiveValues(fields, transform.configValues))
 </script>
 
 <div class="approval">
@@ -34,6 +39,15 @@
       <input type="checkbox" bind:checked={risksRead} />
       {t('approvalRisksRead')}
     </label>
+  {/if}
+  {#if fields.length > 0}
+    <p>{t('configRestoredHeading')}</p>
+    <p>{t('configSummaryLine', summaryOf(fields))}</p>
+    <ul class="settings">
+      {#each fields as field (field.key)}
+        <li>{t('configDefaultLine', field.label, describeValue(field, restored[field.key]!))}</li>
+      {/each}
+    </ul>
   {/if}
   <pre>{transform.code}</pre>
   {#if transform.capabilities.length > 0}
@@ -75,7 +89,8 @@
     margin: 0;
   }
 
-  .risks {
+  .risks,
+  .settings {
     margin: 0;
     padding-left: 18px;
   }

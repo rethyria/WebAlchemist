@@ -28,6 +28,7 @@
   import { excludedAccessMessage, excludedHostForPattern } from '@shared/excluded-sites'
   import { MAIN_WORLD_RISKS, WORLD_NAMES, WORLD_RESET_NOTICE, worldOf } from '@shared/world'
   import CodeArea from './CodeArea.svelte'
+  import ConfigSection from '@shared/ConfigSection.svelte'
   import MainRestoreRisks from './MainRestoreRisks.svelte'
   import { shouldConfirmLeaving } from './unload'
 
@@ -286,6 +287,7 @@
       type: 'approve-code',
       code: version.code,
       declaredCapabilities: version.capabilities,
+      ...(version.configFields && version.configFields.length > 0 ? { configFields: version.configFields } : {}),
       ...(version.world ? { world: version.world } : {}),
       transformId: current.id,
       match: version.match,
@@ -435,6 +437,7 @@
           type: 'analyse',
           code,
           declaredCapabilities: current.capabilities,
+          ...(current.configFields && current.configFields.length > 0 ? { configFields: current.configFields } : {}),
         })
         const blocking = analysis.static.filter((f) => f.severity === 'block')
         if (blocking.length > 0) {
@@ -447,6 +450,7 @@
             type: 'approve-code',
             code,
             declaredCapabilities: current.capabilities,
+            ...(current.configFields && current.configFields.length > 0 ? { configFields: current.configFields } : {}),
             world,
             transformId: current.id,
             match: wanted,
@@ -749,6 +753,24 @@
             {/each}
           </ul>
         {/if}
+      </section>
+    {/if}
+
+    {#if !creating && transform.configFields && transform.configFields.length > 0}
+      <!--
+        The values of the settings have their own save, separate from the save
+        of the code. They change nothing but the values, so no review is needed.
+        The fields can be changed only by describing the elixir again.
+      -->
+      <section class="where">
+        <span class="label">{t('configSettings')}</span>
+        <p class="hint">{t('configEditorIntro')}</p>
+        <ConfigSection
+          {transform}
+          place="tabs"
+          onchanged={(next) => (transform = next)}
+          onerror={(cause) => (findings = [cause instanceof Error ? cause.message : String(cause)])}
+        />
       </section>
     {/if}
 

@@ -927,6 +927,7 @@
       onsave={() => void flow.save()}
       onworld={(world) => void flow.setWorld(world)}
       onback={() => flow.toSaving()}
+      notKept={flow.configNotKept}
     />
     <UsageLine report={flow.lastUsage} />
   {:else if transforms.length === 0}
@@ -1008,6 +1009,9 @@
           onhover={() => dragOverRow(transform.id)}
           ondrop={() => void endDrag()}
           onmove={(delta) => void moveBy(transform, delta)}
+          findTab={async () => (await activeTab())?.id}
+          onconfigchanged={(next) => (transforms = transforms.map((t) => (t.id === next.id ? next : t)))}
+          onconfigerror={(cause) => flow.fail(cause, null)}
         />
       {/each}
     </ul>

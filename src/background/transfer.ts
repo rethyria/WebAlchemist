@@ -21,6 +21,8 @@ import {
   type Accent,
   type Anchor,
   type Capability,
+  type ConfigField,
+  type ConfigValue,
   type ExecutionWorld,
   type HealthCheckMode,
   type SettingsFields,
@@ -83,6 +85,12 @@ export interface PlannedTransform {
   needsRegeneration: boolean
   /** True when the record holds code that the user has to approve before it runs. */
   needsApproval: boolean
+  /**
+   * The settings that the record would be stored with: the fields, and the
+   * values for a backup. They were written by the author of the file, so the
+   * preview shows them as such.
+   */
+  config?: { fields: ConfigField[]; values: Record<string, ConfigValue> }
   /** The world restored code runs in. Present only when `needsApproval` is true. */
   world?: ExecutionWorld
   /** The JavaScript that is restored, for the preview to show. Present only when `needsApproval` is true. */
@@ -345,6 +353,7 @@ export async function planImport(
       ...(reason === undefined ? {} : { reason }),
       needsRegeneration,
       needsApproval,
+      ...(record.configFields ? { config: { fields: record.configFields, values: record.configValues ?? {} } } : {}),
       ...(needsApproval ? { code: record.code, world: record.world ?? 'USER_SCRIPT' } : {}),
     })
     records.push(record)

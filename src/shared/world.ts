@@ -15,6 +15,7 @@ export const MAIN_WORLD_RISKS: readonly string[] = [
   t('mainRisk2'),
   t('mainRisk3'),
   t('mainRisk4'),
+  t('mainRisk5'),
 ]
 
 export const WORLD_NAMES: Record<ExecutionWorld, string> = {

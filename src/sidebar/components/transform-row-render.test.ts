@@ -53,6 +53,9 @@ function html(transform: Record<string, unknown>, access = true) {
       onhover: noop,
       ondrop: noop,
       onmove: noop,
+      findTab: async () => undefined,
+      onconfigchanged: noop,
+      onconfigerror: noop,
     },
   }).body.replace(/<!--.*?-->/g, '')
 }
@@ -96,5 +99,28 @@ describe('the row of a transform on an https page after access is granted', () =
   it('shows no access when only another scheme is held (control)', () => {
     const held = ['http://www.youtube.com/*']
     expect(html(youtube, hasAccess(held, youtube))).toContain(noAccess)
+  })
+})
+
+describe('the settings button on an open row', () => {
+  const fields = [{ key: 'label', label: 'Label', type: 'text', default: 'x' }]
+
+  it('appears beside Rename and Refine when the elixir has settings', () => {
+    const body = html({ ...base, configFields: fields })
+    expect(body).toMatch(/>\s*Settings\s*<\/button>/)
+    expect(body.indexOf('Settings')).toBeGreaterThan(body.indexOf('Rename'))
+    expect(body.indexOf('Settings') - body.indexOf('Refine')).toBeLessThan(260)
+  })
+
+  it('is absent when the elixir has none (control)', () => {
+    expect(html(base)).not.toMatch(/>\s*Settings\s*<\/button>/)
+    expect(html({ ...base, configFields: [] })).not.toMatch(/>\s*Settings\s*<\/button>/)
+  })
+
+  it('starts closed, so the row is no taller than one without settings', () => {
+    const body = html({ ...base, configFields: fields })
+    expect(body).toContain('aria-expanded="false"')
+    expect(body).not.toContain('<form')
+    expect(body).not.toContain('Save settings')
   })
 })

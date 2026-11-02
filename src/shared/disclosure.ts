@@ -26,7 +26,7 @@ export const REVOKE_KEY_NOTICE = t('revokeKeyNotice')
  * alone does not need a new version. The acknowledgement stores the number,
  * so a raise shows the text again to everyone (see disclosure-ack.ts).
  */
-export const DISCLOSURE_VERSION = 3
+export const DISCLOSURE_VERSION = 4
 
 /**
  * The page-controlled values that the picked element's excerpt carries to the
@@ -50,6 +50,7 @@ export const SENT_STYLES = t('sentStyles')
 export const SENT_REFERENCES = t('sentReferences')
 export const SENT_HISTORY = t('sentHistory')
 export const SENT_REPAIR = t('sentRepair')
+export const SENT_SETTINGS = t('sentSettings')
 export const SENT_ADDRESS = t('sentAddress')
 export const SENT_DESCRIPTION = t('sentDescription')
 export const SENT_SCREENSHOT = t('sentScreenshot')
@@ -97,6 +98,7 @@ export function firstRunDisclosure(vault: VaultView): DisclosureSection[] {
         SENT_REFERENCES,
         SENT_HISTORY,
         SENT_REPAIR,
+        SENT_SETTINGS,
         SENT_ADDRESS,
         SENT_SCREENSHOT,
       ],

@@ -131,11 +131,15 @@ describe('the approval panel state', () => {
     expect(worldState({ ...js, requestedWorld: 'USER_SCRIPT' }).showRisks).toBe(false)
   })
 
-  it('names the four risks the user listed', () => {
+  it('names the four risks the user listed, and the fifth about settings', () => {
     const text = MAIN_WORLD_RISKS.join(' ')
     expect(text).toMatch(/page can change this code/)
     expect(text).toMatch(/read what the page keeps in memory/)
     expect(text).toMatch(/safety check cannot see/)
     expect(text).toMatch(/image requests/)
+  })
+
+  it('also says that the page can read the settings values', () => {
+    expect(MAIN_WORLD_RISKS.join(' ')).toMatch(/page can read this elixir's settings values/)
   })
 })

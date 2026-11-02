@@ -12,6 +12,7 @@
   import Toggle from './Toggle.svelte'
   import { WORLD_RESET_NOTICE } from '@shared/world'
   import RestoredCodeApproval from './RestoredCodeApproval.svelte'
+  import ConfigSection from '@shared/ConfigSection.svelte'
 
   interface Props {
     transform: Transform
@@ -58,6 +59,12 @@
     ondrop: () => void
     /** Keyboard equivalent of a drag: -1 earlier, +1 later. */
     onmove: (delta: number) => void
+    /** Finds the tab that a change of settings is applied in. */
+    findTab: () => Promise<number | undefined>
+    /** Called with the stored record after the values of its settings changed. */
+    onconfigchanged: (transform: Transform) => void
+    /** Called with the error when a message about the settings fails. */
+    onconfigerror: (cause: unknown) => void
   }
 
   let {
@@ -83,6 +90,9 @@
     onhover,
     ondrop,
     onmove,
+    findTab,
+    onconfigchanged,
+    onconfigerror,
   }: Props = $props()
 
   /*
@@ -146,6 +156,10 @@
    * question and the answer is one click away from the cancel.
    */
   let confirming = $state(false)
+
+  /* The settings section is closed until the user opens it, so a collapsed row is no taller than before. */
+  let settingsOpen = $state(false)
+  let hasSettings = $derived((transform.configFields?.length ?? 0) > 0)
 
   let renaming = $state(false)
   let draftName = $state('')
@@ -401,11 +415,35 @@
               {t('trRefine')}
             </button>
           {/if}
+          {#if hasSettings && !regenerates}
+            <button
+              type="button"
+              class="secondary"
+              aria-expanded={settingsOpen}
+              onclick={() => (settingsOpen = !settingsOpen)}
+            >
+              {t('configSettings')}
+            </button>
+          {/if}
           <button type="button" class="secondary btn-danger" onclick={() => (confirming = true)}>
             {t('trDelete')}
           </button>
         {/if}
       </div>
+
+      {#if settingsOpen && hasSettings && !regenerates}
+        <section>
+          <h3 class="label">{t('configSettings')}</h3>
+          <ConfigSection
+            {transform}
+            {findTab}
+            place="page"
+            onchanged={onconfigchanged}
+            oncancel={() => (settingsOpen = false)}
+            onerror={onconfigerror}
+          />
+        </section>
+      {/if}
 
       <details class="disclosure">
         <summary>{t('savingCodeAndRationale')}</summary>

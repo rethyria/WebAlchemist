@@ -50,6 +50,10 @@ export const disclosureMessages = defineMessages({
     message: 'When you use Repair with AI or Refine, the saved code, its description and rationale, and the reason that the elixir stopped working',
     description: 'An item in the list of what is sent to the provider.',
   },
+  sentSettings: {
+    message: 'When you use Repair with AI or Refine on an elixir that has settings, the names, types and default values of the settings, and never the values that you set',
+    description: 'An item in the list of what is sent to the provider.',
+  },
   sentAddress: {
     message: 'The address of the page, without the part after # and without query values',
     description: 'An item in the list of what is sent to the provider.',
@@ -145,6 +149,10 @@ export const disclosureMessages = defineMessages({
   },
   mainRisk4: {
     message: 'The block on image requests that applies in the isolated world does not apply here, so the code can send information out by loading an image.',
+    description: 'One risk of running code in the page\'s own world (MAIN), shown before the user approves it.',
+  },
+  mainRisk5: {
+    message: "The page can read this elixir's settings values.",
     description: 'One risk of running code in the page\'s own world (MAIN), shown before the user approves it.',
   },
   worldNameIsolated: {

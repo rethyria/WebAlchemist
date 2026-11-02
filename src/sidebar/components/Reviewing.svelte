@@ -12,6 +12,8 @@
   import { describeMatch } from '@shared/match'
   import { MAIN_WORLD_RISKS, WORLD_NAMES, worldState } from '@shared/world'
   import type { ExecutionWorld } from '@shared/types'
+  import type { NotKept } from '@shared/config'
+  import { describeValue, notKeptText, summaryOf } from '@shared/config-text'
 
   /**
    * Everything the user needs to judge the code is shown at once: the world,
@@ -40,6 +42,8 @@
     /** The user's choice of world. The model's request does not call this. */
     onworld: (world: ExecutionWorld) => void
     onback: () => void
+    /** Values that the user set for the saved elixir and that this version does not keep. */
+    notKept?: NotKept[]
   }
 
   let {
@@ -56,6 +60,7 @@
     onsave,
     onworld,
     onback,
+    notKept = [],
   }: Props = $props()
 
   /* JavaScript is shown expanded. The user decides on code they can see. */
@@ -268,6 +273,25 @@
           {/if}
         </dd>
       </div>
+      {#if result.config.length > 0 || notKept.length > 0}
+        <div class="row">
+          <dt>{t('configSettings')}</dt>
+          <dd>
+            {#if result.config.length > 0}
+              {t('configSummaryLine', summaryOf(result.config))}
+              <details class="fold">
+                <summary>{t('configDefaultsFold')}</summary>
+                {#each result.config as field (field.key)}
+                  <p class="finding">{t('configDefaultLine', field.label, describeValue(field, field.default))}</p>
+                {/each}
+              </details>
+            {/if}
+            {#each notKept as item (item.key)}
+              <p class="finding">{notKeptText(item)}</p>
+            {/each}
+          </dd>
+        </div>
+      {/if}
       <div class="row">
         <dt>{result.kind === 'css' ? t('revCssCheck') : t('revCodeScan')}</dt>
         <dd>

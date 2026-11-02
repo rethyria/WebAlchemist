@@ -513,4 +513,222 @@ export const sharedMessages = defineMessages({
     message: 'The file has no values for the settings of this elixir.',
     description: 'Shown when a settings file is chosen and none of its values can be applied.',
   },
+  configSettings: {
+    message: 'Settings',
+    description: 'Heading and button label for the settings of an elixir.',
+  },
+  configSave: {
+    message: 'Save settings',
+    description: 'Button that stores the values of the settings of an elixir.',
+  },
+  configResetDefaults: {
+    message: 'Reset to defaults',
+    description: 'Button that puts every setting back to its default value.',
+  },
+  configAddItem: {
+    message: 'Add item',
+    description: 'Button that adds one line to a list setting.',
+  },
+  configAddRow: {
+    message: 'Add row',
+    description: 'Button that adds one row to a table setting.',
+  },
+  configRemoveItem: {
+    message: 'Remove',
+    description: 'Button that removes one line of a list or one row of a table.',
+  },
+  configRemoveItemLabel: {
+    message: 'Remove item $N$ of $FIELD$',
+    description: 'Accessible name of a button that removes one line of a list setting. $N$ is a position and $FIELD$ is the name of the setting.',
+    placeholders: ['N', 'FIELD'],
+  },
+  configRemoveRowLabel: {
+    message: 'Remove row $N$ of $FIELD$',
+    description: 'Accessible name of a button that removes one row of a table setting. $N$ is a position and $FIELD$ is the name of the setting.',
+    placeholders: ['N', 'FIELD'],
+  },
+  configItemLabel: {
+    message: 'Item $N$ of $FIELD$',
+    description: 'Accessible name of one line of a list setting. $N$ is a position and $FIELD$ is the name of the setting.',
+    placeholders: ['N', 'FIELD'],
+  },
+  configCellLabel: {
+    message: '$COLUMN$, row $N$ of $FIELD$',
+    description: 'Accessible name of one cell of a table setting. $COLUMN$ is a column name, $N$ a row position and $FIELD$ the name of the setting.',
+    placeholders: ['COLUMN', 'N', 'FIELD'],
+  },
+  configColourPicker: {
+    message: 'Colour picker for $FIELD$',
+    description: 'Accessible name of a colour picker. $FIELD$ is the name of the setting.',
+    placeholders: ['FIELD'],
+  },
+  configColourCode: {
+    message: 'Colour code for $FIELD$',
+    description: 'Accessible name of the text box for a colour code. $FIELD$ is the name of the setting.',
+    placeholders: ['FIELD'],
+  },
+  configRangeBoth: {
+    message: 'From $MIN$ to $MAX$',
+    description: 'Shows the allowed range of a number setting. $MIN$ and $MAX$ are numbers, optionally with a unit.',
+    placeholders: ['MIN', 'MAX'],
+  },
+  configRangeMin: {
+    message: 'At least $MIN$',
+    description: 'Shows the smallest allowed value of a number setting. $MIN$ is a number, optionally with a unit.',
+    placeholders: ['MIN'],
+  },
+  configRangeMax: {
+    message: 'At most $MAX$',
+    description: 'Shows the largest allowed value of a number setting. $MAX$ is a number, optionally with a unit.',
+    placeholders: ['MAX'],
+  },
+  configFixProblems: {
+    message: 'Fix the settings that show a problem, then save.',
+    description: 'Shown when the settings cannot be saved because a value is not valid.',
+  },
+  configSaved: {
+    message: 'Settings saved.',
+    description: 'Shown after the values of the settings were stored.',
+  },
+  configReloadPage: {
+    message: 'Reload the page to use the new settings.',
+    description: 'Shown after the settings of a JavaScript elixir were changed. A script cannot change a page that is already open.',
+  },
+  configReloadPageButton: {
+    message: 'Reload page',
+    description: 'Button that reloads the page after the settings of a JavaScript elixir were changed.',
+  },
+  configReloadTabsOne: {
+    message: 'Reload the open tab of this site to use the new settings.',
+    description: 'Shown in the editor after the settings of a JavaScript elixir were changed.',
+  },
+  configReloadTabsMany: {
+    message: 'Reload the $COUNT$ open tabs of this site to use the new settings.',
+    description: 'Shown in the editor after the settings of a JavaScript elixir were changed. $COUNT$ is a number.',
+    placeholders: ['COUNT'],
+  },
+  configExport: {
+    message: 'Export settings',
+    description: 'Button that saves the values of the settings of one elixir to a file.',
+  },
+  configImport: {
+    message: 'Import settings',
+    description: 'Button that applies a file of setting values to one elixir.',
+  },
+  configImportApplied: {
+    message: 'Applied $COUNT$ values from the file.',
+    description: 'Shown after a settings file was applied. $COUNT$ is a number.',
+    placeholders: ['COUNT'],
+  },
+  configImportNoneApplied: {
+    message: 'No values from the file were applied.',
+    description: 'Shown after a settings file was read and none of its values could be applied.',
+  },
+  configImportSkipped: {
+    message: 'Not applied: $LIST$',
+    description: 'Lists the settings whose value from a settings file was not applied, each with the reason. $LIST$ is a list.',
+    placeholders: ['LIST'],
+  },
+  configImportSkippedItem: {
+    message: '$FIELD$ ($REASON$)',
+    description: 'One entry of the list of settings that were not applied. $FIELD$ is the name of a setting and $REASON$ the reason.',
+    placeholders: ['FIELD', 'REASON'],
+  },
+  configImportIgnored: {
+    message: 'Ignored $COUNT$ values in the file for settings that this elixir does not have.',
+    description: 'Shown after a settings file was applied. $COUNT$ is a number.',
+    placeholders: ['COUNT'],
+  },
+  configTypeText: {
+    message: 'text',
+    description: 'Name of a type of setting, used in a list.',
+  },
+  configTypeNumber: {
+    message: 'number',
+    description: 'Name of a type of setting, used in a list.',
+  },
+  configTypeYesNo: {
+    message: 'yes or no',
+    description: 'Name of a type of setting, used in a list.',
+  },
+  configTypeChoice: {
+    message: 'choice',
+    description: 'Name of a type of setting, used in a list.',
+  },
+  configTypeColour: {
+    message: 'colour',
+    description: 'Name of a type of setting, used in a list.',
+  },
+  configTypeList: {
+    message: 'list',
+    description: 'Name of a type of setting, used in a list.',
+  },
+  configTypeTable: {
+    message: 'table',
+    description: 'Name of a type of setting, used in a list.',
+  },
+  configSummaryLine: {
+    message: 'Settings: $LIST$',
+    description: 'One line in the approval panel that names the settings the code reads. $LIST$ is a list of names with their types.',
+    placeholders: ['LIST'],
+  },
+  configSummaryItem: {
+    message: '$FIELD$ ($TYPE$)',
+    description: 'One entry in the list of settings. $FIELD$ is the name of a setting and $TYPE$ its type.',
+    placeholders: ['FIELD', 'TYPE'],
+  },
+  configDefaultsFold: {
+    message: 'Defaults of the settings',
+    description: 'Label of a section in the approval panel that lists the default value of each setting.',
+  },
+  configDefaultLine: {
+    message: '$FIELD$: $VALUE$',
+    description: 'One line in a list of settings. $FIELD$ is the name of a setting and $VALUE$ is a value.',
+    placeholders: ['FIELD', 'VALUE'],
+  },
+  configNotKeptRemoved: {
+    message: 'Your value for $FIELD$ is not kept: the new version has no such setting.',
+    description: 'Shown in the approval panel when a value that the user set is lost. $FIELD$ is the name of a setting.',
+    placeholders: ['FIELD'],
+  },
+  configNotKeptType: {
+    message: 'Your value for $FIELD$ is not kept: the new version has a different type of setting.',
+    description: 'Shown in the approval panel when a value that the user set is lost. $FIELD$ is the name of a setting.',
+    placeholders: ['FIELD'],
+  },
+  configNotKeptInvalid: {
+    message: 'Your value for $FIELD$ is not kept: the value does not fit the new version of the setting.',
+    description: 'Shown in the approval panel when a value that the user set is lost. $FIELD$ is the name of a setting.',
+    placeholders: ['FIELD'],
+  },
+  configRestoredHeading: {
+    message: 'Settings and values in this file',
+    description: 'Heading in the panel where restored code is approved. The values came from the file.',
+  },
+  configValueRows: {
+    message: '$COUNT$ rows',
+    description: 'Short description of the value of a table setting. $COUNT$ is a number.',
+    placeholders: ['COUNT'],
+  },
+  configValueItems: {
+    message: '$COUNT$ items',
+    description: 'Short description of the value of a list setting. $COUNT$ is a number.',
+    placeholders: ['COUNT'],
+  },
+  configValueEmpty: {
+    message: 'empty',
+    description: 'Short description of an empty value of a setting.',
+  },
+  configValueYes: {
+    message: 'yes',
+    description: 'Short description of the value of a yes or no setting.',
+  },
+  configValueNo: {
+    message: 'no',
+    description: 'Short description of the value of a yes or no setting.',
+  },
+  configEditorIntro: {
+    message: 'Change the values that the code of this elixir reads. The code stays as it is.',
+    description: 'Text under the heading of the settings section in the editor.',
+  },
 })

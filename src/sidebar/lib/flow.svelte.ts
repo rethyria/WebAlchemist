@@ -35,6 +35,7 @@ import type {
   ElementContext,
   ExecutionWorld,
   ConfigField,
+  ConfigValue,
   GenerationResult,
   HoverTarget,
   PageContext,
@@ -63,6 +64,7 @@ import { MAX_ANSWER_CHARACTERS } from '@shared/ask-limit'
 import { screenshotsAvailable } from '@shared/panel-binding'
 import { jsPreviewGate, reviewKey } from './preview-gate'
 import { t } from '@shared/i18n'
+import { reconcileValues, type NotKept } from '@shared/config'
 
 /** An address without its fragment, so that scrolling to an anchor is not a new page. */
 const pageKey = (url: string): string => url.split('#')[0] ?? url
@@ -631,6 +633,28 @@ export class Flow {
   private resultFromImport = false
 
   /**
+   * The fields and the values of the saved elixir that this run changes, when
+   * it started from one (Refine, Edit description, Repair). It is used to say
+   * which of the user's values the new version would not keep. Null for an
+   * elixir that is new or has no settings.
+   */
+  storedConfig = $state<{ fields: ConfigField[]; values: Record<string, ConfigValue> } | null>(null)
+
+  /** The values of the saved elixir that the current result does not keep, for the approval panel. */
+  get configNotKept(): NotKept[] {
+    const stored = this.storedConfig
+    if (!stored || !this.result) return []
+    return reconcileValues(stored.fields, this.result.config, stored.values).notKept
+  }
+
+  private rememberStoredConfig(transform: Transform): void {
+    this.storedConfig =
+      transform.configFields && transform.configFields.length > 0
+        ? { fields: transform.configFields, values: transform.configValues ?? {} }
+        : null
+  }
+
+  /**
    * The element that was selected when "Change" started a new pick, held so
    * that cancelling the pick can go back to it. Null when the pick did not
    * start from the describing step, in which case there is nothing to go back
@@ -951,6 +975,7 @@ export class Flow {
     this.importedDescription = null
     this.savedDescription = null
     this.resultFromImport = false
+    this.storedConfig = null
     this.history = []
     this.followUp = ''
     this.references = []
@@ -1127,6 +1152,7 @@ export class Flow {
       this.history = []
       this.references = []
       this.draft = transform
+      this.rememberStoredConfig(transform)
       await this.restoreScopeDepth(transform)
       if (!current()) return
 
@@ -1256,6 +1282,7 @@ export class Flow {
       this.picked = { ...found, cropDrawn: false }
       this.tree = found.tree ?? []
       this.draft = transform
+      this.rememberStoredConfig(transform)
       this.matchPattern = transform.match
       this.approvedCssUrls = transform.approvedCssUrls ?? []
 
@@ -1336,6 +1363,7 @@ export class Flow {
       this.references = []
       this.followUp = ''
       this.draft = transform
+      this.rememberStoredConfig(transform)
       await this.restoreScopeDepth(transform)
       if (!current()) return
 
@@ -3022,6 +3050,7 @@ export class Flow {
     this.importedDescription = null
     this.savedDescription = null
     this.resultFromImport = false
+    this.storedConfig = null
     this.keptSavedInstruction = null
     this.keptSavedImported = false
     this.sendScreenshot = false
