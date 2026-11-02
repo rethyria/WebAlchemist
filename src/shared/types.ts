@@ -119,6 +119,36 @@ export type TransformStatus = 'ok' | 'broken' | 'disabled'
 /** What produced the code a transform holds, recorded when it is saved. */
 export type TransformSource = 'generation' | 'repair' | 'ai-edit' | 'hand-edit'
 
+/** The kinds of setting an elixir can offer. See src/shared/config.ts for the rules of each. */
+export type ConfigFieldType = 'text' | 'number' | 'yes-no' | 'choice' | 'colour' | 'list' | 'table'
+export type ConfigValue = string | number | boolean | string[] | Record<string, string>[]
+
+/**
+ * One setting that an elixir offers. The model proposes it with the code, and
+ * the approval covers it. The values the user sets are separate and are stored
+ * in `Transform.configValues`.
+ */
+export interface ConfigField {
+  /** Matches /^[a-z][a-zA-Z0-9]{0,31}$/ and is unique in the elixir. */
+  key: string
+  /** 1 to 60 characters. */
+  label: string
+  /** Up to 200 characters. */
+  help?: string
+  type: ConfigFieldType
+  default: ConfigValue
+  /** Choice only, 2 to 20 options. */
+  options?: { value: string; label: string }[]
+  /** Table only, 1 to 6 columns. */
+  columns?: { key: string; label: string }[]
+  /** Number only. */
+  min?: number
+  max?: number
+  step?: number
+  /** Number only. Used when the value is written into CSS. */
+  unit?: '' | 'px' | 'em' | 'rem' | '%' | 'vh' | 'vw' | 's' | 'ms' | 'deg'
+}
+
 export interface Transform {
   id: string
   /** Short human-facing name, model-proposed, user-editable. */
@@ -154,6 +184,18 @@ export interface Transform {
   rationale: Rationale
   anchor: Anchor
   code: string
+  /**
+   * The settings this elixir offers. Absent means none. Part of what the
+   * approval covers, so a change to them needs a new approval.
+   */
+  configFields?: ConfigField[]
+  /**
+   * The values the user has set, by field key. Only overrides are stored: a
+   * field without an entry uses its default. Never covered by the approval and
+   * never sent to a model. Written only by the set-config-values handler, by
+   * import and by restore (see saveTransform).
+   */
+  configValues?: Record<string, ConfigValue>
   /**
    * External URLs the user approved for this CSS, when its site is set to
    * list external URLs. A stored URL not in this list does not load. Absent
@@ -197,6 +239,8 @@ export interface TransformVersion {
   match: string
   capabilities: Capability[]
   world?: ExecutionWorld
+  /** The settings the code of this version expects. Values are not versioned. */
+  configFields?: ConfigField[]
   /** When this state was saved, as `updatedAt` of the record it came from. */
   savedAt: number
   producedBy?: TransformSource

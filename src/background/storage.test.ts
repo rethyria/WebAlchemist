@@ -142,6 +142,8 @@ describe('malformed transform records (#90)', () => {
     ['no anchor path', { ...mk('bad', 0), anchor: { ...mk('x', 0).anchor, path: undefined } }],
     ['non-array anchor classes', { ...mk('bad', 0), anchor: { ...mk('x', 0).anchor, classes: 'a b' } }],
     ['non-string anchor classes', { ...mk('bad', 0), anchor: { ...mk('x', 0).anchor, classes: [1] } }],
+    ['non-array settings fields', { ...mk('bad', 0), configFields: 'x' }],
+    ['array settings values', { ...mk('bad', 0), configValues: [] }],
     ['not an object', 'transform'],
     ['null', null],
   ]

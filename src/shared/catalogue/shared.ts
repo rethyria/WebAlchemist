@@ -417,4 +417,73 @@ export const sharedMessages = defineMessages({
     description: 'Label of a choice for which pages an elixir applies to. $DOMAIN$ is a domain name.',
     placeholders: ['DOMAIN'],
   },
+  configKeyInvalid: {
+    message: 'The setting key "$KEY$" is not valid. A key starts with a lowercase letter and has at most 32 letters and digits.',
+    description: 'Why a setting that a generated elixir offers is dropped. $KEY$ is the key that the model wrote.',
+    placeholders: ['KEY'],
+  },
+  configKeyDuplicate: {
+    message: 'The setting key "$KEY$" is used more than once.',
+    description: 'Why a setting that a generated elixir offers is dropped. $KEY$ is the key that the model wrote.',
+    placeholders: ['KEY'],
+  },
+  configTooManyFields: {
+    message: 'An elixir can have at most $COUNT$ settings.',
+    description: 'Why settings that a generated elixir offers are dropped. $COUNT$ is a number.',
+    placeholders: ['COUNT'],
+  },
+  configFieldPartInvalid: {
+    message: 'The setting "$KEY$" has a missing or invalid $PART$.',
+    description: 'Why a setting that a generated elixir offers is dropped. $KEY$ is the key of the setting and $PART$ names one part of its definition, such as label or default value.',
+    placeholders: ['KEY', 'PART'],
+  },
+  configPartLabel: { message: 'label', description: 'Names one part of the definition of a setting, inside a sentence.' },
+  configPartHelp: { message: 'help text', description: 'Names one part of the definition of a setting, inside a sentence.' },
+  configPartType: { message: 'type', description: 'Names one part of the definition of a setting, inside a sentence.' },
+  configPartOptions: { message: 'list of options', description: 'Names one part of the definition of a setting, inside a sentence.' },
+  configPartColumns: { message: 'list of columns', description: 'Names one part of the definition of a setting, inside a sentence.' },
+  configPartRange: { message: 'minimum, maximum or step', description: 'Names one part of the definition of a setting, inside a sentence.' },
+  configPartUnit: { message: 'unit', description: 'Names one part of the definition of a setting, inside a sentence.' },
+  configPartDefault: { message: 'default value', description: 'Names one part of the definition of a setting, inside a sentence.' },
+  configValueNotText: { message: 'Enter text.', description: 'Why a value for a setting is refused.' },
+  configValueTooLong: {
+    message: 'This is longer than $COUNT$ characters.',
+    description: 'Why a value for a setting is refused. $COUNT$ is a number.',
+    placeholders: ['COUNT'],
+  },
+  configValueControl: {
+    message: 'This contains a character that is not allowed, such as a line break.',
+    description: 'Why a value for a setting is refused.',
+  },
+  configValueNotNumber: { message: 'Enter a number.', description: 'Why a value for a setting is refused.' },
+  configValueBelowMin: {
+    message: 'The number must be at least $MIN$.',
+    description: 'Why a value for a setting is refused. $MIN$ is a number.',
+    placeholders: ['MIN'],
+  },
+  configValueAboveMax: {
+    message: 'The number must be at most $MAX$.',
+    description: 'Why a value for a setting is refused. $MAX$ is a number.',
+    placeholders: ['MAX'],
+  },
+  configValueNotYesNo: { message: 'Choose yes or no.', description: 'Why a value for a setting is refused.' },
+  configValueNotChoice: { message: 'Choose one of the listed options.', description: 'Why a value for a setting is refused.' },
+  configValueNotColour: {
+    message: 'Enter a colour as # followed by six hexadecimal digits, for example #ffcc00.',
+    description: 'Why a value for a setting is refused.',
+  },
+  configValueNotList: { message: 'This must be a list of text lines.', description: 'Why a value for a setting is refused.' },
+  configValueTooManyItems: {
+    message: 'There can be at most $COUNT$ items.',
+    description: 'Why a value for a setting is refused. $COUNT$ is a number.',
+    placeholders: ['COUNT'],
+  },
+  configValueBadRow: {
+    message: 'Each row needs one text cell for every column.',
+    description: 'Why a value for a setting is refused.',
+  },
+  configValuesTooLarge: {
+    message: 'The values of the settings are larger than 64 KB.',
+    description: 'Why values for settings are refused.',
+  },
 })

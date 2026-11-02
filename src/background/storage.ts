@@ -348,6 +348,11 @@ function firstProblem(value: unknown): string | null {
   if (value.cookieStoreId !== undefined && (typeof value.cookieStoreId !== 'string' || value.cookieStoreId === '')) {
     return 'cookieStoreId'
   }
+  // Only the shape is checked here. Deep validation of the settings runs at
+  // save, at import and in the stored-code gate, so a record with bad settings
+  // is reported as blocked and does not disappear from the list.
+  if (value.configFields !== undefined && !Array.isArray(value.configFields)) return 'configFields'
+  if (value.configValues !== undefined && !isObject(value.configValues)) return 'configValues'
   if (!isObject(anchor)) return 'anchor'
   if (typeof anchor.selector !== 'string') return 'anchor.selector'
   if (typeof anchor.tag !== 'string') return 'anchor.tag'
