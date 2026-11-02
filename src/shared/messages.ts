@@ -15,6 +15,7 @@ import type { PickerAction } from './picker-keys'
 import type {
   Anchor,
   Credential,
+  ConfigValue,
   CredentialStatus,
   ElementContext,
   GenerationResult,
@@ -39,6 +40,7 @@ import type { OverlayPalette } from './accents'
 import type { RefinementTurn, ReviewInstruction } from '@background/providers/types'
 import type { ExportBundle, ImportResult } from '@background/storage'
 import type { EncryptedExport } from './export-envelope'
+import type { SettingsFile } from './config-file'
 import type { BackupSettings, ExportMode, PlannedTransform } from '@background/transfer'
 
 /**
@@ -181,6 +183,24 @@ export type Message =
    * `approve-code` for the stored code, world, capabilities, id and match pattern.
    */
   | { type: 'set-enabled'; id: string; enabled: boolean; tabId?: number; approvalToken?: string }
+
+  /**
+   * Changes the values of an elixir's settings. `values` holds the keys to set
+   * and `reset` the keys that go back to their default. The whole message is
+   * refused when any value fails its field's validation or any key is not a
+   * field. Code, fields, world, capabilities and match are never changed. A
+   * CSS elixir is applied at once; a JavaScript elixir is registered again and
+   * the result says how many open tabs need a reload.
+   */
+  | { type: 'set-config-values'; id: string; values: Record<string, ConfigValue>; reset?: string[]; tabId?: number }
+  /** The file of one elixir's setting values, which carries nothing else. */
+  | { type: 'export-config-values'; id: string }
+  /**
+   * Applies a settings file to an elixir. Values are checked against this
+   * elixir's fields; keys it lacks are ignored, and the result lists what was
+   * applied and what was skipped.
+   */
+  | { type: 'import-config-values'; id: string; file: unknown; tabId?: number }
 
   /* --- settings and credentials ------------------------------------- */
   /** Applies one change to the stored settings and returns the settings as saved. */
@@ -544,6 +564,15 @@ export interface Responses {
   'export-transforms': ExportBundle | EncryptedExport
   'preview-import': { mode: ExportMode; items: PlannedTransform[]; settings: BackupSettings | null }
   'import-transforms': ImportResult
+  'set-config-values': { transform: Transform; reloadTabs: number }
+  'export-config-values': SettingsFile
+  'import-config-values': {
+    transform: Transform
+    reloadTabs: number
+    applied: string[]
+    skipped: { key: string; problem: string }[]
+    unknown: string[]
+  }
   'capture-region': {
     dataUrl: string
     rect: Rect

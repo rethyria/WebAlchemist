@@ -56,7 +56,10 @@ import {
   handlePreviewCss,
   handleReview,
   cssPolicyChanged,
+  handleExportConfigValues,
+  handleImportConfigValues,
   handleSaveTransform,
+  handleSetConfigValues,
   type CssApplyDeps,
   type SaveDeps,
 } from './handlers'
@@ -754,7 +757,9 @@ async function handle(
       // world, capabilities and match. The editor obtains the token from
       // approve-code. The current state becomes a version in turn, so a
       // restore can be undone.
-      const { world: _world, producedBy: _producedBy, ...rest } = current
+      // The fields come back with the code that reads them. Values are not
+      // versioned: saveTransform keeps the stored ones that still fit.
+      const { world: _world, producedBy: _producedBy, configFields: _fields, ...rest } = current
       return handleSaveTransform(
         {
           type: 'save-transform',
@@ -764,6 +769,7 @@ async function handle(
             rationale: version.rationale,
             match: version.match,
             capabilities: version.capabilities,
+            ...(version.configFields === undefined ? {} : { configFields: version.configFields }),
             ...(version.world === undefined ? {} : { world: version.world }),
             ...(version.producedBy === undefined ? {} : { producedBy: version.producedBy }),
           },
@@ -848,6 +854,21 @@ async function handle(
       // A toggle that takes effect on the next reload is not a toggle.
       await reapply(message.tabId)
       return true
+    }
+
+    case 'set-config-values': {
+      await refuseInPrivateWindow(message.tabId)
+      const transform = await handleSetConfigValues(message, { getAllTransforms, updateTransform })
+      return { transform, reloadTabs: await applyConfigChange(transform, message.tabId) }
+    }
+
+    case 'export-config-values':
+      return handleExportConfigValues(message, { getAllTransforms }, Date.now())
+
+    case 'import-config-values': {
+      await refuseInPrivateWindow(message.tabId)
+      const result = await handleImportConfigValues(message, { getAllTransforms, updateTransform })
+      return { ...result, reloadTabs: await applyConfigChange(result.transform, message.tabId) }
     }
 
     case 'count-js-tabs':
@@ -2188,6 +2209,25 @@ async function reapply(tabId: number | undefined): Promise<void> {
     transforms.map((t) => t.id),
     settings.accent,
   )
+}
+
+/**
+ * Makes a change of setting values take effect. CSS is applied again in the
+ * open tabs that match, so the change shows at once. A script cannot change a
+ * page that is already open, so a JavaScript elixir is registered again for
+ * the next load (unless a preview of it is running) and the number of open
+ * tabs that need a reload is returned.
+ */
+async function applyConfigChange(next: Transform, tabId: number | undefined): Promise<number> {
+  if (next.kind === 'css') {
+    await reapply(tabId)
+    await reapplyOpenTabs((url) => matchesUrl(next.match, url))
+    return 0
+  }
+  await inRegistryQueue(async () => {
+    if (next.enabled && !(await previewedScriptIds()).includes(next.id)) await registerTransform(next)
+  })
+  return countTabsWithJavaScript((url) => matchesUrl(next.match, url))
 }
 
 /** Recomputes what runs in every open tab, for a change that is not tied to one transform. */

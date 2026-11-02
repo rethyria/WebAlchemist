@@ -68,6 +68,7 @@ import { assertEndpoint, endpointsOf } from '@shared/endpoint-policy'
 import { destinationOf, sameBinding } from '@shared/credential-binding'
 import type { Provider, TransformVersion } from '@shared/types'
 import { EXPORT_FORMAT, importCountProblem } from '@shared/export-envelope'
+import { checkValueSet, fieldsAreClean, parseConfigFields, reconcileValues } from '@shared/config'
 import { getExcludedSites } from './excluded-sites'
 import {
   backupSettingsOf,
@@ -363,6 +364,14 @@ function firstProblem(value: unknown): string | null {
   return null
 }
 
+/** Throws when the settings of an elixir do not pass the deep validation. */
+function assertValidFields(fields: unknown): void {
+  if (fields === undefined) return
+  if (!fieldsAreClean(fields)) {
+    throw new Error(t('configFieldsNotValid', parseConfigFields(fields).problems[0] ?? '').trim())
+  }
+}
+
 export function isValidTransform(value: unknown): value is Transform {
   return firstProblem(value) === null
 }
@@ -415,7 +424,7 @@ export async function getVersions(id: string): Promise<TransformVersion[]> {
 /** True when a save changed something a version holds. */
 function versionedFieldsDiffer(a: Transform, b: Transform): boolean {
   const view = (t: Transform) =>
-    JSON.stringify([t.code, t.rationale, t.match, t.capabilities, t.world ?? null])
+    JSON.stringify([t.code, t.rationale, t.match, t.capabilities, t.world ?? null, t.configFields ?? []])
   return view(a) !== view(b)
 }
 
@@ -433,6 +442,7 @@ async function recordVersion(replaced: Transform): Promise<void> {
     match: replaced.match,
     capabilities: replaced.capabilities,
     ...(replaced.world === undefined ? {} : { world: replaced.world }),
+    ...(replaced.configFields === undefined ? {} : { configFields: replaced.configFields }),
     savedAt: replaced.updatedAt,
     ...(replaced.producedBy === undefined ? {} : { producedBy: replaced.producedBy }),
   }
@@ -522,13 +532,14 @@ export function saveTransform(
     // record, not taken from the caller: a save of changed code has been
     // approved (the handler requires a token for it) and clears the flag, and
     // a rename keeps it.
-    const { awaitsApproval: _sent, ...sent } = transform
+    const { awaitsApproval: _sent, configValues: _values, ...sent } = transform
+    assertValidFields(transform.configFields)
     const stillWaiting =
       existing?.awaitsApproval === true &&
       existing.code === transform.code &&
       existing.match === transform.match &&
       (existing.world ?? 'USER_SCRIPT') === (transform.world ?? 'USER_SCRIPT')
-    const next = {
+    const next: Transform = {
       ...sent,
       ...(stillWaiting ? { awaitsApproval: true as const } : {}),
       ...(existing && {
@@ -541,6 +552,15 @@ export function saveTransform(
       }),
       updatedAt: Date.now(),
     }
+    // The values are never taken from the caller. The caller's copy may be older
+    // than the stored one, and a rename must not undo a value edit made in the
+    // editor (the same reason `order` and `enabled` are kept, #85). The stored
+    // values are reconciled to the incoming fields: a value is kept only when
+    // its field survives with the same type and the value is still valid.
+    const kept = existing
+      ? reconcileValues(existing.configFields, next.configFields, existing.configValues).values
+      : {}
+    if (Object.keys(kept).length > 0) next.configValues = kept
     assertValidTransform(next)
     // Before the transform is replaced, so a failure leaves at worst one extra
     // version and never a replaced transform with no version of what it was.
@@ -573,6 +593,13 @@ export function updateTransform(
     if (index === -1) return null
     const { awaitsApproval, ...fields } = patch
     const next: Transform = { ...all[index]!, ...fields, id, updatedAt: Date.now() }
+    // Values are checked here as well as in the handler, so no caller can store
+    // a value that its field refuses.
+    if (fields.configValues !== undefined) {
+      const set = checkValueSet(next.configFields, fields.configValues)
+      const problem = set.skipped[0]?.problem ?? (set.unknown[0] === undefined ? null : t('configValueUnknownKey', set.unknown[0]))
+      if (problem !== null) throw new Error(t('configValuesNotSaved', problem))
+    }
     // `null` clears the flag; leaving it out keeps what is stored.
     if (awaitsApproval === null) delete next.awaitsApproval
     assertValidTransform(next)
@@ -1340,7 +1367,16 @@ export async function exportTransforms(mode: ExportMode = 'share'): Promise<Expo
       schemaVersion: SCHEMA_VERSION,
       exportedAt: Date.now(),
       mode,
-      transforms: transforms.map((t) => (t.kind === 'js' ? { ...t, code: '' } : t)),
+      // A share never carries the user's values, which can hold personal
+      // words. CSS keeps its fields, so the recipient gets the defaults.
+      // JavaScript keeps neither: its code is empty, and the importer's own
+      // generation proposes new fields.
+      transforms: transforms.map((t) => {
+        const { configValues: _values, ...withoutValues } = t
+        if (t.kind !== 'js') return withoutValues
+        const { configFields: _fields, ...withoutFields } = withoutValues
+        return { ...withoutFields, code: '' }
+      }),
     }
   }
   const { accent, healthCheckMode } = await getSettings()

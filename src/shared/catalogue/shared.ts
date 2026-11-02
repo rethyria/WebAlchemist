@@ -486,4 +486,31 @@ export const sharedMessages = defineMessages({
     message: 'The values of the settings are larger than 64 KB.',
     description: 'Why values for settings are refused.',
   },
+  configValueUnknownKey: {
+    message: 'This elixir has no setting named "$KEY$".',
+    description: 'Why values for settings are refused. $KEY$ is a setting key.',
+    placeholders: ['KEY'],
+  },
+  configValuesNotSaved: {
+    message: 'The settings were not saved. $PROBLEM$',
+    description: 'Shown when values for settings are refused. $PROBLEM$ is the reason, a full sentence.',
+    placeholders: ['PROBLEM'],
+  },
+  configFieldsNotValid: {
+    message: 'The settings of this elixir are not valid. $PROBLEM$',
+    description: 'Shown when the definition of the settings is refused. $PROBLEM$ is the reason, a full sentence.',
+    placeholders: ['PROBLEM'],
+  },
+  configFileNotSettings: {
+    message: 'This file is not a Web Alchemist settings file.',
+    description: 'Shown when a file chosen for importing the values of settings has the wrong content.',
+  },
+  configFileTypeDiffers: {
+    message: 'This setting has a different type in this elixir.',
+    description: 'Why one value in a settings file is not applied.',
+  },
+  configFileNothingToApply: {
+    message: 'The file has no values for the settings of this elixir.',
+    description: 'Shown when a settings file is chosen and none of its values can be applied.',
+  },
 })

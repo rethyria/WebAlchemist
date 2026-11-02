@@ -15,9 +15,11 @@
  */
 
 import { appliesInContainer } from '@shared/container'
+import { checkValueSet, valuesFitSize } from '@shared/config'
+import { readSettingsFile, settingsFileFor, type SettingsFile } from '@shared/config-file'
 import type { Message } from '@shared/messages'
 import type { ReviewInstruction } from './providers/types'
-import type { ReviewResult, Settings, Transform } from '@shared/types'
+import type { ConfigValue, ReviewResult, Settings, Transform } from '@shared/types'
 import { isApproved, mayBeSaved, recordApproval, spendApproval, type ApprovalVerdict } from './approvals'
 import { blockedStates, problemWithStoredCode, runStaticAnalysis } from './code-gate'
 import { assertPreviewable, checkCssForPage, checkCssTransform } from './css-gate'
@@ -405,4 +407,83 @@ export async function applyCssTransforms(
     // No host permission for this origin yet, which is expected until the user
     // saves their first transform for the site.
   }
+}
+
+/* ------------------------------------------------------------------ */
+/* Values of settings                                                  */
+/* ------------------------------------------------------------------ */
+
+export interface ConfigValueDeps {
+  getAllTransforms: () => Promise<Transform[]>
+  /** The queued update of storage.ts. It checks the values again against the stored fields. */
+  updateTransform: (id: string, patch: { configValues: Record<string, ConfigValue> }) => Promise<Transform | null>
+}
+
+async function storedTransform(id: string, deps: ConfigValueDeps): Promise<Transform> {
+  const stored = (await deps.getAllTransforms()).find((t) => t.id === id)
+  if (!stored) throw new Error(t('bgThatTransformNoLongerExists'))
+  return stored
+}
+
+async function storeValues(
+  stored: Transform,
+  values: Record<string, ConfigValue>,
+  reset: readonly string[],
+  deps: ConfigValueDeps,
+): Promise<Transform> {
+  const merged: Record<string, ConfigValue> = { ...(stored.configValues ?? {}) }
+  for (const key of reset) delete merged[key]
+  Object.assign(merged, values)
+  if (!valuesFitSize(merged)) throw new Error(t('configValuesNotSaved', t('configValuesTooLarge')))
+  const next = await deps.updateTransform(stored.id, { configValues: merged })
+  if (!next) throw new Error(t('bgThatTransformNoLongerExists'))
+  return next
+}
+
+/**
+ * Stores values for the settings of an elixir. The values are validated here,
+ * in the background, against the stored fields, and the whole message is
+ * refused when one is not valid. Only `configValues` changes: a value edit
+ * cannot change the code, the world, the capabilities, the match pattern or
+ * the fields, which is why it needs no new review and no approval token.
+ */
+export async function handleSetConfigValues(message: Of<'set-config-values'>, deps: ConfigValueDeps): Promise<Transform> {
+  const stored = await storedTransform(message.id, deps)
+  const fields = stored.configFields ?? []
+  const set = checkValueSet(fields, message.values)
+  const problem =
+    set.skipped[0]?.problem ?? (set.unknown[0] === undefined ? null : t('configValueUnknownKey', set.unknown[0]))
+  if (problem !== null) throw new Error(t('configValuesNotSaved', problem))
+  const reset = message.reset ?? []
+  const unknownReset = reset.find((key) => !fields.some((field) => field.key === key))
+  if (unknownReset !== undefined) throw new Error(t('configValuesNotSaved', t('configValueUnknownKey', unknownReset)))
+  return storeValues(stored, set.values, reset, deps)
+}
+
+/** The file holding the effective values of one elixir's settings. */
+export async function handleExportConfigValues(
+  message: Of<'export-config-values'>,
+  deps: Pick<ConfigValueDeps, 'getAllTransforms'>,
+  now: number,
+): Promise<SettingsFile> {
+  return settingsFileFor(await storedTransform(message.id, { ...deps, updateTransform: async () => null }), now)
+}
+
+/**
+ * Applies a settings file to an elixir. Each value is validated against this
+ * elixir's fields, a key the elixir lacks is ignored, and nothing but
+ * `configValues` changes. Values that are valid are applied even when others
+ * are skipped, and the result lists both.
+ */
+export async function handleImportConfigValues(message: Of<'import-config-values'>, deps: ConfigValueDeps) {
+  const stored = await storedTransform(message.id, deps)
+  const read = readSettingsFile(message.file, stored)
+  if (read.applied.length === 0) {
+    if (read.skipped.length === 0 && read.unknown.length === 0) {
+      throw new Error(t('configFileNothingToApply'))
+    }
+    return { transform: stored, applied: [], skipped: read.skipped, unknown: read.unknown }
+  }
+  const transform = await storeValues(stored, read.values, [], deps)
+  return { transform, applied: read.applied, skipped: read.skipped, unknown: read.unknown }
 }

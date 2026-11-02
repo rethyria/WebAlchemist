@@ -283,11 +283,23 @@ export function parseConfigFields(raw: unknown): { fields: ConfigField[]; proble
   return { fields, problems }
 }
 
-/** True when stored fields are in the shape that the parser would produce. */
-export function fieldsAreClean(fields: ConfigField[] | undefined): boolean {
+/** JSON text with the keys of every object in sorted order, so that two equal values give equal text. */
+function stableJson(value: unknown): string {
+  return JSON.stringify(value, (_key, inner: unknown) =>
+    isPlainObject(inner)
+      ? Object.fromEntries(Object.keys(inner).sort().map((key) => [key, inner[key]]))
+      : inner,
+  )
+}
+
+/**
+ * True when stored fields are exactly what the parser would produce: nothing
+ * dropped, nothing added, and no property outside the known ones.
+ */
+export function fieldsAreClean(fields: unknown): boolean {
   if (fields === undefined) return true
   const parsed = parseConfigFields(fields)
-  return parsed.problems.length === 0 && JSON.stringify(parsed.fields) === JSON.stringify(fields)
+  return parsed.problems.length === 0 && stableJson(parsed.fields) === stableJson(fields)
 }
 
 /* ------------------------------------------------------------------ */

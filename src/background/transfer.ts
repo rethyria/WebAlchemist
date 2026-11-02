@@ -12,6 +12,7 @@
  * `browser` and a test can call it directly.
  */
 
+import { checkValueSet, parseConfigFields } from '@shared/config'
 import { excludedHostForPattern } from '@shared/excluded-sites'
 import { assessMatch } from '@shared/import-match'
 import { originPermissionFor } from '@shared/match'
@@ -152,6 +153,15 @@ export function sanitiseIncoming(
 ): Transform {
   const js = incoming.kind === 'js'
   const keep = js && keepScript
+  // Settings. A share keeps the fields of CSS and nothing else, and a backup
+  // keeps the fields and the values of both kinds. Fields are parsed again, so
+  // an invalid one is dropped (code that reads it then fails the settings
+  // check and is not imported). Each value is checked against its field and an
+  // invalid one is dropped, so the default applies. A share that carries values
+  // anyway has them removed here.
+  const fields = parseConfigFields(incoming.configFields).fields
+  const keepFields = fields.length > 0 && (keepScript || !js)
+  const values = keepScript && keepFields ? checkValueSet(fields, incoming.configValues).values : {}
   return {
     id: '',
     name: incoming.name,
@@ -175,6 +185,8 @@ export function sanitiseIncoming(
     },
     anchor: cleanAnchor(incoming.anchor),
     code: js && !keepScript ? '' : incoming.code,
+    ...(keepFields ? { configFields: fields } : {}),
+    ...(Object.keys(values).length > 0 ? { configValues: values } : {}),
     createdAt: now,
     updatedAt: now,
   }
@@ -303,6 +315,8 @@ export async function planImport(
       const problem = deps.cssProblem(record)
       if (problem !== null) {
         record.code = ''
+        delete record.configFields
+        delete record.configValues
         reason = t('bgTheCssIsNotImportedBecause', problem)
       }
     }
@@ -314,6 +328,8 @@ export async function planImport(
       if (problem !== null) {
         record.code = ''
         record.capabilities = []
+        delete record.configFields
+        delete record.configValues
         reason = t('bgTheCodeIsNotRestoredBecause', problem)
       } else {
         record.awaitsApproval = true
