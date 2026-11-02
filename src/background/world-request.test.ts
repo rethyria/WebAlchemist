@@ -134,7 +134,7 @@ describe('the approval panel state', () => {
     const text = MAIN_WORLD_RISKS.join(' ')
     expect(text).toMatch(/page can change this code/)
     expect(text).toMatch(/read what the page keeps in memory/)
-    expect(text).toMatch(/static analysis cannot see/)
+    expect(text).toMatch(/safety check cannot see/)
     expect(text).toMatch(/image requests/)
   })
 })

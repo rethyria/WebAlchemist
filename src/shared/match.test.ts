@@ -272,13 +272,13 @@ describe('exactPagePattern', () => {
 
 describe('describeMatch variants (#55)', () => {
   it('says that a pattern without a query also covers any query and the trailing-slash form', () => {
-    expect(describeMatch('https://example.com/a').variants).toMatch(/any query string.*trailing slash/)
+    expect(describeMatch('https://example.com/a').variants).toMatch(/anything after a \?.*slash at the end/)
   })
 
   it('says only the trailing-slash form when the pattern has a query', () => {
     const variants = describeMatch('https://example.com/a?x=1').variants
-    expect(variants).toMatch(/trailing slash/)
-    expect(variants).not.toMatch(/any query/)
+    expect(variants).toMatch(/slash at the end/)
+    expect(variants).not.toMatch(/anything after a \?/)
   })
 
   it('says nothing for a pattern with a wildcard path', () => {
@@ -291,7 +291,7 @@ describe('describeMatch', () => {
   it('says a host with its subdomains and every page', () => {
     expect(describeMatch('https://*.example.com/*')).toEqual({
       schemes: 'https pages',
-      sites: 'example.com and every subdomain of example.com',
+      sites: 'example.com and all its subdomains',
       pages: 'every page',
     })
   })
@@ -299,8 +299,8 @@ describe('describeMatch', () => {
   it('says one host only, and a path prefix', () => {
     expect(describeMatch('https://www.example.com/r/news*')).toEqual({
       schemes: 'https pages',
-      sites: 'www.example.com (this host only, no subdomains)',
-      pages: 'pages whose path starts with /r/news',
+      sites: 'www.example.com only, not its subdomains',
+      pages: 'pages whose address starts with /r/news',
     })
   })
 

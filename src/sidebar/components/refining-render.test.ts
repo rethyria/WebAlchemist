@@ -98,7 +98,7 @@ describe('the Refining step for JavaScript that has not run', () => {
     expect(folded).toContain('A script cannot change a page that is already open')
     expect(folded).toContain('Nothing is saved yet.')
     expect(folded).toContain('A second model checks the code before it runs on the page.')
-    expect(folded).toContain('Page address sent to your AI provider.')
+    expect(folded).toContain('This is the page address sent to your AI provider.')
     expect(folded).toContain('Address sent: https://www.example.com/shop')
   })
 

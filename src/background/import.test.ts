@@ -176,7 +176,7 @@ describe('the preview before an import', () => {
       ['Leaky', 'import'],
     ])
     expect(items[0].sites).toBe('Every page on example.com, over https only')
-    expect(items[1].reason).toBe('The match pattern covers every site.')
+    expect(items[1].reason).toBe('The Applies to value covers every site.')
     expect(items[2]).toMatchObject({ kind: 'js', needsRegeneration: true })
     expect(items[2].intent).toContain('back up the session cookie')
     expect(items[3].reason).toContain('did not pass the safety check')

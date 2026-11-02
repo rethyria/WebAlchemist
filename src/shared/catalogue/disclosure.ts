@@ -43,19 +43,19 @@ export const disclosureMessages = defineMessages({
     description: 'An item in the list of what is sent to the provider.',
   },
   sentHistory: {
-    message: 'Your earlier follow-up requests for the same transform and the code that the model generated for them',
+    message: 'Your earlier follow-up requests and questions for the same transform, with the answers and the code that the model generated for them',
     description: 'An item in the list of what is sent to the provider.',
   },
   sentRepair: {
-    message: 'When you use Repair or Edit with AI, the saved code, its description and rationale, and the reason that the transform stopped working',
+    message: 'When you use Repair with AI or Change with AI, the saved code, its description and rationale, and the reason that the transform stopped working',
     description: 'An item in the list of what is sent to the provider.',
   },
   sentAddress: {
-    message: 'The address of the page, with the fragment removed and the query values removed',
+    message: 'The address of the page, without the part after # and without query values',
     description: 'An item in the list of what is sent to the provider.',
   },
   sentDescription: {
-    message: 'Your description of the change',
+    message: 'Your description of the change, or your question about a draft',
     description: 'An item in the list of what is sent to the provider.',
   },
   sentScreenshot: {
@@ -66,30 +66,30 @@ export const disclosureMessages = defineMessages({
     message: 'The provider\'s own retention policy applies to what it receives. Nothing is sent to the developer of Web Alchemist.',
   },
   enforcementNotice: {
-    message: 'Firefox does not enforce a network restriction on the transform scripts this extension runs on a page, as measured in testing. A script that you approve can therefore use the network and read pages that you are logged in to. Approving the code is the main protection.',
+    message: 'Firefox does not enforce a network restriction on the transform scripts this extension runs on a page. A script that you approve can use the network and read pages that you are logged in to. Approving the code is the main protection.',
   },
   checksNotice: {
-    message: 'JavaScript written by the model is checked by a static analysis and by a review from a second model. Neither check is complete. CSS, whether the model or you wrote it, is checked for addresses that it would load. By default only data: addresses are allowed. Two settings, which are chosen for each site, allow addresses on the page\'s own site or addresses that you approve. An @import rule is refused in every setting.',
+    message: 'JavaScript written by the model is checked by the safety check, which is automatic, and by the code check, which is a review by a second model. Neither check catches every problem. The second model is sent only the code and your description. All CSS, including CSS you write, is checked for the addresses it would load. By default it may load only data: addresses. A setting for each site can also allow the page\'s own addresses (same domain, protocol and port), or addresses that you approve. An @import rule is always refused.',
     description: 'Describes how JavaScript and CSS from the model are checked, including the CSS address policy.',
   },
   transformsStorageNotice: {
-    message: 'Saved transforms are stored unencrypted in the Firefox profile, also when a passphrase is set.',
+    message: 'Saved transforms are not encrypted, even when a passphrase is set. They are stored in the Firefox profile.',
   },
   passphraseOptionNotice: {
-    message: 'A passphrase set on the settings page encrypts the keys.',
+    message: 'To encrypt the keys, set a passphrase on the settings page.',
   },
   siteAccessNotice: {
     message: 'Picking an element on a site, and saving a transform for a site, give Web Alchemist lasting access to that site. The access stays until it is removed under Site access on the settings page.',
   },
   exclusionNotice: {
-    message: 'On sites on the excluded list, which also covers their subdomains, Web Alchemist does not pick elements, does not generate transforms, does not run saved JavaScript transforms, does not apply saved CSS, does not count transforms on the toolbar badge, does not check whether transforms still work, and does not load its content script. A page that is already open keeps the changes that were made before the site was added, until it is reloaded. The list is under Excluded sites on the settings page and starts empty. Before text from a page with password or payment fields is sent, a warning asks for confirmation.',
+    message: 'On excluded sites and their subdomains, Web Alchemist does not pick elements, generate or run transforms, apply saved CSS, count transforms on the toolbar badge, check whether transforms still work, or add any of its own scripts to the page. A page that is already open keeps its changes until it is reloaded. The list is under Excluded sites on the settings page and starts empty. Before text from a page with password or payment fields is sent, a warning asks you to confirm.',
   },
   headingSent: {
     message: 'What is sent to your provider',
     description: 'Heading of a section of the first-run disclosure.',
   },
   leadSent: {
-    message: 'When you generate a transform, Web Alchemist sends the following to the provider that you chose.',
+    message: 'When you generate a transform or ask a question about a draft, Web Alchemist sends the following to the AI provider that you chose.',
   },
   headingChecks: {
     message: 'How code is checked',
@@ -108,15 +108,15 @@ export const disclosureMessages = defineMessages({
     description: 'Heading of a section of the first-run disclosure.',
   },
   disclosurePlain: {
-    message: 'Keys are stored as plain text in this browser profile\'s directory. Browsers offer extensions no access to the operating system keychain, so this data is protected by file permissions and nothing else. Anyone who can read your profile directory can read these keys.',
+    message: 'Keys are stored as plain text in your Firefox profile folder. Extensions cannot use the operating system\'s password store, so only file permissions protect the keys. Anyone who can read that folder can read them.',
     description: 'Says how API keys are stored when no passphrase is set.',
   },
   disclosureSealed: {
-    message: 'Keys are encrypted with your passphrase. What sits in this browser profile is ciphertext, and nothing stored on this machine decrypts it — the key is derived from your passphrase when you unlock, and kept in memory for the session only.',
+    message: 'Keys are encrypted with your passphrase. Nothing stored on this computer can decrypt them. When you unlock, the decryption key is made from your passphrase and kept in memory for this session only.',
     description: 'Says how API keys are stored when a passphrase is set.',
   },
   disclosureTransforms: {
-    message: 'Transforms are never encrypted, with or without a passphrase. Each saved transform stores text from the page element it changes, the addresses of the pages it applies to, and your description of it, as plain text in this browser profile. Exported files hold the same text.',
+    message: 'Transforms are not encrypted, even with a passphrase. Each saved transform is stored as plain text in this browser profile, including text from the element it changes, the addresses of the pages it applies to, and your description. Exported files hold the same text.',
   },
   statusUnlocked: {
     message: 'Unlocked for this session.',
@@ -140,11 +140,11 @@ export const disclosureMessages = defineMessages({
     description: 'One risk of running code in the page\'s own world (MAIN), shown before the user approves it.',
   },
   mainRisk3: {
-    message: 'The static analysis cannot see what the page\'s own functions do when the code calls them.',
+    message: 'The safety check cannot see what the page\'s own functions do when the code calls them.',
     description: 'One risk of running code in the page\'s own world (MAIN), shown before the user approves it.',
   },
   mainRisk4: {
-    message: 'The restriction that blocks image requests in the isolated world does not apply, so the code can send information out through an image address.',
+    message: 'The block on image requests that applies in the isolated world does not apply here, so the code can send information out by loading an image.',
     description: 'One risk of running code in the page\'s own world (MAIN), shown before the user approves it.',
   },
   worldNameIsolated: {
@@ -156,6 +156,6 @@ export const disclosureMessages = defineMessages({
     description: 'Name of the page\'s own execution world. The identifier in brackets is a technical name and stays as written.',
   },
   worldResetNotice: {
-    message: 'This transform used to run in the page\'s own JavaScript environment because the model chose it. It now runs in its isolated environment. Turn on the page\'s environment only if the change needs it.',
+    message: 'The model chose to run this transform in the page\'s own world. It now runs in the isolated world. Turn on "Run in the page\'s own world (MAIN)" in the editor only if the change needs it.',
   },
 })

@@ -9,11 +9,11 @@ export const sharedMessages = defineMessages({
     message: 'Signing in with a provider account is not available in this browser. Use an API key instead.',
   },
   endpointInvalid: {
-    message: 'The address is not a valid URL.',
+    message: 'The address is not valid.',
     description: 'Why a provider address is refused.',
   },
   endpointNeedsHttps: {
-    message: 'The address must use https. Plain http is allowed only for localhost and other loopback addresses.',
+    message: 'The address must use https. Plain http is allowed only for addresses on this computer, such as localhost.',
     description: 'Why a provider address is refused.',
   },
   endpointNeedsScheme: {
@@ -29,7 +29,7 @@ export const sharedMessages = defineMessages({
     message: 'This page has password or payment fields',
   },
   sensitivePageMessage: {
-    message: 'Generating sends text from this page to your model provider, and the page may show private information. Send the page content only if that is acceptable.',
+    message: 'Generating sends text from this page to your AI provider, and the page may show private information. Send the page content only if that is acceptable.',
   },
   matchPresetExactPage: {
     message: 'This exact page',
@@ -52,12 +52,12 @@ export const sharedMessages = defineMessages({
     description: 'Describes which sites a match pattern covers.',
   },
   matchSitesWithSubdomains: {
-    message: '$DOMAIN$ and every subdomain of $DOMAIN$',
+    message: '$DOMAIN$ and all its subdomains',
     description: 'Describes which sites a match pattern covers. $DOMAIN$ is a domain name.',
     placeholders: ['DOMAIN'],
   },
   matchSitesOneHost: {
-    message: '$HOST$ (this host only, no subdomains)',
+    message: '$HOST$ only, not its subdomains',
     description: 'Describes which sites a match pattern covers. $HOST$ is a host name.',
     placeholders: ['HOST'],
   },
@@ -66,12 +66,12 @@ export const sharedMessages = defineMessages({
     description: 'Describes which pages a match pattern covers.',
   },
   matchPagesPrefix: {
-    message: 'pages whose path starts with $PATH$',
+    message: 'pages whose address starts with $PATH$',
     description: 'Describes which pages a match pattern covers. $PATH$ is the start of a path.',
     placeholders: ['PATH'],
   },
   matchPagesFits: {
-    message: 'pages whose path fits $PATH$',
+    message: 'pages whose address matches $PATH$',
     description: 'Describes which pages a match pattern covers. $PATH$ is a path pattern.',
     placeholders: ['PATH'],
   },
@@ -81,21 +81,21 @@ export const sharedMessages = defineMessages({
     placeholders: ['PATH'],
   },
   matchVariantSlash: {
-    message: 'It also covers the same page with a trailing slash.',
+    message: 'It also covers the same page with a slash at the end.',
     description: 'Added when a pattern names one page that has a query.',
   },
   matchVariantQuery: {
-    message: 'It also covers the same page with any query string, and with or without a trailing slash.',
+    message: 'It also covers the same page with anything after a ? in the address, with or without a slash at the end.',
     description: 'Added when a pattern names one page that has no query.',
   },
   needsRegeneratingNote: {
-    message: 'This transform has no code. It came from an imported file, and its description has to be used to write code again before it can run. Open it and choose Edit description on a page it applies to.',
+    message: 'This transform came from an imported file and has no code yet. To create the code, open a page it applies to and choose Edit description.',
   },
   awaitingApprovalNote: {
     message: 'This JavaScript was restored from a backup and has not been approved. Read its code, then approve it to turn it on.',
   },
   panelReopen: {
-    message: 'Open Web Alchemist from the toolbar menu on the page that should be changed.',
+    message: 'Open Web Alchemist from its toolbar button on the page you want to change.',
     description: 'Tells the user how to open the panel again after it was refused.',
   },
   panelNoValidPage: {
@@ -109,7 +109,7 @@ export const sharedMessages = defineMessages({
     placeholders: ['REOPEN'],
   },
   panelOwnPage: {
-    message: 'This panel cannot work on a page of Web Alchemist. $REOPEN$',
+    message: 'This panel cannot work on Web Alchemist\'s own pages. $REOPEN$',
     description: 'Shown when the panel cannot work. $REOPEN$ is the sentence that says how to open it again.',
     placeholders: ['REOPEN'],
   },
@@ -123,14 +123,14 @@ export const sharedMessages = defineMessages({
     description: 'Choice in the editor.',
   },
   containerTabContainer: {
-    message: 'Only in the container of the tab this transform was made in',
+    message: 'Only in the container it was made in',
     description: 'Choice in the editor.',
   },
   containerScopeNote: {
-    message: 'Applies to CSS transforms only. A JavaScript transform runs in every container, because Firefox cannot limit a registered user script to one. The container is read from the tab the sidebar was showing when this editor opened, and reading it needs the cookies permission, which is requested when this is saved.',
+    message: 'Applies to CSS transforms only. Firefox cannot limit JavaScript transforms to one container, so they run in every container. The container is taken from the tab the sidebar showed when this editor opened. Saving asks for the cookies permission, which Firefox needs to report a tab\'s container.',
   },
   containerUnreadableNote: {
-    message: 'This transform is restricted to a container, but the cookies permission is not granted, so Firefox does not report which container a tab is in and the transform does not apply in any tab. Saving it with the cookies permission, or choosing "Every tab", fixes this.',
+    message: 'This transform is limited to one container, but without the cookies permission Firefox cannot report a tab\'s container, so the transform applies in no tab. To fix this, save it and grant the cookies permission, or choose "Every tab".',
   },
   containerTabUnknown: {
     message: 'The tab this editor was opened from has closed or cannot be read, so its container is not known. Open the editor again from the sidebar.',
@@ -151,11 +151,11 @@ export const sharedMessages = defineMessages({
     message: 'Stop running all transforms',
   },
   killSwitchNote: {
-    message: 'Stops CSS and JavaScript transforms, whether written by hand or by the model, on every site. CSS is removed from open tabs when this is turned on. A tab that already ran JavaScript keeps running it until the tab is reloaded.',
+    message: 'Stops all CSS and JavaScript transforms on every site. CSS is removed from open tabs straight away. A tab that already ran JavaScript keeps running it until the tab is reloaded.',
     description: 'Explains what the setting that stops every transform does.',
   },
   killSwitchOnOneTab: {
-    message: '1 open tab may still be running JavaScript. Reload it to stop it.',
+    message: 'One open tab may still be running JavaScript. Reload it to stop it.',
     description: 'Shown after the setting that stops every transform is turned on. $COUNT$ is not used for one tab.',
   },
   killSwitchOnTabs: {
@@ -173,20 +173,20 @@ export const sharedMessages = defineMessages({
     placeholders: ['COUNT'],
   },
   importMatchEmpty: {
-    message: 'The match pattern is empty.',
+    message: 'The Applies to value is empty.',
     description: 'Why an imported match pattern is refused.',
   },
   importMatchAllSites: {
-    message: 'The match pattern covers every site.',
+    message: 'The Applies to value covers every site.',
     description: 'Why an imported match pattern is refused.',
   },
   importMatchScheme: {
-    message: 'The match pattern uses the scheme $SCHEME$, which is not supported.',
+    message: 'The Applies to value uses the protocol $SCHEME$, which is not supported.',
     description: 'Why an imported match pattern is refused. $SCHEME$ is a URL scheme.',
     placeholders: ['SCHEME'],
   },
   importMatchSubdomains: {
-    message: 'The host "$HOST$" covers every subdomain of $DOMAIN$. An import takes only a pattern that names one host.',
+    message: 'The host "$HOST$" covers every subdomain of $DOMAIN$. An import takes only an Applies to value that names one host.',
     description: 'Why an imported match pattern is refused.',
     placeholders: ['HOST', 'DOMAIN'],
   },
@@ -211,7 +211,7 @@ export const sharedMessages = defineMessages({
     placeholders: ['HOST'],
   },
   importMatchNoPath: {
-    message: 'The match pattern has no valid path.',
+    message: 'The Applies to value has no valid page address.',
     description: 'Why an imported match pattern is refused.',
   },
   importMatchSitesHttps: {
@@ -286,11 +286,11 @@ export const sharedMessages = defineMessages({
     description: 'Value in the comparison of two versions.',
   },
   versionWorldMain: {
-    message: 'MAIN (runs in the page\'s own JavaScript context)',
+    message: 'The page\'s own world (MAIN)',
     description: 'Value in the comparison of two versions.',
   },
   versionWorldIsolated: {
-    message: 'USER_SCRIPT (runs in a separate context)',
+    message: 'Isolated world (USER_SCRIPT)',
     description: 'Value in the comparison of two versions.',
   },
   restoreMainRefusal: {
@@ -301,11 +301,11 @@ export const sharedMessages = defineMessages({
     description: 'Shown when a transform has no capabilities.',
   },
   versionRowMatch: {
-    message: 'Match pattern',
+    message: 'Applies to',
     description: 'Row heading in the comparison of two versions.',
   },
   versionRowCapabilities: {
-    message: 'Capabilities',
+    message: 'Access it asks for',
     description: 'Row heading in the comparison of two versions.',
   },
   versionRowWorld: {
@@ -348,7 +348,7 @@ export const sharedMessages = defineMessages({
     description: 'Name of an accent colour, read out by a screen reader for a colour swatch.',
   },
   accentMono: {
-    message: 'mono',
+    message: 'grey',
     description: 'Name of an accent colour, read out by a screen reader for a colour swatch.',
   },
   excludedAccessMessage: {
@@ -403,12 +403,12 @@ export const sharedMessages = defineMessages({
     description: 'Name of a provider setting, used inside a sentence.',
   },
   removeAccessQuestionOne: {
-    message: '1 saved transform uses $ORIGIN$. After the access is removed they stop running there, and CSS they applied is taken out of open tabs. Remove access?',
+    message: 'One saved transform uses $ORIGIN$. If you remove access, it stops running there and its CSS is removed from open tabs. Remove access?',
     description: 'Question asked before the permission for a site is removed. $ORIGIN$ is a site address pattern.',
     placeholders: ['ORIGIN'],
   },
   removeAccessQuestionMany: {
-    message: '$COUNT$ saved transforms use $ORIGIN$. After the access is removed they stop running there, and CSS they applied is taken out of open tabs. Remove access?',
+    message: '$COUNT$ saved transforms use $ORIGIN$. If you remove access, they stop running there and their CSS is removed from open tabs. Remove access?',
     description: 'Question asked before the permission for a site is removed. $COUNT$ is a number and $ORIGIN$ is a site address pattern.',
     placeholders: ['COUNT', 'ORIGIN'],
   },

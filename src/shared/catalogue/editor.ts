@@ -15,7 +15,7 @@ export const editorMessages = defineMessages({
     description: 'Accessible name of the box that holds the code.',
   },
   edDraftGone: {
-    message: 'That draft is no longer available. Drafts last until the browser closes — pick the element again to start over.',
+    message: 'That draft is no longer available. Drafts are kept only until the browser closes. Pick the element again to start over.',
     description: 'Error shown when a draft transform was lost.',
   },
   edWrittenByHandIntent: {
@@ -27,11 +27,11 @@ export const editorMessages = defineMessages({
     description: 'Saved as the approach of a transform that the user wrote by hand.',
   },
   edTitleNew: {
-    message: 'New transform — Web Alchemist',
+    message: 'New transform · Web Alchemist',
     description: 'Title of the editor tab for a new transform.',
   },
   edTitleNamed: {
-    message: '$NAME$ — Web Alchemist',
+    message: '$NAME$ · Web Alchemist',
     description: 'Title of the editor tab. $NAME$ is the name of the transform.',
     placeholders: ['NAME'],
   },
@@ -48,7 +48,7 @@ export const editorMessages = defineMessages({
     description: 'Error shown when a permission was refused.',
   },
   edNeedsPermissionCookies: {
-    message: 'Web Alchemist needs permission for $ORIGIN$ and the cookies permission, to read the container, before it can apply this there.',
+    message: 'To apply this on $ORIGIN$, Web Alchemist needs access to that site and the cookies permission, which it uses to read the container.',
     description: 'Error shown when a permission was refused. $ORIGIN$ is a site address pattern.',
     placeholders: ['ORIGIN'],
   },
@@ -133,7 +133,7 @@ export const editorMessages = defineMessages({
     placeholders: ['ORIGIN'],
   },
   edNow: {
-    message: 'Now: $WORLD$.',
+    message: 'Runs in: $WORLD$',
     description: 'Names the execution world that is set. $WORLD$ is the name of the world.',
     placeholders: ['WORLD'],
   },
@@ -167,11 +167,11 @@ export const editorMessages = defineMessages({
     description: 'Choice of which addresses the CSS may load.',
   },
   edCssSame: {
-    message: 'Data: addresses and addresses on the same site',
+    message: 'The page\'s own addresses (same domain, protocol and port) and data: addresses',
     description: 'Choice of which addresses the CSS may load.',
   },
   edCssList: {
-    message: 'Same site, and other addresses that are approved one by one',
+    message: 'The page\'s own addresses, data: addresses, and other addresses that you approve one by one',
     description: 'Choice of which addresses the CSS may load.',
   },
   edCssHint: {
@@ -179,11 +179,11 @@ export const editorMessages = defineMessages({
     description: 'Explains the choice of which addresses the CSS may load.',
   },
   edCssNoKey: {
-    message: 'This pattern has no fixed host name, or covers every site under a public suffix such as .com, so the default applies.',
+    message: 'The Applies to value does not name one site (for example, it covers every .com site), so the default applies.',
     description: 'Added when the address pattern has no fixed host name.',
   },
   edNeedsApproval: {
-    message: 'Needs approval.',
+    message: 'Needs approval',
     description: 'Heading of the list of addresses that the CSS loads and the user has not approved.',
   },
   edApproveLoadingOne: {
@@ -195,7 +195,7 @@ export const editorMessages = defineMessages({
     description: 'Label of a checkbox.',
   },
   edNotSaved: {
-    message: 'Not saved.',
+    message: 'Not saved',
     description: 'Heading of the reasons why a save failed.',
   },
   edEarlierVersions: {
@@ -213,7 +213,7 @@ export const editorMessages = defineMessages({
     placeholders: ['DATE'],
   },
   edRestoreExplain: {
-    message: 'Restoring replaces the code, match pattern, capabilities and world of this transform with the values of this version. The current state is kept as a version, so a restore can be undone.',
+    message: 'Restoring replaces the code, the pages it applies to, the access it asks for and the world of this transform with those of this version. The current state is kept as a version, so a restore can be undone.',
     description: 'Explains what restoring a version does.',
   },
   edTableCaption: {

@@ -52,9 +52,9 @@ describe('the surfaces that show it', () => {
 
 describe('the transform disclosure (#132)', () => {
   it('says transforms are not encrypted and names page text, addresses and descriptions', () => {
-    expect(DISCLOSURE_TRANSFORMS).toMatch(/never encrypted/)
-    expect(DISCLOSURE_TRANSFORMS).toMatch(/with or without a passphrase/)
-    expect(DISCLOSURE_TRANSFORMS).toMatch(/text from the page/)
+    expect(DISCLOSURE_TRANSFORMS).toMatch(/not encrypted/)
+    expect(DISCLOSURE_TRANSFORMS).toMatch(/even with a passphrase/)
+    expect(DISCLOSURE_TRANSFORMS).toMatch(/text from the element it changes/)
     expect(DISCLOSURE_TRANSFORMS).toMatch(/addresses/)
     expect(DISCLOSURE_TRANSFORMS).toMatch(/description/)
   })

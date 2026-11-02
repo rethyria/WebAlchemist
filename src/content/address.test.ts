@@ -158,14 +158,14 @@ describe('the panel says what is removed', () => {
   it('lists every removal the function makes, with the same limit', async () => {
     const { ADDRESS_REMOVAL_NOTE } = await import('@shared/address-policy')
     for (const phrase of [
-      'fragment',
+      'the part after #',
       'user name and password',
       'query values',
       'query keys with no value',
       'longer than 32 characters',
-      'path parameters',
-      'path segments',
-      'only the scheme',
+      'anything after a semicolon in the path',
+      'path parts',
+      'only the type of address',
     ]) {
       expect(ADDRESS_REMOVAL_NOTE).toContain(phrase)
     }

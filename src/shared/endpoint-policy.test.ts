@@ -23,8 +23,8 @@ describe('the endpoint rule', () => {
     ['ftp://localhost/v1', /https/],
     ['file:///etc/passwd', /https/],
     ['javascript:alert(1)', /https/],
-    ['not a url', /not a valid/],
-    ['', /not a valid/],
+    ['not a url', /not valid/],
+    ['', /not valid/],
   ])('refuses %s', (url, reason) => {
     expect(endpointProblem(url)).toMatch(reason)
   })

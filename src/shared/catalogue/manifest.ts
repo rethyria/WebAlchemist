@@ -7,8 +7,7 @@ export const manifestMessages = defineMessages({
     description: 'The name of the extension, shown in the add-ons manager and on the add-on listing.',
   },
   extensionDescription: {
-    message:
-      'Describe a change to any webpage and have it written, saved, and repaired when the site changes.',
+    message: 'Describe a change to any website, and an AI model writes the CSS or JavaScript for it. You choose the AI provider.',
     description: 'The summary of the extension, shown in the add-ons manager and on the add-on listing.',
   },
   sidebarTitle: {

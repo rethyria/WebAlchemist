@@ -713,7 +713,7 @@ export const sidebarMessages = defineMessages({
     placeholders: ['WORLD'],
   },
   revModelAskedMain: {
-    message: 'The model asked to run this code in the page\'s own world. It stays in the isolated world until you allow it here.',
+    message: 'The model asked to run this code in the page\'s own world, where the code can use everything the page\'s scripts can. It stays in the isolated world until you allow it here.',
     description: 'Explains that the model requested the page\'s own world.',
   },
   revReasonGiven: {
@@ -726,7 +726,7 @@ export const sidebarMessages = defineMessages({
     description: 'Says the model gave no reason for the world it chose.',
   },
   revRunsInMain: {
-    message: 'This code runs in the page\'s own world.',
+    message: 'This code runs in the page\'s own world, where it can use everything the page\'s scripts can.',
     description: 'Says the code runs in the page\'s own world.',
   },
   revRunsIsolated: {

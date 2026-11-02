@@ -26,7 +26,7 @@ export const REVOKE_KEY_NOTICE = t('revokeKeyNotice')
  * alone does not need a new version. The acknowledgement stores the number,
  * so a raise shows the text again to everyone (see disclosure-ack.ts).
  */
-export const DISCLOSURE_VERSION = 2
+export const DISCLOSURE_VERSION = 3
 
 /**
  * The page-controlled values that the picked element's excerpt carries to the

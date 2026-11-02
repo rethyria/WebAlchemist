@@ -93,7 +93,7 @@ describe('resolveBinding', () => {
 
 describe('the record that links a panel tab to its page tab (#128)', () => {
   const page = (id: number) => async () => ({ id, url: 'https://example.com/' })
-  const reopen = 'Open Web Alchemist from the toolbar menu'
+  const reopen = 'Open Web Alchemist from its toolbar button'
 
   it('refuses when the record names another page tab, as after a restart reuses ids', async () => {
     const result = await resolveBinding('?tab=7', BASE, page(7), link(9))

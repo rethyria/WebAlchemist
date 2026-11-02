@@ -33,12 +33,12 @@ describe('compareWithCurrent', () => {
     expect(row(rows, 'World')).toMatchObject({ status: 'Different' })
     expect(row(rows, 'World').version).toContain('MAIN')
     expect(row(rows, 'World').current).toContain('USER_SCRIPT')
-    expect(row(rows, 'Capabilities')).toMatchObject({ current: 'None', version: 'network', status: 'Different' })
+    expect(row(rows, 'Access it asks for')).toMatchObject({ current: 'None', version: 'network', status: 'Different' })
   })
 
   it('marks a different match pattern', () => {
     const rows = compareWithCurrent(current, { ...version, match: '*.example.com/*' })
-    expect(row(rows, 'Match pattern')).toMatchObject({
+    expect(row(rows, 'Applies to')).toMatchObject({
       current: 'example.com/*',
       version: '*.example.com/*',
       status: 'Different',
@@ -53,7 +53,7 @@ describe('compareWithCurrent', () => {
   it('does not compare the capability order', () => {
     const both = { ...current, capabilities: ['storage', 'network'] } as unknown as Transform
     const rows = compareWithCurrent(both, { ...version, capabilities: ['network', 'storage'] })
-    expect(row(rows, 'Capabilities').status).toBe('Same')
+    expect(row(rows, 'Access it asks for').status).toBe('Same')
   })
 
   it('does not report a world for CSS', () => {

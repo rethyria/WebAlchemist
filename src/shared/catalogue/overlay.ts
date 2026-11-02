@@ -7,7 +7,7 @@ export const overlayMessages = defineMessages({
     description: 'Hint shown in the overlay on the page while picking by touch.',
   },
   overlayHintRegion: {
-    message: 'Drag the area to capture',
+    message: 'Drag over the area to capture',
     description: 'Hint shown in the overlay on the page while an area is drawn for a screenshot.',
   },
   overlayHintCrop: {
@@ -15,7 +15,7 @@ export const overlayMessages = defineMessages({
     description: 'Hint shown in the overlay on the page after an area was drawn.',
   },
   overlayHintHover: {
-    message: 'Hover or drag',
+    message: 'Point at an element, or drag to draw an area',
     description: 'Hint shown in the overlay on the page while picking an element.',
   },
   overlayRedraw: {
@@ -41,36 +41,36 @@ export const overlayMessages = defineMessages({
     placeholders: ['SELECTOR'],
   },
   scriptErrorReason: {
-    message: 'The script threw an error when it ran.',
+    message: 'The script stopped with an error when it ran.',
     description: 'Sent to the model as the reason a repair is requested, and shown to the user.',
   },
   addressRemovalNote: {
-    message: 'Page address sent to your AI provider. Removed from it: the fragment, the user name and password, query values, query keys with no value, query keys and path segments longer than $LIMIT$ characters or that look like tokens (a long run of digits, or a long run of letters and digits), and path parameters (everything after a semicolon in a path segment). Removed path segments are shown as $PLACEHOLDER$. For file, blob, data and other addresses that are not http or https, only the scheme is sent.',
+    message: 'This is the page address sent to your AI provider. These parts are removed: the part after #, any user name and password, query values, query keys with no value, anything after a semicolon in the path, and query keys and path parts that are longer than $LIMIT$ characters or look like codes (a long run of digits, or of letters and digits). Removed path parts are shown as $PLACEHOLDER$. For addresses that are not http or https, such as file, blob and data addresses, only the type of address (for example "file:") is sent.',
     description: 'Shown next to the page address. $LIMIT$ is a number of characters; $PLACEHOLDER$ is the text that replaces a removed path segment.',
     placeholders: ['LIMIT', 'PLACEHOLDER'],
   },
   anchorKeepsRole: {
-    message: 'it keeps role="$ROLE$"',
+    message: 'the element still has role="$ROLE$"',
     description: 'Names an assumption of a transform that no longer holds. It follows the words \'This transform assumed\'. $ROLE$ is an attribute value.',
     placeholders: ['ROLE'],
   },
   anchorKeepsId: {
-    message: 'it keeps id="$ID$"',
+    message: 'the element still has id="$ID$"',
     description: 'Names an assumption of a transform that no longer holds. It follows the words \'This transform assumed\'. $ID$ is an attribute value.',
     placeholders: ['ID'],
   },
   anchorKeepsClass: {
-    message: 'it keeps the class $CLASSES$',
+    message: 'the element still has the class $CLASSES$',
     description: 'Names an assumption of a transform that no longer holds. It follows the words \'This transform assumed\'. $CLASSES$ is a list of class names.',
     placeholders: ['CLASSES'],
   },
   anchorTextStarts: {
-    message: 'its text still starts "$TEXT$…"',
+    message: 'the element\'s text still starts with "$TEXT$…"',
     description: 'Names an assumption of a transform that no longer holds. It follows the words \'This transform assumed\'. $TEXT$ is the start of the element text.',
     placeholders: ['TEXT'],
   },
   anchorInside: {
-    message: 'it still sits inside $LANDMARK$',
+    message: 'the element is still inside $LANDMARK$',
     description: 'Names an assumption of a transform that no longer holds. It follows the words \'This transform assumed\'. $LANDMARK$ is the name of a page region.',
     placeholders: ['LANDMARK'],
   },

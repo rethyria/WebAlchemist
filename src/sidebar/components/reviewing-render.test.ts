@@ -70,8 +70,8 @@ describe('the approval panel for JavaScript with a clean review', () => {
   it('shows the world, the capabilities, the sites and the second model note', () => {
     expect(body).toContain('Isolated world (USER_SCRIPT)')
     expect(body).toContain('None. Code that uses')
-    expect(body).toContain('example.com and every subdomain of example.com')
-    expect(body).toContain('pages whose path starts with /shop/')
+    expect(body).toContain('example.com and all its subdomains')
+    expect(body).toContain('pages whose address starts with /shop/')
     expect(body).toContain('It only changes the title.')
   })
 
