@@ -8,6 +8,7 @@ import { describe, expect, it } from 'vitest'
 import { render } from 'svelte/server'
 import PickActions from './PickActions.svelte'
 import SiteControls from './SiteControls.svelte'
+import OrderInfo from './OrderInfo.svelte'
 
 const noop = () => {}
 const html = (component: unknown, props: Record<string, unknown>) =>
@@ -23,11 +24,9 @@ describe('the pick actions', () => {
     expect(out).not.toContain('drag a rectangle')
   })
 
-  it('show the order hint only when asked to', () => {
-    expect(html(PickActions, { onselect: noop, onwrite: noop })).not.toContain('later one wins')
-    expect(html(PickActions, { onselect: noop, onwrite: noop, showOrderHint: true })).toContain(
-      'later one wins',
-    )
+  it('do not show the order explanation as standing text', () => {
+    const out = html(PickActions, { onselect: noop, onwrite: noop })
+    expect(out).not.toContain('later one wins')
   })
 })
 
@@ -50,5 +49,31 @@ describe('the site controls', () => {
   it('show the result of the last action', () => {
     const out = html(SiteControls, { siteOff: true, notice: 'Reload 1 open tab', onsetoff: noop })
     expect(out).toContain('Reload 1 open tab')
+  })
+})
+
+describe('the order information button', () => {
+  const out = html(OrderInfo, {})
+
+  it('has the accessible name About the order and is linked to a tooltip', () => {
+    expect(out).toContain('aria-label="About the order"')
+    const described = /aria-describedby="([^"]+)"/.exec(out)?.[1]
+    expect(described).toBeTruthy()
+    expect(out).toContain(`id="${described}"`)
+    expect(out).toContain('role="tooltip"')
+  })
+
+  it('keeps the explanation in a hidden tooltip, not in a title attribute', () => {
+    expect(out).toContain('If elixirs conflict, the later one wins')
+    expect(out).toMatch(/role="tooltip"[^>]*hidden/)
+    expect(out).not.toContain('title=')
+  })
+})
+
+describe('the main panel', () => {
+  it('shows the order information button only when the site has more than one elixir', async () => {
+    const { readFileSync } = await import('node:fs')
+    const source = readFileSync(new URL('../App.svelte', import.meta.url), 'utf8')
+    expect(source).toMatch(/\{#if transforms\.length > 1\}\s*<OrderInfo \/>/)
   })
 })

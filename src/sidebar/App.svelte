@@ -48,6 +48,7 @@
   import PickActions from './components/PickActions.svelte'
   import SiteControls from './components/SiteControls.svelte'
   import Button from './components/Button.svelte'
+  import OrderInfo from './components/OrderInfo.svelte'
 
   let settings = $state<Settings | null>(null)
   /** What to reload after the stop-all setting changed, shown under that setting. */
@@ -962,6 +963,9 @@
         </Button>
       </span>
       <span class="count">{t('appActive', activeCount)}</span>
+      {#if transforms.length > 1}
+        <OrderInfo />
+      {/if}
     </header>
 
     {#if siteOff}
@@ -1010,7 +1014,6 @@
 
     <footer>
       <PickActions
-        showOrderHint={transforms.length > 1}
         onselect={() => describe(() => void flow.startPicking())}
         onwrite={() => void flow.startPicking('author')}
       />
@@ -1054,6 +1057,7 @@
   }
 
   .site {
+    position: relative;
     display: flex;
     align-items: center;
     gap: 7px;

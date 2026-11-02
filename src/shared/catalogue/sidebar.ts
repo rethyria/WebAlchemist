@@ -1325,7 +1325,11 @@ export const sidebarMessages = defineMessages({
   },
   appOrderHint: {
     message: 'If elixirs conflict, the later one wins',
-    description: 'Hint under the buttons below the list of elixirs. Shown only when the site has more than one elixir.',
+    description: 'Text of the tooltip that the About the order button shows. The button is shown only when the site has more than one elixir.',
+  },
+  appOrderInfo: {
+    message: 'About the order',
+    description: 'Accessible name of the small question mark button beside the list of elixirs. It shows a tooltip about the order of elixirs.',
   },
   appTurnOn: {
     message: 'Turn everything back on for this site',
