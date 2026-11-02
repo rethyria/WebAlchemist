@@ -294,7 +294,36 @@ body {
    The lifted tone, since this is a line rather than a fill. */
 :focus-visible {
   outline: 2px solid var(--accent-fg);
-  outline-offset: 1px;
+  outline-offset: 2px;
+}
+
+/*
+ * States shared by every button and disclosure summary in the sidebar, the
+ * settings page and the editor. The overlay that the content script draws in
+ * the page has no buttons; its controls are in the sidebar.
+ *
+ * Hover and active add a tint of the button's own text colour over its
+ * background, so one rule works for filled, outlined and tinted buttons in both
+ * themes. A disabled button has no hover or active state. The transition uses
+ * --motion, which is 0ms when the user prefers reduced motion.
+ */
+button,
+summary {
+  transition: box-shadow var(--motion) linear;
+}
+
+button:not(:disabled):hover,
+summary:hover {
+  box-shadow: inset 0 0 0 999px color-mix(in srgb, currentColor 12%, transparent);
+}
+
+button:not(:disabled):active,
+summary:active {
+  box-shadow: inset 0 0 0 999px color-mix(in srgb, currentColor 24%, transparent);
+}
+
+button:disabled {
+  cursor: default;
 }
 
 /*

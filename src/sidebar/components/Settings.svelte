@@ -217,6 +217,21 @@
       0 0 0 3.5px var(--swatch);
   }
 
+  /* The shared hover tint would be invisible on a swatch, so hover draws a ring. */
+  .swatch:not(:disabled):hover,
+  .swatch:not(:disabled):active {
+    box-shadow:
+      0 0 0 2px var(--surface),
+      0 0 0 3.5px var(--border-strong);
+  }
+
+  .swatch.selected:not(:disabled):hover,
+  .swatch.selected:not(:disabled):active {
+    box-shadow:
+      0 0 0 2px var(--surface),
+      0 0 0 3.5px var(--swatch);
+  }
+
   .hex {
     margin-left: auto;
     font: 10.5px var(--font-mono);

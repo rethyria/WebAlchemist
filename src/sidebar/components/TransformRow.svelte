@@ -488,7 +488,7 @@
   }
 
   .handle:focus-visible {
-    outline: 1px solid var(--accent-fg);
+    outline: 2px solid var(--accent-fg);
     border-radius: 2px;
   }
 
