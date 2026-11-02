@@ -171,7 +171,9 @@ describe('pricing', () => {
     for (const model of ANTHROPIC_MODELS) {
       expect(listedPrice(model.id), model.id).not.toBeNull()
     }
-    expect(listedPrice('claude-sonnet-5')).toEqual({ input: 3, output: 15 })
+    // Sonnet 5 is $2 / $10; it was listed at $3 / $15 until #152.
+    expect(listedPrice('claude-sonnet-5')).toEqual({ input: 2, output: 10 })
+    expect(listedPrice('claude-opus-5-5')).toEqual({ input: 4, output: 20 })
     expect(listedPrice('typed-by-hand')).toBeNull()
   })
 

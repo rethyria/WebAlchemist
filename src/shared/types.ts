@@ -299,8 +299,8 @@ export type Credential =
  * Anthropic adapter so the settings page can read them without pulling the SDK
  * into its bundle.
  */
-export const DEFAULT_GENERATE_MODEL = 'claude-opus-5'
-export const DEFAULT_REVIEW_MODEL = 'claude-opus-5'
+export const DEFAULT_GENERATE_MODEL = 'claude-opus-5-5'
+export const DEFAULT_REVIEW_MODEL = 'claude-opus-5-5'
 
 /**
  * Models offered in the settings dropdown, newest first.
@@ -321,8 +321,11 @@ export interface ModelOption {
 }
 
 export const ANTHROPIC_MODELS: ModelOption[] = [
+  { id: 'claude-opus-5-5', label: 'Opus 5.5', price: '$4 / $20', vision: true },
+  { id: 'claude-sonnet-5-5', label: 'Sonnet 5.5', price: '$2 / $10', vision: true },
+  { id: 'claude-fable-5-1', label: 'Fable 5.1', price: '$10 / $50', vision: true },
   { id: 'claude-opus-5', label: 'Opus 5', price: '$5 / $25', vision: true },
-  { id: 'claude-sonnet-5', label: 'Sonnet 5', price: '$3 / $15', vision: true },
+  { id: 'claude-sonnet-5', label: 'Sonnet 5', price: '$2 / $10', vision: true },
   { id: 'claude-opus-4-6', label: 'Opus 4.6', price: '$5 / $25', vision: true },
   { id: 'claude-sonnet-4-6', label: 'Sonnet 4.6', price: '$3 / $15', vision: true },
   { id: 'claude-haiku-4-5', label: 'Haiku 4.5', price: '$1 / $5', vision: true },
