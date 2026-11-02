@@ -20,6 +20,11 @@ import { originCovers } from '@shared/site-access'
 /** Captured before a test installs fake timers, so `boot()` can still wait. */
 const realSetTimeout = globalThis.setTimeout
 
+/** An array when it has entries, otherwise null, as Firefox stores match lists. */
+function nonEmptyOrNull(list: string[] | null | undefined): string[] | null {
+  return list && list.length > 0 ? list : null
+}
+
 export type Listener = (...args: any[]) => any
 
 export const ORIGIN = 'moz-extension://abc-123/'
@@ -214,13 +219,23 @@ export function createHarness(): Harness {
     'browser.userScripts.register': async (scripts: { id: string }[]) => {
       for (const script of scripts) {
         h.calls.registry.push(`register:${script.id}`)
-        h.userScriptsHeld.set(script.id, structuredClone(script))
+        h.userScriptsHeld.set(script.id, {
+          ...structuredClone(script),
+          excludeMatches: nonEmptyOrNull((script as any).excludeMatches),
+        })
       }
     },
     'browser.userScripts.update': async (scripts: { id: string }[]) => {
       for (const script of scripts) {
         h.calls.registry.push(`update:${script.id}`)
-        h.userScriptsHeld.set(script.id, structuredClone(script))
+        // Firefox merges an update into the held registration: a key that is
+        // missing or an empty list keeps the old value, except that an empty
+        // `excludeMatches` list is stored as null (ExtensionUserScripts.sys.mjs).
+        const old = h.userScriptsHeld.get(script.id) as any
+        const merged = { ...(old ?? {}), ...structuredClone(script) } as any
+        const given = (script as any).excludeMatches
+        merged.excludeMatches = nonEmptyOrNull(given ?? old?.excludeMatches)
+        h.userScriptsHeld.set(script.id, merged)
       }
     },
     'browser.userScripts.configureWorld': async () => {},

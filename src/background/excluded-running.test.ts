@@ -45,7 +45,7 @@ beforeEach(async () => {
 
 describe('registrations', () => {
   it('start without an exclusion when the list is empty (control)', () => {
-    expect(h.userScriptsHeld.get('js-bank').excludeMatches).toBeUndefined()
+    expect(h.userScriptsHeld.get('js-bank').excludeMatches).toBeNull()
     for (const script of h.contentScriptsHeld.values()) expect(script.excludeMatches).toBeUndefined()
   })
 
@@ -71,7 +71,7 @@ describe('registrations', () => {
   it('are rebuilt again when the list changes, and lose the exclusion when it is emptied', async () => {
     await ask({ type: 'set-excluded-sites', sites: ['bank.example'] })
     await ask({ type: 'set-excluded-sites', sites: [] })
-    expect(h.userScriptsHeld.get('js-bank').excludeMatches).toBeUndefined()
+    expect(h.userScriptsHeld.get('js-bank').excludeMatches).toBeNull()
     for (const script of h.contentScriptsHeld.values()) expect(script.excludeMatches).toBeUndefined()
   })
 

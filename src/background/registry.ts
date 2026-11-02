@@ -221,8 +221,10 @@ async function registrationFor(
       matches: matchPatternsFor(transform, { exactPath: options.exactPath === true }),
       // The per-site off switch and the excluded sites (#131). The registration
       // stays, so that turning a site back on needs no re-registration of
-      // anything else.
-      ...(excludeMatches ? { excludeMatches } : {}),
+      // anything else. The key is always sent, as an empty list when nothing
+      // is excluded: Firefox's userScripts.update keeps the old value of a key
+      // that is missing, so leaving it out would keep a removed exclusion.
+      excludeMatches: excludeMatches ?? [],
       // Wrapped so the transform re-applies after framework re-renders, and
       // preceded by the guard that removes the features it did not declare a
       // capability for (#139). Only the CSP probe asks for no guard: it
@@ -462,7 +464,7 @@ async function reregisterAllNow(
       if (JSON.stringify(preview.excludeMatches ?? []) === JSON.stringify(excludeMatches ?? [])) continue
       const { excludeMatches: _old, ...rest } = preview
       try {
-        await userScripts.update([{ ...rest, ...(excludeMatches ? { excludeMatches } : {}) }])
+        await userScripts.update([{ ...rest, excludeMatches: excludeMatches ?? [] }])
       } catch {
         // A preview that cannot be updated is removed rather than left running
         // on a site that is now off.

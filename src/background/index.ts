@@ -46,7 +46,7 @@ import { hostOfUrl } from '@shared/site-off'
 import { isSidebarPortName, ownerOfSidebarPort, panelOwner } from '@shared/sidebar-port'
 import { isApproved, spendApproval } from './approvals'
 import { encryptExport, openExport } from './export-crypto'
-import { blockedStates, runStaticAnalysis, staticProblem } from './code-gate'
+import { blockedStates, problemWithStoredCode, runStaticAnalysis, staticProblem } from './code-gate'
 import { assertPreviewable, checkCssForPage, checkCssTransform, pageUrlFor, sameCssContext } from './css-gate'
 import {
   applyCssTransforms as applyCssTransformsFor,
@@ -2040,7 +2040,12 @@ async function reapplyOpenTabs(include: (url: string) => boolean): Promise<void>
  * a script, so this is the set a registered script would have run in.
  */
 async function tabsWithJavaScript(include: (url: string) => boolean): Promise<number[]> {
-  const scripts = (await getAllTransforms()).filter((t) => t.kind === 'js' && t.enabled && t.code)
+  const settings = await getSettings()
+  // Scripts the code gate refuses are never registered, so they have not run
+  // and a reload would not bring them back.
+  const scripts = (await getAllTransforms()).filter(
+    (t) => t.kind === 'js' && t.enabled && t.code && problemWithStoredCode(t, settings) === null,
+  )
   const ids: number[] = []
   for (const tab of await browser.tabs.query({})) {
     if (tab.id === undefined || !tab.url || !include(tab.url)) continue

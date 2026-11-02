@@ -169,7 +169,7 @@ describe('previewing a saved JavaScript transform', () => {
 
   it('registers with no exclusions when no host is turned off (control)', async () => {
     await registerTransform(saved)
-    expect((store.get('SAVED') as any).excludeMatches).toBeUndefined()
+    expect((store.get('SAVED') as any).excludeMatches).toEqual([])
   })
 
   it('pauses the saved registration while the preview runs', async () => {

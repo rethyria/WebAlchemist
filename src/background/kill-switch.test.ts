@@ -117,10 +117,17 @@ describe('turning off one site', () => {
     await ask({ type: 'set-site-off', url: 'https://a.example/page', off: true })
     h.calls.reload.length = 0
     const answer = await ask({ type: 'set-site-off', url: 'https://a.example/page', off: false })
-    expect(h.userScriptsHeld.get('js-a').excludeMatches).toBeUndefined()
+    expect(h.userScriptsHeld.get('js-a').excludeMatches).toBeNull()
     expect(h.calls.insertCSS.filter((c) => c.tabId === A)).toHaveLength(2)
     expect(h.calls.reload).toEqual([])
     expect(answer).toMatchObject({ reloadTabs: 1 })
+  })
+
+  it('counts no tabs to reload when the only matching script is refused by the code gate', async () => {
+    h.local.set('transforms', [css, cssB, { ...js, world: 'MAIN', mainApprovedByUser: false }])
+    await ask({ type: 'set-site-off', url: 'https://a.example/page', off: true })
+    const answer = await ask({ type: 'set-site-off', url: 'https://a.example/page', off: false })
+    expect(answer).toMatchObject({ reloadTabs: 0 })
   })
 
   it('refuses a page that is not a website', async () => {
@@ -160,6 +167,13 @@ describe('a JavaScript preview and the switches (#121)', () => {
     await ask({ type: 'set-site-off', url: 'https://a.example/page', off: true })
     expect(h.userScriptsHeld.get('preview-js-a').excludeMatches).toEqual(['*://a.example/*'])
     expect(h.userScriptsHeld.get('preview-js-a').js[0].code).toContain('unsaved')
+  })
+
+  it('loses the exclusion when its site is turned back on', async () => {
+    await startPreview()
+    await ask({ type: 'set-site-off', url: 'https://a.example/page', off: true })
+    await ask({ type: 'set-site-off', url: 'https://a.example/page', off: false })
+    expect(h.userScriptsHeld.get('preview-js-a').excludeMatches).toBeNull()
   })
 
   it('excludes only the host that was turned off', async () => {
