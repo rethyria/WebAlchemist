@@ -23,17 +23,17 @@ export const optionsMessages = defineMessages({
     description: 'Main heading of the settings page.',
   },
   optLoadError: {
-    message: 'The stored credentials could not be read: $ERROR$ The credential status below is not known.',
-    description: 'Error shown on the settings page. $ERROR$ is the error text.',
+    message: 'The stored API keys and sign-ins could not be read: $ERROR$ The key status below is not known.',
+    description: 'Error shown on the settings page when the stored keys could not be read. $ERROR$ is the error text.',
     placeholders: ['ERROR'],
   },
   optBindingError: {
-    message: 'The vault change was made, but the stored keys could not be checked against their providers: $ERROR$ The check is repeated when a stored key is next used.',
+    message: 'The passphrase change was saved, but the stored keys could not be checked: $ERROR$ They are checked again the next time they are used.',
     description: 'Error shown on the settings page after the passphrase setting changed. $ERROR$ is the error text.',
     placeholders: ['ERROR'],
   },
   optAccent: {
-    message: 'Accent',
+    message: 'Accent colour',
     description: 'Heading of the choice of accent colour.',
   },
   optHealth: {
@@ -55,7 +55,7 @@ export const optionsMessages = defineMessages({
     description: 'Heading of the list of excluded sites.',
   },
   optExcludedBody: {
-    message: 'On these sites, and on their subdomains, Web Alchemist does not pick elements or generate transforms, and does not ask for permission to read them. The list is empty until sites are added.',
+    message: 'On these sites and their subdomains, Web Alchemist does not pick elements, generate transforms or ask for access.',
     description: 'Explains the list of excluded sites.',
   },
   optSiteName: {
@@ -79,21 +79,21 @@ export const optionsMessages = defineMessages({
     description: 'Choice in the list of models that lets the user type a model identifier.',
   },
   optModelId: {
-    message: 'model id',
+    message: 'Model ID',
     description: 'Hint shown in the empty box for a model identifier.',
   },
   optModelPrice: {
-    message: '$PRICE$ per Mtok',
+    message: '$PRICE$ per million tokens (input / output)',
     description: 'Price of a model. $PRICE$ is an amount, and Mtok means a million tokens.',
     placeholders: ['PRICE'],
   },
   optModelPriceNoImages: {
-    message: '$PRICE$ per Mtok · no images',
+    message: '$PRICE$ per million tokens (input / output) · no images',
     description: 'Price of a model that cannot read images. $PRICE$ is an amount, and Mtok means a million tokens.',
     placeholders: ['PRICE'],
   },
   optModelUnknown: {
-    message: 'not a known model — cost and image support unknown',
+    message: 'unknown model, so its price and image support are not known',
     description: 'Shown for a model identifier that the extension has no data about.',
   },
   optAccessNotRemoved: {
@@ -119,7 +119,7 @@ export const optionsMessages = defineMessages({
     description: 'Heading of the list of sites that the extension can read and change.',
   },
   optSiteAccessBody: {
-    message: 'The sites Web Alchemist can read and change. Removing access stops its transforms from running there until access is granted again.',
+    message: 'Web Alchemist can read and change these sites. Removing access stops transforms from running on that site until access is granted again.',
     description: 'Explains the list of sites that the extension can read and change.',
   },
   optNoAccess: {
@@ -147,6 +147,10 @@ export const optionsMessages = defineMessages({
     message: '$COST$ ($PRICED$ of $REPORTED$ calls priced)',
     description: 'Cost of model calls when some calls have no known price. $COST$ is an amount; the other values are numbers.',
     placeholders: ['COST', 'PRICED', 'REPORTED'],
+  },
+  optUsageSeparator: {
+    message: ', ',
+    description: 'Goes between the figures that describe model use, for example the tokens, the number of calls that were not reported and the cost.',
   },
   optUsageTitle: {
     message: 'Usage',
@@ -179,31 +183,31 @@ export const optionsMessages = defineMessages({
     description: 'Name of the row that adds up the model use of drafts.',
   },
   optUsageDeleted: {
-    message: 'Transform not saved or deleted',
+    message: 'Deleted transform',
     description: 'Name of a row whose transform no longer exists.',
   },
   optVaultWrongPassphrase: {
-    message: 'That passphrase is not the one that was set.',
+    message: 'The passphrase is not correct.',
     description: 'Error shown when the passphrase does not unlock the vault.',
   },
   optVaultTitle: {
-    message: 'How your credentials are stored',
-    description: 'Heading of the section about how credentials are stored.',
+    message: 'How your API keys are stored',
+    description: 'Heading of the section about how API keys and sign-ins are stored.',
   },
   optVaultAbout: {
-    message: 'A passphrase changes that. Your keys are encrypted with it, and nothing stored on this machine can decrypt them without it — so reading the profile directory yields ciphertext and nothing else. You unlock once each time you start the browser.',
+    message: 'A passphrase changes that. Your keys are encrypted with it, and nothing stored on this computer can decrypt them without it. You unlock them once each time you start the browser.',
     description: 'Explains what a passphrase does.',
   },
   optVaultNoRecovery: {
-    message: 'There is no way to recover a forgotten passphrase. That is what makes it worth something, and it means losing it means re-entering your keys.',
+    message: 'A forgotten passphrase cannot be recovered. If it is lost, you have to enter your keys again.',
     description: 'Warns that a forgotten passphrase cannot be recovered.',
   },
   optVaultOldCopy: {
-    message: 'Turning this on encrypts your keys from that point on. It cannot erase the copy already written to this profile — browsers give extensions no way to reclaim that space, and it stays readable until the browser reuses it. If that matters to you, replace the key at your provider after turning this on.',
+    message: 'Turning this on encrypts your keys from then on. The plain-text copy already saved in this profile cannot be erased by an extension and stays readable until the browser overwrites it. If that matters to you, replace the key at your provider afterwards.',
     description: 'Warns that an earlier plain-text copy of the keys may remain.',
   },
   optVaultLimits: {
-    message: 'This protects the profile at rest. It does not protect against software already running inside this extension while it is unlocked, which can ask for the keys the same way the extension itself does.',
+    message: 'This protects the keys stored on disk. It does not protect them from code running inside this extension while it is unlocked, because that code can ask for the keys the same way the extension does.',
     description: 'Says what the passphrase does not protect against.',
   },
   optVaultIdleBefore: {
@@ -215,7 +219,7 @@ export const optionsMessages = defineMessages({
     description: 'Text after the choice of how long the vault stays unlocked.',
   },
   optVaultLockNote: {
-    message: 'Locking stops generation until the passphrase is entered again. With Never selected, the vault stays unlocked until the browser closes or it is locked by hand.',
+    message: 'While locked, nothing can be generated until the passphrase is entered again. With Never selected, the keys stay unlocked until the browser closes or "Lock now" is pressed.',
     description: 'Explains automatic locking.',
   },
   optVaultProtect: {
@@ -247,12 +251,12 @@ export const optionsMessages = defineMessages({
     description: 'Label of the box that repeats the new passphrase.',
   },
   optVaultMinimum: {
-    message: 'At least $COUNT$ characters. Length matters more than symbols here.',
+    message: 'At least $COUNT$ characters. A longer passphrase is stronger than one with more symbols.',
     description: 'Hint about the passphrase. $COUNT$ is a number.',
     placeholders: ['COUNT'],
   },
   optVaultMismatch: {
-    message: 'The two do not match.',
+    message: 'The passphrases do not match.',
     description: 'Error shown when the two passphrases differ.',
   },
   optVaultPlainAgain: {
@@ -276,7 +280,7 @@ export const optionsMessages = defineMessages({
     description: 'Button that offers to discard the keys when the passphrase is lost.',
   },
   optVaultDiscardNote: {
-    message: 'There is no recovery. Discarding deletes the stored keys so you can enter them again; your transforms are not affected.',
+    message: 'A forgotten passphrase cannot be recovered. Discarding deletes the stored keys so you can enter them again. Your transforms are kept.',
     description: 'Explains what discarding the stored keys does.',
   },
   optVaultDiscard: {
@@ -296,7 +300,7 @@ export const optionsMessages = defineMessages({
     description: 'Shown in place of a provider address that is empty.',
   },
   optTypeOpenAiHint: {
-    message: 'Any endpoint speaking the OpenAI chat API',
+    message: 'Any provider that works with the OpenAI chat API',
     description: 'Describes the provider type that works with any compatible address.',
   },
   optTypeOpenAi: {
@@ -308,11 +312,11 @@ export const optionsMessages = defineMessages({
     description: 'Heading of the list of providers.',
   },
   optNoProvider: {
-    message: 'No provider is set up. Nothing can be generated until one is — Anthropic, or any endpoint speaking the OpenAI chat API.',
+    message: 'No AI provider is set up, so nothing can be generated. Add Anthropic or any provider that works with the OpenAI chat API.',
     description: 'Shown when no provider is set up.',
   },
   optOauth: {
-    message: 'OAuth',
+    message: 'sign-in',
     description: 'How the provider is signed in to.',
   },
   optApiKey: {
@@ -334,7 +338,7 @@ export const optionsMessages = defineMessages({
     placeholders: ['DATE'],
   },
   optNoRefresh: {
-    message: 'no refresh token; sign in again when it ends',
+    message: 'cannot be renewed; sign in again when it ends',
     description: 'Says that a sign-in cannot be renewed.',
   },
   optMakeActive: {
@@ -374,7 +378,7 @@ export const optionsMessages = defineMessages({
     description: 'Label of the box for the price of output tokens.',
   },
   optKeyReplacePlaceholder: {
-    message: 'New key — replaces the stored one',
+    message: 'New key (replaces the stored one)',
     description: 'Hint shown in the empty box for a new API key.',
   },
   optKeyPastePlaceholder: {
@@ -386,7 +390,7 @@ export const optionsMessages = defineMessages({
     description: 'Button that saves the API key.',
   },
   optOauthExplain: {
-    message: 'From the provider\'s own documentation. Web Alchemist opens their sign-in page and stores the token it returns; the token is held the same way an API key is and never reaches this page.',
+    message: 'Copy these values from the provider\'s documentation. Web Alchemist opens the provider\'s sign-in page and stores the token it returns the same way as an API key. The token never reaches this page.',
     description: 'Explains the sign-in settings.',
   },
   optOauthAuthEndpoint: {
@@ -459,7 +463,7 @@ export const optionsMessages = defineMessages({
     description: 'Example of a provider address, shown in the empty box.',
   },
   optBaseUrlError: {
-    message: 'Needs to be an https URL, or localhost.',
+    message: 'The address must start with https://, or be a localhost address.',
     description: 'Error shown when the address of a provider is not allowed.',
   },
   optApiKeyLabel: {
@@ -467,7 +471,7 @@ export const optionsMessages = defineMessages({
     description: 'Label of the box for an API key.',
   },
   optKeyPlain: {
-    message: 'Stored as plain text in this browser profile — see below.',
+    message: 'Stored as plain text in this browser profile unless a passphrase is set.',
     description: 'Note under the box for an API key.',
   },
   optAddProvider: {
@@ -475,11 +479,11 @@ export const optionsMessages = defineMessages({
     description: 'Button that adds a provider.',
   },
   optFileNotJson: {
-    message: 'This file is not valid JSON, so it cannot be a Web Alchemist export.',
+    message: 'This file is not a Web Alchemist export.',
     description: 'Error shown when the chosen file cannot be parsed.',
   },
   optExportWarning: {
-    message: 'The file contains text taken from the pages the transforms were written for (the start of the text of each element they target), the descriptions of the transforms, and the addresses they apply to. On a mail, banking or health site that text can be personal. The file is saved as plain text unless it is encrypted with a passphrase. Anyone with the passphrase and the file can read it, and a forgotten passphrase cannot be recovered.',
+    message: 'The file contains the descriptions of the transforms, the addresses they apply to, and the start of the text of each page element they change. On a mail, banking or health site, that text can be personal. The file is plain text unless you encrypt it with a passphrase. Anyone with the file and the passphrase can read it, and a forgotten passphrase cannot be recovered.',
     description: 'Warning shown before an export file is written.',
   },
   optPassphraseShort: {
@@ -488,11 +492,11 @@ export const optionsMessages = defineMessages({
     placeholders: ['COUNT'],
   },
   optPassphraseMismatch: {
-    message: 'The two passphrases are not the same.',
+    message: 'The passphrases do not match.',
     description: 'Reason a passphrase for an export cannot be used.',
   },
   optResultImportedOne: {
-    message: 'Imported 1 transform. They are all turned off.',
+    message: 'Imported 1 transform. It is turned off.',
     description: 'What the user is told after an import.',
   },
   optResultImported: {
@@ -510,11 +514,11 @@ export const optionsMessages = defineMessages({
     placeholders: ['COUNT'],
   },
   optResultAwaitingOne: {
-    message: '1 transform was restored with JavaScript code. Each stays off until its code has been read and approved in the sidebar.',
+    message: '1 transform was restored with JavaScript code. It stays off until you read and approve its code in the sidebar.',
     description: 'What the user is told after an import.',
   },
   optResultAwaiting: {
-    message: '$COUNT$ transforms were restored with JavaScript code. Each stays off until its code has been read and approved in the sidebar.',
+    message: '$COUNT$ transforms were restored with JavaScript code. Each stays off until you read and approve its code in the sidebar.',
     description: 'What the user is told after an import. $COUNT$ is a number.',
     placeholders: ['COUNT'],
   },
@@ -523,20 +527,20 @@ export const optionsMessages = defineMessages({
     description: 'What the user is told after an import.',
   },
   optResultDuplicateOne: {
-    message: '1 transform already saved and skipped.',
+    message: '1 transform was already saved, so it was skipped.',
     description: 'What the user is told after an import.',
   },
   optResultDuplicates: {
-    message: '$COUNT$ transforms already saved and skipped.',
+    message: '$COUNT$ transforms were already saved, so they were skipped.',
     description: 'What the user is told after an import. $COUNT$ is a number.',
     placeholders: ['COUNT'],
   },
   optResultRefusedOne: {
-    message: '1 transform refused.',
+    message: '1 transform could not be imported.',
     description: 'What the user is told after an import.',
   },
   optResultRefused: {
-    message: '$COUNT$ transforms refused.',
+    message: '$COUNT$ transforms could not be imported.',
     description: 'What the user is told after an import. $COUNT$ is a number.',
     placeholders: ['COUNT'],
   },
@@ -561,11 +565,11 @@ export const optionsMessages = defineMessages({
     description: 'Heading of the section about export and import.',
   },
   optExportBody1: {
-    message: 'Export to share saves your transforms to a JSON file that can be given to someone else. JavaScript is saved as its description only, without code. Back up also saves the JavaScript code and the accent colour and health check mode, so that the set can be restored on another computer. Neither file contains credentials or provider settings. Both files hold text and addresses taken from the pages the transforms were written for, and either can be encrypted with a passphrase when it is saved.',
+    message: '"Export to share" saves your transforms to a file that you can give to someone else. JavaScript transforms are saved as their descriptions only, without code. "Back up" also saves the JavaScript code, the accent colour and the health check mode, so that everything can be restored on another computer. Neither file contains your API keys, sign-ins or provider settings. Both files contain text and addresses from the pages the transforms were written for, and either can be encrypted with a passphrase.',
     description: 'Explains the two kinds of export file.',
   },
   optExportBody2: {
-    message: 'Import reads such a file and shows what it would add before anything is saved. Imported transforms are always turned off. Imported JavaScript from a shared file has no code until its description has been read and code has been generated and reviewed here. JavaScript code from a backup stays off until the code has been read and approved.',
+    message: 'Import shows what a file would add before anything is saved. Imported transforms are always turned off. JavaScript from a shared file has no code until you read its description, then generate and check the code in the sidebar. JavaScript code from a backup stays off until you read and approve it in the sidebar.',
     description: 'Explains what an import does.',
   },
   optExportShare: {
@@ -611,7 +615,7 @@ export const optionsMessages = defineMessages({
     placeholders: ['NAME'],
   },
   optBackupNote: {
-    message: 'This file is a backup. JavaScript code in it is restored, but each script stays off until its code has been read and approved. Code that fails the static analysis is not restored.',
+    message: 'This file is a backup. Its JavaScript code is restored, but each script stays off until you read and approve its code. Code that fails the safety check is not restored.',
     description: 'Explains what importing a backup file does.',
   },
   optNoTransforms: {
@@ -655,7 +659,7 @@ export const optionsMessages = defineMessages({
     description: 'Says an imported transform has no code.',
   },
   optAuthorDescription: {
-    message: 'Description written by the author of the file, not by you: $TEXT$',
+    message: 'Description by the author of this file, not by you: $TEXT$',
     description: 'Shows the description of an imported transform. $TEXT$ is the text in quotation marks.',
     placeholders: ['TEXT'],
   },

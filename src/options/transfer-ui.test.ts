@@ -68,7 +68,7 @@ describe('reading the chosen file', () => {
   })
 
   it('refuses text that is not JSON with a message about the file', () => {
-    expect(() => parseBundleText('not json')).toThrow('not valid JSON')
+    expect(() => parseBundleText('not json')).toThrow('not a Web Alchemist export')
   })
 })
 
@@ -124,8 +124,8 @@ describe('what the user is told after an import', () => {
     const text = describeResult(result, true)
     expect(text).toContain('Imported 2 transforms. They are all turned off.')
     expect(text).toContain('1 transform has no code and needs regenerating')
-    expect(text).toContain('1 transform already saved and skipped.')
-    expect(text).toContain('1 transform refused.')
+    expect(text).toContain('1 transform was already saved, so it was skipped.')
+    expect(text).toContain('1 transform could not be imported.')
     expect(text).not.toContain('No access')
   })
 
@@ -138,7 +138,7 @@ describe('what the user is told after an import', () => {
       },
       true,
     )
-    expect(text).toContain('1 transform was restored with JavaScript code. Each stays off until')
+    expect(text).toContain('1 transform was restored with JavaScript code. It stays off until')
     expect(text).toContain('The accent colour and health check mode were restored.')
   })
 

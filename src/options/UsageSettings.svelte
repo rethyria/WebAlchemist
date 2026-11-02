@@ -54,7 +54,7 @@
           : formatCost(totals.costUsd),
       )
     }
-    return parts.join(', ')
+    return parts.join(t('optUsageSeparator'))
   }
 </script>
 

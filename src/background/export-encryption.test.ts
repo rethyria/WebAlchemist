@@ -178,14 +178,14 @@ describe('exporting and importing through the background script', () => {
 
 describe('what the export panel says and asks', () => {
   it('names the page text and the addresses in the file, and says it is plain text unless encrypted', () => {
-    expect(EXPORT_WARNING).toContain('text taken from the pages')
+    expect(EXPORT_WARNING).toContain('the start of the text of each page element')
     expect(EXPORT_WARNING).toContain('the addresses they apply to')
-    expect(EXPORT_WARNING).toContain('plain text unless it is encrypted')
+    expect(EXPORT_WARNING).toContain('plain text unless you encrypt it')
   })
 
   it('needs a passphrase of the vault length that is typed twice the same', () => {
     expect(passphraseProblem('short', 'short')).toContain('at least 12')
-    expect(passphraseProblem(PASSPHRASE, 'something else entirely')).toContain('not the same')
+    expect(passphraseProblem(PASSPHRASE, 'something else entirely')).toContain('do not match')
     expect(passphraseProblem(PASSPHRASE, PASSPHRASE)).toBeNull()
   })
 })
