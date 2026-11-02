@@ -15,9 +15,13 @@
   interface Props {
     /** Loads every saved transform. */
     loadTransforms: () => Promise<Transform[]>
+    /** Counts the enabled transforms, on every site, that the safety check blocks. */
+    loadBlockedCount?: () => Promise<number>
   }
 
-  let { loadTransforms }: Props = $props()
+  let { loadTransforms, loadBlockedCount }: Props = $props()
+
+  let blockedCount = $state(0)
 
   let grants = $state<SiteGrant[]>([])
   let loaded = $state(false)
@@ -28,6 +32,7 @@
     try {
       const held = await browser.permissions.getAll()
       grants = siteGrants(held.origins ?? [], await loadTransforms())
+      blockedCount = loadBlockedCount ? await loadBlockedCount() : 0
       error = null
     } catch (cause) {
       error = String(cause instanceof Error ? cause.message : cause)
@@ -78,6 +83,12 @@
     {t('optSiteAccessBody')}
   </p>
 
+  {#if blockedCount > 0}
+    <p class="blocked" role="status">
+      {t(blockedCount === 1 ? 'optBlockedOne' : 'optBlockedMany', blockedCount)}
+    </p>
+  {/if}
+
   {#if error}
     <p class="error" role="alert">{error}</p>
   {/if}
@@ -112,6 +123,12 @@
     margin: 0 0 var(--sp-9);
     font: 11.5px/1.5 var(--font-ui);
     color: var(--text-faint);
+  }
+
+  .blocked {
+    margin: 0 0 var(--sp-9);
+    font: 12px/1.5 var(--font-ui);
+    color: var(--attention);
   }
 
   .error {

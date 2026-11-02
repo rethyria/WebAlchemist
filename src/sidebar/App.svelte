@@ -45,6 +45,9 @@
   import SettingsPanel from './components/Settings.svelte'
   import type { VaultView } from '@shared/vault-disclosure'
   import TransformRow from './components/TransformRow.svelte'
+  import PickActions from './components/PickActions.svelte'
+  import SiteControls from './components/SiteControls.svelte'
+  import Button from './components/Button.svelte'
 
   let settings = $state<Settings | null>(null)
   /** What to reload after the stop-all setting changed, shown under that setting. */
@@ -58,6 +61,10 @@
   /* Stored code that no longer passes the safety checks, so is not running. */
   let blockedStates = $state<TransformRuntimeState[]>([])
   /* Blocked wins: the page check can find the element and still miss that the code is refused. */
+  /* Enabled transforms of this site that the safety check keeps from running. */
+  let blockedCount = $derived(
+    transforms.filter((x) => x.enabled && blockedStates.some((b) => b.id === x.id)).length,
+  )
   let runtimeStates = $derived([
     ...healthStates.filter((s) => !blockedStates.some((b) => b.id === s.id)),
     ...blockedStates,
@@ -70,8 +77,6 @@
   let loadError = $state<{ message: string; retryable: boolean } | null>(null)
   let checking = $state(false)
   let showSettings = $state(false)
-  /* Enabled transforms on any site that the safety check keeps from running. */
-  let blockedCount = $state(0)
 
   const tabFocus: TabFocusDeps = {
     boundTab,
@@ -203,7 +208,6 @@
   }
 
   async function refresh() {
-    await refreshBlockedCount()
     if (!transformable) {
       transforms = []
       conflicts = []
@@ -276,12 +280,14 @@
     document.documentElement.dataset['accent'] = next.accent
   }
 
-  async function refreshBlockedCount() {
+  /* Re-reads which transforms of this site the safety check blocks. */
+  async function refreshBlockedStates() {
+    if (!transformable) return
     try {
-      blockedCount = await send<number>({ type: 'get-blocked-count' })
+      blockedStates = await send<TransformRuntimeState[]>({ type: 'get-blocked-states', url })
     } catch {
-      // The count is a notice; failing to read it must not stop the list loading.
-      blockedCount = 0
+      // The banner is a notice; failing to read it must not stop the list loading.
+      blockedStates = []
     }
   }
 
@@ -302,7 +308,7 @@
     const saved = await send<Settings>({ type: 'patch-settings', change: { kind: 'fields', fields } })
     applySettings(saved)
     // A site setting can change which stored CSS passes the check.
-    await refreshBlockedCount()
+    await refreshBlockedStates()
     if ('aiJsKillSwitch' in fields) {
       killNotice = killSwitchNotice(saved.aiJsKillSwitch, await send<number>({ type: 'count-js-tabs' }))
     }
@@ -712,16 +718,17 @@
 <div class="panel">
   <header class="chrome">
     <span class="brand">{t('appBrand')}</span>
-    <button
-      type="button"
-      class="chrome-link"
-      onclick={() => {
-        showSettings = !showSettings
-        if (showSettings) refreshVault().catch(() => undefined)
-      }}
-    >
-      {showSettings ? t('appDone') : t('appSettings')}
-    </button>
+    <span class="chrome-action">
+      <Button
+        small
+        onclick={() => {
+          showSettings = !showSettings
+          if (showSettings) refreshVault().catch(() => undefined)
+        }}
+      >
+        {showSettings ? t('appDone') : t('appSettings')}
+      </Button>
+    </span>
   </header>
 
   {#if loadError}
@@ -933,27 +940,12 @@
         {host ? t('appEmptyBody', host) : t('appEmptyBodyNoHost')}
       </p>
       <div class="cta">
-        <button type="button" class="primary" onclick={() => describe(() => void flow.startPicking())}>
-          {t('appSelect')}
-        </button>
-        <p class="hint">{t('appDragHint')}</p>
-        <!--
-          #27: someone who already knows the CSS they want should not have to
-          describe it to a model and wait. It is also the only path that works
-          with no provider configured, which is exactly the state this empty
-          screen is most often seen in.
-        -->
-        <button
-          type="button"
-          class="link"
-          onclick={() => void flow.startPicking('author')}
-        >
-          {t('appWriteMyself')}
-        </button>
+        <PickActions
+          onselect={() => describe(() => void flow.startPicking())}
+          onwrite={() => void flow.startPicking('author')}
+        />
         {#if cspProbeEnabled}
-          <button type="button" class="link" onclick={() => void runCspProbe()}>
-            Run CSP probe
-          </button>
+          <Button onclick={() => void runCspProbe()}>Run CSP probe</Button>
         {/if}
       </div>
     </div>
@@ -964,15 +956,11 @@
     <header class="site">
       <span class="site-dot" aria-hidden="true"></span>
       <span class="host" role="heading" aria-level="1" data-list-focus tabindex="-1">{host}</span>
-      <button
-        type="button"
-        class="check"
-        disabled={checking}
-        title={t('appCheckTitle')}
-        onclick={() => void checkNow()}
-      >
-        {checking ? t('appChecking') : t('appCheck')}
-      </button>
+      <span class="check">
+        <Button small disabled={checking} title={t('appCheckTitle')} onclick={() => void checkNow()}>
+          {checking ? t('appChecking') : t('appCheck')}
+        </Button>
+      </span>
       <span class="count">{t('appActive', activeCount)}</span>
     </header>
 
@@ -1021,23 +1009,13 @@
     </ul>
 
     <footer>
-      <button type="button" class="primary" onclick={() => describe(() => void flow.startPicking())}>
-        {t('appSelect')}
-      </button>
-      <button type="button" class="link" onclick={() => void flow.startPicking('author')}>
-        {t('appWriteMyself')}
-      </button>
-      <p class="hint">{t('appOrderHint')}</p>
+      <PickActions
+        showOrderHint={transforms.length > 1}
+        onselect={() => describe(() => void flow.startPicking())}
+        onwrite={() => void flow.startPicking('author')}
+      />
     </footer>
-    <div class="site-off">
-      <button type="button" class="link" onclick={() => void setSiteOff(!siteOff)}>
-        {siteOff ? t('appTurnOn') : t('appTurnOff')}
-      </button>
-      <p class="hint">
-        {siteOff ? t('appSiteOffNote') : t('appSiteOnNote')}
-      </p>
-      {#if siteNotice}<p class="hint" role="status">{siteNotice}</p>{/if}
-    </div>
+    <SiteControls {siteOff} notice={siteNotice} onsetoff={(off) => void setSiteOff(off)} />
 
   {/if}
 </div>
@@ -1071,14 +1049,8 @@
     font: 600 11.5px var(--font-ui);
   }
 
-  .chrome-link {
+  .chrome-action {
     margin-left: auto;
-    padding: 0;
-    border: none;
-    background: none;
-    font: 11px var(--font-ui);
-    color: var(--text-faint);
-    cursor: pointer;
   }
 
   .site {
@@ -1110,17 +1082,6 @@
 
   .check {
     margin-left: auto;
-    padding: 0;
-    border: none;
-    background: none;
-    font: 11px var(--font-ui);
-    color: var(--accent-fg);
-    cursor: pointer;
-  }
-
-  .check:disabled {
-    color: var(--text-faint);
-    cursor: default;
   }
 
   .broken-banner {
@@ -1154,12 +1115,6 @@
     border-top: 1px solid var(--border-subtle);
   }
 
-  .site-off {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    padding: 8px 12px 12px;
-  }
   .off-note {
     padding: 0 12px;
   }
@@ -1311,15 +1266,6 @@
     background: var(--accent);
     font: 600 12.5px var(--font-ui);
     color: var(--accent-text);
-    cursor: pointer;
-  }
-
-  button.link {
-    padding: 0;
-    border: none;
-    background: none;
-    font: 11px var(--font-ui);
-    color: var(--text-faint);
     cursor: pointer;
   }
 </style>

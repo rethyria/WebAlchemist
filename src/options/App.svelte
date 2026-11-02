@@ -222,7 +222,10 @@
       }}
     />
 
-    <SiteAccess loadTransforms={() => call<Transform[]>({ type: 'get-all-transforms' })} />
+    <SiteAccess
+      loadTransforms={() => call<Transform[]>({ type: 'get-all-transforms' })}
+      loadBlockedCount={() => call<number>({ type: 'get-blocked-count' })}
+    />
 
     <ExcludedSites />
 

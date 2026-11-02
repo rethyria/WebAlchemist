@@ -1214,11 +1214,11 @@ export const sidebarMessages = defineMessages({
     description: 'Button that opens the code of a transform for editing.',
   },
   appReloadOneTab: {
-    message: 'Reload 1 open tab of this site to run JavaScript transforms there again.',
+    message: 'Reload 1 open tab to run JavaScript transforms again.',
     description: 'Shown after everything is turned back on for a site.',
   },
   appReloadTabs: {
-    message: 'Reload $COUNT$ open tabs of this site to run JavaScript transforms there again.',
+    message: 'Reload $COUNT$ open tabs to run JavaScript transforms again.',
     description: 'Shown after everything is turned back on for a site. $COUNT$ is a number.',
     placeholders: ['COUNT'],
   },
@@ -1238,11 +1238,11 @@ export const sidebarMessages = defineMessages({
     message: 'Settings',
   },
   appBlockedOne: {
-    message: '1 transform is blocked by the current safety check and is not running. This count covers every site.',
+    message: '1 transform on this site is blocked by the safety check and is not running.',
     description: 'Banner shown when the safety check blocks a saved transform.',
   },
   appBlockedMany: {
-    message: '$COUNT$ transforms are blocked by the current safety check and are not running. This count covers every site.',
+    message: '$COUNT$ transforms on this site are blocked by the safety check and are not running.',
     description: 'Banner shown when the safety check blocks saved transforms. $COUNT$ is a number.',
     placeholders: ['COUNT'],
   },
@@ -1289,10 +1289,6 @@ export const sidebarMessages = defineMessages({
     message: 'Select an element',
     description: 'Button that starts picking an element on the page.',
   },
-  appDragHint: {
-    message: 'Or drag a rectangle on the page',
-    description: 'Hint under the button that starts picking.',
-  },
   appWriteMyself: {
     message: 'Write it myself',
     description: 'Button that opens the editor to write a transform by hand.',
@@ -1328,8 +1324,8 @@ export const sidebarMessages = defineMessages({
     placeholders: ['COUNT'],
   },
   appOrderHint: {
-    message: 'When transforms conflict, the later one wins',
-    description: 'Hint under the list of transforms.',
+    message: 'If transforms conflict, the later one wins',
+    description: 'Hint under the buttons below the list of transforms. Shown only when the site has more than one transform.',
   },
   appTurnOn: {
     message: 'Turn everything back on for this site',
@@ -1339,13 +1335,13 @@ export const sidebarMessages = defineMessages({
     message: 'Turn off everything on this site',
     description: 'Button that turns off the transforms of a site.',
   },
-  appSiteOffNote: {
-    message: 'No transforms run on this site until they are turned back on. They stay saved.',
-    description: 'Explains the state after the transforms of a site were turned off.',
+  appTurnOffAsk: {
+    message: 'Turn off every transform on this site? Open tabs of this site that ran JavaScript are reloaded.',
+    description: 'Question shown before the transforms of a site are turned off.',
   },
-  appSiteOnNote: {
-    message: 'Stops every CSS and JavaScript transform on this site. Open tabs of this site that ran JavaScript are reloaded.',
-    description: 'Explains the button that turns off the transforms of a site.',
+  appTurnOffConfirm: {
+    message: 'Turn off',
+    description: 'Button that confirms turning off the transforms of a site.',
   },
   flowNeedsPermission: {
     message: 'Web Alchemist needs permission to read $HOST$ before elements on it can be picked.',

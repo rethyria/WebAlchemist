@@ -122,6 +122,15 @@ export const optionsMessages = defineMessages({
     message: 'Web Alchemist can read and change these sites. Removing access stops transforms from running on that site until access is granted again.',
     description: 'Explains the list of sites that the extension can read and change.',
   },
+  optBlockedOne: {
+    message: 'Across all sites, 1 transform is blocked by the safety check and is not running.',
+    description: 'Shown on the settings page when the safety check blocks a saved transform on any site.',
+  },
+  optBlockedMany: {
+    message: 'Across all sites, $COUNT$ transforms are blocked by the safety check and are not running.',
+    description: 'Shown on the settings page when the safety check blocks saved transforms. $COUNT$ is a number.',
+    placeholders: ['COUNT'],
+  },
   optNoAccess: {
     message: 'Web Alchemist has no access to any site.',
     description: 'Shown when no site permission is held.',

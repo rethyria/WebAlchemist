@@ -11,6 +11,7 @@
     full?: boolean
     small?: boolean
     disabled?: boolean
+    title?: string
     grow?: number
     onclick: () => void
     children: Snippet
@@ -21,6 +22,7 @@
     full = false,
     small = false,
     disabled = false,
+    title,
     grow,
     onclick,
     children,
@@ -33,6 +35,7 @@
   class:full
   class:small
   {disabled}
+  {title}
   style={grow === undefined ? '' : `flex: ${grow}`}
   {onclick}
 >
