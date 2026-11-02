@@ -64,3 +64,18 @@ export function notKeptText(item: NotKept): string {
       return t('configNotKeptInvalid', item.label)
   }
 }
+
+/**
+ * The whole value as plain text for a closed section: a list one line per
+ * item, a table one line per row with the cells separated by " | ". Nothing is
+ * cut. The text is shown as text and never as markup.
+ */
+export function fullValueText(field: ConfigField, value: ConfigValue): string {
+  if (field.type === 'list') return (value as string[]).join('\n')
+  if (field.type === 'table') {
+    const keys = (field.columns ?? []).map((column) => column.key)
+    return (value as Record<string, string>[]).map((row) => keys.map((key) => row[key] ?? '').join(' | ')).join('\n')
+  }
+  if (field.type === 'text' || field.type === 'colour') return String(value)
+  return describeValue(field, value)
+}

@@ -57,19 +57,25 @@ export function draftProblems(fields: readonly ConfigField[], draft: Draft): Rec
 }
 
 /**
- * What to send to the background: the values that differ from their defaults,
- * and the keys that are back at their default, which removes the stored value.
- * Null when any value is not valid.
+ * What to send to the background: only the keys that the user changed against
+ * the values the form was opened with. A key that is unchanged is not sent, so
+ * saving cannot undo an edit that the other form (the row or the editor) made
+ * in the meantime. A changed value that equals the default is sent as a reset,
+ * which removes the stored value. Null when any value is not valid.
  */
 export function draftChanges(
   fields: readonly ConfigField[],
   draft: Draft,
+  opened: Record<string, ConfigValue>,
 ): { set: Record<string, ConfigValue>; reset: string[] } | null {
   const set: Record<string, ConfigValue> = {}
   const reset: string[] = []
   for (const field of fields) {
     const checked = validateValue(field, draftValue(field, draft))
     if (!checked.ok) return null
+    const before = validateValue(field, opened[field.key] ?? field.default)
+    const unchanged = before.ok && stableJson(before.value) === stableJson(checked.value)
+    if (unchanged) continue
     if (stableJson(checked.value) === stableJson(field.default)) reset.push(field.key)
     else set[field.key] = checked.value
   }

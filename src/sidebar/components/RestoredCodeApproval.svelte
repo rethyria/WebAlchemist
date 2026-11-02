@@ -8,7 +8,7 @@
   import type { Transform } from '@shared/types'
   import { MAIN_WORLD_RISKS, WORLD_NAMES, worldOf } from '@shared/world'
   import { effectiveValues } from '@shared/config'
-  import { describeValue, summaryOf } from '@shared/config-text'
+  import { describeValue, fullValueText, summaryOf } from '@shared/config-text'
 
   interface Props {
     transform: Transform
@@ -48,6 +48,13 @@
         <li>{t('configDefaultLine', field.label, describeValue(field, restored[field.key]!))}</li>
       {/each}
     </ul>
+    <details>
+      <summary>{t('configShowValues')}</summary>
+      {#each fields as field (field.key)}
+        <p>{t('configDefaultLine', field.label, '')}</p>
+        <pre>{fullValueText(field, restored[field.key]!)}</pre>
+      {/each}
+    </details>
   {/if}
   <pre>{transform.code}</pre>
   {#if transform.capabilities.length > 0}

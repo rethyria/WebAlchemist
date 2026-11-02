@@ -579,6 +579,48 @@ function cssReferences(tokens: Token[]): CssReference[] {
   return found
 }
 
+/**
+ * The keys of settings that are referenced inside the value of a custom
+ * property declaration (`--x: var(--setting-key)`). The page's own CSS could
+ * read such a property in a function that loads an address, which a value
+ * written straight into the CSS cannot do, so a text setting is refused there.
+ */
+export function keysInCustomProperties(code: string): string[] {
+  const tokens = tokenize(code)
+  const spans: [number, number][] = []
+  let depth = 0
+  let open: number | null = null
+  for (let i = 0; i < tokens.length; i += 1) {
+    const token = tokens[i]!
+    if (open === null) {
+      if (token.type === 'ident' && token.value.startsWith('--')) {
+        let j = i + 1
+        while (tokens[j]?.type === 'whitespace') j += 1
+        if (tokens[j]?.type === 'other' && tokens[j]!.value === ':') {
+          open = token.start
+          depth = 0
+          i = j
+        }
+      }
+      continue
+    }
+    if (token.type === 'open-paren' || token.type === 'function') depth += 1
+    else if (token.type === 'close-paren') depth = Math.max(0, depth - 1)
+    else if (depth === 0 && (token.type === 'semicolon' || (token.type === 'other' && token.value === '}'))) {
+      spans.push([open, token.start])
+      open = null
+    }
+  }
+  if (open !== null) spans.push([open, Number.MAX_SAFE_INTEGER])
+  const keys: string[] = []
+  for (const reference of cssReferences(tokens)) {
+    if (spans.some(([from, to]) => reference.start > from && reference.start < to) && !keys.includes(reference.key)) {
+      keys.push(reference.key)
+    }
+  }
+  return keys
+}
+
 type Ast = { type: string; [key: string]: any } // eslint-disable-line @typescript-eslint/no-explicit-any
 
 function jsReferences(code: string): ConfigReferences {

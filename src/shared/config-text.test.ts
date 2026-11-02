@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { describeValue, notKeptText, summaryOf, typeName } from './config-text'
+import { describeValue, fullValueText, notKeptText, summaryOf, typeName } from './config-text'
 import type { ConfigField } from './types'
 
 const table: ConfigField = { key: 'w', label: 'Words', type: 'table', columns: [{ key: 'a', label: 'A' }], default: [] }
@@ -22,9 +22,19 @@ describe('the wording of settings', () => {
   })
 
   it('summarises fields and says which value is not kept', () => {
-    expect(summaryOf([table, { key: 'a', label: 'A', type: 'text', default: '' }])).toBe('Words (table), A (text)')
+    expect(summaryOf([table, { key: 'a', label: 'A', type: 'text', default: '' }])).toBe('"Words" (table), "A" (text)')
     expect(notKeptText({ key: 'w', label: 'Words to replace', reason: 'removed' })).toBe(
-      'Your value for Words to replace is not kept: the new version has no such setting.',
+      'Your value for "Words to replace" is not kept: the new version has no such setting.',
     )
+  })
+})
+
+describe('the full text of a value', () => {
+  it('shows a long text, every item of a list and every row of a table without cutting', () => {
+    const long = 'x'.repeat(200)
+    expect(fullValueText({ key: 'a', label: 'A', type: 'text', default: '' }, long)).toBe(long)
+    expect(fullValueText({ key: 'l', label: 'L', type: 'list', default: [] }, ['a', 'b'])).toBe('a\nb')
+    const t: ConfigField = { key: 'w', label: 'W', type: 'table', columns: [{ key: 'a', label: 'A' }, { key: 'b', label: 'B' }], default: [] }
+    expect(fullValueText(t, [{ a: '1', b: '2' }, { a: '3', b: '' }])).toBe('1 | 2\n3 | ')
   })
 })

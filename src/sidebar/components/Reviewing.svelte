@@ -275,7 +275,7 @@
       </div>
       {#if result.config.length > 0 || notKept.length > 0}
         <div class="row">
-          <dt>{t('configSettings')}</dt>
+          <dt>{t('configModelProposed')}</dt>
           <dd>
             {#if result.config.length > 0}
               {t('configSummaryLine', summaryOf(result.config))}

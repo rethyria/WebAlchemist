@@ -214,10 +214,19 @@ export const backgroundMessages = defineMessages({
     description: 'Why CSS is refused. $KEY$ is a setting key.',
     placeholders: ['KEY'],
   },
+  bgCssTextInCustomProperty: {
+    message: 'The CSS puts the text setting "$KEY$" into a custom property. A text setting can be used in a normal property, but not in a property whose name starts with two hyphens.',
+    description: 'Why CSS is refused. $KEY$ is a setting key.',
+    placeholders: ['KEY'],
+  },
   bgCssWithTheseValues: {
     message: 'With these values the CSS would not pass the check: $REASON$',
     description: 'Why values for settings are refused. $REASON$ is the reason, a full sentence.',
     placeholders: ['REASON'],
+  },
+  bgItStoppedWorkingAfterASettingChanged: {
+    message: 'It stopped working after the value of a setting was changed.',
+    description: 'The reason given to the model when an elixir is repaired and the reason that the interface showed would have revealed a value.',
   },
   bgThatTransformNoLongerExists: {
     message: 'That elixir no longer exists.',

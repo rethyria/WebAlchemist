@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { describeValue, summaryOf } from '@shared/config-text'
+  import { fullValueText, summaryOf } from '@shared/config-text'
   import { t } from '@shared/i18n'
   /**
    * Export and import of transforms (#31).
@@ -334,12 +334,11 @@
                   <p>{t('configSummaryLine', summaryOf(item.config.fields))}</p>
                   {#if Object.keys(item.config.values).length > 0}
                     <details>
-                      <summary>{t('configRestoredHeading')}</summary>
+                      <summary>{t('configShowValues')}</summary>
                       {#each item.config.fields as field (field.key)}
                         {#if field.key in item.config.values}
-                          <p class="quiet">
-                            {t('configDefaultLine', field.label, describeValue(field, item.config.values[field.key]!))}
-                          </p>
+                          <p class="quiet">{t('configDefaultLine', field.label, '')}</p>
+                          <pre>{fullValueText(field, item.config.values[field.key]!)}</pre>
                         {/if}
                       {/each}
                     </details>

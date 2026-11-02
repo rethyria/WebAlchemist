@@ -77,16 +77,27 @@ describe('restored code with settings', () => {
 
   it('lists the settings with the values that came in the file', () => {
     const body = html({ ...base, world: 'USER_SCRIPT', configFields: fields, configValues: { label: 'From the file', words: ['a', 'b', 'c'] } })
-    expect(body).toContain('Settings: Label (text), Words (list)')
-    expect(body).toContain('Label: From the file')
-    expect(body).toContain('Words: 3 items')
+    expect(body).toContain('Settings: "Label" (text), "Words" (list)')
+    expect(body).toContain('"Label": From the file')
+    expect(body).toContain('"Words": 3 items')
   })
 
   it('shows the default for a setting that the file has no value for', () => {
-    expect(html({ ...base, world: 'USER_SCRIPT', configFields: fields })).toContain('Label: Hello')
+    expect(html({ ...base, world: 'USER_SCRIPT', configFields: fields })).toContain('"Label": Hello')
   })
 
   it('mentions no settings for code without them (control)', () => {
     expect(html({ ...base, world: 'USER_SCRIPT' })).not.toContain('Settings:')
+  })
+
+  it('has a closed section with the full values as plain text', () => {
+    const long = 'y'.repeat(150)
+    const body = html({ ...base, world: 'USER_SCRIPT', configFields: fields, configValues: { label: long + '<b>x</b>', words: ['one', 'two'] } })
+    expect(body).toContain('Show the values')
+    expect(body).toContain(long)
+    expect(body).toContain('one\ntwo')
+    expect(body).not.toContain('<b>x</b>')
+    expect(body).toMatch(/<details>\s*<summary>Show the values/)
+    expect(body).not.toMatch(/<details[^>]*open/)
   })
 })

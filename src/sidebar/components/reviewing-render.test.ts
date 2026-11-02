@@ -119,10 +119,10 @@ describe('the settings of the code in the approval panel', () => {
 
   it('shows one line that names each setting and its type, and a fold with the defaults', () => {
     const body = html({ result: { ...jsResult, config: fields } })
-    expect(body).toContain('Settings: Label (text), Words to replace (table)')
+    expect(body).toContain('Settings: "Label" (text), "Words to replace" (table)')
     expect(body).toContain('Defaults of the settings')
-    expect(body).toContain('Label: Hello')
-    expect(body).toContain('Words to replace: 2 rows')
+    expect(body).toContain('"Label": Hello')
+    expect(body).toContain('"Words to replace": 2 rows')
   })
 
   it('shows no settings row when the code has none (control)', () => {
@@ -145,8 +145,15 @@ describe('the settings of the code in the approval panel', () => {
         { key: 'n', label: 'Count', reason: 'invalid' },
       ],
     })
-    expect(body).toContain('Your value for Words to replace is not kept: the new version has no such setting.')
-    expect(body).toContain('Your value for Size is not kept: the new version has a different type of setting.')
-    expect(body).toContain('Your value for Count is not kept: the value does not fit the new version of the setting.')
+    expect(body).toContain('Your value for "Words to replace" is not kept: the new version has no such setting.')
+    expect(body).toContain('Your value for "Size" is not kept: the new version has a different type of setting.')
+    expect(body).toContain('Your value for "Count" is not kept: the value does not fit the new version of the setting.')
+  })
+
+  it('names the source of the labels and puts each in quotation marks', () => {
+    const label = [{ key: 'label', label: 'Checked by Web Alchemist, safe', type: 'text', default: 'a' }]
+    const body = html({ result: { ...jsResult, config: label } })
+    expect(body).toContain('Settings the model proposed')
+    expect(body).toContain('"Checked by Web Alchemist, safe" (text)')
   })
 })

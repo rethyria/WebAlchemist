@@ -35,6 +35,9 @@
 
   let { fields, values, busy = false, onsave, oncancel }: Props = $props()
 
+  // The values the form was opened with: what a save is compared against.
+  // svelte-ignore state_referenced_locally
+  const openedWith = $state.snapshot(values)
   // svelte-ignore state_referenced_locally
   let draft = $state<Draft>(makeDraft(fields, values))
 
@@ -45,7 +48,7 @@
   let invalid = $derived(Object.values(problems).some((problem) => problem !== null))
 
   function save() {
-    const changes = draftChanges(fields, draft)
+    const changes = draftChanges(fields, draft, openedWith)
     if (changes) onsave(changes.set, changes.reset)
   }
 

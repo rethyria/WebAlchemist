@@ -9,7 +9,7 @@
  */
 
 import { analyseJavaScript, applyCapabilityPolicy } from '@safety/static-analysis'
-import { CSS_CONFIG_TYPES, choiceIsCssSafe, configReferences, fieldsAreClean, parseConfigFields } from '@shared/config'
+import { CSS_CONFIG_TYPES, choiceIsCssSafe, configReferences, fieldsAreClean, keysInCustomProperties, parseConfigFields } from '@shared/config'
 import { typeName } from '@shared/config-text'
 import type { ConfigField, ReviewResult, Settings, Transform, TransformRuntimeState } from '@shared/types'
 import { checkCssTransform } from './css-gate'
@@ -60,8 +60,13 @@ export function configProblem(
     // the brackets, and only for the types that can be written as CSS.
     const byKey = new Map((transform.configFields ?? []).map((field) => [field.key, field]))
     const references = configReferences(transform.code, 'css')
+    const inCustomProperty = keysInCustomProperties(transform.code)
     for (const key of references.keys) {
       const field = byKey.get(key)
+      // JavaScript needs the network capability to build an address from text.
+      // CSS is held to the same rule: a text value in a custom property could be
+      // read by the page's own CSS in a function that loads an address.
+      if (field?.type === 'text' && inCustomProperty.includes(key)) return t('bgCssTextInCustomProperty', key)
       if (!field) return t('bgCodeReadsAnUndefinedSetting', key)
       if (references.withFallback.includes(key)) return t('bgCssSettingHasFallback', key)
       if (!CSS_CONFIG_TYPES.includes(field.type)) return t('bgCssSettingTypeNotUsable', key, typeName(field.type))
@@ -163,4 +168,43 @@ export function blockedStates(
     if (reason) states.push({ id: transform.id, status: 'broken', brokenReason: reason })
   }
   return states
+}
+
+/** Every text in the user's values, for finding one inside another text. */
+function valueTexts(values: Transform['configValues']): string[] {
+  const out: string[] = []
+  for (const value of Object.values(values ?? {})) {
+    if (typeof value === 'string') out.push(value)
+    else if (Array.isArray(value)) {
+      for (const item of value) {
+        if (typeof item === 'string') out.push(item)
+        else out.push(...Object.values(item))
+      }
+    }
+  }
+  return out.filter((text) => text.length >= 3)
+}
+
+/**
+ * The reason that is sent to a model when an elixir is repaired. The sidebar
+ * sends the reason it was shown, but that text can hold a user's value: the
+ * CSS check names the address that it refused, and the address can come from a
+ * setting. A reason that is the code gate's reason for the record as stored, or
+ * that contains a value, is replaced by the code gate's reason for the record
+ * without its values, so that only the defaults can appear in it. Values are
+ * never sent to a model.
+ */
+export function reasonForRepair(
+  existing: Transform,
+  sentReason: string,
+  settings: Settings,
+  tabUrl?: string,
+): string {
+  const withValues = problemWithStoredCode(existing, settings, tabUrl)
+  const leaks =
+    (withValues !== null && sentReason === withValues) ||
+    valueTexts(existing.configValues).some((text) => sentReason.includes(text))
+  if (!leaks) return sentReason
+  const { configValues: _values, ...withoutValues } = existing
+  return problemWithStoredCode(withoutValues, settings, tabUrl) ?? t('bgItStoppedWorkingAfterASettingChanged')
 }

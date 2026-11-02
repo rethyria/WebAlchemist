@@ -419,6 +419,7 @@
           type: 'approve-code',
           code: transform.code,
           declaredCapabilities: transform.capabilities,
+          ...(transform.configFields && transform.configFields.length > 0 ? { configFields: transform.configFields } : {}),
           ...(transform.world ? { world: transform.world } : {}),
           transformId: transform.id,
           match: transform.match,
@@ -532,6 +533,7 @@
         type: 'analyse',
         code,
         declaredCapabilities: transform.capabilities,
+        ...(transform.configFields && transform.configFields.length > 0 ? { configFields: transform.configFields } : {}),
       })
       const blocking = analysis.static.filter((f) => f.severity === 'block')
       if (blocking.length > 0) {
@@ -545,6 +547,7 @@
           type: 'approve-code',
           code,
           declaredCapabilities: transform.capabilities,
+          ...(transform.configFields && transform.configFields.length > 0 ? { configFields: transform.configFields } : {}),
           ...(transform.world ? { world: transform.world } : {}),
           transformId: transform.id,
           match: transform.match,

@@ -673,31 +673,39 @@ export const sharedMessages = defineMessages({
     placeholders: ['LIST'],
   },
   configSummaryItem: {
-    message: '$FIELD$ ($TYPE$)',
+    message: '"$FIELD$" ($TYPE$)',
     description: 'One entry in the list of settings. $FIELD$ is the name of a setting and $TYPE$ its type.',
     placeholders: ['FIELD', 'TYPE'],
+  },
+  configModelProposed: {
+    message: 'Settings the model proposed',
+    description: 'Label in the approval panel for the settings that the generating model wrote. Their names are shown in quotation marks.',
+  },
+  configShowValues: {
+    message: 'Show the values',
+    description: 'Label of a closed section that shows the full values of settings as plain text.',
   },
   configDefaultsFold: {
     message: 'Defaults of the settings',
     description: 'Label of a section in the approval panel that lists the default value of each setting.',
   },
   configDefaultLine: {
-    message: '$FIELD$: $VALUE$',
+    message: '"$FIELD$": $VALUE$',
     description: 'One line in a list of settings. $FIELD$ is the name of a setting and $VALUE$ is a value.',
     placeholders: ['FIELD', 'VALUE'],
   },
   configNotKeptRemoved: {
-    message: 'Your value for $FIELD$ is not kept: the new version has no such setting.',
+    message: 'Your value for "$FIELD$" is not kept: the new version has no such setting.',
     description: 'Shown in the approval panel when a value that the user set is lost. $FIELD$ is the name of a setting.',
     placeholders: ['FIELD'],
   },
   configNotKeptType: {
-    message: 'Your value for $FIELD$ is not kept: the new version has a different type of setting.',
+    message: 'Your value for "$FIELD$" is not kept: the new version has a different type of setting.',
     description: 'Shown in the approval panel when a value that the user set is lost. $FIELD$ is the name of a setting.',
     placeholders: ['FIELD'],
   },
   configNotKeptInvalid: {
-    message: 'Your value for $FIELD$ is not kept: the value does not fit the new version of the setting.',
+    message: 'Your value for "$FIELD$" is not kept: the value does not fit the new version of the setting.',
     description: 'Shown in the approval panel when a value that the user set is lost. $FIELD$ is the name of a setting.',
     placeholders: ['FIELD'],
   },

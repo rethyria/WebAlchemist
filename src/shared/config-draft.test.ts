@@ -68,19 +68,23 @@ describe('the draft of the settings form', () => {
     expect(problems.list).toMatch(/longer than 500/)
   })
 
-  it('returns the changed values and the keys that are back at their default', () => {
-    const draft = makeDraft(fields, { size: 15 })
-    expect(draftChanges(fields, draft)).toEqual({ set: { size: 15 }, reset: ['words', 'list'] })
+  it('returns only the keys changed against the values the form opened with', () => {
+    const opened = { size: 15 }
+    const draft = makeDraft(fields, opened)
+    expect(draftChanges(fields, draft, opened)).toEqual({ set: {}, reset: [] })
+    draft.size = '16'
+    expect(draftChanges(fields, draft, opened)).toEqual({ set: { size: 16 }, reset: [] })
     draft.size = '10'
-    expect(draftChanges(fields, draft)).toEqual({ set: {}, reset: ['words', 'size', 'list'] })
+    expect(draftChanges(fields, draft, opened)).toEqual({ set: {}, reset: ['size'] })
+    draft.size = '15'
     addRow(words, draft)
     draft.words[1].from = 'c'
-    expect(draftChanges(fields, draft)?.set.words).toEqual([{ from: 'a', to: 'b' }, { from: 'c', to: '' }])
+    expect(draftChanges(fields, draft, opened)?.set.words).toEqual([{ from: 'a', to: 'b' }, { from: 'c', to: '' }])
   })
 
   it('returns nothing to save while a value is not valid', () => {
     const draft = makeDraft(fields, {})
     draft.size = ''
-    expect(draftChanges(fields, draft)).toBeNull()
+    expect(draftChanges(fields, draft, {})).toBeNull()
   })
 })

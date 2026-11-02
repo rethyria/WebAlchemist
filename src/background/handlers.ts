@@ -15,7 +15,7 @@
  */
 
 import { appliesInContainer } from '@shared/container'
-import { checkValueSet, effectiveCss, reconcileValues, stableJson, valuesFitSize } from '@shared/config'
+import { checkValueSet, effectiveCss, reconcileValues, stableJson } from '@shared/config'
 import { readSettingsFile, settingsFileFor, type SettingsFile } from '@shared/config-file'
 import type { Message } from '@shared/messages'
 import type { ReviewInstruction } from './providers/types'
@@ -482,7 +482,13 @@ export interface ConfigValueDeps {
   /** Needed for CSS, whose effective text is checked with the new values. */
   getSettings?: () => Promise<Settings>
   /** The queued update of storage.ts. It checks the values again against the stored fields. */
-  updateTransform: (id: string, patch: { configValues: Record<string, ConfigValue> }) => Promise<Transform | null>
+  /** The queued merge of storage.ts: the read, the merge and the write are one step. */
+  mergeConfigValues: (
+    id: string,
+    values: Record<string, ConfigValue>,
+    reset: readonly string[],
+    verify?: (candidate: Transform) => Promise<void> | void,
+  ) => Promise<Transform | null>
 }
 
 async function storedTransform(id: string, deps: ConfigValueDeps): Promise<Transform> {
@@ -497,22 +503,19 @@ async function storeValues(
   reset: readonly string[],
   deps: ConfigValueDeps,
 ): Promise<Transform> {
-  const merged: Record<string, ConfigValue> = { ...(stored.configValues ?? {}) }
-  for (const key of reset) delete merged[key]
-  Object.assign(merged, values)
-  if (!valuesFitSize(merged)) throw new Error(t('configValuesNotSaved', t('configValuesTooLarge')))
-  if (stored.kind === 'css' && stored.code && deps.getSettings) {
+  // The merge is made inside the storage queue, from the record as it is then,
+  // so a value edit made meanwhile in the other form is kept.
+  const next = await deps.mergeConfigValues(stored.id, values, reset, async (candidate) => {
+    if (candidate.kind !== 'css' || !candidate.code || !deps.getSettings) return
     // The CSS that the page would get with these values has to pass the check,
     // for example when a text value is used where an address is read. The check
     // is repeated whenever the CSS is applied.
-    const candidate: Transform = { ...stored, configValues: merged }
     const check = checkCssTransform(candidate, await deps.getSettings())
     if (!check.passed) {
       const reason = check.static.find((f) => f.severity === 'block')?.explanation ?? t('bgItLoadsAddressesOutsideTheSite')
       throw new Error(t('configValuesNotSaved', t('bgCssWithTheseValues', reason)))
     }
-  }
-  const next = await deps.updateTransform(stored.id, { configValues: merged })
+  })
   if (!next) throw new Error(t('bgThatTransformNoLongerExists'))
   return next
 }
@@ -543,7 +546,7 @@ export async function handleExportConfigValues(
   deps: Pick<ConfigValueDeps, 'getAllTransforms'>,
   now: number,
 ): Promise<SettingsFile> {
-  return settingsFileFor(await storedTransform(message.id, { ...deps, updateTransform: async () => null }), now)
+  return settingsFileFor(await storedTransform(message.id, { ...deps, mergeConfigValues: async () => null }), now)
 }
 
 /**

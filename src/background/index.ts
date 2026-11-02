@@ -48,7 +48,7 @@ import { hostOfUrl } from '@shared/site-off'
 import { isSidebarPortName, ownerOfSidebarPort, panelOwner } from '@shared/sidebar-port'
 import { isApproved, spendApproval } from './approvals'
 import { encryptExport, openExport } from './export-crypto'
-import { analyseWithConfig, blockedStates, configProblem, problemWithStoredCode, staticProblem } from './code-gate'
+import { analyseWithConfig, blockedStates, configProblem, problemWithStoredCode, reasonForRepair, staticProblem } from './code-gate'
 import { assertPreviewable, checkCssForPage, checkCssTransform, pageUrlFor, sameCssContext } from './css-gate'
 import {
   applyCssTransforms as applyCssTransformsFor,
@@ -130,6 +130,7 @@ import {
   saveTransform,
   saveCredentialFor,
   unlockVault,
+  mergeConfigValues,
   updateTransform,
   vaultState,
 } from './storage'
@@ -687,6 +688,14 @@ async function handle(
         )
       }
 
+      // The reason is worked out here from the stored record, and never taken
+      // as the sidebar sent it, which can hold a user's value.
+      const brokenReason = reasonForRepair(
+        existing,
+        message.brokenReason,
+        await getSettings(),
+        await tabUrlOf(message.tabId),
+      )
       const usage = createUsageRecorder(existing.id)
       let result: GenerationResult
       try {
@@ -703,7 +712,7 @@ async function handle(
               // Fields and defaults only. The record also holds the user's
               // values, which are never sent to a model.
               ...(existing.configFields && existing.configFields.length > 0 ? { previousConfig: existing.configFields } : {}),
-              brokenReason: message.brokenReason,
+              brokenReason,
             },
           }),
         )
@@ -883,7 +892,7 @@ async function handle(
 
     case 'set-config-values': {
       await refuseInPrivateWindow(message.tabId)
-      const transform = await handleSetConfigValues(message, { getAllTransforms, getSettings, updateTransform })
+      const transform = await handleSetConfigValues(message, { getAllTransforms, getSettings, mergeConfigValues })
       return { transform, reloadTabs: await applyConfigChange(transform, message.tabId) }
     }
 
@@ -892,7 +901,7 @@ async function handle(
 
     case 'import-config-values': {
       await refuseInPrivateWindow(message.tabId)
-      const result = await handleImportConfigValues(message, { getAllTransforms, getSettings, updateTransform })
+      const result = await handleImportConfigValues(message, { getAllTransforms, getSettings, mergeConfigValues })
       return { ...result, reloadTabs: await applyConfigChange(result.transform, message.tabId) }
     }
 

@@ -66,9 +66,9 @@ import {
 import { MIN_PASSPHRASE_LENGTH } from '@shared/vault-policy'
 import { assertEndpoint, endpointsOf } from '@shared/endpoint-policy'
 import { destinationOf, sameBinding } from '@shared/credential-binding'
-import type { Provider, TransformVersion } from '@shared/types'
+import type { ConfigValue, Provider, TransformVersion } from '@shared/types'
 import { EXPORT_FORMAT, importCountProblem } from '@shared/export-envelope'
-import { checkValueSet, fieldsAreClean, parseConfigFields, reconcileValues } from '@shared/config'
+import { checkValueSet, fieldsAreClean, parseConfigFields, reconcileValues, valuesFitSize } from '@shared/config'
 import { getExcludedSites } from './excluded-sites'
 import {
   backupSettingsOf,
@@ -604,6 +604,41 @@ export function updateTransform(
     if (awaitsApproval === null) delete next.awaitsApproval
     assertValidTransform(next)
     if (versionedFieldsDiffer(all[index]!, next)) await recordVersion(all[index]!)
+    all[index] = next
+    await writeTransforms(all, invalid)
+    return next
+  })
+}
+
+/**
+ * Sets and resets values of an elixir's settings. The read, the merge and the
+ * write all happen inside the queue, so a value edit made in the other form
+ * (the row and the editor can both be open) is never overwritten by a merge
+ * made from an older copy. The values are checked against the fields stored
+ * now. `verify` runs on the record as it would be stored, inside the queue,
+ * and throws to refuse it. Returns null when no transform has that id.
+ */
+export function mergeConfigValues(
+  id: string,
+  values: Record<string, ConfigValue>,
+  reset: readonly string[],
+  verify?: (candidate: Transform) => Promise<void> | void,
+): Promise<Transform | null> {
+  return mutateTransforms(async () => {
+    const { valid: all, invalid } = await readStored()
+    const index = all.findIndex((t) => t.id === id)
+    if (index === -1) return null
+    const existing = all[index]!
+    const set = checkValueSet(existing.configFields, values)
+    const problem = set.skipped[0]?.problem ?? (set.unknown[0] === undefined ? null : t('configValueUnknownKey', set.unknown[0]))
+    if (problem !== null) throw new Error(t('configValuesNotSaved', problem))
+    const merged: Record<string, ConfigValue> = { ...(existing.configValues ?? {}) }
+    for (const key of reset) delete merged[key]
+    Object.assign(merged, set.values)
+    if (!valuesFitSize(merged)) throw new Error(t('configValuesNotSaved', t('configValuesTooLarge')))
+    const next: Transform = { ...existing, configValues: merged, updatedAt: Date.now() }
+    await verify?.(next)
+    assertValidTransform(next)
     all[index] = next
     await writeTransforms(all, invalid)
     return next
@@ -1372,7 +1407,9 @@ export async function exportTransforms(mode: ExportMode = 'share'): Promise<Expo
       // JavaScript keeps neither: its code is empty, and the importer's own
       // generation proposes new fields.
       transforms: transforms.map((t) => {
-        const { configValues: _values, ...withoutValues } = t
+        // Neither the values nor the approved CSS addresses: an approved
+        // address can be built from a value.
+        const { configValues: _values, approvedCssUrls: _urls, ...withoutValues } = t
         if (t.kind !== 'js') return withoutValues
         const { configFields: _fields, ...withoutFields } = withoutValues
         return { ...withoutFields, code: '' }
