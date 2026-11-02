@@ -54,7 +54,56 @@ export function generateOverPort(
     onUsage?: (usage: UsageReport | undefined) => void
   },
 ): { result: Promise<unknown>; cancel: () => void } {
-  const port = browser.runtime.connect({ name: 'wa-generate' })
+  return runOverPort('wa-generate', request, handlers)
+}
+
+/**
+ * A side question about the current draft, over its own port. The answer
+ * arrives as one result; where the provider streams, `onChunk` receives the
+ * raw response so far (a JSON object whose answer field is partial).
+ */
+export function askOverPort(
+  request: {
+    context: unknown
+    instruction: string
+    instructionImported?: boolean
+    importedDescription?: string
+    instructionSaved?: boolean
+    savedDescription?: string
+    history: unknown[]
+    scopeDepth?: number
+    scopeContainer?: string | null
+    draft: unknown
+    exchanges: { question: string; answer: string }[]
+    question: string
+    tabId?: number | undefined
+    transformId?: string
+  },
+  handlers: {
+    onSent: () => void
+    onChunk: (accumulated: string) => void
+    onUsage?: (usage: UsageReport | undefined) => void
+  },
+): { result: Promise<unknown>; cancel: () => void } {
+  return runOverPort('wa-ask', request, { ...handlers, onThinking: () => {} })
+}
+
+
+/**
+ * Opens a port, sends one request and reports progress and the result. Both
+ * generation and side questions use it, on ports with different names.
+ */
+function runOverPort(
+  portName: 'wa-generate' | 'wa-ask',
+  request: unknown,
+  handlers: {
+    onSent: () => void
+    onThinking: (characters: number) => void
+    onChunk: (accumulated: string) => void
+    onUsage?: (usage: UsageReport | undefined) => void
+  },
+): { result: Promise<unknown>; cancel: () => void } {
+  const port = browser.runtime.connect({ name: portName })
   let settled = false
 
   const result = new Promise<unknown>((resolve, reject) => {

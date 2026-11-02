@@ -31,7 +31,7 @@ import type {
   TransformRuntimeState,
 } from '@shared/types'
 import { AWAITING_APPROVAL_NOTE, NEEDS_REGENERATING_NOTE, needsRegenerating } from '@shared/transform-state'
-import type { RefinementTurn, ReviewInstruction } from './providers/types'
+import type { AiProvider, AskRequest, RefinementTurn, ReviewInstruction } from './providers/types'
 import { overlayPaletteFor } from '@shared/accents'
 import * as badge from './badge'
 import { openPanel } from './open-panel'
@@ -1650,7 +1650,7 @@ browser.runtime.onConnect.addListener((port) => {
     return
   }
 
-  if (port.name === 'wa-generate') {
+  if (port.name === 'wa-generate' || port.name === 'wa-ask') {
     /*
      * One controller for the port. The sidebar closing, or the panel dropping
      * the port for any other reason, means nobody can receive the result, and a
@@ -1660,7 +1660,8 @@ browser.runtime.onConnect.addListener((port) => {
     const controller = new AbortController()
     port.onDisconnect.addListener(() => controller.abort())
     port.onMessage.addListener((message) => {
-      void runGeneration(port, message as GenerateOverPort, controller.signal)
+      if (port.name === 'wa-ask') void runAsk(port, message as AskOverPort, controller.signal)
+      else void runGeneration(port, message as GenerateOverPort, controller.signal)
     })
   }
 })
@@ -1708,7 +1709,89 @@ async function runGeneration(
   request: GenerateOverPort,
   signal: AbortSignal,
 ): Promise<void> {
-  const { tabId } = request
+  await runModelOverPort(port, signal, {
+    tabId: request.tabId,
+    url: request.context.url,
+    transformId: request.transformId,
+    call: (provider, post) => {
+      const withSignal = { ...request, signal }
+      return provider.generateStream
+        ? provider.generateStream(
+            withSignal,
+            (accumulated) => {
+              post({ type: 'chunk', text: accumulated })
+            },
+            (characters) => {
+              post({ type: 'thinking', characters })
+            },
+          )
+        : provider.generate(withSignal)
+    },
+  })
+}
+
+/** The longest answer to a side question that is passed on, in characters. */
+const MAX_ANSWER_CHARACTERS = 6000
+
+interface AskOverPort {
+  context: PageContext
+  /** The instruction the current draft was generated from. See GenerateRequest. */
+  instruction: string
+  instructionImported?: boolean
+  importedDescription?: string
+  instructionSaved?: boolean
+  savedDescription?: string
+  scopeDepth?: number
+  scopeContainer?: string | null
+  history: RefinementTurn[]
+  draft: AskRequest['draft']
+  exchanges: AskRequest['exchanges']
+  question: string
+  tabId?: number
+  transformId?: string
+}
+
+/**
+ * A side question over a port. It goes through the same guards, usage
+ * recording, keepalive and badge as a generation. The answer is cut to a fixed
+ * length here, so the panel never has to render an unbounded reply.
+ */
+async function runAsk(
+  port: browser.runtime.Port,
+  request: AskOverPort,
+  signal: AbortSignal,
+): Promise<void> {
+  await runModelOverPort(port, signal, {
+    tabId: request.tabId,
+    url: request.context.url,
+    transformId: request.transformId,
+    call: async (provider, post) => {
+      const { answer } = await provider.ask({ ...request, signal }, (accumulated) => {
+        post({ type: 'chunk', text: accumulated })
+      })
+      return { answer: answer.slice(0, MAX_ANSWER_CHARACTERS) }
+    },
+  })
+}
+
+/**
+ * The steps every model call that reports to the sidebar over a port shares:
+ * the private-window and excluded-site checks, the badge, usage recording, the
+ * keepalive and the translation of a failure into an error message. `call`
+ * makes the request and may post progress through `post`; what it returns is
+ * posted as the result.
+ */
+async function runModelOverPort(
+  port: browser.runtime.Port,
+  signal: AbortSignal,
+  options: {
+    tabId: number | undefined
+    url: string
+    transformId: string | undefined
+    call: (provider: AiProvider, post: (message: unknown) => void) => Promise<unknown>
+  },
+): Promise<void> {
+  const { tabId } = options
   // Before the badge changes and before anything is sent to a provider.
   try {
     await requireNormalWindow(tabId)
@@ -1738,29 +1821,16 @@ async function runGeneration(
     await restoreBadgeFacts(tabId, accent)
     await badge.generationStarted(tabId, accent)
   }
-  const usage = createUsageRecorder(request.transformId)
+  const usage = createUsageRecorder(options.transformId)
 
   try {
-    await refuseExcludedUrl(request.context.url)
+    await refuseExcludedUrl(options.url)
     if (signal.aborted) return
     const provider = await resolveActiveProvider(usage.listener)
     if (signal.aborted) return
     post({ type: 'sent' })
 
-    const withSignal = { ...request, signal }
-    const result = await withKeepalive(() =>
-      provider.generateStream
-        ? provider.generateStream(
-            withSignal,
-            (accumulated) => {
-              post({ type: 'chunk', text: accumulated })
-            },
-            (characters) => {
-              post({ type: 'thinking', characters })
-            },
-          )
-        : provider.generate(withSignal),
-    )
+    const result = await withKeepalive(() => options.call(provider, post))
 
     post({ type: 'done', result, usage: await usage.settled() })
   } catch (error) {
