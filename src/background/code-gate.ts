@@ -9,7 +9,8 @@
  */
 
 import { analyseJavaScript, applyCapabilityPolicy } from '@safety/static-analysis'
-import { configReferences, fieldsAreClean, parseConfigFields } from '@shared/config'
+import { CSS_CONFIG_TYPES, choiceIsCssSafe, configReferences, fieldsAreClean, parseConfigFields } from '@shared/config'
+import { typeName } from '@shared/config-text'
 import type { ConfigField, ReviewResult, Settings, Transform, TransformRuntimeState } from '@shared/types'
 import { checkCssTransform } from './css-gate'
 import { t } from '@shared/i18n'
@@ -53,6 +54,19 @@ export function configProblem(
     const defined = new Set((transform.configFields ?? []).map((field) => field.key))
     const unknown = configReferences(transform.code, 'js').keys.find((key) => !defined.has(key))
     if (unknown !== undefined) return t('bgCodeReadsAnUndefinedSetting', unknown)
+  }
+  if (transform.kind === 'css' && transform.code) {
+    // CSS reads a setting with var(--setting-<key>), with nothing else inside
+    // the brackets, and only for the types that can be written as CSS.
+    const byKey = new Map((transform.configFields ?? []).map((field) => [field.key, field]))
+    const references = configReferences(transform.code, 'css')
+    for (const key of references.keys) {
+      const field = byKey.get(key)
+      if (!field) return t('bgCodeReadsAnUndefinedSetting', key)
+      if (references.withFallback.includes(key)) return t('bgCssSettingHasFallback', key)
+      if (!CSS_CONFIG_TYPES.includes(field.type)) return t('bgCssSettingTypeNotUsable', key, typeName(field.type))
+      if (field.type === 'choice' && !choiceIsCssSafe(field)) return t('bgCssChoiceNotIdentifier', key)
+    }
   }
   return null
 }

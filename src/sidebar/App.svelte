@@ -14,6 +14,7 @@
   } from '@shared/types'
   import type { ConflictSpec } from '@shared/messages'
   import { parseRules } from '@shared/css'
+  import { effectiveCss } from '@shared/config'
   import { permissionRequestsFor, requestAll } from '@shared/permissions'
   import { hasAccess, requiredOrigin } from '@shared/site-access'
   import { killSwitchNotice } from '@shared/kill-switch'
@@ -198,7 +199,7 @@
     const specs: ConflictSpec[] = transforms
       .filter((t) => t.enabled && t.kind === 'css')
       .sort((a, b) => a.order - b.order)
-      .map((t) => ({ id: t.id, rules: parseRules(t.code) }))
+      .map((t) => ({ id: t.id, rules: parseRules(effectiveCss(t)) }))
     if (specs.length < 2) return
 
     try {

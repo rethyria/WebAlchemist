@@ -1194,7 +1194,7 @@ export class Flow {
               declaredCapabilities: result.capabilities,
               ...configFieldsOf(result),
             })
-          : await this.checkCss(result.code)
+          : await this.checkCss(result.code, result.config)
       if (!current()) return
 
       this.stage = 'preview'
@@ -1408,7 +1408,7 @@ export class Flow {
               declaredCapabilities: transform.capabilities,
               ...(transform.configFields && transform.configFields.length > 0 ? { configFields: transform.configFields } : {}),
             })
-          : await this.checkCss(transform.code)
+          : await this.checkCss(transform.code, transform.configFields ?? [])
       if (!current()) return
 
       await this.applyPreview(this.result)
@@ -1691,7 +1691,7 @@ export class Flow {
               declaredCapabilities: result.capabilities,
               ...configFieldsOf(result),
             })
-          : await this.checkCss(result.code)
+          : await this.checkCss(result.code, result.config)
       if (!current()) return
 
       if (this.refinement) {
@@ -1997,10 +1997,13 @@ export class Flow {
    * repeats it on save and before any CSS is applied, so this copy exists to
    * show the result.
    */
-  private async checkCss(css: string): Promise<ReviewResult> {
+  private async checkCss(css: string, config: ConfigField[] = []): Promise<ReviewResult> {
     return send<ReviewResult>({
       type: 'analyse-css',
       css,
+      // The settings are put into the CSS before it is checked. The values come
+      // from storage, by the id of the elixir, and never from this panel.
+      ...(config.length > 0 ? { configFields: config, transformId: this.transformKey() } : {}),
       match: this.matchPattern,
       ...(this.tabId === null ? {} : { tabId: this.tabId }),
       approvedUrls: this.approvedCssUrls,
@@ -2014,7 +2017,7 @@ export class Flow {
     this.approvedCssUrls = [
       ...new Set([...this.approvedCssUrls, ...(this.review?.pendingUrls ?? [])]),
     ]
-    this.review = await this.checkCss(result.code)
+    this.review = await this.checkCss(result.code, result.config)
   }
 
   /**
@@ -2037,6 +2040,7 @@ export class Flow {
       type: 'preview-css',
       tabId: this.tabId,
       css: result.code,
+      ...(result.config.length > 0 ? { configFields: result.config, transformId: this.transformKey() } : {}),
       approvedUrls: this.approvedCssUrls,
     })
     this.previewedCss = result.code
@@ -2060,7 +2064,12 @@ export class Flow {
     this.previewedCss = null
     const back = this.step === 'refining' && !this.discarding ? this.result : null
     if (back?.kind === 'css') {
-      await send({ type: 'preview-css', tabId: this.tabId, css: back.code }).catch(() => {})
+      await send({
+        type: 'preview-css',
+        tabId: this.tabId,
+        css: back.code,
+        ...(back.config.length > 0 ? { configFields: back.config, transformId: this.transformKey() } : {}),
+      }).catch(() => {})
       this.previewedCss = back.code
     }
   }
@@ -2574,7 +2583,7 @@ export class Flow {
     // scope and any approvals were chosen.
     if (result.kind === 'css') {
       try {
-        this.review = await this.checkCss(result.code)
+        this.review = await this.checkCss(result.code, result.config)
       } catch (cause) {
         this.step = 'saving'
         this.fail(cause)

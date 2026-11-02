@@ -469,6 +469,9 @@
         const check = await send<ReviewResult>({
           type: 'analyse-css',
           css: code,
+          ...(current.configFields && current.configFields.length > 0
+            ? { configFields: current.configFields, transformId: current.id }
+            : {}),
           match: wanted,
           approvedUrls: approveListed ? [...(approvedCssUrls ?? []), ...pendingUrls] : (approvedCssUrls ?? []),
         })

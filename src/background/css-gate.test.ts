@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { DEFAULT_SETTINGS } from '@shared/types'
-import { checkCssForPage, pageUrlFor } from './css-gate'
+import { checkCssForPage, checkCssTransform, pageUrlFor } from './css-gate'
 
 describe('pageUrlFor', () => {
   it('uses the tab address when there is one', () => {
@@ -44,5 +44,24 @@ describe('checkCssForPage with a page taken from a scheme-prefixed pattern (#50)
   it('still refuses an address on another origin (control)', () => {
     const page = pageUrlFor('https://shop.example.com/*')
     expect(checkCssForPage('a { background: url(https://evil.example/t) }', settings, page, undefined).passed).toBe(false)
+  })
+})
+
+describe('checkCssTransform with settings', () => {
+  const field = { key: 'u', label: 'U', type: 'text' as const, default: 'data:image/png;base64,AAAA' }
+  const base = { code: 'a { background: image-set(var(--setting-u)) }', match: 'shop.example.com/*', configFields: [field] }
+
+  it('checks the CSS with the value put in, so a harmless value passes', () => {
+    expect(checkCssTransform(base, DEFAULT_SETTINGS).passed).toBe(true)
+  })
+
+  it('refuses the same CSS when the value is an external address', () => {
+    const result = checkCssTransform({ ...base, configValues: { u: 'https://evil.example/t.png' } }, DEFAULT_SETTINGS)
+    expect(result.passed).toBe(false)
+    expect(result.static.some((finding) => finding.severity === 'block')).toBe(true)
+  })
+
+  it('does not take a value that fails its field into account', () => {
+    expect(checkCssTransform({ ...base, configValues: { u: 5 as never } }, DEFAULT_SETTINGS).passed).toBe(true)
   })
 })

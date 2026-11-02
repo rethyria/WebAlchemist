@@ -199,6 +199,26 @@ export const backgroundMessages = defineMessages({
     description: 'Why code is refused. $KEY$ is a setting key that the code reads.',
     placeholders: ['KEY'],
   },
+  bgCssSettingHasFallback: {
+    message: 'The CSS gives the setting "$KEY$" a fallback value. Write var(--setting-$KEY$) with nothing else inside the brackets.',
+    description: 'Why CSS is refused. $KEY$ is a setting key.',
+    placeholders: ['KEY'],
+  },
+  bgCssSettingTypeNotUsable: {
+    message: 'The CSS uses the setting "$KEY$", which is a $TYPE$. Only text, number, choice and colour settings can be used in CSS.',
+    description: 'Why CSS is refused. $KEY$ is a setting key and $TYPE$ is the name of its type.',
+    placeholders: ['KEY', 'TYPE'],
+  },
+  bgCssChoiceNotIdentifier: {
+    message: 'The CSS uses the choice "$KEY$", but an option of it is not a plain word. Options that CSS uses must start with a letter and hold only letters, digits and hyphens.',
+    description: 'Why CSS is refused. $KEY$ is a setting key.',
+    placeholders: ['KEY'],
+  },
+  bgCssWithTheseValues: {
+    message: 'With these values the CSS would not pass the check: $REASON$',
+    description: 'Why values for settings are refused. $REASON$ is the reason, a full sentence.',
+    placeholders: ['REASON'],
+  },
   bgThatTransformNoLongerExists: {
     message: 'That elixir no longer exists.',
     description: 'Text that the background returns to the interface, which shows it to the user.',

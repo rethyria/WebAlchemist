@@ -737,3 +737,15 @@ export function cssWithConfig(
   }
   return out
 }
+
+/**
+ * The CSS of an elixir as it is checked and inserted: its code with the
+ * settings put in. This is the one function that every CSS check and every
+ * CSS insert uses (saving, previewing, applying, analysing, importing and the
+ * conflict finder), so the check always covers the text that the page gets.
+ */
+export function effectiveCss(
+  transform: { code: string; configFields?: readonly ConfigField[] | undefined; configValues?: unknown },
+): string {
+  return cssWithConfig(transform.code, transform.configFields, transform.configValues)
+}

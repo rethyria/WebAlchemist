@@ -15,13 +15,13 @@
  */
 
 import { appliesInContainer } from '@shared/container'
-import { checkValueSet, stableJson, valuesFitSize } from '@shared/config'
+import { checkValueSet, effectiveCss, reconcileValues, stableJson, valuesFitSize } from '@shared/config'
 import { readSettingsFile, settingsFileFor, type SettingsFile } from '@shared/config-file'
 import type { Message } from '@shared/messages'
 import type { ReviewInstruction } from './providers/types'
 import type { ConfigField, ConfigValue, ReviewResult, Settings, Transform } from '@shared/types'
 import { isApproved, mayBeSaved, recordApproval, spendApproval, type ApprovalVerdict } from './approvals'
-import { analyseWithConfig, blockedStates, problemWithStoredCode } from './code-gate'
+import { analyseWithConfig, blockedStates, configProblem, problemWithStoredCode } from './code-gate'
 import { assertPreviewable, checkCssForPage, checkCssTransform } from './css-gate'
 import { t } from '@shared/i18n'
 
@@ -119,8 +119,14 @@ export async function handleSaveTransform(message: Of<'save-transform'>, deps: S
       // The fields decide what the CSS says once the values are put in.
       stableJson(stored.configFields ?? []) === stableJson(message.transform.configFields ?? [])
     if (!unchanged) {
+      // The settings are put into the CSS before it is checked, with the values
+      // that the record will have once saved: the stored ones reconciled to the
+      // incoming fields. The values in the message are not used.
+      const candidate = await withStoredValues(message.transform, stored)
+      const problem = configProblem(candidate)
+      if (problem !== null) throw new Error(problem)
       const check = checkCssTransform(
-        message.transform,
+        candidate,
         await deps.getSettings(),
         await deps.tabUrl(message.tabId),
       )
@@ -176,12 +182,49 @@ export async function handleSaveTransform(message: Of<'save-transform'>, deps: S
   return true
 }
 
+/**
+ * The transform as it would be stored: the values are the stored ones
+ * reconciled to the incoming fields, never the ones that came with the message.
+ * This is the same rule that saveTransform applies, so the CSS that is checked
+ * is the CSS that will be inserted.
+ */
+async function withStoredValues(incoming: Transform, stored: Transform | undefined): Promise<Transform> {
+  const { configValues: _sent, ...rest } = incoming
+  const values = reconcileValues(stored?.configFields, incoming.configFields, stored?.configValues).values
+  return Object.keys(values).length > 0 ? { ...rest, configValues: values } : rest
+}
+
+/**
+ * The CSS of a draft that is not stored yet, or whose fields are being changed,
+ * with the settings put in. The values are the stored ones of the same elixir
+ * reconciled to the draft's fields, or the defaults. A settings problem, such
+ * as a reference to a setting the draft lacks, is returned beside the CSS.
+ */
+export async function draftCss(
+  draft: { code: string; configFields?: Transform['configFields']; transformId?: string },
+  deps: { getAllTransforms: () => Promise<Transform[]> },
+): Promise<{ css: string; configProblem: string | null }> {
+  const stored = draft.transformId
+    ? (await deps.getAllTransforms()).find((transform) => transform.id === draft.transformId)
+    : undefined
+  const candidate = await withStoredValues(
+    {
+      code: draft.code,
+      kind: 'css',
+      ...(draft.configFields === undefined ? {} : { configFields: draft.configFields }),
+    } as Transform,
+    stored,
+  )
+  return { css: effectiveCss(candidate), configProblem: configProblem(candidate) }
+}
+
 /* ------------------------------------------------------------------ */
 /* Previewing CSS                                                      */
 /* ------------------------------------------------------------------ */
 
 export interface PreviewCssDeps {
   getSettings: () => Promise<Settings>
+  getAllTransforms: () => Promise<Transform[]>
   tabUrl: (tabId: number | undefined) => Promise<string | undefined>
   /** Injects the CSS into the tab as that tab's preview, replacing an earlier one. */
   setPreviewCss: (tabId: number, css: string) => Promise<void>
@@ -193,8 +236,19 @@ export interface PreviewCssDeps {
  * sidebar: the sidebar's own check is only a courtesy to the user.
  */
 export async function handlePreviewCss(message: Of<'preview-css'>, deps: PreviewCssDeps): Promise<true> {
-  assertPreviewable(message.css, await deps.getSettings(), await deps.tabUrl(message.tabId), message.approvedUrls)
-  await deps.setPreviewCss(message.tabId, message.css)
+  // The settings are put in before the check and before the insert, so the
+  // check covers the text that the page gets. The values are the stored ones.
+  const draft = await draftCss(
+    {
+      code: message.css,
+      ...(message.configFields === undefined ? {} : { configFields: message.configFields }),
+      ...(message.transformId === undefined ? {} : { transformId: message.transformId }),
+    },
+    deps,
+  )
+  if (draft.configProblem !== null) throw new Error(draft.configProblem)
+  assertPreviewable(draft.css, await deps.getSettings(), await deps.tabUrl(message.tabId), message.approvedUrls)
+  await deps.setPreviewCss(message.tabId, draft.css)
   return true
 }
 
@@ -391,7 +445,7 @@ export async function applyCssTransforms(
   // The separator carries the position only. A transform's name is not put in
   // the CSS, because a name containing a comment terminator would end the
   // comment and let the rest of the name be read as CSS (#145).
-  let css = included.map((t, i) => `/* transform ${i + 1} */\n${t.code}`).join('\n\n')
+  let css = included.map((t, i) => `/* transform ${i + 1} */\n${effectiveCss(t)}`).join('\n\n')
 
   // Second barrier: the joined string is what the page receives, so it is
   // checked as a whole, for this page and its site mode. A failure refuses the
@@ -425,6 +479,8 @@ export async function applyCssTransforms(
 
 export interface ConfigValueDeps {
   getAllTransforms: () => Promise<Transform[]>
+  /** Needed for CSS, whose effective text is checked with the new values. */
+  getSettings?: () => Promise<Settings>
   /** The queued update of storage.ts. It checks the values again against the stored fields. */
   updateTransform: (id: string, patch: { configValues: Record<string, ConfigValue> }) => Promise<Transform | null>
 }
@@ -445,6 +501,17 @@ async function storeValues(
   for (const key of reset) delete merged[key]
   Object.assign(merged, values)
   if (!valuesFitSize(merged)) throw new Error(t('configValuesNotSaved', t('configValuesTooLarge')))
+  if (stored.kind === 'css' && stored.code && deps.getSettings) {
+    // The CSS that the page would get with these values has to pass the check,
+    // for example when a text value is used where an address is read. The check
+    // is repeated whenever the CSS is applied.
+    const candidate: Transform = { ...stored, configValues: merged }
+    const check = checkCssTransform(candidate, await deps.getSettings())
+    if (!check.passed) {
+      const reason = check.static.find((f) => f.severity === 'block')?.explanation ?? t('bgItLoadsAddressesOutsideTheSite')
+      throw new Error(t('configValuesNotSaved', t('bgCssWithTheseValues', reason)))
+    }
+  }
   const next = await deps.updateTransform(stored.id, { configValues: merged })
   if (!next) throw new Error(t('bgThatTransformNoLongerExists'))
   return next

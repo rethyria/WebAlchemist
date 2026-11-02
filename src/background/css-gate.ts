@@ -8,6 +8,7 @@
  */
 
 import { checkCss, hostOfPattern, modeForHost } from '@safety/css-check'
+import { effectiveCss } from '@shared/config'
 import type { CssUrlMode, ReviewResult, Settings, Transform } from '@shared/types'
 import { t } from '@shared/i18n'
 
@@ -69,14 +70,15 @@ export function checkCssForPage(
   }
 }
 
-/** Checks a stored or about-to-be-stored CSS transform. */
+/** Checks a stored or about-to-be-stored CSS transform, with its settings put in. */
 export function checkCssTransform(
-  transform: Pick<Transform, 'code' | 'match' | 'approvedCssUrls'>,
+  transform: Pick<Transform, 'code' | 'match' | 'approvedCssUrls' | 'configFields' | 'configValues'>,
   settings: Settings,
   tabUrl?: string,
 ): ReviewResult {
+  // The settings are put in first, so what is checked is what the page gets.
   return checkCssForPage(
-    transform.code,
+    effectiveCss(transform),
     settings,
     pageUrlFor(transform.match, tabUrl),
     transform.approvedCssUrls,

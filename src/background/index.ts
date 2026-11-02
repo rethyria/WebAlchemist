@@ -48,7 +48,7 @@ import { hostOfUrl } from '@shared/site-off'
 import { isSidebarPortName, ownerOfSidebarPort, panelOwner } from '@shared/sidebar-port'
 import { isApproved, spendApproval } from './approvals'
 import { encryptExport, openExport } from './export-crypto'
-import { analyseWithConfig, blockedStates, problemWithStoredCode, staticProblem } from './code-gate'
+import { analyseWithConfig, blockedStates, configProblem, problemWithStoredCode, staticProblem } from './code-gate'
 import { assertPreviewable, checkCssForPage, checkCssTransform, pageUrlFor, sameCssContext } from './css-gate'
 import {
   applyCssTransforms as applyCssTransformsFor,
@@ -58,6 +58,7 @@ import {
   handlePreviewCss,
   handleReview,
   cssPolicyChanged,
+  draftCss,
   handleExportConfigValues,
   handleImportConfigValues,
   handleSaveTransform,
@@ -732,12 +733,31 @@ async function handle(
         message.tabId === undefined
           ? undefined
           : await browser.tabs.get(message.tabId).catch(() => undefined)
-      return checkCssForPage(
-        message.css,
+      // The settings are put into the CSS first, so the check covers what the
+      // page would get. A reference that the fields do not support is a block.
+      const draft = await draftCss(
+        {
+          code: message.css,
+          ...(message.configFields === undefined ? {} : { configFields: message.configFields }),
+          ...(message.transformId === undefined ? {} : { transformId: message.transformId }),
+        },
+        { getAllTransforms },
+      )
+      const result = checkCssForPage(
+        draft.css,
         await getSettings(),
         pageUrlFor(message.match, tab?.url),
         message.approvedUrls,
       )
+      if (draft.configProblem === null) return result
+      return {
+        ...result,
+        static: [
+          ...result.static,
+          { line: 0, column: 0, api: 'CONFIG', capability: null, severity: 'block' as const, explanation: draft.configProblem },
+        ],
+        passed: false,
+      }
     }
 
     case 'save-transform':
@@ -863,7 +883,7 @@ async function handle(
 
     case 'set-config-values': {
       await refuseInPrivateWindow(message.tabId)
-      const transform = await handleSetConfigValues(message, { getAllTransforms, updateTransform })
+      const transform = await handleSetConfigValues(message, { getAllTransforms, getSettings, updateTransform })
       return { transform, reloadTabs: await applyConfigChange(transform, message.tabId) }
     }
 
@@ -872,7 +892,7 @@ async function handle(
 
     case 'import-config-values': {
       await refuseInPrivateWindow(message.tabId)
-      const result = await handleImportConfigValues(message, { getAllTransforms, updateTransform })
+      const result = await handleImportConfigValues(message, { getAllTransforms, getSettings, updateTransform })
       return { ...result, reloadTabs: await applyConfigChange(result.transform, message.tabId) }
     }
 
@@ -1009,6 +1029,7 @@ async function handle(
       await refuseWhenOff(message.tabId)
       return handlePreviewCss(message, {
         getSettings,
+        getAllTransforms,
         tabUrl: tabUrlOf,
         setPreviewCss: async (tabId, css) =>
           setPreviewCss(tabId, css, await ownerOfTab(tabId), checkedDocument),
@@ -1315,7 +1336,18 @@ async function handle(
 }
 
 /** The first reason CSS fails the check for the settings given, or null when it passes. */
-function cssProblemOf(transform: Pick<Transform, 'code' | 'match'>, settings: Settings): string | null {
+function cssProblemOf(
+  transform: Pick<Transform, 'code' | 'match' | 'configFields' | 'configValues'>,
+  settings: Settings,
+): string | null {
+  // An invalid field, or a reference to a setting that the fields do not
+  // support, keeps the CSS out of an import, as it keeps it out of a save.
+  const settingsProblem = configProblem({
+    kind: 'css',
+    code: transform.code,
+    ...(transform.configFields === undefined ? {} : { configFields: transform.configFields }),
+  })
+  if (settingsProblem !== null) return settingsProblem
   const check = checkCssTransform(transform, settings)
   if (check.passed) return null
   return (

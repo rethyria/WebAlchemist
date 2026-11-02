@@ -135,7 +135,17 @@ export type Message =
    * (the editor has no page). `approvedUrls` are the external URLs the user
    * approved, which only matter on a site set to list external URLs.
    */
-  | { type: 'analyse-css'; css: string; match: string; tabId?: number; approvedUrls?: string[] }
+  | {
+      type: 'analyse-css'
+      css: string
+      match: string
+      tabId?: number
+      approvedUrls?: string[]
+      /** The settings the CSS reads. They are put into the CSS before it is checked. */
+      configFields?: ConfigField[]
+      /** The elixir whose stored values are used for the check. Absent for a draft that is not saved. */
+      transformId?: string
+    }
 
   /* --- persistence -------------------------------------------------- */
   /** `tabId` lets the change take effect now instead of on the next load. */
@@ -263,7 +273,16 @@ export type Message =
    */
 
   /* --- page-side operations ----------------------------------------- */
-  | { type: 'preview-css'; tabId: number; css: string; approvedUrls?: string[] }
+  | {
+      type: 'preview-css'
+      tabId: number
+      css: string
+      approvedUrls?: string[]
+      /** The settings the CSS reads, put in before the check and before the insert. */
+      configFields?: ConfigField[]
+      /** The elixir whose stored values are used. Absent for a draft that is not saved. */
+      transformId?: string
+    }
   | { type: 'clear-preview-css'; tabId: number; css: string }
   /**
    * Registers an unsaved transform and reloads the tab, so the preview runs in

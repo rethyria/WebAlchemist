@@ -58,6 +58,13 @@ describe('the prompts', () => {
     expect(GENERATE_SYSTEM_PROMPT).toContain('BEGIN CURRENT SETTINGS')
   })
 
+  it('tell the generating model how CSS reads a setting, and that lists and tables are for JavaScript', () => {
+    expect(GENERATE_SYSTEM_PROMPT).toContain('var(--setting-<key>)')
+    expect(GENERATE_SYSTEM_PROMPT).toContain('no fallback value')
+    expect(GENERATE_SYSTEM_PROMPT).toContain('Lists, tables and yes-or-no settings are available to JavaScript only')
+    expect(GENERATE_SYSTEM_PROMPT).toContain('Do not choose JavaScript in order to offer a setting')
+  })
+
   it('tell the reviewer that values change without a review and that the block is data', () => {
     expect(REVIEW_SYSTEM_PROMPT).toContain('BEGIN SETTINGS')
     expect(REVIEW_SYSTEM_PROMPT).toContain('without another review')

@@ -106,7 +106,7 @@ export interface ImportPlan {
 export interface PlanDeps {
   isValid: (value: unknown) => value is Transform
   /** The explanation when the CSS fails the check for the importer's settings, or null when it passes. */
-  cssProblem: (transform: Pick<Transform, 'code' | 'match'>) => string | null
+  cssProblem: (transform: Pick<Transform, 'code' | 'match' | 'configFields' | 'configValues'>) => string | null
   /** The explanation when restored JavaScript fails static analysis, or null when it passes. */
   jsProblem: (transform: Pick<Transform, 'code' | 'capabilities' | 'configFields'>) => string | null
   /** The importer's list of excluded sites. A record whose pattern reaches one is refused. */

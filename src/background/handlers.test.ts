@@ -263,6 +263,7 @@ describe('handlePreviewCss', () => {
       injected,
       deps: {
         getSettings: async () => settings,
+        getAllTransforms: async () => [],
         tabUrl: async () => 'https://shop.example.com/cart',
         setPreviewCss: async (_tab: number, css: string | null) => {
           injected.push(css)
