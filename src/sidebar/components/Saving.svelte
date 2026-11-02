@@ -48,9 +48,12 @@
       value={intent}
       oninput={(event) => onintent(event.currentTarget.value)}
     ></textarea>
-    <p class="note">
-      {#if consolidated}{t('savingNoteConsolidated')}{:else}{t('savingNote')}{/if}
-    </p>
+    <details class="fold">
+      <summary>{t('detailsLabel')}</summary>
+      <p class="note">
+        {#if consolidated}{t('savingNoteConsolidated')}{:else}{t('savingNote')}{/if}
+      </p>
+    </details>
   </section>
 
   <section>
@@ -197,6 +200,18 @@
 
   summary::-webkit-details-marker {
     display: none;
+  }
+
+  .fold summary {
+    display: list-item;
+    list-style: revert;
+    font: 11.5px var(--font-ui);
+    color: var(--text-faint);
+    cursor: pointer;
+  }
+
+  .fold .note {
+    margin: var(--sp-5) 0 0;
   }
 
   .caret {

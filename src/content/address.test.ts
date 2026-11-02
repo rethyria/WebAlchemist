@@ -200,6 +200,6 @@ describe('where the address is used', () => {
   it('is shown in the describing panel from the context that will be sent', () => {
     expect(read('sidebar/App.svelte')).toMatch(/sentAddress=\{flow\.sentAddress\}/)
     expect(read('sidebar/components/Describing.svelte')).toMatch(/<AddressNote address=\{sentAddress\}/)
-    expect(read('sidebar/components/AddressNote.svelte')).toMatch(/\{address\}/)
+    expect(read('sidebar/components/AddressNote.svelte')).toMatch(/addressSentSummary', address\)/)
   })
 })

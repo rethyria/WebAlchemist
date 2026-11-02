@@ -21,7 +21,8 @@
   .usage {
     margin: 0;
     padding: 0 var(--gutter-sidebar);
-    font: 10.5px var(--font-mono);
+    font: 10px var(--font-mono);
     color: var(--text-faint);
+    opacity: 0.8;
   }
 </style>

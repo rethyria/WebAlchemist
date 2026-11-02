@@ -117,9 +117,10 @@
                 {#if world.reason}{t('revReasonGiven', world.reason)}{/if}
               </p>
             {:else}
-              <p class="finding">
-                {t('revRunsIsolated')}
-              </p>
+              <details class="fold">
+                <summary>{t('detailsLabel')}</summary>
+                <p class="finding">{t('revRunsIsolated')}</p>
+              </details>
             {/if}
           </div>
         </div>
@@ -270,8 +271,13 @@
       <div class="row">
         <dt>{result.kind === 'css' ? t('revCssCheck') : t('revCodeScan')}</dt>
         <dd>
-          {#if findingCount === 0}
-            {t(result.kind === 'js' ? 'revNoFindingsJs' : 'revNoFindingsCss')}
+          {#if findingCount === 0 && result.kind === 'js'}
+            <details class="fold">
+              <summary>{t('revNoFindingsJsShort')}</summary>
+              <p class="finding">{t('revNoFindingsJs')}</p>
+            </details>
+          {:else if findingCount === 0}
+            {t('revNoFindingsCss')}
           {:else}
             {t(findingCount === 1 ? 'revFindingsOne' : 'revFindings', findingCount)}
           {/if}
@@ -523,6 +529,14 @@
 
   summary::-webkit-details-marker {
     display: none;
+  }
+
+  .fold summary {
+    display: list-item;
+    list-style: revert;
+    font: 11.5px var(--font-ui);
+    color: var(--text-faint);
+    cursor: pointer;
   }
 
   .meta {

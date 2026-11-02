@@ -542,8 +542,17 @@ export const sidebarMessages = defineMessages({
     message: 'Nothing is stored. Discarding removes the registration.',
     description: 'Hint under a notice about previewing JavaScript.',
   },
+  detailsLabel: {
+    message: 'Details',
+    description: 'Label of a collapsed section that holds an explanation.',
+  },
+  addressSentSummary: {
+    message: 'Address sent: $ADDRESS$',
+    description: 'Label of a collapsed section. $ADDRESS$ is the page address sent to the AI provider, as it is sent.',
+    placeholders: ['ADDRESS'],
+  },
   refReviewReading: {
-    message: 'A second model is reading the code. It cannot be run until that finishes.',
+    message: 'A second model is checking the code.',
     description: 'Explains why the preview of JavaScript is not offered yet.',
   },
   refReviewDisagrees: {
@@ -556,7 +565,7 @@ export const sidebarMessages = defineMessages({
     description: 'Explains why the preview of JavaScript is not offered.',
   },
   refReviewNeeded: {
-    message: 'The code has to be read by a second model before it runs on the page.',
+    message: 'A second model checks the code before it runs on the page.',
     description: 'Explains why the preview of JavaScript is not offered.',
   },
   refReloadTitle: {
@@ -642,12 +651,12 @@ export const sidebarMessages = defineMessages({
     description: 'Button that reloads the page and runs the generated JavaScript.',
   },
   refReading: {
-    message: 'Reading the code…',
-    description: 'Button text while a second model reads the code.',
+    message: 'Checking the code…',
+    description: 'Button text while a second model checks the code.',
   },
   refReadFirst: {
-    message: 'Read the code first',
-    description: 'Button that asks a second model to read the code before it runs.',
+    message: 'Check the code',
+    description: 'Button that asks a second model to check the code before it runs.',
   },
   refKeep: {
     message: 'Keep it',
@@ -793,6 +802,10 @@ export const sidebarMessages = defineMessages({
   revNoFindingsCss: {
     message: 'No known patterns found. The check looks for addresses the CSS would load.',
     description: 'Result of the CSS check when it found nothing.',
+  },
+  revNoFindingsJsShort: {
+    message: 'No known patterns found.',
+    description: 'Short result of the static analysis when it found nothing. The full explanation is shown under it.',
   },
   revFindingsOne: {
     message: '1 finding, listed above.',

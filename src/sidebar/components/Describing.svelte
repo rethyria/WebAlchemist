@@ -445,20 +445,17 @@
         <p class="warning">
           {t('describingShotWarning')}
         </p>
-        {#if shotClipped}
-          <p class="note">
-            {t('describingShotClipped')}
-          </p>
-        {/if}
-        {#if shotMoved}
-          <p class="note">
-            {t('describingShotMoved')}
-          </p>
-        {/if}
-        {#if shotReduced}
-          <p class="note">
-            {t('describingShotReduced', `${shotReduced.from.width} × ${shotReduced.from.height}`, `${shotReduced.to.width} × ${shotReduced.to.height}`)}
-          </p>
+        {#if shotClipped || shotMoved || shotReduced}
+          <details class="fold">
+            <summary>{t('detailsLabel')}</summary>
+            {#if shotClipped}<p class="note">{t('describingShotClipped')}</p>{/if}
+            {#if shotMoved}<p class="note">{t('describingShotMoved')}</p>{/if}
+            {#if shotReduced}
+              <p class="note">
+                {t('describingShotReduced', `${shotReduced.from.width} × ${shotReduced.from.height}`, `${shotReduced.to.width} × ${shotReduced.to.height}`)}
+              </p>
+            {/if}
+          </details>
         {/if}
         <button type="button" class="shot-action" onclick={() => onscreenshot(false)}>
           {t('describingShotRemove')}
@@ -743,5 +740,15 @@
     margin: 0;
     font: 11px/1.5 var(--font-ui);
     color: var(--text-faint);
+  }
+
+  .fold summary {
+    font: 11.5px var(--font-ui);
+    color: var(--text-faint);
+    cursor: pointer;
+  }
+
+  .fold .note {
+    margin-top: var(--sp-5);
   }
 </style>

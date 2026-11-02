@@ -85,6 +85,12 @@
   let isJs = $derived(result.kind === 'js')
   let blocked = $derived(analysis !== null && !analysis.passed)
   let attempt = $derived(attemptNumber(history.length))
+  /** True when a finished review stopped the run, which is shown outside the collapsed text. */
+  let reviewBlocks = $derived(
+    previewReview !== null &&
+      ((!!previewReview.model && previewReview.model.verdict !== 'match') ||
+        !previewReview.passed),
+  )
 
   /*
    * The transcript is the conversation as the user experienced it: their
@@ -154,30 +160,35 @@
       <p class="quiet">{t('refSayWhat')}</p>
     </div>
   {:else if isJs && !jsRan}
-    <div class="notice">
-      <span class="notice-title">{t('refJsNextLoadTitle')}</span>
-      <p>
-        {t('refJsNextLoadBody')}
-      </p>
+    <!--
+      The explanations are collapsed to one line. A review that disagrees or a
+      scan that rejected the code stays visible, because it blocks the run.
+    -->
+    <details class="fold">
+      <summary>{t('refJsNextLoadTitle')}</summary>
+      <p>{t('refJsNextLoadBody')}</p>
       <p class="quiet">{t('refNothingStored')}</p>
-      {#if !previewAllowed}
-        <!--
-          The script runs on the page with the user's session, so it is not
-          offered until a second model has read it (issue 55).
-        -->
-        <p>
-          {#if previewReviewing}
-            {t('refReviewReading')}
-          {:else if previewReview && previewReview.model && previewReview.model.verdict !== 'match'}
-            {t('refReviewDisagrees', previewReview.model.explanation)}
-          {:else if previewReview && !previewReview.passed}
-            {t('refReviewScanRejected')}
-          {:else}
-            {t('refReviewNeeded')}
-          {/if}
-        </p>
+      {#if !previewAllowed && !previewReviewing && !reviewBlocks}
+        <p>{t('refReviewNeeded')}</p>
       {/if}
-    </div>
+    </details>
+    {#if !previewAllowed}
+      <!--
+        The script runs on the page with the user's session, so it is not
+        offered until a second model has checked it (issue 55).
+      -->
+      {#if previewReviewing}
+        <p class="status" role="status">{t('refReviewReading')}</p>
+      {:else if previewReview && previewReview.model && previewReview.model.verdict !== 'match'}
+        <div class="notice attention">
+          <p>{t('refReviewDisagrees', previewReview.model.explanation)}</p>
+        </div>
+      {:else if previewReview && !previewReview.passed}
+        <div class="notice block">
+          <p>{t('refReviewScanRejected')}</p>
+        </div>
+      {/if}
+    {/if}
   {:else if isJs && jsRan}
     <div class="notice attention">
       <span class="notice-title">{t('refReloadTitle')}</span>
@@ -187,9 +198,10 @@
       <p class="quiet">{t('refReloadKept')}</p>
     </div>
   {:else}
-    <p class="explainer">
-      {t('refExplainer')}
-    </p>
+    <details class="fold">
+      <summary>{t('detailsLabel')}</summary>
+      <p>{t('refExplainer')}</p>
+    </details>
   {/if}
 
   <section class="transcript">
@@ -271,15 +283,19 @@
         {/if}
         {#if shotPreview}
           <img class="shot-image" src={shotPreview} alt={t('describingShotAlt')} />
-          <p class="shot-warning">
-            {t('describingShotWarning')}{shotClipped
-              ? ' ' + t('refShotClipped')
-              : ''}{shotMoved
-              ? ' ' + t('refShotMoved')
-              : ''}{shotReduced
-              ? ' ' + t('refShotReduced', `${shotReduced.from.width} × ${shotReduced.from.height}`, `${shotReduced.to.width} × ${shotReduced.to.height}`)
-              : ''}
-          </p>
+          <p class="shot-warning">{t('describingShotWarning')}</p>
+          {#if shotClipped || shotMoved || shotReduced}
+            <details class="fold">
+              <summary>{t('detailsLabel')}</summary>
+              {#if shotClipped}<p>{t('refShotClipped')}</p>{/if}
+              {#if shotMoved}<p>{t('refShotMoved')}</p>{/if}
+              {#if shotReduced}
+                <p>
+                  {t('refShotReduced', `${shotReduced.from.width} × ${shotReduced.from.height}`, `${shotReduced.to.width} × ${shotReduced.to.height}`)}
+                </p>
+              {/if}
+            </details>
+          {/if}
           <button type="button" class="shot-action" onclick={() => onscreenshot(false)}>
             {t('describingShotRemove')}
           </button>
@@ -418,7 +434,25 @@
     font: 11.5px var(--font-mono);
   }
 
-  .explainer {
+  .fold summary {
+    display: list-item;
+    list-style: revert;
+    font: 11.5px var(--font-ui);
+    color: var(--text-faint);
+    cursor: pointer;
+  }
+
+  .fold p {
+    margin: var(--sp-5) 0 0;
+    font: 12px/1.55 var(--font-ui);
+    color: var(--text-dim);
+  }
+
+  .fold p.quiet {
+    color: var(--text-faint);
+  }
+
+  .status {
     margin: 0;
     font: 12px/1.55 var(--font-ui);
     color: var(--text-dim);
