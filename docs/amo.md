@@ -2,7 +2,7 @@
 
 Web Alchemist is a Firefox extension that writes a change to a webpage from a plain-language description. This document holds everything needed to submit it to addons.mozilla.org (AMO) under issue 41: the notes for the AMO reviewer, the reason for each permission, the data collection declaration, the instructions for the source-code submission, a draft listing, a draft privacy policy, and the steps that only the account owner can do. Nothing in this repository submits or signs the extension.
 
-The facts below were checked against the repository at the time of writing. Wherever a statement is a judgement about Mozilla's rules and not a fact about the code, it says so.
+The facts below were checked against the repository on 2 November 2026. Wherever a statement is a judgement about Mozilla's rules and not a fact about the code, it says so.
 
 ## Reviewer notes
 
@@ -10,36 +10,34 @@ These notes go in the "Notes for Reviewers" field of the submission.
 
 ### What the extension does
 
-The user selects part of a page, or describes a change in words, and a language model writes CSS or JavaScript that makes the change. The user can read the code and the model's explanation before anything is saved. A saved change is applied again on every later visit to the matching site. When a site changes so that a saved change no longer applies, the extension reports it and offers to write a replacement from the original description.
+The user selects part of a page, or describes a change in words, and a language model writes CSS or JavaScript that makes the change. The user can read the code and the model's explanation before anything is saved. JavaScript is also checked by a second model call before it can be previewed or saved. While refining a draft, the user can ask the model questions about it; the answers are shown to the user and change nothing. A saved change is applied again on every later visit to the matching site. When a site changes so that a saved change no longer applies, the extension reports it and offers to write a replacement from the original description.
 
-The user chooses the model provider (Anthropic, or any endpoint compatible with the OpenAI chat completions interface) and enters their own API key. The extension has no server of its own and the developer receives no data.
+The user chooses the AI provider (Anthropic, or any provider compatible with the OpenAI chat completions interface) and enters their own API key. The extension has no server of its own and the developer receives no data.
 
 ### Why generated JavaScript is user-script code and not remote code
 
-The JavaScript is not part of the extension package and is not fetched from a location that the developer controls. It is written on request by a model that the user configured with the user's own key, shown to the user in the approval panel together with an automatic review result, and saved only after the user approves it. The extension then registers it with the `userScripts` API, which Firefox provides for running code that the user has chosen to run. This is the same arrangement as a user-script manager, except that the code is written by a model from the user's description and not copied from a repository.
+The JavaScript is not part of the extension package and is not fetched from a location that the developer controls. It is written on request by a model that the user set up with the user's own key, shown to the user in the approval panel together with the result of an automatic check, and saved only after the user approves it. The extension then registers it with the `userScripts` API, which Firefox provides for running code that the user has chosen to run. This is the same arrangement as a user-script manager, except that the code is written by a model from the user's description and not copied from a repository.
 
-The extension enforces the following before any generated script runs:
+The extension enforces the following before any generated script runs, in a preview or after saving:
 
-- A saved approval record ties the exact code, its world, the transform and the site pattern to one approval token. Code that differs from what the user was shown is refused at save time, and a token works once.
-- A static analysis step parses the code and refuses constructs that load or build code at run time. These include `eval`, `new Function`, string arguments to timer functions, `import()`, script element creation and similar. It also refuses use of the network, cookies and page storage unless the transform declares that capability, and it shows the user each declared capability.
-- The code is checked again from storage before it is registered, so a script that did not pass is not run after a browser restart or an update.
-- A separate model review receives only the code and the user's description, never the page content.
+- A safety check (a static analysis, in `src/safety/static-analysis.ts`) parses the code and accepts it only when everything it uses is on an allowlist of ordinary DOM reading and writing. It refuses code that builds or loads code at run time, including `eval`, `new Function`, string arguments to timer functions, dynamic `import()` with or without network access, script element creation and the other ways of loading code from an address. It also refuses use of the network, cookies and page storage unless the transform asks for that access, and the user sees the access that is asked for before approving.
+- A code check, which is a separate model call, receives the user's typed instructions, the generating model's summary of the intent, the saved description when there is one, and the code. It never receives the page content. Its result is shown to the user in the approval panel.
+- A preview runs the script only after the safety check passed and the code check returned the verdict "match" for that exact code, only on the exact address of the page being edited, and only after the user clicks to reload the page with it.
+- A saved approval record ties the exact code, its world, the access it asks for, the transform and the site pattern to one approval token. Code that differs from what the user was shown is refused at save time, and a token works once.
+- The code is checked again from storage before it is registered, so a script that does not pass the current checks is not run after a browser restart or an update.
+- Before the script runs, a runtime guard defines throwing properties in its user script world for every feature the transform did not ask for: the network features, storage, cookies, workers, `eval`, `Function` and others. The measured limits of the guard are in `test/runtime-guard/README.md`.
 
 The extension itself contains no remote code. Every script in the package is bundled, and the content security policy is Firefox's default for Manifest V3 extensions.
 
-### Remote loading is refused
-
-The static analysis refuses dynamic `import()` with or without the network capability, and refuses the other ways of loading code from an address. This is the subject of issue 137; the reviewer should be told only what the shipped build does. Confirm the state of issue 137 and its unit test before submitting, and remove this paragraph if the behaviour is not in the submitted build.
-
 ### Network access of generated scripts
 
-An earlier version of the design relied on a content security policy set per user script world (`connect-src 'none'`) to stop an undeclared network request. A measurement in Firefox showed that this does not work. With `connect-src 'none'` in force, `fetch`, `XMLHttpRequest`, `sendBeacon`, `WebSocket` and `EventSource` all reached a listening server from a user script world. Only an image request was stopped, by `img-src`. The test page and results are in `test/csp/`.
+An earlier version of the design relied on a content security policy set for each user script world (`connect-src 'none'`) to stop a network request that the transform had not asked for. A measurement in Firefox 145 showed that this does not work. With `connect-src 'none'` in force, `fetch`, `XMLHttpRequest`, `sendBeacon`, `WebSocket` and `EventSource` all reached a listening server from a user script world. Only an image request was stopped, by `img-src`. The test page and results are in `test/csp/`.
 
-The extension therefore does not treat the world's content security policy as a security boundary. The policy is still set, because it closes the image channel and costs nothing. The control that the extension relies on is the refusal to save code: the static analysis blocks every use of the network that the transform did not declare, and the user sees each declared capability before approving. The README and the comments in `src/background/registry.ts` describe this. Issue 61 rewrote the texts that called the world policy a boundary.
+The extension therefore does not treat the world's content security policy as a security boundary. The policy is still set, because it closes the image channel and costs nothing. The extension relies on two other controls. The safety check refuses to save code that uses the network without asking for it, and the user sees the access that is asked for before approving. The runtime guard removes the network features that were not asked for from the script's world before the script runs. The comments in `src/background/registry.ts` record the measurement.
 
 ### Execution worlds
 
-By default a script runs in the isolated user script world. The model may ask for the MAIN world when a change needs the page's own JavaScript objects, and it must state the reason. The user sees the world in the approval panel. The reason the model is allowed to choose this is tracked in issue 53. Replace this paragraph with that issue's decision before submission.
+By default a script runs in the isolated user script world. The model may request the MAIN world, which is the page's own world, where the code can use everything the page's scripts can, when a change needs the page's own objects, and it must state the reason. The request has no effect until the user approves it for that transform. The approval panel and the editor show the world and four risks of MAIN: the page can change the code, the code can read what the page keeps in memory, the safety check cannot see what the page's own functions do, and the restriction on image requests does not apply. Restoring an earlier version or a backup that runs in MAIN needs the same confirmation. A script in MAIN without a record of the user's approval is not registered, and one that has no such record when the extension starts is moved to the isolated world. The runtime guard cannot be applied to the MAIN world, so a script there is protected by the safety check and the user's approval.
 
 ### Build probes
 
@@ -51,7 +49,7 @@ The manifest declares seven required permissions, two optional permissions and t
 
 ### Required permissions
 
-Each of these appears in the install prompt, so each needs a reason a user can accept. Issue 41 asks that any permission without a good reason be removed. The owner should decide on `identity` and `tabs` in particular.
+Each of these appears in the install prompt, so each needs a reason a user can accept. Issue 41 asks that any permission without a good reason be removed. The owner decided on 1 November 2026 to keep `identity` for the OAuth sign-in. The owner should still confirm that `tabs` is needed.
 
 | Permission | Use in the code | Justification |
 |---|---|---|
@@ -60,8 +58,8 @@ Each of these appears in the install prompt, so each needs a reason a user can a
 | `activeTab` | Lets the extension act on the current tab after the user clicks the toolbar button or opens the sidebar, without access to every site; also allows a screenshot of the visible tab | The extension asks for access to a site only when the user works on it. |
 | `tabs` | Reads the address and window of tabs to decide which saved changes apply, to re-evaluate open tabs when a change is saved or access is granted, and to read a tab's address for the editor | Without it the address of a tab that the user has not just activated is not available. |
 | `webNavigation` | Detects page loads and single-page-app address changes (`onCommitted`, `onHistoryStateUpdated`) so saved changes are checked after a site updates its page | Single-page sites change the address without a page load, and saved changes must be checked then. |
-| `identity` | `identity.launchWebAuthFlow` and `identity.getRedirectURL` for signing in to an OpenAI-compatible provider that supports OAuth | Only the OAuth sign-in uses it. No default provider uses OAuth, and Firefox does not allow `identity` as an optional permission (see `docs/batch-plan.md`). If the OAuth sign-in is not part of the first release, remove the permission and the sign-in code instead of justifying it. |
-| `alarms` | Locks the credential vault after the idle time the user chose | A timer is needed in a background script that Firefox can suspend. |
+| `identity` | `identity.launchWebAuthFlow` and `identity.getRedirectURL` for signing in to an OpenAI-compatible provider that supports OAuth | The OAuth sign-in lets a user connect a provider without copying an API key. Only the sign-in uses this permission. Firefox does not accept `identity` as an optional permission, so it is declared as required. |
+| `alarms` | Locks the stored keys after the idle time the user chose | A timer is needed in a background script that Firefox can suspend. |
 
 ### Optional permissions
 
@@ -74,25 +72,26 @@ These are requested at the moment the user needs them, from a click, and the use
 
 ### Optional host permissions
 
-The manifest lists `*://*/*` and `<all_urls>`. They are requested one site at a time when the user turns a saved change on for that site, or once for all sites when the user asks for screenshots, because `captureVisibleTab` accepts only the all-sites grant or `activeTab`. A saved change cannot run on a site the user did not grant.
+The manifest lists `*://*/*` and `<all_urls>`. They are requested only from a click, in three cases: for one site when the user turns a saved change on for that site; for the sites named in a file, in one request of at most 20 sites, when the user imports transforms; and once for all sites when the user asks for screenshots, because `captureVisibleTab` accepts only the all-sites grant or `activeTab`. A saved change cannot run on a site the user did not grant.
 
 ## Data collection declaration
 
 The manifest declares two required categories under `data_collection_permissions`: `websiteContent` and `browsingActivity`. It does not declare `none`, because the extension sends page data to a third party when the user asks for a change.
 
-When the user asks for a change, the background script sends the following to the provider that the user configured:
+When the user asks for a change, refines or repairs one, or asks a question about a draft, the background script sends the following to the AI provider that the user set up:
 
-- the user's description of the change;
+- the user's description of the change, earlier follow-up requests in the session, and any question the user asks;
 - the text and markup of the relevant part of the page, which is `websiteContent`;
-- the address of the page, which is `browsingActivity`;
-- the user's API key, as the authorization header for that provider;
-- a screenshot of the visible tab, only when the user asks for one, which is `websiteContent`.
+- the address of the page, with the part after #, query values and token-like parts removed, which is `browsingActivity`;
+- for a repair or a question, the saved or drafted code and its explanation;
+- a screenshot of the visible tab, only when the user adds one, which is `websiteContent`;
+- the user's API key, as the authorization header for that provider.
 
-Nothing is sent to the developer, and the extension has no analytics or error reporting.
+The code check of JavaScript is a second call to the same AI provider. It sends the code, the user's instructions and the model's summary of them, and not the page. Nothing is sent to the developer, and the extension has no analytics or error reporting.
 
 The categories were chosen under these uncertainties, which the owner should confirm against Mozilla's current list of categories before submitting:
 
-- `personalCommunications` and `financialAndPaymentInfo` are not declared. The extension does not look for such data, but a user can point it at a webmail or banking page and the page text then reaches the provider. The review in issue 41 suggests these categories may apply. If Mozilla's reviewers or guidance say they do, add them; the cost is a more alarming install prompt.
+- `personalCommunications` and `financialAndPaymentInfo` are not declared. The extension does not look for such data, but a user can point it at a webmail or banking page and the page text then reaches the AI provider. The extension warns before sending text from a page with password or payment fields. The review in issue 41 suggests these categories may apply. If Mozilla's reviewers or guidance say they do, add them; the install prompt then lists more kinds of data.
 - `authenticationInfo` is not declared. The user's own key is sent only to the provider it belongs to. Whether Mozilla counts that as collection is uncertain.
 - The privacy policy below is probably required for a listed add-on that sends data. This is inferred from Mozilla's policy text and has not been confirmed.
 
@@ -144,15 +143,17 @@ Describe a change to any webpage in plain words. A model you choose writes it, y
 
 ### Description
 
-Web Alchemist changes how websites look and behave, using a description that you write in plain language. Select part of a page or type what you want, for example "hide the sidebar" or "make the text larger and the background dark". A language model writes the CSS or JavaScript, and Web Alchemist shows you the code, an explanation, and the result of an automatic review before anything is saved.
+Web Alchemist changes how websites look and behave, based on a description that you write in plain language. Select part of a page or type what you want, for example "hide the sidebar" or "make the text larger and the background dark". A language model writes the CSS or JavaScript. Before anything is saved, Web Alchemist shows you the code and an explanation, and a second model call checks any JavaScript. While you refine a draft, you can ask the model questions about it.
 
-Saved changes apply again each time you visit the site. When a site updates its design and a change stops working, Web Alchemist tells you and offers to write a new version from your original description.
+Saved changes, which Web Alchemist calls transforms, apply again each time you visit the site. When a site updates its design and a transform stops working, Web Alchemist tells you and offers to write a new version from your original description.
 
-You provide the model. Web Alchemist works with the Anthropic API and with any provider that uses the OpenAI chat completions interface, and you enter your own API key. When you ask for a change, the text of the relevant part of the page, the page address and your description are sent to the provider you chose, and to no one else. The developer receives nothing. You can turn on encryption of stored keys with a passphrase.
+You provide the model. Web Alchemist works with the Anthropic API and with any AI provider that uses the OpenAI chat completions interface, and you enter your own API key. Each generation, each code check and each question is a call that your AI provider bills you for. The settings page shows the token use and cost of your calls.
 
-JavaScript changes need the optional permission to run user scripts, which Web Alchemist requests when you first save one. Access to a site is requested one site at a time.
+When you ask for a change or ask a question, the text of the relevant part of the page, the page address and your description are sent to the AI provider you chose, and to no one else. A screenshot is sent only when you add one. The developer receives nothing. Your API keys can be encrypted with a passphrase.
 
-Web Alchemist is free software under the GPL-3.0-or-later licence. On Firefox for Android the panel opens in a tab, and picking works by touch (issue 128). That interface has not been run on a device or an emulator, so the Android listing should not be published before it has been tested. The settings page can export transforms to share, back up and restore them, with optional passphrase encryption; neither file holds credentials or provider settings.
+JavaScript transforms need the optional permission to run user scripts, which Web Alchemist requests when you first save one. Access to a site is requested one site at a time. The settings page can export transforms to share, back them up and restore them, with optional passphrase encryption. Neither kind of file holds credentials or provider settings. On Firefox for Android the panel opens in a browser tab, and picking works by touch.
+
+Web Alchemist is free software under the GPL-3.0-or-later licence.
 
 ## Privacy policy draft
 
@@ -164,19 +165,24 @@ Web Alchemist is a Firefox extension that writes changes to webpages from descri
 
 ### Data that leaves the browser
 
-Data leaves the browser only when the user asks for a change to be written, checked or repaired. The extension then sends the following to the AI provider that the user selected in the settings:
+Data leaves the browser only when the user asks for a change to be written, refined or repaired, or asks a question about a draft. The extension then sends the following to the AI provider that the user selected in the settings:
 
-- the user's description of the change;
+- the user's description of the change, earlier requests in the same session, and the user's question when there is one;
 - the text and markup of the relevant part of the page;
-- the address of the page;
-- a screenshot of the visible tab, if the user asked for one;
+- the address of the page, with the part after #, query values and parts that look like tokens removed;
+- for a repair or a question, the code and the explanation that the model wrote earlier;
+- a screenshot of the visible tab, if the user added one;
 - the user's API key, to authenticate the request.
 
-The provider is the only recipient. It handles the data under its own terms and privacy policy, which the user accepted when creating the key. Web Alchemist has no server and does not send anything to its developer, to an analytics service or to any other party.
+When the change is JavaScript, the extension makes a second request to the same AI provider to check the code. That request contains the code and the user's description, and not the page.
+
+The AI provider is the only recipient. It handles the data under its own terms and privacy policy, which the user accepted when creating the key. Web Alchemist has no server and does not send anything to its developer, to an analytics service or to any other party.
 
 ### Data stored in the browser
 
-Settings, saved changes, usage records and API keys are stored in the browser profile on the user's own computer. Keys are stored as plain text unless the user turns on passphrase encryption. Removing the extension deletes this data.
+Settings, saved changes, usage records and API keys are stored in the browser profile on the user's own computer. Keys are stored as plain text unless the user turns on passphrase encryption. Removing the extension deletes this data. It does not cancel an API key at the AI provider, which the user does in the provider's own console.
+
+When the user exports or backs up saved changes, the extension writes a file to a place the user chooses. The file contains text and addresses taken from the pages the changes were written for, and it can be encrypted with a passphrase. It contains no API keys or provider settings.
 
 ### Contact
 
@@ -186,7 +192,7 @@ The contact address is to be added by the owner before submission.
 
 These steps can be done only by the owner of the AMO account.
 
-1. Confirm the open items named above: issues 53 and 137, and the decision about `identity` and `tabs`.
+1. Confirm that `tabs` is needed, or remove it. The decisions on issues 53 and 137 and on `identity` are recorded above.
 2. Ask Mozilla, before preparing the listing, whether a user-approved script written by a remote model and registered through `userScripts` is acceptable. The review in issue 41 recommends doing so first.
 3. Check Mozilla's current data collection categories and adjust the manifest and this document if they differ from those named here.
 4. Raise the version in `package.json` and `src/manifest.json` together if this is not the first upload.
@@ -195,5 +201,5 @@ These steps can be done only by the owner of the AMO account.
 7. Create the source zip with `git archive --format=zip HEAD` and check that its build matches the package, as described above.
 8. Upload `web-ext-artifacts/web_alchemist-0.1.0.zip` on AMO, attach the source zip, and paste the reviewer notes, permission justifications, summary and description from this document.
 9. Publish the privacy policy at a stable address or paste it into the policy field, with the contact address filled in.
-10. Add screenshots and the icon for the listing. The Android tab interface (issue 128) is implemented but untested on a device or emulator; do not publish an Android listing until it has been tested. Also confirm that the privacy policy and the data collection declaration cover export and backup files, which the user saves to their own computer and which contain page text and addresses.
+10. Add screenshots and the icon for the listing. The Android tab interface (issue 128) is implemented but has not been run on a device or an emulator. Do not publish a Firefox for Android listing until it has been tested, and remove the Android sentence from the description if it has not been tested by then.
 11. Choose listed or self-distributed signing, and submit.
