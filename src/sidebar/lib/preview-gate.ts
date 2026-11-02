@@ -1,3 +1,4 @@
+import { stableJson } from '@shared/config'
 import type { GenerationResult, ReviewResult } from '@shared/types'
 
 /**
@@ -23,12 +24,19 @@ export function jsPreviewGate(
 
 /**
  * Identifies what a review was run for. A review counts only for the same
- * code, intent, world and capabilities, so a regeneration or an edit to the
- * intent makes an earlier review stop counting.
+ * code, intent, world, capabilities and settings, so a regeneration or an edit
+ * to the intent makes an earlier review stop counting. The fields are part of
+ * what the reviewer saw; the values are not part of a review.
  */
 export function reviewKey(
-  result: Pick<GenerationResult, 'code' | 'world' | 'capabilities'>,
+  result: Pick<GenerationResult, 'code' | 'world' | 'capabilities'> & Partial<Pick<GenerationResult, 'config'>>,
   intent: string,
 ): string {
-  return JSON.stringify([result.code, intent, result.world, [...result.capabilities].sort()])
+  return JSON.stringify([
+    result.code,
+    intent,
+    result.world,
+    [...result.capabilities].sort(),
+    stableJson(result.config ?? []),
+  ])
 }

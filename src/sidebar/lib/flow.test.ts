@@ -116,6 +116,7 @@ const jsResultBase = {
   requestedWorld: 'USER_SCRIPT',
   worldReason: '',
   capabilities: [],
+  config: [],
   rationale: { targets: '', approach: '', assumptions: [] },
   intent: 'i',
 }
@@ -323,6 +324,7 @@ const jsResult = {
   kind: 'js',
   world: 'USER_SCRIPT',
   capabilities: [],
+  config: [],
   code: 'x',
   rationale: { targets: '', approach: '', assumptions: [] },
   intent: 'model intent',
@@ -536,6 +538,7 @@ const cssResult = (approach: string) =>
     name: 'n',
     kind: 'css',
     capabilities: [],
+    config: [],
     code: `/* ${approach} */`,
     rationale: { targets: '', approach, assumptions: [] },
     intent: 'model intent',
@@ -1503,6 +1506,7 @@ describe('a repair or regeneration of a transform restricted to a container (#12
     kind: 'css',
     code: 'div { color: red }',
     capabilities: [],
+    config: [],
     rationale: { targets: 't', approach: 'a', assumptions: [] },
   }
   const savedCall = () => calls.filter((c) => c.type === 'save-transform').at(-1)
@@ -3457,5 +3461,59 @@ describe('questions asked while refining', () => {
     expect(bubbles(flow)).toEqual(['user:old intent', 'assistant:a'])
     await askAndAnswer(flow, 'Why?', 'Because.')
     expect(bubbles(flow)).toEqual(['user:old intent', 'assistant:a', 'question:Why?', 'answer:Because.'])
+  })
+})
+
+describe('the settings of an elixir in the flow', () => {
+  const fields = [
+    { key: 'label', label: 'Label', type: 'text', default: 'd' },
+    { key: 'size', label: 'Size', type: 'number', default: 3 },
+  ]
+  const withFields = { ...jsResult, code: 'document.title = CONFIG.label', config: fields }
+  const passing = { static: [], undeclaredCapabilities: [], passed: true }
+  const settingsHandler = (m: any) => {
+    if (m.type === 'context-for-anchor') return { ok: true, data: found }
+    if (m.type === 'repair') return { ok: true, data: { result: withFields } }
+    if (m.type === 'analyse' || m.type === 'review') return { ok: true, data: passing }
+    return { ok: true, data: null }
+  }
+  const last = (type: string) => calls.filter((c) => c.type === type).at(-1)
+
+  it('puts the model fields in the draft and sends them with the analysis and the review', async () => {
+    const flow = newFlow()
+    handler = settingsHandler
+    await flow.repair({ ...saved, kind: 'js', intent: 'STORED' }, 'broken')
+    expect(flow.draft?.configFields).toEqual(fields)
+    expect(last('analyse').configFields).toEqual(fields)
+    await flow.toReview()
+    expect(last('review').configFields).toEqual(fields)
+  })
+
+  it('sends no settings for a result that has none', async () => {
+    const flow = newFlow()
+    handler = (m: any) => (m.type === 'repair' ? { ok: true, data: { result: jsResult } } : settingsHandler(m))
+    await flow.repair({ ...saved, kind: 'js', intent: 'STORED' }, 'broken')
+    expect(flow.draft).not.toHaveProperty('configFields')
+    expect(last('analyse')).not.toHaveProperty('configFields')
+    await flow.toReview()
+    expect(last('review')).not.toHaveProperty('configFields')
+  })
+
+  it('sends the fields of the saved elixir when it is edited with AI, and the same fields with its review', async () => {
+    const flow = newFlow()
+    handler = settingsHandler
+    await flow.editWithAi({ ...saved, kind: 'js', code: 'document.title = CONFIG.label', configFields: fields, configValues: { label: 'USERVALUE' } } as any)
+    expect(flow.result?.config).toEqual(fields)
+    expect(last('analyse').configFields).toEqual(fields)
+    await flow.toReview()
+    expect(last('review').configFields).toEqual(fields)
+    expect(JSON.stringify(calls.filter((c) => c.type === 'review' || c.type === 'analyse'))).not.toContain('USERVALUE')
+  })
+
+  it('counts a change of fields as a different result for the review that a preview needs', () => {
+    const a = { code: 'x', world: 'USER_SCRIPT', capabilities: [], config: fields } as any
+    expect(reviewKey(a, 'i')).toBe(reviewKey({ ...a, config: fields.map((f) => ({ ...f })) }, 'i'))
+    expect(reviewKey(a, 'i')).not.toBe(reviewKey({ ...a, config: [{ ...fields[0], default: 'changed' }] }, 'i'))
+    expect(reviewKey(a, 'i')).not.toBe(reviewKey({ ...a, config: [] }, 'i'))
   })
 })

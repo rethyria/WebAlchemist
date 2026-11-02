@@ -34,6 +34,7 @@ import type {
   Anchor,
   ElementContext,
   ExecutionWorld,
+  ConfigField,
   GenerationResult,
   HoverTarget,
   PageContext,
@@ -176,6 +177,11 @@ interface CapturedShot {
 
 /** The most questions that can be asked while refining one run. */
 export const MAX_QUESTIONS = 20
+
+/** The `configFields` entry of a message, left out when there are no settings. */
+function configFieldsOf(result: Pick<GenerationResult, 'config'>): { configFields?: ConfigField[] } {
+  return result.config.length > 0 ? { configFields: result.config } : {}
+}
 
 export class Flow {
   step = $state<Step>('list')
@@ -1160,6 +1166,7 @@ export class Flow {
               type: 'analyse',
               code: result.code,
               declaredCapabilities: result.capabilities,
+              ...configFieldsOf(result),
             })
           : await this.checkCss(result.code)
       if (!current()) return
@@ -1343,6 +1350,9 @@ export class Flow {
         code: transform.code,
         rationale: transform.rationale,
         intent: transform.intent,
+        // The fields of the saved elixir, so that a Refine sends them to the
+        // model and keeps the keys of the settings whose meaning is unchanged.
+        config: transform.configFields ?? [],
       }
       // Empty on purpose. The intent and the approach are already the current
       // instruction and the current result, and regenerate() moves that pair
@@ -1368,6 +1378,7 @@ export class Flow {
               type: 'analyse',
               code: transform.code,
               declaredCapabilities: transform.capabilities,
+              ...(transform.configFields && transform.configFields.length > 0 ? { configFields: transform.configFields } : {}),
             })
           : await this.checkCss(transform.code)
       if (!current()) return
@@ -1588,6 +1599,9 @@ export class Flow {
           ...(this.importedDescription === null ? {} : { importedDescription: this.importedDescription }),
           ...(this.savedDescription === null ? {} : { savedDescription: this.savedDescription }),
           history: this.history,
+          // The fields and defaults of the result being refined, so that the
+          // model keeps the key of each setting whose meaning is unchanged.
+          ...(this.result && this.result.config.length > 0 ? { currentConfig: this.result.config } : {}),
           scopeDepth: this.scopeDepth,
           scopeContainer: this.scopeContainer,
           tabId: this.tabId ?? undefined,
@@ -1647,6 +1661,7 @@ export class Flow {
               type: 'analyse',
               code: result.code,
               declaredCapabilities: result.capabilities,
+              ...configFieldsOf(result),
             })
           : await this.checkCss(result.code)
       if (!current()) return
@@ -1941,6 +1956,9 @@ export class Flow {
       rationale: result.rationale,
       anchor,
       code: result.code,
+      // The model's settings. The values the user set are not in the draft: the
+      // background keeps the stored ones and reconciles them to these fields.
+      ...(result.config.length > 0 ? { configFields: result.config } : {}),
       createdAt: this.draft?.createdAt ?? now,
       updatedAt: now,
     }
@@ -2068,6 +2086,7 @@ export class Flow {
         ...(this.resultFromImport ? { intentImported: true } : {}),
         instructions: this.reviewInstructions(),
         declaredCapabilities: result.capabilities,
+        ...configFieldsOf(result),
         world: result.world,
         transformId: draft.id,
         match: draft.match,
@@ -2364,7 +2383,11 @@ export class Flow {
           history: this.history,
           scopeDepth: this.scopeDepth,
           scopeContainer: this.scopeContainer,
-          draft: { code: result.code, rationale: result.rationale },
+          draft: {
+            code: result.code,
+            rationale: result.rationale,
+            ...(result.config.length > 0 ? { config: result.config } : {}),
+          },
           exchanges: this.exchanges,
           question,
           tabId: this.tabId ?? undefined,
@@ -2545,6 +2568,7 @@ export class Flow {
         ...(this.resultFromImport ? { intentImported: true } : {}),
         instructions: this.reviewInstructions(),
         declaredCapabilities: result.capabilities,
+        ...configFieldsOf(result),
         world: result.world,
         // The approval token is tied to the id and pattern, so the save must
         // send the same ones. The id is also what the review's cost is added
@@ -2596,6 +2620,7 @@ export class Flow {
       type: 'analyse',
       code: result.code,
       declaredCapabilities: [],
+      ...configFieldsOf(result),
     })
     this.analysis = analysis
     this.review = {

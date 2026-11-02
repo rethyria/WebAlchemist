@@ -16,7 +16,7 @@ import type {
 import { exactPagePattern, matchesUrl, originPermissionForUrl } from '@shared/match'
 import { CAPTURE_GRANT_KEY } from '@shared/capture-grant'
 import { appliesInContainer } from '@shared/container'
-import { reconcileValues } from '@shared/config'
+import { parseConfigFields, reconcileValues } from '@shared/config'
 import { refuseInPrivateWindow, requireNormalWindow } from './private-window'
 import { cropWindow, reducedSize, regionAtScroll, viewportChanged, type PixelSize, type ScrollOffset, type Viewport } from '@shared/region'
 import { createSerialQueue } from '@shared/serial'
@@ -699,6 +699,9 @@ async function handle(
               intent: existing.intent,
               previousCode: existing.code,
               previousRationale: existing.rationale,
+              // Fields and defaults only. The record also holds the user's
+              // values, which are never sent to a model.
+              ...(existing.configFields && existing.configFields.length > 0 ? { previousConfig: existing.configFields } : {}),
               brokenReason: message.brokenReason,
             },
           }),
@@ -1721,6 +1724,8 @@ interface GenerateOverPort {
   history: RefinementTurn[]
   scopeDepth?: number
   scopeContainer?: string | null
+  /** The settings of the elixir being changed: fields and defaults only. */
+  currentConfig?: ConfigField[]
   /*
    * Only the badge uses this. A sidebar's port sender carries no tab — the
    * panel belongs to a window, not a page — so the tab being worked on has to
@@ -1755,7 +1760,12 @@ async function runGeneration(
     url: request.context.url,
     transformId: request.transformId,
     call: (provider, post) => {
-      const withSignal = { ...request, signal }
+      // Only what a prompt is built from is passed on. The settings are parsed
+      // again, so what reaches a prompt is a valid list of fields, and nothing
+      // else in the message (a value, for example) can ride along with it.
+      const currentConfig = parseConfigFields(request.currentConfig).fields
+      const { currentConfig: _unchecked, ...rest } = request
+      const withSignal = { ...rest, ...(currentConfig.length > 0 ? { currentConfig } : {}), signal }
       return provider.generateStream
         ? provider.generateStream(
             withSignal,
@@ -1805,7 +1815,9 @@ async function runAsk(
     url: request.context.url,
     transformId: request.transformId,
     call: async (provider, post) => {
-      const { answer } = await provider.ask({ ...request, signal }, (accumulated) => {
+      const config = parseConfigFields(request.draft.config).fields
+      const draft = { code: request.draft.code, rationale: request.draft.rationale, ...(config.length > 0 ? { config } : {}) }
+      const { answer } = await provider.ask({ ...request, draft, signal }, (accumulated) => {
         post({ type: 'chunk', text: accumulated })
       })
       return { answer: answer.slice(0, MAX_ANSWER_CHARACTERS) }
@@ -2004,7 +2016,15 @@ async function runReview(
   // is suspended and the caller is told the receiving end does not exist.
   let model: ModelReview
   try {
-    model = await withKeepalive(() => provider.review({ code, intent, intentEditedByUser, intentImported, instructions }))
+    model = await withKeepalive(() => provider.review({
+        code,
+        intent,
+        intentEditedByUser,
+        intentImported,
+        instructions,
+        // Fields and defaults only. The user's values are never sent to a model.
+        ...(configFields && configFields.length > 0 ? { config: configFields } : {}),
+      }))
   } finally {
     // In `finally` so a billed response that failed to parse is still counted.
     await usage.settled()

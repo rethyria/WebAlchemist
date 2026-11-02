@@ -10,11 +10,11 @@
  * support cannot be queried and is set by hand on the Provider record.
  */
 
+import { toGenerationResult } from '@shared/generation-result'
 import {
   modelDisplayName,
   type Credential,
   type GenerationResult,
-  toGenerationResult,
   type ModelReview,
   type Provider,
 } from '@shared/types'
@@ -24,6 +24,7 @@ import {
   REVIEW_SYSTEM_PROMPT,
   askContent,
   fencePageContent,
+  fenceCurrentSettings,
   fenceSavedTransform,
   pageDataSections,
   randomNonce,
@@ -279,6 +280,9 @@ export async function createOpenAiCompatibleProvider(
         instruction,
         scopeInstruction(request.scopeDepth, request.scopeContainer ?? null, nonce),
         ...(request.repair ? [fenceSavedTransform(request.repair, nonce)] : []),
+    ...(request.currentConfig && request.currentConfig.length > 0 && !request.repair
+      ? [fenceCurrentSettings(request.currentConfig, nonce)]
+      : []),
         fencePageContent(
           // The screenshot is sent as an image part below. Serialised here it
           // would add the whole image to the request a second time as text.

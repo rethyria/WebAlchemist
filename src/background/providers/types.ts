@@ -1,5 +1,6 @@
 import {
   modelDisplayName,
+  type ConfigField,
   type GenerationResult,
   type TokenUsage,
   type ModelReview,
@@ -60,6 +61,12 @@ export interface ReviewArgs {
    * all need one.
    */
   instructions?: ReviewInstruction[]
+  /**
+   * The settings the code reads: keys, types, options and defaults. Written by
+   * the generating model, so the reviewer is told that they are data. The
+   * values the user sets are never part of a review request.
+   */
+  config?: ConfigField[]
 }
 
 export interface GenerateRequest {
@@ -102,6 +109,12 @@ export interface GenerateRequest {
    */
   history: RefinementTurn[]
   /**
+   * The settings of the elixir being changed (Refine and Brew again), so that
+   * the model keeps the key of every setting whose meaning is unchanged. It
+   * holds the fields and their defaults only, never the user's values.
+   */
+  currentConfig?: ConfigField[]
+  /**
    * Aborted when nobody can receive the result any more, which is when the
    * panel that asked has closed. Adapters pass it to the request so the call
    * stops being paid for.
@@ -112,6 +125,8 @@ export interface GenerateRequest {
     intent: string
     previousCode: string
     previousRationale: GenerationResult['rationale']
+    /** The settings of the saved elixir: fields and defaults, never the user's values. */
+    previousConfig?: ConfigField[]
     brokenReason: string
   }
 }
@@ -138,6 +153,8 @@ export interface AskRequest {
   draft: {
     code: string
     rationale: GenerationResult['rationale']
+    /** The settings of the draft: fields and defaults, never the user's values. */
+    config?: ConfigField[]
   }
   /** Earlier questions and answers of this run, oldest first. */
   exchanges: { question: string; answer: string }[]
@@ -315,8 +332,66 @@ export const GENERATION_SCHEMA = {
       type: 'string',
       description: 'Single sentence describing the end state. Must stand alone.',
     },
+    config: {
+      type: 'array',
+      description:
+        'Settings the user can change later without asking again. Empty for most transforms. At most 20. Every property is required, so use an empty string, an empty array or an empty list where one does not apply.',
+      items: {
+        type: 'object',
+        properties: {
+          key: {
+            type: 'string',
+            description: 'Starts with a lowercase letter, then letters and digits only, at most 32 characters. Unique. The code reads it as CONFIG.<key>.',
+          },
+          label: { type: 'string', description: 'Plain label for the user, 1 to 60 characters.' },
+          help: { type: 'string', description: 'One short line of help, up to 200 characters, or an empty string.' },
+          type: { type: 'string', enum: ['text', 'number', 'yes-no', 'choice', 'colour', 'list', 'table'] },
+          options: {
+            type: 'array',
+            description: 'For choice only, 2 to 20 options. Empty for every other type.',
+            items: {
+              type: 'object',
+              properties: { value: { type: 'string' }, label: { type: 'string' } },
+              required: ['value', 'label'],
+              additionalProperties: false,
+            },
+          },
+          columns: {
+            type: 'array',
+            description: 'For table only, 1 to 6 columns, each key following the same rule as key. Empty for every other type.',
+            items: {
+              type: 'object',
+              properties: { key: { type: 'string' }, label: { type: 'string' } },
+              required: ['key', 'label'],
+              additionalProperties: false,
+            },
+          },
+          min: { type: 'string', description: 'For number only: the smallest value as decimal text, or an empty string for no limit.' },
+          max: { type: 'string', description: 'For number only: the largest value as decimal text, or an empty string for no limit.' },
+          step: { type: 'string', description: 'For number only: the step as decimal text, or an empty string.' },
+          unit: {
+            type: 'string',
+            enum: ['', 'px', 'em', 'rem', '%', 'vh', 'vw', 's', 'ms', 'deg'],
+            description: 'For number only, used when CSS reads the value. An empty string for every other case.',
+          },
+          defaultValue: {
+            type: 'string',
+            description:
+              'The default of a text, colour, choice, number or yes-no setting. A number as decimal text. yes-no as "yes" or "no". A colour as #rrggbb. An empty string for list and table.',
+          },
+          defaultRows: {
+            type: 'array',
+            description:
+              'The default of a list (one cell per row) or a table (one cell per column, in column order). An empty list for every other type.',
+            items: { type: 'array', items: { type: 'string' } },
+          },
+        },
+        required: ['key', 'label', 'help', 'type', 'options', 'columns', 'min', 'max', 'step', 'unit', 'defaultValue', 'defaultRows'],
+        additionalProperties: false,
+      },
+    },
   },
-  required: ['name', 'kind', 'requestedWorld', 'worldReason', 'capabilities', 'code', 'rationale', 'intent'],
+  required: ['name', 'kind', 'requestedWorld', 'worldReason', 'capabilities', 'code', 'rationale', 'intent', 'config'],
   additionalProperties: false,
 } as const
 

@@ -283,6 +283,58 @@ export function parseConfigFields(raw: unknown): { fields: ConfigField[]; proble
   return { fields, problems }
 }
 
+/**
+ * Turns the settings a model returned into fields. The schema cannot express a
+ * default whose shape depends on the type, so the model sends `defaultValue`
+ * (text, colour, choice, number as decimal text, yes-no as "yes" or "no") and
+ * `defaultRows` (one list of cells per row, for list and table). Limits come as
+ * decimal text, where an empty string means no limit. The result goes through
+ * parseConfigFields, so an invalid field is dropped and nothing the schema
+ * allowed can reach storage unchecked.
+ */
+export function fieldsFromModel(raw: unknown): ConfigField[] {
+  if (!Array.isArray(raw)) return []
+  const limit = (value: unknown): number | undefined => {
+    if (typeof value !== 'string' || value.trim() === '') return undefined
+    return Number(value)
+  }
+  const candidates = raw.map((item): unknown => {
+    if (!isPlainObject(item)) return item
+    const type = item.type
+    const rows = Array.isArray(item.defaultRows)
+      ? item.defaultRows.map((row): unknown[] => (Array.isArray(row) ? row : []))
+      : []
+    const columns = Array.isArray(item.columns) ? (item.columns as unknown[]) : []
+    let value: unknown = item.defaultValue
+    if (type === 'number') value = typeof value === 'string' && value.trim() !== '' ? Number(value) : Number.NaN
+    else if (type === 'yes-no') value = value === 'yes' ? true : value === 'no' ? false : undefined
+    else if (type === 'list') value = rows.map((row) => row[0] ?? '')
+    else if (type === 'table') {
+      value = rows.map((row) =>
+        Object.fromEntries(columns.map((column, index) => [isPlainObject(column) ? column.key : '', row[index] ?? ''])),
+      )
+    }
+    const field: Record<string, unknown> = {
+      key: item.key,
+      label: item.label,
+      ...(item.help === '' ? {} : { help: item.help }),
+      type,
+      default: value,
+    }
+    if (type === 'choice') field.options = item.options
+    if (type === 'table') field.columns = item.columns
+    if (type === 'number') {
+      for (const name of ['min', 'max', 'step'] as const) {
+        const parsed = limit(item[name])
+        if (parsed !== undefined) field[name] = parsed
+      }
+      field.unit = item.unit ?? ''
+    }
+    return field
+  })
+  return parseConfigFields(candidates).fields
+}
+
 /** JSON text with the keys of every object in sorted order, so that two equal values give equal text. */
 export function stableJson(value: unknown): string {
   return JSON.stringify(value, (_key, inner: unknown) =>

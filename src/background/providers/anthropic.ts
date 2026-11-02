@@ -12,11 +12,11 @@
  * work from any context.
  */
 
+import { toGenerationResult } from '@shared/generation-result'
 import Anthropic from '@anthropic-ai/sdk'
 import {
   modelDisplayName,
   type GenerationResult,
-  toGenerationResult,
   type ModelReview,
   type PageContext,
   type Provider,
@@ -27,6 +27,7 @@ import {
   REVIEW_SYSTEM_PROMPT,
   askContent,
   fencePageContent,
+  fenceCurrentSettings,
   fenceSavedTransform,
   pageDataSections,
   randomNonce,
@@ -463,6 +464,9 @@ export function buildGenerationContent(
     instruction,
     scopeInstruction(request.scopeDepth, request.scopeContainer ?? null, nonce),
     ...(request.repair ? [fenceSavedTransform(request.repair, nonce)] : []),
+    ...(request.currentConfig && request.currentConfig.length > 0 && !request.repair
+      ? [fenceCurrentSettings(request.currentConfig, nonce)]
+      : []),
     fencePageContent(describeContext(request.context) + pageDataSections(request, nonce), nonce),
   ].join('\n\n')
 

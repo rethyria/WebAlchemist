@@ -8,7 +8,8 @@
 
 import { resetBrowserMock } from './test-support/browser-mock'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { toGenerationResult, type Provider } from '@shared/types'
+import { toGenerationResult } from '@shared/generation-result'
+import type { Provider } from '@shared/types'
 import { MAIN_WORLD_RISKS, worldState } from '@shared/world'
 import * as storage from './storage'
 import { createOpenAiCompatibleProvider } from './providers/openai-compatible'
