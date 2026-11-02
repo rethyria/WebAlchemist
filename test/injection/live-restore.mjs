@@ -19,12 +19,12 @@ try {
   const p = saved.providers.find((x) => x.id === saved.activeProviderId)
   await s.setModels(p.generateModel, p.reviewModel, O)
   await s.B.run(`browser.storage.local.remove('wa-disclosure-ack').then(() => 'removed')`)
-  if (s.original.localhost === 'false') await s.grant('remove', ['http://localhost/*'])
+  if (s.original.localhost === 'false') await s.grant('remove', ['*://localhost/*'])
   await s.parent.run(`(() => { const p = 'extensions.webextOptionalPermissionPrompts'; Services.prefs.clearUserPref(p); return 'cleared' })()`)
   out.settingsIdentical = (await s.rawSettings()) === s.original.settings
   out.ackAbsent = (await s.B.run(`browser.storage.local.get('wa-disclosure-ack').then(s => String('wa-disclosure-ack' in s))`)) === 'false'
   out.transformsIdentical = (await s.B.long(`browser.storage.local.get('transforms').then(s => JSON.stringify(s.transforms ?? null))`)) === s.original.transforms
-  out.localhostGrant = await s.B.run(`browser.permissions.contains({ origins: ['http://localhost/*'] })`)
+  out.localhostGrant = await s.B.run(`browser.permissions.contains({ origins: ['*://localhost/*'] })`)
   out.allSitesGrant = await s.B.run(`browser.permissions.contains({ origins: ['<all_urls>'] })`)
   out.prefNow = await s.parent.run(`(() => { const p = 'extensions.webextOptionalPermissionPrompts'; return Services.prefs.prefHasUserValue(p) ? 'user:' + Services.prefs.getBoolPref(p) : 'default' })()`)
   out.original = { localhost: s.original.localhost, allSites: s.original.allSites, pref: s.original.pref, ack: s.original.ack }

@@ -22,7 +22,7 @@ export const SIDEBAR = 'src/sidebar/index.html'
 export const ORIGINAL = '/tmp/wa/orig.json'
 export const LEDGER = '/tmp/wa/ledger.jsonl'
 export const MAX_CALLS = 40
-export const MAX_COST = 5
+export const MAX_COST = Number(process.env.WA_MAX_COST ?? 5)
 /** USD per million tokens, from the brief of the run. */
 export const PRICES = {
   'claude-sonnet-5-5': [2, 10],

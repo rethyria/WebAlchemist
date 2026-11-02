@@ -63,9 +63,9 @@ async function runOne(target, followUp) {
   await trustedPageClick(rdp, needle, geo[0] + 5, geo[1] + 5)
   if (!(await s.waitFor(sb, `!!document.querySelector('textarea')`))) throw new Error('no describing step: ' + (await s.text()).slice(0, 300))
   const picked = (await s.text()).replace(/\s+/g, ' ').match(/(\S+) locked/)?.[1]
-  await sb.run(`(() => { const t = document.querySelector('textarea'); t.value = ${JSON.stringify(INSTRUCTIONS[target])}; t.dispatchEvent(new Event('input', { bubbles: true })); return 'typed' })()`)
+  await sb.run(`(() => { const t = document.querySelector('textarea'); t.value = ${JSON.stringify(process.env.INSTRUCTION ?? INSTRUCTIONS[target])}; t.dispatchEvent(new Event('input', { bubbles: true })); return 'typed' })()`)
   await sleep(400)
-  const result = { tag, model: MODEL, kind: KIND, target, picked, instruction: INSTRUCTIONS[target], calls: [] }
+  const result = { tag, model: MODEL, kind: KIND, target, picked, instruction: process.env.INSTRUCTION ?? INSTRUCTIONS[target], calls: [] }
   const generate = async (button, since) => {
     assertBudget()
     await s.click(button)
@@ -95,6 +95,7 @@ async function runOne(target, followUp) {
     return { done, err, analysis }
   }
   const since = await s.logLength()
+  let since2Mark = since
   let log = await generate('Brew', since)
   let out = readOut(log, '')
   if (out.err) { result.error = out.err; return result }
@@ -109,6 +110,7 @@ async function runOne(target, followUp) {
     await sleep(500)
     result.firstTurn = { result: generated, analysis: out.analysis }
     const since2 = await s.logLength()
+    since2Mark = since2
     log = await generate('Brew again', since2)
     out = readOut(log, '-refine')
     if (out.err) { result.error = out.err; return result }
@@ -120,8 +122,11 @@ async function runOne(target, followUp) {
   // The review, started by the panel's own button for JavaScript. CSS has no model review.
   if (result.result.kind === 'js' && result.analysis?.passed) {
     assertBudget()
-    const since3 = await s.logLength()
-    await s.click('Read the code first')
+    // The panel starts the review as soon as the analysis passes, so the reply can be earlier than this point; read from the start of the last generation.
+    const since3 = followUp && generated.kind === 'js' ? since2Mark : since
+    // The panel starts the check by itself once the analysis passes; the button is pressed only if it is shown.
+    await sleep(1500)
+    if ((await sb.run(s.hasButton('Check the code'))) === 'true') await s.click('Check the code')
     for (let i = 0; i < 90; i += 1) {
       await sleep(2000)
       const l = await s.log(since3)
@@ -152,7 +157,7 @@ async function runOne(target, followUp) {
 
 try {
   await s.B.run(`browser.storage.local.set({ 'wa-disclosure-ack': { version: 999, at: 1 } }).then(() => 'ack set')`)
-  await s.grant('add', ['http://localhost/*'])
+  await s.grant('add', ['*://localhost/*'])
   await s.hideSidebar()
   await s.showSidebar()
   await s.setModels(MODEL, MODEL)

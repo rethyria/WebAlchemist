@@ -301,3 +301,17 @@ WA_RDP_PORT=<port> node test/injection/live-restore.mjs
 ```
 
 `live-lib.mjs` holds the shared helpers and the ledger that stops a run at 40 calls or US$5. The runs need the development Firefox from `npm run start:firefox`, an API key in the profile, and calls that cost money.
+
+# Paid check of the settings schema on 2 November 2026
+
+This check asked whether the Anthropic API accepts the generation response schema with the required `config` array (commit d203cee), and whether a model proposes settings for a request that suits them. It was measured with the extension built at commit 78e9aa9, against the provider of the development profile (Anthropic, not an OpenAI-compatible provider), on the clean fixture, with the generation and review model set to the same model. The limit was US$1.
+
+| Model | Target | Instruction | Result | Config fields | Static analysis | Automatic code check | Cost (US$) |
+|---|---|---|---|---|---|---|---:|
+| Sonnet 5.5 | comment-form | Character counter | JavaScript, no schema error | none | passed | ran; verdict not captured (the harness read the log too late) | 0.0262 |
+| Opus 5.5 | comment-form | Character counter | JavaScript, no schema error | none | passed | match | 0.0568 |
+| Sonnet 5.5 | plan-card | Replace the word 'plan' with 'package' and allow more replacements later | JavaScript, no schema error | one `table` field, `replacements`, with columns `from` and `to` and the default row plan → package | passed, no findings | match | 0.0465 |
+
+The cost of the first row includes about US$0.0052 for the code check, which the panel displayed (1,954 tokens in, 128 out) and the ledger did not record. The total is about US$0.13 for 6 calls. The provider returned no error for the schema in any call. The settings request produced code that reads `CONFIG.replacements`; the draft was discarded and nothing was saved.
+
+The harness needed three changes: the permission origin granted to the extension is now `*://localhost/*`, the code check is started by the panel itself (the harness presses "Check the code" only if the button is shown, and reads the review reply from the start of the generation), and `WA_MAX_COST` and `INSTRUCTION` set the budget and the instruction. The restore script reported that the stored settings and transforms differ from the snapshot taken in the earlier run; that snapshot predates the settings feature.
