@@ -75,7 +75,8 @@ describe('what the text says', () => {
   it('uses sentence-case headings that are noun phrases without a trailing full stop', () => {
     for (const { heading } of firstRunDisclosure({ sealed: false, unlocked: true })) {
       expect(heading).toMatch(/^[A-Z][a-z]/)
-      expect(heading).not.toMatch(/[A-Z].*\s[A-Z]/)
+      // A later word may be an acronym such as AI, but not a capitalised word.
+      expect(heading).not.toMatch(/\s[A-Z][a-z]/)
       expect(heading).not.toMatch(/[.?!]$/)
     }
   })

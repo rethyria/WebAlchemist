@@ -85,7 +85,7 @@ export const disclosureMessages = defineMessages({
     message: 'On excluded sites and their subdomains, Web Alchemist does not pick elements, generate or run transforms, apply saved CSS, count transforms on the toolbar badge, check whether transforms still work, or add any of its own scripts to the page. A page that is already open keeps its changes until it is reloaded. The list is under Excluded sites on the settings page and starts empty. Before text from a page with password or payment fields is sent, a warning asks you to confirm.',
   },
   headingSent: {
-    message: 'What is sent to your provider',
+    message: 'What is sent to your AI provider',
     description: 'Heading of a section of the first-run disclosure.',
   },
   leadSent: {
