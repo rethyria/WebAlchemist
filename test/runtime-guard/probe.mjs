@@ -263,6 +263,14 @@ try {
     ])
     rows.push(['guarded, nothing declared: timers given functions still work, with their arguments', g.other['data-wa-fn-timer'] === 'ran' && g.other['data-wa-timer-args'] === 'xy'])
     rows.push([
+      'guarded, nothing declared: the style element with url(), @import or @font-face, and the iframe with an src, made no request (the guard refused the text and the frame)',
+      ['styleElementUrl', 'styleElementImport', 'fontFace', 'iframeSrc'].every((n) => !run('guarded-nothing').arrived.has(`dom.${n}`) && g.dom[n]?.startsWith('threw')),
+    ])
+    rows.push([
+      'guarded, network declared: the style element routes make their requests again, and the iframe is still refused',
+      Boolean(run('guarded-network').arrived) && ['styleElementUrl', 'styleElementImport', 'fontFace'].every((n) => run('guarded-network').arrived.has(`dom.${n}`)) && !run('guarded-network').arrived.has('dom.iframeSrc'),
+    ])
+    rows.push([
       'guarded, nothing declared: the numbered window routes give no window, because the guard refused to create the frames',
       ['window0', 'window1'].every((r) => typeof g.routes[r] === 'string') && g.other.iframeCreate?.startsWith('blocked'),
     ])

@@ -8,7 +8,7 @@ Measured on 2026-11-01 in Firefox 159.0 (flatpak build, SteamOS), with Firefox s
 
 The guard hides the listed features from every route to the window that the issue names: the bare name, `window`, `self`, `top`, `parent`, `document.defaultView`, `getRootNode()`, `parentNode`, `Object.getPrototypeOf(globalThis)`, `this` in a timer callback, the target of an event on `window` or on `document`, `frames[0]`, and the `contentWindow` of a created iframe. It also hides two routes that the issue did not list and that the measurements found: `window.wrappedJSObject` (the page's real window) and `element.constructor.constructor` (the page's `Function`). A transform that declared a capability keeps the features of that capability. The page's own use of every feature is unaffected.
 
-The guard refuses to create an element with a browsing context of its own, which closes the windows reached by index (`window[0]`) for frames that the transform creates. The frames that the page already had stay reachable by index and have every feature. The Xray waiver on any element, event or collection stays open (see the sections below), so the guard is a second protection and not a boundary against a transform written to evade the static analysis. The acceptance criterion of #139 asks for each feature to be unreachable from a transform that declared nothing, through every route, so it is not met in full.
+The guard refuses to create an element with a browsing context of its own, which closes the windows reached by index (`window[0]`) for frames that the transform creates and the request of an `iframe` with an `src`. For a transform that did not declare `network` it also refuses CSS text that loads an address, which closes the requests of `url()`, `@import` and `@font-face` in a style element and in a sheet. The frames that the page already had stay reachable by index and have every feature. The Xray waiver on any element, event or collection stays open (see the sections below), so the guard is a second protection and not a boundary against a transform written to evade the static analysis. The acceptance criterion of #139 asks for each feature to be unreachable from a transform that declared nothing, through every route, so it is not met in full.
 
 ## What was measured
 
@@ -82,7 +82,36 @@ The guard was not applied to a world other than USER_SCRIPT. In the MAIN world t
 | `style` element containing `@font-face` | arrives | arrives | Page |
 | `iframe` with `src` | arrives | arrives | Neither |
 
-For the rows marked Page: with an open world CSP and a page that sends `default-src 'none'; style-src 'unsafe-inline'; img-src 'none'; font-src 'none'; frame-src 'none'`, the three style loads do not arrive. For the rows marked World: with an open world CSP and the page policy above, those elements still arrive, so the page policy does not govern them. For the iframe: the request arrives under a strict world policy and under that page policy, which has `frame-src 'none'`, so neither policy stopped it. The image route that #21 found closed for `new Image()` is closed for inserted `img` elements as well. The four routes marked Page or Neither are open to a transform, and the guard does not change them. The static analysis refuses an address written to an element or to a style that can load a resource, so these routes depend on that check.
+For the rows marked Page: with an open world CSP and a page that sends `default-src 'none'; style-src 'unsafe-inline'; img-src 'none'; font-src 'none'; frame-src 'none'`, the three style loads do not arrive. For the rows marked World: with an open world CSP and the page policy above, those elements still arrive, so the page policy does not govern them. For the iframe: the request arrives under a strict world policy and under that page policy, which has `frame-src 'none'`, so neither policy stopped it. The image route that #21 found closed for `new Image()` is closed for inserted `img` elements as well. These four routes were open to a transform under the guard of commit 76d9244. The sections that follow measure what the guard does to them now.
+
+### Requests from stylesheet text and from iframe src
+
+The four routes above that no policy governed are closed by two refusals in the guard: the refusal to create frames (see the next section), which stops the `iframe` with an `src`, and a check of the CSS text that a transform writes, for a transform that did not declare `network`. `styles.mjs` measures the text check on 2026-11-01 in Firefox 159.0, on a page that has a style element of its own. It puts CSS that loads an address into the document by 69 paths, each for an element with its own id and its own address, so the server's log shows which path made a request. The paths are:
+
+- the text of a style element: `textContent`, `innerHTML`, `innerText`, `appendChild`, `insertBefore` and `replaceChild` of a text node, `append`, `prepend`, `replaceChildren`, `insertAdjacentText`, and a range's `insertNode`;
+- the text node inside a style element: `data`, `nodeValue`, `textContent`, `appendData`, `insertData`, `replaceData`, `replaceWith`, `before`, `after`, and `splitText` followed by `data`;
+- a style element built before it is inserted, a clone of one, an SVG style element, the page's own style element (written with `+=` and with `appendChild`), and a style element in a shadow root;
+- markup that holds a style element or a style attribute, through `innerHTML`, `outerHTML`, `insertAdjacentHTML`, `createContextualFragment`, `DOMParser`, a `template`, `setHTMLUnsafe` and a shadow root's `innerHTML`;
+- the text of a sheet: `insertRule` (also with `@import`), the legacy `addRule`, `insertRule` of a grouping rule, `replaceSync`, `replace` and `insertRule` on a constructed sheet put in `document.adoptedStyleSheets` or a shadow root's `adoptedStyleSheets`, and a sheet whose text came from another document;
+- the declarations of a rule in a sheet: `setProperty`, `cssText`, the property setters `backgroundImage` and `background`, a custom property used by `var()`, and the declarations of a keyframe;
+- the forms of the text, written through `textContent`: `url()` unquoted, quoted and in upper case, `@import` with `url()` and with a string, `@font-face` whose font is used, `image-set()` with and without the `-webkit-` prefix, `list-style-image`, `cursor`, `content: url()`, an escape inside `url` and inside `@import` (`u\72l(`, `@\69mport`), a token split over two writes (`@imp` then `ort ...`), and a split over two text nodes.
+
+Controls and results:
+
+| Check | Result |
+|---|---|
+| Baseline, no guard (control) | All 69 paths request their address, and the server sees each one. The two inline style paths (`style.cssText` and `setAttribute('style', ...)` on an element) send no request, because the world's CSP refuses them, which also shows that the world's policy governs inline style and not the `style` element. A form with a `data:` address and a form with no address send no request. |
+| The page, from its own context, in every configuration | The same 69 paths make their requests under other addresses, so the page is unaffected by the wrappers. |
+| Guard of commit bb130c3, with the frame refusal and without the text check | All 69 paths still request their addresses. Refusing the creation of frames does not close them. |
+| Guard with the text check, nothing declared | None of the 69 paths requests its address, and each one raised the guard's error. A rule with no address (`color: red; content: "\201C"`) is accepted. The inline style set with `setAttribute` is not touched. |
+| Guard with the text check, `network` declared | All 69 paths request their addresses again, so the check refuses undeclared addresses and is not a general block of CSS. |
+| `probe.mjs`, the `iframe` with an `src`, nothing declared | No request: the frame was refused. With the world CSP and the page policy that were measured before, the request had arrived. |
+
+How the text check works. The guard wraps every function and setter of the list above. A text is refused when it contains `@import`, `url(`, `image-set(`, `image(`, `cross-fade(` or `src(`, which are the names that the static analysis uses for CSS that loads an address, with the addition of three functions. Escapes are decoded first, so `u\72l(` is read as `url(`. A write into a style element, or into a text node inside one, is checked together with the text that is already there, and is refused when the two together hold more of these tokens than the existing text did; this is what stops a token split over two writes and still allows a page's own style element, which may already hold an address, to be written to. A node that is passed (a text node, a fragment) is read for its text once, and any other object is converted once, as in the frame refusal. Markup is refused when it holds one of the tokens and also a `style` element or a `style` attribute. All of this is skipped when `network` is declared. The check treats a `data:` address as an address, because the static analysis does too: `url(data:...)` is refused for a transform that did not declare `network`.
+
+Cost: the guard took 1 to 2 ms to run in the world without the text check and 5 ms with it, in this browser, which reports times in whole milliseconds. This is not a measurement of page load.
+
+Not demonstrated as routes, because they sent no request even with no guard: `execCommand('insertText')` into an editable style element, a declaration of a nested rule (the nested rule had nothing to load), and the `src` descriptor of an `@font-face` rule, which Firefox refuses (a `NotSupportedError`). `rule.styleMap` does not exist in this version.
 
 ### Windows reached by index
 
@@ -160,7 +189,8 @@ The last three routes are attributes of inserted elements, in the same family as
 - Windows reached by index for frames that the page already had (see the section on windows reached by index). A property cannot be defined on an index of the window wrapper.
 - The Xray waiver on elements, text nodes, events and collections, and `XPCNativeWrapper.unwrap`. They reach the page's window and its `Function` (see the section on the waiver). Only the static analysis refuses them.
 - A `video` poster, `link rel="modulepreload"` and a click on a submit button, which load or send without a feature of the window.
-- Requests made by inserted elements: `style` elements containing `url()`, `@import` or `@font-face`, and `iframe` with `src`, as in the table above.
+- Requests from stylesheet text are refused only for the 69 paths measured and the sinks that the guard wraps. A path that writes text into a style element that is not on the list, for example an editing command that was not shown to work, or a new interface that Firefox adds, is not covered.
+- CSS that loads an address is checked by its text. An address built from several pieces that never form `url(` in one write (for example through a custom property set from separate writes) was not measured.
 - Navigation. Setting `location` was not measured. The static analysis refuses it.
 - Code run by the page through DOM sinks: inline event handler attributes, `javascript:` addresses, `script` elements, `document.write` and `innerHTML`. They were not measured. The static analysis refuses them, and the guard does not affect them. A `script` element with a `src` was refused by the world CSP in this run.
 - The guard hides names, not the page. A transform can still change the page's DOM, which the page's own scripts then act on, and that includes the page's own `fetch` calls.
@@ -171,9 +201,10 @@ The last three routes are attributes of inserted elements, in the same family as
 - A transform in the MAIN world, which the guard cannot be applied to.
 - Other Firefox versions. The extension requires 140 or later; only 159.0 was measured.
 - Pages that have their own content security policy, other than the one test page described above.
-- A transform running on a page that already contains iframes, and frames of other origins.
-- The cost of the guard on page load.
-- Every Web API that can send data (for example `navigator.mediaDevices`, `BroadcastChannel`, `postMessage` to other windows, and form submission). Only the features listed above were tested.
+- Frames of other origins, and a transform running on a page that creates its own frames after the transform ran. Only a page with two same-origin frames present at load was measured.
+- The cost of the guard on page load. Only the time to run the guard script (1 to 5 ms, to the whole millisecond) was read, once per configuration.
+- Every Web API that can send data (for example `navigator.mediaDevices`, `BroadcastChannel` and `postMessage` to other windows). Only the features listed above were tested.
+- Whether a page that redefines `Document.prototype.createElement`, `Node.prototype.appendChild` or a CSS interface before the guard runs changes what the wrappers see. The guard reads the wrapper of the page's object that the world has, and the effect of a page redefinition on it was not measured.
 - Behaviour with the guard when the page replaces `window.Function`, `EventTarget` or `Object` before the guard runs. A page script runs before the guard at `document_idle`, so a page can do this, and the effect on the guard was not measured.
 - The production build has no probe for the failure path of the guard (a definition that throws). It is covered only by a unit test with a frozen stand-in window.
 
@@ -183,6 +214,7 @@ The last three routes are attributes of inserted elements, in the same family as
 |---|---|
 | `techniques.mjs` | Which way of removing a feature works, per route |
 | `probe.mjs` | Reachability by route with and without the guard, the page controls and the inserted elements |
+| `styles.mjs`, `styles-code.mjs` | Requests made by stylesheet text, by 69 paths, with and without the text check |
 | `frames.mjs`, `frames-code.mjs` | Windows reached by index, and the refusal of frame creation through every API that makes elements |
 | `integration.mjs` | The guard in the registration that the extension makes |
 | `resources.mjs`, `resources-code.mjs` | Page objects reached through the waiver, and loads that the world's CSP does not stop |
@@ -201,6 +233,7 @@ WA_RDP_PORT=<port> node test/runtime-guard/probe.mjs
 WA_RDP_PORT=<port> node test/runtime-guard/integration.mjs
 WA_RDP_PORT=<port> node test/runtime-guard/resources.mjs
 WA_RDP_PORT=<port> node test/runtime-guard/frames.mjs
+WA_RDP_PORT=<port> node test/runtime-guard/styles.mjs
 ```
 
 `probe.mjs` imports `src/background/runtime-guard.ts` directly, which needs a Node version that strips TypeScript types (22.18 or later). Each probe prints its controls with its results and exits with 1 when a row of its verdict fails.

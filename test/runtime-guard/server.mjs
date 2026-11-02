@@ -39,10 +39,16 @@ export function startServer() {
       response.end('<!doctype html><html><head><meta charset="utf-8"><title>runtime guard probe</title></head><body><main><p id="subject">Probe page</p></main></body></html>')
       return
     }
+    if (path === '/page-style') {
+      // A page with a style element of its own, for the routes that change one.
+      response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
+      response.end('<!doctype html><html><head><meta charset="utf-8"><title>style</title><style id="pagestyle">main { margin: 0 }</style></head><body><main><p id="subject">Probe page with a style element</p></main></body></html>')
+      return
+    }
     if (path === '/page-frames' || path === '/blank') {
       // /page-frames already has two same-origin frames, one of them named, so
       // that a window reached by index without the transform creating anything
-      // can be measured. /page-style has a style element of the page's own.
+      // can be measured.
       response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
       response.end(
         path === '/blank'

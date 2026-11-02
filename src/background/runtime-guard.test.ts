@@ -82,7 +82,44 @@ function world(options: { frozenWindow?: boolean; without?: string } = {}) {
       prototype.submit = () => 'submitted'
       prototype.requestSubmit = () => 'submitted'
     }
+    if (name === 'Node') {
+      // The brand check of the real getters: they throw for an object that is not a node.
+      const read = (field: string) =>
+        function (this: Record<string, unknown>) {
+          if (this === null || typeof this !== 'object' || !('type' in this)) throw new TypeError('not a node')
+          return this[field]
+        }
+      Object.defineProperty(prototype, 'nodeType', { get: read('type'), configurable: true })
+      Object.defineProperty(prototype, 'parentNode', { get: read('parent'), configurable: true })
+      for (const accessor of ['textContent', 'nodeValue']) {
+        Object.defineProperty(prototype, accessor, {
+          get: read('text'),
+          set: function (this: Record<string, unknown>, value: unknown) {
+            calls.push({ name: accessor, self: this, args: [value] })
+          },
+          configurable: true,
+        })
+      }
+      for (const method of ['appendChild', 'insertBefore', 'replaceChild']) prototype[method] = recorder(method)
+    }
+    if (name === 'HTMLElement') {
+      Object.defineProperty(prototype, 'innerText', {
+        get: () => '',
+        set: function (this: unknown, value: unknown) {
+          calls.push({ name: 'innerText', self: this, args: [value] })
+        },
+        configurable: true,
+      })
+    }
     if (name === 'Element') {
+      Object.defineProperty(prototype, 'localName', {
+        get: function (this: Record<string, unknown>) {
+          if (this === null || typeof this !== 'object' || !('type' in this)) throw new TypeError('not an element')
+          return this.name
+        },
+        configurable: true,
+      })
+      for (const method of ['append', 'prepend', 'replaceChildren', 'insertAdjacentText']) prototype[method] = recorder(method)
       for (const method of ['insertAdjacentHTML', 'setHTMLUnsafe', 'setHTML']) prototype[method] = recorder(method)
       for (const accessor of ['innerHTML', 'outerHTML']) {
         Object.defineProperty(prototype, accessor, {
@@ -110,7 +147,39 @@ function world(options: { frozenWindow?: boolean; without?: string } = {}) {
     },
     configurable: true,
   })
-  const range = interfaceWith(['createContextualFragment'])
+  const range = interfaceWith(['createContextualFragment', 'insertNode'])
+  Object.defineProperty(range.prototype, 'startContainer', {
+    get: function (this: { container: unknown }) {
+      return this.container
+    },
+    configurable: true,
+  })
+  const characterData = interfaceWith(['appendData', 'insertData', 'replaceData', 'before', 'after', 'replaceWith'])
+  for (const accessor of ['data']) {
+    Object.defineProperty(characterData.prototype, accessor, {
+      get: () => '',
+      set: function (this: unknown, value: unknown) {
+        calls.push({ name: accessor, self: this, args: [value] })
+      },
+      configurable: true,
+    })
+  }
+  const cssStyleSheet = interfaceWith(['insertRule', 'addRule', 'replace', 'replaceSync'])
+  const cssGroupingRule = interfaceWith(['insertRule'])
+  const cssStyleDeclaration = interfaceWith(['setProperty'])
+  const cssSetter = (name: string) => ({
+    get: () => '',
+    set: function (this: unknown, value: unknown) {
+      calls.push({ name, self: this, args: [value] })
+    },
+    configurable: true,
+  })
+  Object.defineProperty(cssStyleDeclaration.prototype, 'cssText', cssSetter('cssText'))
+  const cssStyleProperties = interfaceWith([])
+  for (const name of ['backgroundImage', 'background-image', 'color', 'listStyleImage']) {
+    Object.defineProperty(cssStyleProperties.prototype, name, cssSetter(name))
+  }
+  Object.defineProperty(cssStyleProperties.prototype, 'length', { get: () => 0, configurable: true })
   const domParser = interfaceWith(['parseFromString'])
   const domImplementation = interfaceWith(['createDocument'])
   const customElementRegistry = interfaceWith(['define'])
@@ -130,27 +199,30 @@ function world(options: { frozenWindow?: boolean; without?: string } = {}) {
     sandbox[name] = `real ${name}`
   }
 
-  const run = (capabilities: Capability[]) => {
-    const source = runtimeGuardSource(capabilities, MARKER)
+  const run = (capabilities: Capability[], guardOptions: { blockFrames?: boolean; blockStyleText?: boolean } = {}) => {
+    const source = runtimeGuardSource(capabilities, MARKER, guardOptions)
     new Function(
       'window', 'navigator', 'Navigator', 'document', 'Document', 'EventTarget',
       'HTMLIFrameElement', 'HTMLFrameElement', 'HTMLObjectElement', 'HTMLEmbedElement',
       'location', 'history', 'globalThis', 'Node', 'Element', 'HTMLElement', 'Location', 'History',
       'BaseAudioContext', 'HTMLFormElement', 'ShadowRoot', 'Range', 'DOMParser', 'DOMImplementation',
-      'CustomElementRegistry',
+      'CustomElementRegistry', 'CharacterData', 'CSSStyleSheet', 'CSSGroupingRule', 'CSSStyleDeclaration',
+      'CSSStyleProperties',
       source,
     )(
       win, navigator, { prototype: navigatorPrototype }, doc, documentInterface, eventTarget,
       ...frames.map(([, ctor]) => ctor),
       location, history, sandbox, prototypes.Node, prototypes.Element, prototypes.HTMLElement,
       prototypes.Location, prototypes.History, prototypes.BaseAudioContext, prototypes.HTMLFormElement,
-      shadowRoot, range, domParser, domImplementation, customElementRegistry,
+      shadowRoot, range, domParser, domImplementation, customElementRegistry, characterData, cssStyleSheet,
+      cssGroupingRule, cssStyleDeclaration, cssStyleProperties,
     )
   }
   return {
     win, navigator, doc, attributes, timerCalls, pageFunctionPrototype, frames, run, navigatorPrototype,
     documentPrototype, location, history, prototypes, sandbox, eventTarget, calls, documentInterface,
-    shadowRoot, range, domParser, domImplementation, customElementRegistry,
+    shadowRoot, range, domParser, domImplementation, customElementRegistry, characterData, cssStyleSheet,
+    cssGroupingRule, cssStyleDeclaration, cssStyleProperties,
   }
 }
 
@@ -482,8 +554,200 @@ describe('the refusal to create an element with a browsing context', () => {
   it('leaves the frame wrappers out when asked, for the probe that measures their effect', () => {
     const w = world()
     const source = runtimeGuardSource([], MARKER, { blockFrames: false })
-    expect(source).not.toContain('FRAME_MARKUP')
-    expect(runtimeGuardSource([], MARKER)).toContain('FRAME_MARKUP')
-    void w
+    expect(source).toContain('const FRAMES = false;')
+    expect(runtimeGuardSource([], MARKER)).toContain('const FRAMES = true;')
+    // With both refusals left out, a frame name and style text are passed on.
+    w.run([], { blockFrames: false, blockStyleText: false })
+    expect(PROTOTYPE_OF(w).createElement.call(w.doc, 'iframe')).toBe('made by createElement')
+    expect(() => w.prototypes.Node.prototype.appendChild).not.toThrow()
+  })
+})
+
+
+describe('the refusal of stylesheet text that loads an address', () => {
+  const styleNode = (text = '') => ({ type: 1, name: 'style', text, parent: null as unknown })
+  const textIn = (style: { text: string }) => ({ type: 3, name: '#text', text: style.text, parent: style })
+  const divNode = () => ({ type: 1, name: 'div', text: '', parent: null })
+  const LOADING = [
+    '#a { background-image: url(http://x.example/a.png) }',
+    "#a { background: URL('http://x.example/a.png') }",
+    '@import url(http://x.example/a.css);',
+    '@import "http://x.example/a.css";',
+    '#a { background-image: image-set("http://x.example/a.png" 1x) }',
+    '#a { background-image: -webkit-image-set(url(http://x.example/a.png) 1x) }',
+    '@font-face { font-family: f; src: url(http://x.example/f.woff2) }',
+    '#a { background-image: u\\72l(http://x.example/a.png) }',
+    '@\\69mport "http://x.example/a.css";',
+    '#a { cursor: src(var(--x)) }',
+  ]
+  const PLAIN = [
+    '#a { color: red; display: none }',
+    '.md\\:hidden { display: none }',
+    '#a::before { content: "\\201C" }',
+    '#a { font-family: "Arial", sans-serif; background: linear-gradient(red, blue) }',
+    '#a { image-rendering: pixelated }',
+    '/* the url is in a comment-free place */ #a { margin: 0 }',
+  ]
+
+  // Control for every refusal below: before the guard runs, each stand-in is called with each text.
+  it('control: before the guard runs, the stand-ins take every text', () => {
+    const w = world()
+    const style = styleNode()
+    const setter = Object.getOwnPropertyDescriptor(w.prototypes.Node.prototype, 'textContent')?.set as (v: unknown) => void
+    for (const css of LOADING) setter.call(style, css)
+    expect(w.calls.filter((c) => c.name === 'textContent').length).toBe(LOADING.length)
+  })
+
+  it('refuses text with an address in every setter, method and sheet path, for a style element and a text node in one', () => {
+    const w = world()
+    w.run([])
+    const style = styleNode('#a { width: 1px }')
+    const text = textIn(style)
+    const node = w.prototypes.Node.prototype
+    const sinks: Array<[string, (css: string) => unknown]> = [
+      ['textContent of the style', (c) => Reflect.set(node, 'textContent', c, style)],
+      ['nodeValue of the text', (c) => Reflect.set(node, 'nodeValue', c, text)],
+      ['data of the text', (c) => Reflect.set(w.characterData.prototype, 'data', c, text)],
+      ['innerText of the style', (c) => Reflect.set(w.prototypes.HTMLElement.prototype, 'innerText', c, style)],
+      ['innerHTML of the style', (c) => Reflect.set(w.prototypes.Element.prototype, 'innerHTML', c, style)],
+      ['appendData', (c) => (w.characterData.prototype.appendData as (...a: unknown[]) => unknown).call(text, c)],
+      ['insertData', (c) => (w.characterData.prototype.insertData as (...a: unknown[]) => unknown).call(text, 0, c)],
+      ['replaceData', (c) => (w.characterData.prototype.replaceData as (...a: unknown[]) => unknown).call(text, 0, 1, c)],
+      ['before a text node', (c) => (w.characterData.prototype.before as (...a: unknown[]) => unknown).call(text, c)],
+      ['after a text node', (c) => (w.characterData.prototype.after as (...a: unknown[]) => unknown).call(text, 'x', c)],
+      ['replaceWith a text node', (c) => (w.characterData.prototype.replaceWith as (...a: unknown[]) => unknown).call(text, c)],
+      ['append to the style', (c) => (w.prototypes.Element.prototype.append as (...a: unknown[]) => unknown).call(style, c)],
+      ['prepend to the style', (c) => (w.prototypes.Element.prototype.prepend as (...a: unknown[]) => unknown).call(style, 'a', c)],
+      ['replaceChildren of the style', (c) => (w.prototypes.Element.prototype.replaceChildren as (...a: unknown[]) => unknown).call(style, c)],
+      ['insertAdjacentText', (c) => (w.prototypes.Element.prototype.insertAdjacentText as (...a: unknown[]) => unknown).call(style, 'beforeend', c)],
+      ['insertAdjacentHTML', (c) => (w.prototypes.Element.prototype.insertAdjacentHTML as (...a: unknown[]) => unknown).call(style, 'beforeend', c)],
+      ['setHTMLUnsafe', (c) => (w.prototypes.Element.prototype.setHTMLUnsafe as (...a: unknown[]) => unknown).call(style, c)],
+      ['appendChild of a text node', (c) => (node.appendChild as (...a: unknown[]) => unknown).call(style, { ...textIn(styleNode()), text: c })],
+      ['insertBefore a text node', (c) => (node.insertBefore as (...a: unknown[]) => unknown).call(style, { ...textIn(styleNode()), text: c }, null)],
+      ['replaceChild with a text node', (c) => (node.replaceChild as (...a: unknown[]) => unknown).call(style, { ...textIn(styleNode()), text: c }, text)],
+      ['insertNode into a range in the style', (c) => (w.range.prototype.insertNode as (...a: unknown[]) => unknown).call({ container: style }, { ...divNode(), text: c })],
+      ['insertRule', (c) => (w.cssStyleSheet.prototype.insertRule as (...a: unknown[]) => unknown).call({}, c, 0)],
+      ['addRule', (c) => (w.cssStyleSheet.prototype.addRule as (...a: unknown[]) => unknown).call({}, '#a', c)],
+      ['replace', (c) => (w.cssStyleSheet.prototype.replace as (...a: unknown[]) => unknown).call({}, c)],
+      ['replaceSync', (c) => (w.cssStyleSheet.prototype.replaceSync as (...a: unknown[]) => unknown).call({}, c)],
+      ['insertRule of a grouping rule', (c) => (w.cssGroupingRule.prototype.insertRule as (...a: unknown[]) => unknown).call({}, c)],
+      ['setProperty', (c) => (w.cssStyleDeclaration.prototype.setProperty as (...a: unknown[]) => unknown).call({}, 'background-image', c)],
+      ['cssText', (c) => Reflect.set(w.cssStyleDeclaration.prototype, 'cssText', c, {})],
+      ['backgroundImage', (c) => Reflect.set(w.cssStyleProperties.prototype, 'backgroundImage', c, {})],
+      ['background-image', (c) => Reflect.set(w.cssStyleProperties.prototype, 'background-image', c, {})],
+      ['listStyleImage', (c) => Reflect.set(w.cssStyleProperties.prototype, 'listStyleImage', c, {})],
+    ]
+    const before = w.calls.length
+    for (const [name, call] of sinks) {
+      for (const css of LOADING) {
+        // Declarations and rules hold the value only, so the whole text is not a value for them.
+        expect(() => call(css), `${name}: ${css}`).toThrow(/not declared/)
+      }
+    }
+    expect(w.calls.length).toBe(before)
+  })
+
+  it('passes text without an address through, with the same arguments, to the same sinks', () => {
+    const w = world()
+    w.run([])
+    const style = styleNode('#a { width: 1px }')
+    const text = textIn(style)
+    const node = w.prototypes.Node.prototype
+    for (const css of PLAIN) {
+      Reflect.set(node, 'textContent', css, style)
+      Reflect.set(w.characterData.prototype, 'data', css, text)
+      ;(w.characterData.prototype.appendData as (...a: unknown[]) => unknown).call(text, css)
+      ;(w.prototypes.Element.prototype.append as (...a: unknown[]) => unknown).call(style, css)
+      ;(w.cssStyleSheet.prototype.insertRule as (...a: unknown[]) => unknown).call({}, css, 0)
+      Reflect.set(w.cssStyleProperties.prototype, 'color', css, {})
+    }
+    expect(w.calls.length).toBe(PLAIN.length * 6)
+    expect(w.calls[0]).toEqual({ name: 'textContent', self: style, args: [PLAIN[0]] })
+  })
+
+  it('treats a node that is not a style element as plain, and refuses the same text in a style', () => {
+    const w = world()
+    w.run([])
+    const node = w.prototypes.Node.prototype
+    const div = divNode()
+    expect(() => Reflect.set(node, 'textContent', LOADING[0], div)).not.toThrow()
+    expect(() => Reflect.set(node, 'textContent', LOADING[0], styleNode())).toThrow(/not declared/)
+    // A text node whose parent is a div is plain; one whose parent is a style is not.
+    const plainText = { type: 3, name: '#text', text: '', parent: div }
+    expect(() => Reflect.set(w.characterData.prototype, 'data', LOADING[0], plainText)).not.toThrow()
+  })
+
+  it('sees a token that is split over two writes, and counts what the style already holds', () => {
+    const w = world()
+    w.run([])
+    const split = styleNode('@imp')
+    expect(() => (w.prototypes.Element.prototype.append as (...a: unknown[]) => unknown).call(split, 'ort "http://x.example/a.css";')).toThrow(/not declared/)
+    const pieceOfNode = { type: 3, name: '#text', text: 'ort url(http://x.example/a.css);', parent: null }
+    expect(() => (w.prototypes.Node.prototype.appendChild as (...a: unknown[]) => unknown).call(styleNode('@imp'), pieceOfNode)).toThrow(/not declared/)
+    // The page's own style already holds an address, and adding plain text is still allowed.
+    const pageStyle = styleNode('@import url(/page.css); main { margin: 0 }')
+    expect(() => Reflect.set(w.prototypes.Node.prototype, 'textContent', 'main { margin: 1px }', pageStyle)).not.toThrow()
+    // A second address added to it is refused.
+    expect(() => (w.prototypes.Element.prototype.append as (...a: unknown[]) => unknown).call(pageStyle, ' @imp')).not.toThrow()
+    const splitOnPage = styleNode('@import url(/page.css); @imp')
+    expect(() => (w.prototypes.Element.prototype.append as (...a: unknown[]) => unknown).call(splitOnPage, 'ort url(/other.css);')).toThrow(/not declared/)
+  })
+
+  it('refuses markup with a style that loads an address, or a style attribute that does, and passes the plain markup', () => {
+    const w = world()
+    w.run([])
+    const insert = w.prototypes.Element.prototype.insertAdjacentHTML as (...a: unknown[]) => unknown
+    for (const markup of ['<style>#a{background:url(http://x.example/a.png)}</style>', '<div style="background:url(http://x.example/a)">', '<style>@import "http://x.example/a.css"</style>', '<STYLE>u\\72l(x)</STYLE> url(']) {
+      expect(() => insert.call(divNode(), 'beforeend', markup), markup).toThrow(/not declared/)
+    }
+    for (const markup of ['<style>#a{color:red}</style>', '<p>a url( in text</p>', '<div style="color:red">']) {
+      expect(() => insert.call(divNode(), 'beforeend', markup), markup).not.toThrow()
+    }
+  })
+
+  it('reads a node once for its text, and converts any other object once', () => {
+    const w = world()
+    w.run([])
+    let conversions = 0
+    const changing = { toString: () => (++conversions === 1 ? 'main { margin: 0 }' : '@import "http://x.example/a.css";') }
+    ;(w.prototypes.Element.prototype.append as (...a: unknown[]) => unknown).call(styleNode(), changing)
+    expect(conversions).toBe(1)
+    expect(w.calls.at(-1)?.args).toEqual(['main { margin: 0 }'])
+  })
+
+  it('is left out when network is declared, because that capability covers addresses in CSS', () => {
+    const w = world()
+    w.run(['network'])
+    expect(() => Reflect.set(w.prototypes.Node.prototype, 'textContent', LOADING[0], styleNode())).not.toThrow()
+    expect(() => (w.cssStyleSheet.prototype.replaceSync as (...a: unknown[]) => unknown).call({}, LOADING[0])).not.toThrow()
+    // The refusal of frames is not covered by any capability.
+    expect(() => (w.documentPrototype.createElement as (...a: unknown[]) => unknown).call(w.doc, 'iframe')).toThrow(/not declared/)
+  })
+
+  it('cannot be undone by the code that runs after it', () => {
+    const w = world()
+    w.run([])
+    expect(() => Object.defineProperty(w.cssStyleSheet.prototype, 'replaceSync', { value: () => 1 })).toThrow(TypeError)
+    expect(() => Object.defineProperty(w.characterData.prototype, 'data', { set: () => {} })).toThrow(TypeError)
+    expect(() => Object.defineProperty(w.cssStyleProperties.prototype, 'backgroundImage', { set: () => {} })).toThrow(TypeError)
+  })
+
+  it('stops the transform when a sheet method it has to wrap is missing', () => {
+    const w = world({ without: 'replaceSync' })
+    expect(() => w.run([])).toThrow(/could not restrict replaceSync/)
+  })
+
+  it('stops the transform when a getter it reads the node type or text with is missing', () => {
+    const w = world()
+    delete (w.range.prototype as Record<string, unknown>).startContainer
+    expect(() => w.run([])).toThrow(/could not restrict startContainer/)
+    expect(w.attributes.get(MARKER)).toMatch(/startContainer/)
+  })
+
+  it('leaves the style wrappers out when asked', () => {
+    const w = world()
+    w.run([], { blockStyleText: false })
+    expect(() => (w.cssStyleSheet.prototype.replaceSync as (...a: unknown[]) => unknown).call({}, LOADING[0])).not.toThrow()
+    expect(() => (w.documentPrototype.createElement as (...a: unknown[]) => unknown).call(w.doc, 'iframe')).toThrow(/not declared/)
   })
 })
