@@ -85,7 +85,7 @@ describe('a 401 on a sign-in token', () => {
 
     expect(error).toBeInstanceOf(ProviderError)
     expect((error as ProviderError).kind).toBe('auth')
-    expect((error as ProviderError).message).toMatch(/rejected the credential/)
+    expect((error as ProviderError).message).toMatch(/rejected the API key or sign-in/)
     expect(state.tokenRequests).toBe(1)
     expect(state.chatTokens).toHaveLength(2)
   })

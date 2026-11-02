@@ -3,7 +3,7 @@ import { defineMessages } from './define'
 /** Messages of the background surface. */
 export const backgroundMessages = defineMessages({
   bgACapabilityWasUsedWithoutBeing: {
-    message: 'A capability was used without being declared.',
+    message: 'The code uses network, storage or cookie access that it did not ask for.',
     description: 'Text that the background returns to the interface, which shows it to the user.',
   },
   bgItLoadsAddressesOutsideTheSite: {
@@ -39,7 +39,7 @@ export const backgroundMessages = defineMessages({
     description: 'Text that the background returns to the interface, which shows it to the user.',
   },
   bgStaticAnalysisRejectedThisCodeSo: {
-    message: 'Static analysis rejected this code, so it was not saved.',
+    message: 'This code did not pass the safety check, so it was not saved.',
     description: 'Text that the background returns to the interface, which shows it to the user.',
   },
   bgThisCodeWasNotApprovedIn: {
@@ -55,7 +55,7 @@ export const backgroundMessages = defineMessages({
     description: 'Text that the background returns to the interface, which shows it to the user.',
   },
   bgStaticAnalysisRejectedThisCodeSo2: {
-    message: 'Static analysis rejected this code, so it was not approved.',
+    message: 'This code did not pass the safety check, so it was not approved.',
     description: 'Text that the background returns to the interface, which shows it to the user.',
   },
   bgWebAlchemistIsLockedEnterYour: {
@@ -63,11 +63,11 @@ export const backgroundMessages = defineMessages({
     description: 'Text that the background returns to the interface, which shows it to the user.',
   },
   bgWebAlchemistCouldNotTellWhich: {
-    message: 'Web Alchemist could not tell which tab this request is for, or could not read that tab, so it did not send the page to a model. Close the sidebar, open it again from the tab you want to change, and try again.',
+    message: 'Web Alchemist could not find or read the tab for this request, so nothing was sent to your AI provider. Close the sidebar, open it again from the tab you want to change, and try again.',
     description: 'Text that the background returns to the interface, which shows it to the user.',
   },
   bgWebAlchemistDoesNotPickGenerate: {
-    message: 'Web Alchemist does not pick, generate, capture or save in a private window, because a saved transform keeps text from the page after the window closes. Use a normal window to make a transform. Transforms you already saved still apply here.',
+    message: 'Transforms cannot be made in a private window, because a saved transform keeps text from the page after the window closes. Use a normal window. Transforms you already saved still apply in private windows.',
     description: 'Text that the background returns to the interface, which shows it to the user.',
   },
   bgThisCssLoadsAddressesOutsideThe: {
@@ -79,7 +79,7 @@ export const backgroundMessages = defineMessages({
     description: 'Text that the background returns to the interface, which shows it to the user.',
   },
   bgRunningTransformsIsSwitchedOffIn: {
-    message: 'Running transforms is switched off in the settings, so the JavaScript was not run. Turn that setting off to run it.',
+    message: '"Stop running all transforms" is turned on in settings, so the JavaScript was not run. Turn it off to run the JavaScript.',
     description: 'Text that the background returns to the interface, which shows it to the user.',
   },
   bgThisCodeDidNotPassThe: {
@@ -95,11 +95,11 @@ export const backgroundMessages = defineMessages({
     description: 'Text that the background returns to the interface, which shows it to the user.',
   },
   bgFirefoxHasNotGrantedTheUser: {
-    message: 'Firefox has not granted the user scripts permission, so no script can be registered.',
+    message: 'Firefox has not granted the user scripts permission, so scripts cannot run.',
     description: 'Text that the background returns to the interface, which shows it to the user.',
   },
   bgTheRecordIsMissingAField: {
-    message: 'The record is missing a field or has a field of the wrong type.',
+    message: 'This transform in the file is damaged or incomplete.',
     description: 'Text that the background returns to the interface, which shows it to the user.',
   },
   bgATransformWithTheSameName: {
@@ -107,7 +107,7 @@ export const backgroundMessages = defineMessages({
     description: 'Text that the background returns to the interface, which shows it to the user.',
   },
   bgAnthropicSupportsApiKeysOnlyOauth: {
-    message: 'Anthropic supports API keys only. OAuth is restricted to Claude Code and Claude.ai.',
+    message: 'Anthropic supports API keys only. Its sign-in works only in Claude Code and Claude.ai.',
     description: 'Text that the background returns to the interface, which shows it to the user.',
   },
   bgTheModelDeclinedThisRequestTry: {
@@ -127,7 +127,7 @@ export const backgroundMessages = defineMessages({
     description: 'Text that the background returns to the interface, which shows it to the user.',
   },
   bgRateLimitedByTheProviderWait: {
-    message: 'Rate limited by the provider. Wait a moment and try again.',
+    message: 'The provider is limiting requests. Wait a moment and try again.',
     description: 'Text that the background returns to the interface, which shows it to the user.',
   },
   bgCouldNotReachTheProvider: {
@@ -139,7 +139,7 @@ export const backgroundMessages = defineMessages({
     description: 'Text that the background returns to the interface, which shows it to the user.',
   },
   bgTheSignInHasEndedAnd: {
-    message: 'The sign-in has ended and this provider issued no way to renew it. Sign in again in settings.',
+    message: 'The sign-in has expired and this provider cannot renew it. Sign in again in settings.',
     description: 'Text that the background returns to the interface, which shows it to the user.',
   },
   bgTheSignInForThisProvider2: {
@@ -155,7 +155,7 @@ export const backgroundMessages = defineMessages({
     description: 'Text that the background returns to the interface, which shows it to the user.',
   },
   bgTheSignInServerReturnedA: {
-    message: 'The sign-in server returned a response that is not JSON. Reconnect this provider in settings.',
+    message: 'The sign-in server returned a response in the wrong format. Reconnect this provider in settings.',
     description: 'Text that the background returns to the interface, which shows it to the user.',
   },
   bgTheSignInServerReturnedNo: {
@@ -163,7 +163,7 @@ export const backgroundMessages = defineMessages({
     description: 'Text that the background returns to the interface, which shows it to the user.',
   },
   bgTheVaultLockPeriodMustBe: {
-    message: 'The vault lock period must be a whole number of minutes, or 0 for never.',
+    message: 'The time before locking must be a whole number of minutes, or 0 for never.',
     description: 'Text that the background returns to the interface, which shows it to the user.',
   },
   bgAProviderWithThatIdAlready: {
@@ -171,19 +171,19 @@ export const backgroundMessages = defineMessages({
     description: 'Text that the background returns to the interface, which shows it to the user.',
   },
   bgTheActiveProviderMustBeOne: {
-    message: 'The active provider must be one that is configured.',
+    message: 'The active provider must be one that is set up.',
     description: 'Text that the background returns to the interface, which shows it to the user.',
   },
   bgThatProviderIsNoLongerConfigured: {
-    message: 'That provider is no longer configured.',
+    message: 'That provider is no longer set up.',
     description: 'Text that the background returns to the interface, which shows it to the user.',
   },
   bgTheCredentialsAreAlreadyProtectedBy: {
-    message: 'The credentials are already protected by a passphrase. Remove that passphrase first to set a different one.',
+    message: 'Your keys are already protected by a passphrase. Remove it first to set a different one.',
     description: 'Text that the background returns to the interface, which shows it to the user.',
   },
   bgStoredCredentialsCanBeDiscardedOnly: {
-    message: 'Stored credentials can be discarded only while they are sealed and locked.',
+    message: 'Stored keys can be discarded only while they are protected by a passphrase and locked.',
     description: 'Text that the background returns to the interface, which shows it to the user.',
   },
   bgThisFileIsNotAWeb: {
@@ -199,7 +199,7 @@ export const backgroundMessages = defineMessages({
     description: 'Text that the background returns to the interface, which shows it to the user.',
   },
   bgThisTransformCameFromAnImported: {
-    message: 'This transform came from an imported file. Use Edit description to read its description before it is used.',
+    message: 'This transform came from an imported file. Read its description first with "Edit description".',
     description: 'Text that the background returns to the interface, which shows it to the user.',
   },
   bgThatVersionIsNoLongerKept: {
@@ -207,7 +207,7 @@ export const backgroundMessages = defineMessages({
     description: 'Text that the background returns to the interface, which shows it to the user.',
   },
   bgThatPageIsNotAWebsite: {
-    message: 'That page is not a website, so it cannot be turned off.',
+    message: 'That page is not a website, so Web Alchemist cannot be turned off there.',
     description: 'Text that the background returns to the interface, which shows it to the user.',
   },
   bgAnthropicDoesNotOfferSignIn: {
@@ -215,11 +215,11 @@ export const backgroundMessages = defineMessages({
     description: 'Text that the background returns to the interface, which shows it to the user.',
   },
   bgThisProviderHasNoSignIn: {
-    message: 'This provider has no sign-in endpoints configured. Add them in settings first.',
+    message: 'This provider has no sign-in endpoints set up. Add them in settings first.',
     description: 'Text that the background returns to the interface, which shows it to the user.',
   },
   bgStaticAnalysisRejectedThisCodeSo3: {
-    message: 'Static analysis rejected this code, so it was not run.',
+    message: 'This code did not pass the safety check, so it was not run.',
     description: 'Text that the background returns to the interface, which shows it to the user.',
   },
   bgThisPageCannotBePreviewedSo: {
@@ -231,11 +231,11 @@ export const backgroundMessages = defineMessages({
     description: 'Text that the background returns to the interface, which shows it to the user.',
   },
   bgThisPageIsNotOneThat: {
-    message: 'This page is not one that the transform\'s sites cover, so the script was not run.',
+    message: 'This transform does not apply to this page, so the script was not run.',
     description: 'Text that the background returns to the interface, which shows it to the user.',
   },
   bgTheModelReviewDidNotMatch: {
-    message: 'The model review did not match this code, so the script was not run.',
+    message: 'The code check has not approved this code, so the script was not run. Select Check the code again.',
     description: 'Text that the background returns to the interface, which shows it to the user.',
   },
   bgThePageChangedWhileThePreview: {
@@ -243,7 +243,7 @@ export const backgroundMessages = defineMessages({
     description: 'Text that the background returns to the interface, which shows it to the user.',
   },
   bgRunningTransformsIsSwitchedOffIn2: {
-    message: 'Running transforms is switched off in the settings, so the preview was not shown. Turn that setting off to preview.',
+    message: '"Stop running all transforms" is turned on in settings, so the preview was not shown. Turn it off to see a preview.',
     description: 'Text that the background returns to the interface, which shows it to the user.',
   },
   bgWebAlchemistIsTurnedOffOn: {
@@ -259,15 +259,15 @@ export const backgroundMessages = defineMessages({
     description: 'Text that the background returns to the interface, which shows it to the user.',
   },
   bgThePageThisRunIsAbout: {
-    message: 'The page this run is about is no longer open, so nothing was captured.',
+    message: 'The page you were working on is no longer open, so nothing was captured.',
     description: 'Text that the background returns to the interface, which shows it to the user.',
   },
   bgThePageThisRunIsAbout2: {
-    message: 'The page this run is about is not the tab in front, so nothing was captured. Switch back to it and try again.',
+    message: 'The page you were working on is not the selected tab, so nothing was captured. Switch back to it and try again.',
     description: 'Text that the background returns to the interface, which shows it to the user.',
   },
   bgThePageThisRunIsAbout3: {
-    message: 'The page this run is about has moved to another address, so nothing was captured.',
+    message: 'The page you were working on has moved to another address, so nothing was captured.',
     description: 'Text that the background returns to the interface, which shows it to the user.',
   },
   bgTheTabChangedWhileTheScreenshot: {
@@ -283,7 +283,7 @@ export const backgroundMessages = defineMessages({
     description: 'Text that the background returns to the interface, which shows it to the user.',
   },
   bgItsCodeDoesNotPassThe: {
-    message: 'Its code does not pass the safety check that is applied now, so it is not running. $REASON$',
+    message: 'Its code does not pass the current safety check, so it is not running. $REASON$',
     description: 'Text that the background returns to the interface, which shows it to the user. Placeholders: REASON.',
     placeholders: ['REASON'],
   },
@@ -303,12 +303,12 @@ export const backgroundMessages = defineMessages({
     placeholders: ['ERROR'],
   },
   bgTheProviderRejectedTheSignIn: {
-    message: 'The provider rejected the sign-in ($STATUS$). Check the client id and endpoints in settings.',
+    message: 'The provider rejected the sign-in ($STATUS$). Check the client ID and endpoints in settings.',
     description: 'Text that the background returns to the interface, which shows it to the user. Placeholders: STATUS.',
     placeholders: ['STATUS'],
   },
   bgNoApiKeyIsConfiguredFor: {
-    message: 'No API key is configured for $LABEL$.',
+    message: 'No API key is set up for $LABEL$.',
     description: 'Text that the background returns to the interface, which shows it to the user. Placeholders: LABEL.',
     placeholders: ['LABEL'],
   },
@@ -323,22 +323,22 @@ export const backgroundMessages = defineMessages({
     placeholders: ['LABEL'],
   },
   bgRateLimitedByTheProviderIt: {
-    message: 'Rate limited by the provider. It asked for $SECONDS$ seconds.',
+    message: 'The provider is limiting requests. Try again in $SECONDS$ seconds.',
     description: 'Text that the background returns to the interface, which shows it to the user. Placeholders: SECONDS.',
     placeholders: ['SECONDS'],
   },
   bgProviderReturnedAnError: {
-    message: 'Provider returned an error ($STATUS$): $DETAIL$',
+    message: 'The provider returned an error ($STATUS$): $DETAIL$',
     description: 'Text that the background returns to the interface, which shows it to the user. Placeholders: STATUS, DETAIL.',
     placeholders: ['STATUS', 'DETAIL'],
   },
   bgProviderReturnedAnError2: {
-    message: 'Provider returned an error ($STATUS$).',
+    message: 'The provider returned an error ($STATUS$).',
     description: 'Text that the background returns to the interface, which shows it to the user. Placeholders: STATUS.',
     placeholders: ['STATUS'],
   },
   bgHasNoBaseUrlConfigured: {
-    message: '$LABEL$ has no base URL configured.',
+    message: '$LABEL$ has no base URL set up.',
     description: 'Text that the background returns to the interface, which shows it to the user. Placeholders: LABEL.',
     placeholders: ['LABEL'],
   },
@@ -348,7 +348,7 @@ export const backgroundMessages = defineMessages({
     placeholders: ['LABEL', 'BASE_PROBLEM'],
   },
   bgNoCredentialIsConfiguredFor: {
-    message: 'No credential is configured for $LABEL$.',
+    message: 'No API key or sign-in is set up for $LABEL$.',
     description: 'Text that the background returns to the interface, which shows it to the user. Placeholders: LABEL.',
     placeholders: ['LABEL'],
   },
@@ -358,7 +358,7 @@ export const backgroundMessages = defineMessages({
     placeholders: ['LABEL'],
   },
   bgReturnedAResponseThatIsNot: {
-    message: '$LABEL$ returned a response that is not JSON. Check the base URL in settings.',
+    message: '$LABEL$ returned a response in the wrong format. Check the base URL in settings.',
     description: 'Text that the background returns to the interface, which shows it to the user. Placeholders: LABEL.',
     placeholders: ['LABEL'],
   },
@@ -368,7 +368,7 @@ export const backgroundMessages = defineMessages({
     placeholders: ['LABEL'],
   },
   bgReturnedAResponseThatCouldNot: {
-    message: '$LABEL$ returned a response that could not be read. It may not support structured output.',
+    message: '$LABEL$ returned a response that could not be read. This model may not support the format that Web Alchemist needs. Try another model in settings.',
     description: 'Text that the background returns to the interface, which shows it to the user. Placeholders: LABEL.',
     placeholders: ['LABEL'],
   },
@@ -378,17 +378,17 @@ export const backgroundMessages = defineMessages({
     placeholders: ['ENDPOINT_ISSUE'],
   },
   bgRejectedTheCredentialCheckItIn: {
-    message: '$LABEL$ rejected the credential. Check it in settings.',
+    message: '$LABEL$ rejected the API key or sign-in. Check it in settings.',
     description: 'Text that the background returns to the interface, which shows it to the user. Placeholders: LABEL.',
     placeholders: ['LABEL'],
   },
   bgRateLimitedByWaitAMoment: {
-    message: 'Rate limited by $LABEL$. Wait a moment and try again.',
+    message: '$LABEL$ is limiting requests. Wait a moment and try again.',
     description: 'Text that the background returns to the interface, which shows it to the user. Placeholders: LABEL.',
     placeholders: ['LABEL'],
   },
   bgRateLimitedByItAskedFor: {
-    message: 'Rate limited by $LABEL$. It asked for $SECONDS$ seconds.',
+    message: '$LABEL$ is limiting requests. Try again in $SECONDS$ seconds.',
     description: 'Text that the background returns to the interface, which shows it to the user. Placeholders: LABEL, SECONDS.',
     placeholders: ['LABEL', 'SECONDS'],
   },
@@ -398,12 +398,12 @@ export const backgroundMessages = defineMessages({
     placeholders: ['LABEL', 'STATUS'],
   },
   bgTheCodeIsWaitingForApproval: {
-    message: 'The code is waiting for approval, so it was not run. $AWAITING_APPROVAL_NOTE$',
+    message: 'The code was not run. $AWAITING_APPROVAL_NOTE$',
     description: 'Text that the background returns to the interface, which shows it to the user. Placeholders: AWAITING_APPROVAL_NOTE.',
     placeholders: ['AWAITING_APPROVAL_NOTE'],
   },
   bgThePriceForMustBeTwo: {
-    message: 'The price for $LABEL$ must be two numbers of 0 or more.',
+    message: 'The input and output prices for $LABEL$ must be numbers of 0 or more.',
     description: 'Text that the background returns to the interface, which shows it to the user. Placeholders: LABEL.',
     placeholders: ['LABEL'],
   },
@@ -418,7 +418,7 @@ export const backgroundMessages = defineMessages({
     placeholders: ['PROBLEM'],
   },
   bgThePassphraseMustBeAtLeast2: {
-    message: 'The passphrase must be at least $MIN_PASSPHRASE_LENGTH$ characters.',
+    message: 'The passphrase must be at least $MIN_PASSPHRASE_LENGTH$ characters long.',
     description: 'Text that the background returns to the interface, which shows it to the user. Placeholders: MIN_PASSPHRASE_LENGTH.',
     placeholders: ['MIN_PASSPHRASE_LENGTH'],
   },
@@ -428,51 +428,51 @@ export const backgroundMessages = defineMessages({
     placeholders: ['LABEL'],
   },
   bgTheKeyForHasNoRecorded: {
-    message: 'The key for $LABEL$ has no recorded address, so it was not sent. Enter it again in settings.',
+    message: 'The key for $LABEL$ is not linked to a provider address, so it was not sent. Enter it again in settings.',
     description: 'Text that the background returns to the interface, which shows it to the user. Placeholders: LABEL.',
     placeholders: ['LABEL'],
   },
   bgTheKeyForWasEnteredFor: {
-    message: 'The key for $LABEL$ was entered for $ENTERED$, but the provider now sends requests to $CURRENT$. The key was not sent. Enter it again in settings.',
+    message: 'The key for $LABEL$ was entered for $ENTERED$, but the provider now uses $CURRENT$, so the key was not sent. Enter it again in settings.',
     description: 'Text that the background returns to the interface, which shows it to the user. Placeholders: LABEL, ENTERED, CURRENT.',
     placeholders: ['LABEL', 'ENTERED', 'CURRENT'],
   },
   bgHasNoValidAddressToBind: {
-    message: '$LABEL$ has no valid address to bind the key to.',
+    message: '$LABEL$ has no valid address, so the key cannot be saved. Fix the address in settings.',
     description: 'Text that the background returns to the interface, which shows it to the user. Placeholders: LABEL.',
     placeholders: ['LABEL'],
   },
   bgThisFileWasMadeByA: {
-    message: 'This file was made by a newer version of Web Alchemist (schema $SCHEMA_VERSION$). Update the extension to import it.',
+    message: 'This file was made by a newer version of Web Alchemist (file version $SCHEMA_VERSION$). Update the extension to import it.',
     description: 'Text that the background returns to the interface, which shows it to the user. Placeholders: SCHEMA_VERSION.',
     placeholders: ['SCHEMA_VERSION'],
   },
   bgThePatternReachesWhichIsOn: {
-    message: 'The pattern reaches $EXCLUDED$, which is on the list of excluded sites. Remove it from that list in the settings first if the transform should be imported.',
+    message: 'This transform applies to $EXCLUDED$, which is on your list of excluded sites. To import it, first remove that site from the list in settings.',
     description: 'Text that the background returns to the interface, which shows it to the user. Placeholders: EXCLUDED.',
     placeholders: ['EXCLUDED'],
   },
   bgThisFileAsksForAccessTo: {
-    message: 'This file asks for access to more than $MAX_IMPORT_ORIGINS$ different sites. This record is not imported. Import a smaller file.',
+    message: 'This file asks for access to more than $MAX_IMPORT_ORIGINS$ sites, so this transform was not imported. Import a smaller file.',
     description: 'Text that the background returns to the interface, which shows it to the user. Placeholders: MAX_IMPORT_ORIGINS.',
     placeholders: ['MAX_IMPORT_ORIGINS'],
   },
   bgTheCssIsNotImportedBecause: {
-    message: 'The CSS is not imported because it fails the CSS check. $PROBLEM$',
+    message: 'The CSS was not imported because it did not pass the safety check. $PROBLEM$',
     description: 'Text that the background returns to the interface, which shows it to the user. Placeholders: PROBLEM.',
     placeholders: ['PROBLEM'],
   },
   bgTheCodeIsNotRestoredBecause: {
-    message: 'The code is not restored because it fails the static analysis. $PROBLEM$',
+    message: 'The code was not restored because it did not pass the safety check. $PROBLEM$',
     description: 'Text that the background returns to the interface, which shows it to the user. Placeholders: PROBLEM.',
     placeholders: ['PROBLEM'],
   },
   bgUnnamedRecord: {
-    message: 'Unnamed record',
+    message: 'Unnamed transform',
     description: 'Name shown for an imported record that has no name.',
   },
   bgSetToRunInMainNotApproved: {
-    message: 'It is set to run in the page\'s own world, which the user has not approved, so it is not running.',
+    message: 'It is set to run in the page\'s own world (MAIN), where the page can read and change it. This has not been approved, so it is not running.',
     description: 'Reason shown for a transform that is set to run in the page\'s own world without the user\'s approval.',
   },
   bgNotSiteNameCssSetting: {

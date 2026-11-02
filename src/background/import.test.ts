@@ -121,7 +121,7 @@ describe('imported CSS', () => {
   it('that fails the CSS check loses its code and says why in the result', async () => {
     const result = await ask({ type: 'import-transforms', bundle: bundle(cssTransform({ code: EVIL_CSS })) })
     expect(stored()[0].code).toBe('')
-    expect(result.items[0].reason).toContain('fails the CSS check')
+    expect(result.items[0].reason).toContain('did not pass the safety check')
     expect(result.needsRegeneration).toEqual([stored()[0].id])
   })
 
@@ -179,7 +179,7 @@ describe('the preview before an import', () => {
     expect(items[1].reason).toBe('The match pattern covers every site.')
     expect(items[2]).toMatchObject({ kind: 'js', needsRegeneration: true })
     expect(items[2].intent).toContain('back up the session cookie')
-    expect(items[3].reason).toContain('fails the CSS check')
+    expect(items[3].reason).toContain('did not pass the safety check')
     expect(items[0].origin).toBe('https://example.com/*')
     expect(items[2].origin).toBe('*://shop.example.org/*')
   })
@@ -363,7 +363,7 @@ describe('how many sites one import asks for (#56)', () => {
     expect(origins(items).size).toBe(20)
     const refused = items.filter((i: any) => i.status === 'refused')
     expect(refused).toHaveLength(3)
-    expect(refused[0].reason).toContain('more than 20 different sites')
+    expect(refused[0].reason).toContain('more than 20 sites')
     expect(refused[0].origin).toBeNull()
   })
 

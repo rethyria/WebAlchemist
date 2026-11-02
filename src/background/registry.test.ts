@@ -113,7 +113,7 @@ describe('previewing a saved JavaScript transform', () => {
     const error = await registerPreview({ ...saved, awaitsApproval: true, code: DRAFT_CODE }).catch(
       (cause: unknown) => cause as Error,
     )
-    expect((error as Error).message).toMatch(/waiting for approval/)
+    expect((error as Error).message).toMatch(/has not been approved/)
     expect((error as Error).message).not.toMatch(/safety check/)
     // Nothing was registered and the saved script was not paused.
     expect(store.has('preview-SAVED')).toBe(false)
@@ -133,7 +133,7 @@ describe('previewing a saved JavaScript transform', () => {
     killSwitch = true
     await expect(
       registerPreview({ ...saved, origin: 'ai', code: DRAFT_CODE }),
-    ).rejects.toThrow(/switched off/)
+    ).rejects.toThrow(/Stop running all transforms/)
     expect(store.has('preview-SAVED')).toBe(false)
     // The refused preview did not pause the saved registration.
     expect(store.has('SAVED')).toBe(true)
@@ -143,7 +143,7 @@ describe('previewing a saved JavaScript transform', () => {
     // Before #121 the switch covered only model-written code, and this
     // preview ran.
     killSwitch = true
-    await expect(registerPreview({ ...saved, code: DRAFT_CODE })).rejects.toThrow(/switched off/)
+    await expect(registerPreview({ ...saved, code: DRAFT_CODE })).rejects.toThrow(/Stop running all transforms/)
     expect(store.has('preview-SAVED')).toBe(false)
   })
 

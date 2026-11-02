@@ -306,7 +306,7 @@ describe('capture-region (#135, #119)', () => {
     tabHooks.tab = (tabId) => ({ id: tabId, active: false, windowId: 3, url: 'https://www.example.com/' })
     const reply = (await request()) as any
     expect(reply.ok).toBe(false)
-    expect(reply.error.message).toMatch(/not the tab in front/)
+    expect(reply.error.message).toMatch(/not the selected tab/)
     expect(captureCalls).toEqual([])
   })
 

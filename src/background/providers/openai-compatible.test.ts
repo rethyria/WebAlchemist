@@ -132,7 +132,7 @@ describe('a response body that is not JSON', () => {
 
     expect(error).toBeInstanceOf(ProviderError)
     expect((error as ProviderError).kind).toBe('bad-response')
-    expect((error as ProviderError).message).toMatch(/not JSON/i)
+    expect((error as ProviderError).message).toMatch(/wrong format/i)
     // The raw parser message must not be what the user sees.
     expect((error as ProviderError).message).not.toMatch(/JSON\.parse|unexpected character/i)
   })

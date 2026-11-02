@@ -314,7 +314,7 @@ describe('after the binding pass has run', () => {
       .catch((e: unknown) => e)
 
     expect(error).toBeInstanceOf(storage.CredentialOriginError)
-    expect((error as Error).message).toMatch(/no recorded address/)
+    expect((error as Error).message).toMatch(/not linked to a provider address/)
     expect((await storage.readStoredCredential('p1'))?.boundTo).toBeUndefined()
   })
 

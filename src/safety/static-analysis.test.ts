@@ -78,7 +78,7 @@ describe('analyseJavaScript', () => {
 
   it('flags dynamic property access as unanalysable rather than clean', () => {
     const apis = findingApis(`window[atob('ZmV0Y2g=')]('/x')`)
-    expect(apis).toContain('(dynamic property access)')
+    expect(apis).toContain('(property name decided while running)')
   })
 
   it('resolves a key made only of literals, so it is judged by its real name', () => {

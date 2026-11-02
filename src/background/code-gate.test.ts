@@ -169,7 +169,7 @@ describe('code in the MAIN world without the record of approval (#151)', () => {
       base({ id: 'ok', code: GOOD_JS, world: 'MAIN', mainApprovedByUser: true }),
     ]
     expect(blockedStates(records, settings).map((s) => [s.id, s.status])).toEqual([['main', 'broken']])
-    expect(problemWithStoredCode(records[0]!, settings)).toMatch(/not approved/)
+    expect(problemWithStoredCode(records[0]!, settings)).toMatch(/has not been approved/)
     stored = records
     expect(await reregisterAll()).toMatchObject({ registered: 1, skipped: 1 })
     expect(registered).toEqual(['ok'])

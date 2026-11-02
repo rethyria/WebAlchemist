@@ -195,7 +195,7 @@ describe('restoring a version', () => {
     const history = h.local.get('wa-transform-history') as Record<string, any[]>
     history['c1']!.find((v) => v.id === original.id)!.code = 'a { background: url(https://evil.example/t) }'
     h.local.set('wa-transform-history', history)
-    await expect(restore('c1', original.id, TAB)).rejects.toThrow(/asks the browser to load/)
+    await expect(restore('c1', original.id, TAB)).rejects.toThrow(/makes the browser load/)
     expect(stored('c1').code).toBe('a { color: blue }')
   })
 
@@ -211,7 +211,7 @@ describe('restoring a version', () => {
 
     await expect(
       ask({ type: 'restore-transform-version', id: 'j1', versionId: history['j1']![0].id }),
-    ).rejects.toThrow(/Static analysis rejected/)
+    ).rejects.toThrow(/did not pass the safety check/)
     expect(stored('j1').code).toBe('document.title = "two"')
     expect(JSON.stringify(h.userScriptsHeld.get('j1'))).toBe(before)
     expect(h.calls.registry).toHaveLength(registryBefore)

@@ -156,7 +156,7 @@ describe('restoring a backup into a fresh profile', () => {
     expect(bad).not.toHaveProperty('awaitsApproval')
     expect(JSON.stringify(stored())).not.toContain('sendBeacon')
     const item = result.items.find((i: any) => i.name === 'Bad')
-    expect(item.reason).toContain('fails the static analysis')
+    expect(item.reason).toContain('did not pass the safety check')
     expect(item.needsRegeneration).toBe(true)
     expect(result.needsRegeneration).toContain(bad.id)
   })
@@ -484,7 +484,7 @@ describe('invisible characters in restored code (#124)', () => {
     const result = await ask({ type: 'import-transforms', bundle: backup(`// ${ch}\n${GOOD_JS}`) })
     expect(stored()[0].code).toBe('')
     expect(stored()[0]).not.toHaveProperty('awaitsApproval')
-    expect(result.items[0].reason).toContain('static analysis')
+    expect(result.items[0].reason).toContain('safety check')
     expect(result.items[0].needsApproval).toBe(false)
   })
 

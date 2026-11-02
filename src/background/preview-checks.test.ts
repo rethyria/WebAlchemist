@@ -46,7 +46,7 @@ describe('the page of the preview', () => {
       await h.approvedPreview({ type: 'preview-js', tabId: TAB, transform: draft({ match: 'other.example.org/*' }) }),
     )
     expect(reply.ok).toBe(false)
-    expect(reply.error.message).toMatch(/not one that the transform's sites cover/)
+    expect(reply.error.message).toMatch(/does not apply to this page/)
     expect(registered()).toBe(false)
   })
 

@@ -183,7 +183,7 @@ describe('a CSS preview and the switches (#121)', () => {
   it('is refused while the kill switch is on', async () => {
     await setSwitch(true)
     const before = h.calls.insertCSS.length
-    await expect(previewCss(A)).rejects.toThrow(/switched off in the settings/)
+    await expect(previewCss(A)).rejects.toThrow(/Stop running all transforms/)
     expect(h.calls.insertCSS.length).toBe(before)
   })
 

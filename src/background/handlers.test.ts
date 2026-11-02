@@ -105,7 +105,7 @@ describe('handleSaveTransform: JavaScript', () => {
   it('refuses code that static analysis rejects, even when it was approved', async () => {
     const token = await recordApproval(BAD_JS, undefined, [], 'match', BIND)
     const { deps, calls } = saveDeps()
-    await expect(handleSaveTransform(saveMessage(transform({ code: BAD_JS }), token), deps)).rejects.toThrow(/Static analysis/)
+    await expect(handleSaveTransform(saveMessage(transform({ code: BAD_JS }), token), deps)).rejects.toThrow(/did not pass the safety check/)
     expect(calls).toEqual([])
   })
 
@@ -354,7 +354,7 @@ describe('handleReview and handleApproveCode', () => {
 
   it('refuses approve-code for code that fails static analysis', async () => {
     const message: Extract<Message, { type: 'approve-code' }> = { type: 'approve-code', code: BAD_JS, declaredCapabilities: [], ...BIND_FIELDS }
-    await expect(handleApproveCode(message, true)).rejects.toThrow(/Static analysis/)
+    await expect(handleApproveCode(message, true)).rejects.toThrow(/did not pass the safety check/)
     expect(Object.keys(session)).toEqual([])
   })
 
