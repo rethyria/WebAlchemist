@@ -286,6 +286,23 @@
   </section>
 
   <div class="foot">
+    <div class="actions">
+      <Button grow={1} small onclick={ondiscard}>{t('discard')}</Button>
+      {#if isJs && !jsRan && !blocked && previewAllowed}
+        <Button variant="primary" grow={1.4} small onclick={onrun}>
+          {t('refReloadAndRun')}
+        </Button>
+      {:else if isJs && !jsRan && !blocked}
+        <Button variant="primary" grow={1.4} small disabled={previewReviewing} onclick={onreviewfirst}>
+          {previewReviewing ? t('refReading') : t('refReadFirst')}
+        </Button>
+      {:else}
+        <Button variant="primary" grow={1.4} small onclick={onkeep} disabled={blocked}>
+          {t('refKeep')}
+        </Button>
+      {/if}
+    </div>
+
     <section class="ask">
       <Label>{t('refAskLabel')}</Label>
       <textarea
@@ -367,21 +384,20 @@
             {t('refAsk')}
           </button>
         {/if}
-        {#if isJs && jsRan}
-          <Button variant="primary" grow={1} disabled={asking} onclick={onreload}>
-            {t('refReloadAndTry')}
-          </Button>
-        {:else}
-          <button
-            type="button"
-            class="regenerate"
-            class:ready={followUp.trim().length > 0 && !asking}
-            disabled={!followUp.trim() || asking}
-            onclick={onregenerate}
-          >
-            {t('refRegenerate')}
-          </button>
-        {/if}
+        <!--
+          After a script has run, a new attempt starts from a clean page, so
+          Regenerate reloads the page first. It needs text in the box in both
+          cases, so it never reloads the page for nothing.
+        -->
+        <button
+          type="button"
+          class="regenerate"
+          class:ready={followUp.trim().length > 0 && !asking}
+          disabled={!followUp.trim() || asking}
+          onclick={isJs && jsRan ? onreload : onregenerate}
+        >
+          {t('refRegenerate')}
+        </button>
       </div>
       {#if askNotice}
         <p class="side-note" role="alert">{askNotice}</p>
@@ -393,22 +409,6 @@
 
     <AddressNote address={sentAddress} />
 
-    <div class="actions">
-      <Button grow={1} small onclick={ondiscard}>{t('discard')}</Button>
-      {#if isJs && !jsRan && !blocked && previewAllowed}
-        <Button variant="primary" grow={1.4} small onclick={onrun}>
-          {t('refReloadAndRun')}
-        </Button>
-      {:else if isJs && !jsRan && !blocked}
-        <Button variant="primary" grow={1.4} small disabled={previewReviewing} onclick={onreviewfirst}>
-          {previewReviewing ? t('refReading') : t('refReadFirst')}
-        </Button>
-      {:else}
-        <Button variant="primary" grow={1.4} small onclick={onkeep} disabled={blocked}>
-          {t('refKeep')}
-        </Button>
-      {/if}
-    </div>
   </div>
 </div>
 
@@ -786,7 +786,7 @@
   .actions {
     display: flex;
     gap: var(--sp-7);
-    padding-top: var(--sp-9);
-    border-top: 1px solid var(--border-subtle);
+    padding-bottom: var(--sp-9);
+    border-bottom: 1px solid var(--border-subtle);
   }
 </style>

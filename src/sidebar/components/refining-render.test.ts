@@ -191,11 +191,19 @@ describe('the Refining step with side questions', () => {
     expect(body).toMatch(/<button[^>]*class="regenerate[^"]*"[^>]*disabled/)
   })
 
-  it('keeps Ask beside the reload button after JavaScript has run', () => {
-    const body = html({ jsRan: true, followUp: 'x' })
-    expect(body).toMatch(/>\s*Ask\s*<\/button>/)
-    expect(body).toContain('Reload page and try again')
-    expect(body).not.toContain('>Regenerate<')
+  it('keeps Ask beside Regenerate after JavaScript has run, and disables both with an empty box', () => {
+    const typed = html({ jsRan: true, followUp: 'x' })
+    expect(typed).toMatch(/>\s*Ask\s*<\/button>/)
+    expect(typed).toMatch(/<button[^>]*class="regenerate[^"]* ready"[^>]*>\s*Regenerate\s*<\/button>/)
+    expect(typed).not.toContain('Reload page and try again')
+    const empty = html({ jsRan: true, followUp: '' })
+    expect(empty).toMatch(/<button[^>]*class="regenerate[^"]*"[^>]*disabled[^>]*>\s*Regenerate\s*<\/button>/)
+  })
+
+  it('puts the action buttons above the box for asking or changing', () => {
+    const body = html({ followUp: 'x' })
+    expect(body.indexOf('>Discard<')).toBeGreaterThan(-1)
+    expect(body.indexOf('>Discard<')).toBeLessThan(body.indexOf('<textarea'))
   })
 
   it('lists the conversation in the order it happened, with the prefixes on the side bubbles', () => {

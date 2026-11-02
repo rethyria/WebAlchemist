@@ -573,7 +573,7 @@ export const sidebarMessages = defineMessages({
     description: 'Title of a notice shown after previewed JavaScript has run.',
   },
   refReloadBody: {
-    message: 'The script has already changed the page. The page must be reloaded first, so that the next attempt does not run on top of this one.',
+    message: 'The script has already changed the page. Regenerate reloads the page first, so that the next attempt does not run on top of this one.',
     description: 'Body of a notice shown after previewed JavaScript has run.',
   },
   refReloadKept: {
@@ -633,10 +633,6 @@ export const sidebarMessages = defineMessages({
   refShotMoved: {
     message: 'The area was moved because the page scrolled after it was drawn.',
     description: 'Added to the screenshot warning.',
-  },
-  refReloadAndTry: {
-    message: 'Reload page and try again',
-    description: 'Button that reloads the page and generates again.',
   },
   refAsk: {
     message: 'Ask',
