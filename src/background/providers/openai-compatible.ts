@@ -19,8 +19,10 @@ import {
   type Provider,
 } from '@shared/types'
 import {
+  ASK_SYSTEM_PROMPT,
   GENERATE_SYSTEM_PROMPT,
   REVIEW_SYSTEM_PROMPT,
+  askContent,
   fencePageContent,
   fenceSavedTransform,
   pageDataSections,
@@ -36,12 +38,15 @@ import { destinationOf } from '@shared/credential-binding'
 import { retryAfterSeconds } from './retry-after'
 import { readCredentialOrProviderError, withCredentialOrProviderError } from './credential'
 import {
+  ASK_SCHEMA,
   GENERATION_SCHEMA,
   ProviderError,
   REVIEW_SCHEMA,
   isModelNotPermitted,
   modelNotPermittedError,
   type AiProvider,
+  type AskRequest,
+  type AskResult,
   type GenerateRequest,
   type ReviewArgs,
   type UsageListener,
@@ -189,7 +194,7 @@ export async function createOpenAiCompatibleProvider(
      * or whose fault it is.
      */
     let payload: {
-      choices?: { message?: { content?: string }; finish_reason?: string }[]
+      choices?: { message?: { content?: string; refusal?: string | null }; finish_reason?: string }[]
       usage?: unknown
     }
     try {
@@ -215,6 +220,15 @@ export async function createOpenAiCompatibleProvider(
       usage: readUsage(payload?.usage, { input: 'prompt_tokens', output: 'completion_tokens' }),
     })
     const text = payload.choices?.[0]?.message?.content
+    /*
+     * OpenAI reports a refusal as a `refusal` string in place of the content,
+     * and a content filter as the finish reason. Both are the provider
+     * declining, which repeating the request does not change.
+     */
+    const refusal = payload.choices?.[0]?.message?.refusal
+    if (!text && ((typeof refusal === 'string' && refusal !== '') || payload.choices?.[0]?.finish_reason === 'content_filter')) {
+      throw new ProviderError(t('bgTheModelDeclinedThisRequestTry'), 'refusal', false)
+    }
     if (!text) {
       throw new ProviderError(
         t('bgReturnedNoUsableResponse', provider.label),
@@ -292,6 +306,47 @@ export async function createOpenAiCompatibleProvider(
         maxTokens: 16000,
         signal: request.signal,
       }))
+    },
+
+    /**
+     * A side question about the draft. The reply arrives in one piece, so the
+     * listener for partial text is not used.
+     */
+    async ask(request: AskRequest): Promise<AskResult> {
+      const nonce = randomNonce()
+      const text = askContent(
+        request,
+        // The screenshot is sent as an image part below, not as text.
+        JSON.stringify({ ...request.context, screenshot: undefined }, null, 2) +
+          pageDataSections(request, nonce),
+        nonce,
+      )
+      const shot = request.context.screenshot
+      const userContent = shot
+        ? [
+            { type: 'text', text },
+            { type: 'image_url', image_url: { url: shot.dataUrl } },
+          ]
+        : text
+
+      const reply = await complete<{ answer?: unknown }>({
+        model: provider.generateModel,
+        system: ASK_SYSTEM_PROMPT,
+        userContent,
+        history: request.history,
+        schema: ASK_SCHEMA,
+        schemaName: 'answer',
+        maxTokens: 8000,
+        signal: request.signal,
+      })
+      if (typeof reply?.answer !== 'string') {
+        throw new ProviderError(
+          t('bgReturnedAResponseThatCouldNot', provider.label),
+          'bad-response',
+          true,
+        )
+      }
+      return { answer: reply.answer }
     },
 
     async review(args: ReviewArgs): Promise<ModelReview> {

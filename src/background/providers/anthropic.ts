@@ -22,8 +22,10 @@ import {
   type Provider,
 } from '@shared/types'
 import {
+  ASK_SYSTEM_PROMPT,
   GENERATE_SYSTEM_PROMPT,
   REVIEW_SYSTEM_PROMPT,
+  askContent,
   fencePageContent,
   fenceSavedTransform,
   pageDataSections,
@@ -36,12 +38,15 @@ import {
 import { retryAfterSeconds, type HeaderSource } from './retry-after'
 import { readCredentialOrProviderError } from './credential'
 import {
+  ASK_SCHEMA,
   GENERATION_SCHEMA,
   ProviderError,
   REVIEW_SCHEMA,
   isModelNotPermitted,
   modelNotPermittedError,
   type AiProvider,
+  type AskRequest,
+  type AskResult,
   type GenerateRequest,
   type ReviewArgs,
   type StreamListener,
@@ -323,6 +328,66 @@ export async function createAnthropicProvider(
       }
     },
 
+    /**
+     * A side question about the draft. It streams so the panel can show the
+     * answer as it is written. The configured generation model answers it, with
+     * adaptive thinking at medium effort where the model supports them; a
+     * rejected field is taken off by `withoutUnsupportedFields` as for
+     * generation. The reply is capped at 8000 tokens, which is far more than the
+     * prompt asks for, so a cut-off reply is unusual.
+     */
+    async ask(request: AskRequest, onChunk?: StreamListener): Promise<AskResult> {
+      const content = buildAskContent(request)
+
+      try {
+        const final = await withoutUnsupportedFields(
+          {
+            model: generateModel,
+            max_tokens: ASK_MAX_TOKENS,
+            system: ASK_SYSTEM_PROMPT,
+            thinking: { type: 'adaptive' },
+            messages: [
+              ...request.history.map((turn) => ({
+                role: turn.role,
+                content: turn.content,
+              })),
+              { role: 'user' as const, content },
+            ],
+            output_config: {
+              effort: 'medium',
+              format: { type: 'json_schema', schema: ASK_SCHEMA },
+            },
+          },
+          async (payload) => {
+            const stream = client.messages.stream(
+              payload as unknown as Parameters<typeof client.messages.stream>[0],
+              request.signal ? { signal: request.signal } : undefined,
+            )
+
+            let accumulated = ''
+            stream.on('text', (delta: string) => {
+              accumulated += delta
+              onChunk?.(accumulated)
+            })
+
+            try {
+              return await stream.finalMessage()
+            } catch (error) {
+              // As in generateStream: tokens counted before an abort are billed.
+              const partial = stream.currentMessage
+              if (partial?.usage) reportUsage(generateModel, partial)
+              throw error
+            }
+          },
+        )
+
+        reportUsage(generateModel, final)
+        return toAskResult(parseJsonResponse<unknown>(final))
+      } catch (error) {
+        throw toProviderError(error, { model: generateModel, label: provider.label })
+      }
+    },
+
     async review(args: ReviewArgs): Promise<ModelReview> {
       // Note what is absent: no PageContext, no URL, no DOM, no screenshot.
       // See REVIEW_SYSTEM_PROMPT for why this matters.
@@ -356,6 +421,29 @@ export async function createAnthropicProvider(
   }
 }
 
+/** Largest reply to a side question, in tokens. */
+const ASK_MAX_TOKENS = 8000
+
+/** The message of a side question: the same page description and screenshot rule as a generation. */
+export function buildAskContent(request: AskRequest): Anthropic.MessageParam['content'] {
+  const nonce = randomNonce()
+  const text = askContent(
+    request,
+    describeContext(request.context) + pageDataSections(request, nonce),
+    nonce,
+  )
+  return withScreenshot(text, request.context)
+}
+
+/** Checks the shape of a side-question reply, which the schema should already guarantee. */
+function toAskResult(parsed: unknown): AskResult {
+  const answer = (parsed as { answer?: unknown } | null)?.answer
+  if (typeof answer !== 'string') {
+    throw new ProviderError(t('bgTheModelReturnedAResponseThat'), 'bad-response', true)
+  }
+  return { answer }
+}
+
 export function buildGenerationContent(
   request: GenerateRequest,
 ): Anthropic.MessageParam['content'] {
@@ -378,7 +466,12 @@ export function buildGenerationContent(
     fencePageContent(describeContext(request.context) + pageDataSections(request, nonce), nonce),
   ].join('\n\n')
 
-  const shot = request.context.screenshot
+  return withScreenshot(text, request.context)
+}
+
+/** The text with the screenshot, when one was opted into, in front of it. */
+function withScreenshot(text: string, context: PageContext): Anthropic.MessageParam['content'] {
+  const shot = context.screenshot
   if (!shot) return text
 
   const [meta, data] = shot.dataUrl.split(',', 2)

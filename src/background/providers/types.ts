@@ -117,6 +117,39 @@ export interface GenerateRequest {
 }
 
 /**
+ * A side question about the current draft. It carries the fields of a
+ * generation request that describe the draft and the page, plus the draft, the
+ * earlier questions of the run and the question itself. The answer is shown to
+ * the user and is never part of a generation or review request.
+ */
+export interface AskRequest {
+  context: PageContext
+  /** The instruction the current draft was generated from. See GenerateRequest. */
+  instruction: string
+  instructionImported?: boolean
+  importedDescription?: string
+  instructionSaved?: boolean
+  savedDescription?: string
+  scopeDepth?: number
+  scopeContainer?: string | null
+  /** The change history, sent as prior messages as in a generation. */
+  history: RefinementTurn[]
+  /** The draft the question is about. */
+  draft: {
+    code: string
+    rationale: GenerationResult['rationale']
+  }
+  /** Earlier questions and answers of this run, oldest first. */
+  exchanges: { question: string; answer: string }[]
+  question: string
+  signal?: AbortSignal
+}
+
+export interface AskResult {
+  answer: string
+}
+
+/**
  * Every provider implements this. Adapters are responsible for their own auth
  * shape; callers only ever hand over a Provider and get results back.
  */
@@ -154,6 +187,13 @@ export interface AiProvider {
     onChunk: StreamListener,
     onThinking?: ThinkingListener,
   ): Promise<GenerationResult>
+
+  /**
+   * Answers a side question about the current draft. The answer is text for
+   * the user and changes nothing. `onChunk` receives the raw response as it
+   * arrives on adapters that stream; adapters that do not stream never call it.
+   */
+  ask(request: AskRequest, onChunk?: StreamListener): Promise<AskResult>
 
   /**
    * Reviews generated JavaScript against what the user typed.
@@ -291,6 +331,18 @@ export const REVIEW_SCHEMA = {
     },
   },
   required: ['verdict', 'explanation'],
+  additionalProperties: false,
+} as const
+
+export const ASK_SCHEMA = {
+  type: 'object',
+  properties: {
+    answer: {
+      type: 'string',
+      description: 'The answer in plain text for the user. It changes nothing.',
+    },
+  },
+  required: ['answer'],
   additionalProperties: false,
 } as const
 
