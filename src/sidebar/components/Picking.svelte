@@ -33,7 +33,7 @@
 
   /*
    * The page's own listener only sees keys while the page has the focus, and
-   * clicking "Select an element" leaves the focus here. Keys are therefore
+   * clicking "Choose part of the page to change" leaves the focus here. Keys are therefore
    * handled on the window of the sidebar and forwarded. The listener exists
    * only while this panel is mounted, so every way out of picking removes it.
    */

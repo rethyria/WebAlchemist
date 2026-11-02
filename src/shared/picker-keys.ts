@@ -3,7 +3,7 @@
  * sidebar.
  *
  * The content script listens for keys on the page's document, but after a
- * click on "Select an element" the keyboard focus is in the sidebar, where
+ * click on "Choose part of the page to change" the keyboard focus is in the sidebar, where
  * the page's listener never sees the keys. The sidebar therefore maps the same
  * keys with this module and forwards the resulting action to the page. Both
  * sides use one mapping so a key cannot mean different things on each.

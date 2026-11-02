@@ -1,7 +1,7 @@
 /**
  * The authoring flow, as one state machine.
  *
- *   list ──Select an element──▶ picking
+ *   list ──Choose part of the page to change──▶ picking
  *   picking ──↵────────────────▶ describing
  *   describing ──Generate──────▶ generating
  *   generating ──stream ends───▶ refining

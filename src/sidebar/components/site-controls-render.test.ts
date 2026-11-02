@@ -18,7 +18,7 @@ describe('the pick actions', () => {
   it('render both actions as buttons and no link-style control', () => {
     const out = html(PickActions, { onselect: noop, onwrite: noop })
     expect(out.match(/<button/g)?.length).toBe(2)
-    expect(out).toContain('Select an element')
+    expect(out).toContain('Choose part of the page to change')
     expect(out).toContain('Write it myself')
     expect(out).not.toContain('class="link"')
     expect(out).not.toContain('drag a rectangle')
@@ -75,5 +75,15 @@ describe('the main panel', () => {
     const { readFileSync } = await import('node:fs')
     const source = readFileSync(new URL('../App.svelte', import.meta.url), 'utf8')
     expect(source).toMatch(/\{#if transforms\.length > 1\}\s*<OrderInfo \/>/)
+  })
+})
+
+describe('the picking step', () => {
+  it('names the start button and asks for a click or tap on the part of the page to change', async () => {
+    const { EN_CATALOGUE } = await import('@shared/catalogue')
+    expect(EN_CATALOGUE.appSelect.message).toBe('Choose part of the page to change')
+    expect(EN_CATALOGUE.pickingTitle.message).toBe('Click the part of the page you want to change')
+    expect(EN_CATALOGUE.pickingTapHint.message).toBe('Tap the part of the page you want to change.')
+    expect(EN_CATALOGUE.pickingTouchHelp.message).toContain('Tap the part of the page you want to change.')
   })
 })

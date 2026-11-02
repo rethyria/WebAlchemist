@@ -61,15 +61,15 @@ export const sidebarMessages = defineMessages({
     message: 'Cancel',
   },
   pickingTitle: {
-    message: 'Pick an element',
-    description: 'Heading of the panel in which an element is picked.',
+    message: 'Click the part of the page you want to change',
+    description: 'Heading of the panel in which the user points at the part of the page to change.',
   },
   pickingCurrent: {
     message: 'Current element',
     description: 'Label above the path of the element under the pointer.',
   },
   pickingTapHint: {
-    message: 'Tap an element on the page.',
+    message: 'Tap the part of the page you want to change.',
   },
   pickingMoveHint: {
     message: 'Move the pointer over the page, or use the arrow keys.',
@@ -79,7 +79,7 @@ export const sidebarMessages = defineMessages({
     description: 'Label above the instructions for picking on a touch screen.',
   },
   pickingTouchHelp: {
-    message: 'Tap an element to select it. To draw an area instead, hold your finger still for half a second, then drag. A drag that starts sooner scrolls the page. After a tap, this panel comes back and lists the elements around it, so a different one can be chosen.',
+    message: 'Tap the part of the page you want to change. To draw an area instead, hold your finger still for half a second, then drag. A drag that starts sooner scrolls the page. After a tap, this panel comes back and lists the elements around it, so a different one can be chosen.',
   },
   pickingKeysLabel: {
     message: 'Move between elements',
@@ -1286,8 +1286,8 @@ export const sidebarMessages = defineMessages({
     description: 'Explains what the extension does.',
   },
   appSelect: {
-    message: 'Select an element',
-    description: 'Button that starts picking an element on the page.',
+    message: 'Choose part of the page to change',
+    description: 'Button that starts picking the part of the page that an elixir changes. The next step asks the user to click that part.',
   },
   appWriteMyself: {
     message: 'Write it myself',
