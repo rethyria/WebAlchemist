@@ -301,7 +301,7 @@ describe('the prompts', () => {
 
   it('tell the model not to claim a change and to say the user must type the change', () => {
     expect(ASK_SYSTEM_PROMPT).toContain('Never say or imply that you changed')
-    expect(ASK_SYSTEM_PROMPT).toContain('they have to type the change they want and press Regenerate')
+    expect(ASK_SYSTEM_PROMPT).toContain('they have to type the change they want and press Brew again')
     expect(ASK_SYSTEM_PROMPT).toContain('about 200 words or fewer')
   })
 })
