@@ -95,8 +95,8 @@ describe('the Refining step for JavaScript that has not run', () => {
   const folded = insideDetails(body)
 
   it('puts the informational notices inside details elements', () => {
-    expect(folded).toContain('Unlike CSS, a script cannot be applied')
-    expect(folded).toContain('Nothing is stored.')
+    expect(folded).toContain('A script cannot change a page that is already open')
+    expect(folded).toContain('Nothing is saved yet.')
     expect(folded).toContain('A second model checks the code before it runs on the page.')
     expect(folded).toContain('Page address sent to your AI provider.')
     expect(folded).toContain('Address sent: https://www.example.com/shop')
@@ -133,7 +133,7 @@ describe('the Refining step when something blocks the run', () => {
 
   it('shows a rejected scan of the review outside the details elements', () => {
     const body = html({ previewReview: { ...passed, passed: false, model: { verdict: 'match', explanation: '' } } })
-    expect(visibleText(body)).toContain('The code scan rejected this code')
+    expect(visibleText(body)).toContain('The safety check rejected this code')
   })
 
   it('shows the findings of a blocked analysis outside the details elements', () => {
@@ -221,7 +221,7 @@ describe('the Refining step with side questions', () => {
     const notes = list.filter((b) => b.classes === 'side-note')
     expect(notes).toHaveLength(1)
     expect(notes[0]!.text).toBe(
-      'Questions and answers are not sent with the request that makes the change. Type the change you want and press Regenerate.',
+      'Questions and answers are not sent when regenerating. To change the code, type the change and press Regenerate.',
     )
     const at = list.findIndex((b) => b.classes === 'side-note')
     expect(list[at - 1]!.text).toBe('Answer: It is enough for a colour.')
@@ -263,7 +263,7 @@ describe('the Refining step with side questions', () => {
 
   it('shows the limit note and disables Ask when the limit is reached', () => {
     const body = html({ askLimitReached: true, followUp: 'one more' })
-    expect(visibleText(body)).toContain('The most questions allowed (20) have been asked. The count restarts after saving or discarding.')
+    expect(visibleText(body)).toContain('The limit of 20 questions has been reached. The count restarts after saving or discarding.')
     expect(body).toMatch(/<button[^>]*class="ask[^"]*"[^>]*disabled/)
     // Regenerate still works at the limit.
     expect(body).toMatch(/<button[^>]*class="regenerate[^"]* ready[^"]*"/)

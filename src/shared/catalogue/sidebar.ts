@@ -7,7 +7,7 @@ export const sidebarMessages = defineMessages({
     description: 'Main heading of the first-run disclosure.',
   },
   firstRunLead: {
-    message: 'Web Alchemist sends page content to an AI model provider that you choose. Read what is sent and what is stored before you enter an API key or sign in.',
+    message: 'Web Alchemist sends page content to an AI provider that you choose. Read what is sent and what is stored before you enter an API key or sign in.',
     description: 'Opening paragraph of the first-run disclosure.',
   },
   firstRunAcknowledge: {
@@ -26,7 +26,7 @@ export const sidebarMessages = defineMessages({
     description: 'Describes what the picker is doing.',
   },
   pickingModeCrop: {
-    message: 'Resolved from your rectangle',
+    message: 'Found inside your rectangle',
     description: 'Describes what the picker is doing.',
   },
   pickingModeTouch: {
@@ -34,19 +34,19 @@ export const sidebarMessages = defineMessages({
     description: 'Describes what the picker is doing.',
   },
   pickingModeHover: {
-    message: 'Hovering the page',
+    message: 'Following the pointer',
     description: 'Describes what the picker is doing.',
   },
   pickingKeyParent: {
-    message: 'Parent',
+    message: 'Outer element',
     description: 'Meaning of a keyboard key while picking an element.',
   },
   pickingKeyChild: {
-    message: 'First child',
+    message: 'First inner element',
     description: 'Meaning of a keyboard key while picking an element.',
   },
   pickingKeySibling: {
-    message: 'Previous / next sibling',
+    message: 'Previous or next element',
     description: 'Meaning of a keyboard key while picking an element.',
   },
   pickingKeyConfirm: {
@@ -79,10 +79,10 @@ export const sidebarMessages = defineMessages({
     description: 'Label above the instructions for picking on a touch screen.',
   },
   pickingTouchHelp: {
-    message: 'The page is shown while picking. Tap an element to select it. To draw an area instead, touch and hold still for half a second, then drag. A drag that starts sooner scrolls the page. After a tap, this panel comes back and lists the element\'s parent, children and siblings, which can be chosen from the tree.',
+    message: 'Tap an element to select it. To draw an area instead, hold your finger still for half a second, then drag. A drag that starts sooner scrolls the page. After a tap, this panel comes back and lists the elements around it, so a different one can be chosen.',
   },
   pickingKeysLabel: {
-    message: 'Walk the tree',
+    message: 'Move between elements',
     description: 'Label above the list of keyboard keys that move through the page\'s elements.',
   },
   pickingCrop: {
@@ -107,15 +107,15 @@ export const sidebarMessages = defineMessages({
     description: 'Read out by a screen reader while a transform is generated.',
   },
   announceAnalysis: {
-    message: 'Running static analysis.',
-    description: 'Read out by a screen reader while a transform is generated.',
+    message: 'Running the safety check…',
+    description: 'Read out by a screen reader while a transform is generated. It names the local safety check of the code.',
   },
   announcePreview: {
     message: 'Applying a preview to the page.',
     description: 'Read out by a screen reader while a transform is generated.',
   },
   announceReviewing: {
-    message: 'Reviewing the code.',
+    message: 'Checking the code.',
     description: 'Read out by a screen reader when the review of generated code changes.',
   },
   announceOneBlocking: {
@@ -137,11 +137,11 @@ export const sidebarMessages = defineMessages({
     placeholders: ['COUNT'],
   },
   announceModelDisagrees: {
-    message: 'The second model review disagrees with the description.',
+    message: 'The code check says the code does not match your description.',
     description: 'Read out by a screen reader when the review of generated code changes.',
   },
   announceCleanCss: {
-    message: 'Review finished. No problems found. CSS is not sent for model review.',
+    message: 'Review finished. No problems found. CSS is not sent for the code check.',
     description: 'Read out by a screen reader when the review of generated code changes.',
   },
   announceClean: {
@@ -181,7 +181,7 @@ export const sidebarMessages = defineMessages({
     placeholders: ['SIZE'],
   },
   generatingStepThinkingCount: {
-    message: 'Thinking — $COUNT$ characters',
+    message: 'Thinking ($COUNT$ characters)',
     description: 'A step in the checklist shown while a transform is generated. $COUNT$ is a number.',
     placeholders: ['COUNT'],
   },
@@ -190,7 +190,7 @@ export const sidebarMessages = defineMessages({
     description: 'A step in the checklist shown while a transform is generated.',
   },
   generatingStepWritingLines: {
-    message: 'Writing code — $COUNT$ lines so far',
+    message: 'Writing code ($COUNT$ lines so far)',
     description: 'A step in the checklist shown while a transform is generated. $COUNT$ is a number.',
     placeholders: ['COUNT'],
   },
@@ -199,8 +199,8 @@ export const sidebarMessages = defineMessages({
     description: 'A step in the checklist shown while a transform is generated.',
   },
   generatingStepAnalysis: {
-    message: 'Static analysis',
-    description: 'A step in the checklist shown while a transform is generated.',
+    message: 'Safety check',
+    description: 'A step in the checklist shown while a transform is generated. It names the local safety check of the code.',
   },
   generatingStepPreview: {
     message: 'Preview on the page',
@@ -231,15 +231,15 @@ export const sidebarMessages = defineMessages({
     description: 'Heading of the step that asks the user to confirm the description of the change.',
   },
   savingNoteConsolidated: {
-    message: 'Written from your messages. Edit it — this is the text used to rebuild the transform when the site changes.',
+    message: 'Written from your messages. Edit it if needed. This text is used to rebuild the transform when the site changes.',
     description: 'Note under the description of the change, when the description was written from several messages.',
   },
   savingNote: {
-    message: 'Edit it — this is the text used to rebuild the transform when the site changes.',
+    message: 'Edit it if needed. This text is used to rebuild the transform when the site changes.',
     description: 'Note under the description of the change.',
   },
   savingStep2: {
-    message: 'Step 2 · Where it applies',
+    message: 'Step 2 of 3 · Where it applies',
     description: 'Small heading above the choice of pages that the transform applies to.',
   },
   savingWhereLabel: {
@@ -262,7 +262,7 @@ export const sidebarMessages = defineMessages({
     description: 'Button that moves on to review.',
   },
   approvalRunsIn: {
-    message: 'It runs in: $WORLD$.',
+    message: 'Runs in: $WORLD$',
     description: 'Says which execution world restored code runs in. $WORLD$ is the name of the world.',
     placeholders: ['WORLD'],
   },
@@ -274,8 +274,8 @@ export const sidebarMessages = defineMessages({
     description: 'Label of a checkbox that confirms the risks were read.',
   },
   approvalCapabilities: {
-    message: 'It declares these capabilities: $LIST$.',
-    description: 'Lists what restored code declares it can do. $LIST$ is a list of capability names.',
+    message: 'It asks for this access: $LIST$.',
+    description: 'Lists the access that restored code asks for. $LIST$ is a list of access names such as network, storage and cookies.',
     placeholders: ['LIST'],
   },
   approvalApprove: {
@@ -307,7 +307,7 @@ export const sidebarMessages = defineMessages({
     description: 'Accessible name of the slider that sets how many elements the change reaches.',
   },
   describingScopeOne: {
-    message: 'Just this element.',
+    message: 'Only this element.',
     description: 'Note under the scope slider.',
   },
   describingScopeInsideOne: {
@@ -352,14 +352,14 @@ export const sidebarMessages = defineMessages({
     description: 'Button that starts a screenshot.',
   },
   describingShotAlt: {
-    message: 'The region that will be sent',
+    message: 'The area that will be sent',
   },
   describingShotWarning: {
-    message: 'This image is sent to your AI provider. Everything visible in it goes too — names, messages, account details, anything personal that happens to be on screen.',
+    message: 'This image is sent to your AI provider, including anything personal in it, such as names, messages or account details.',
     description: 'Warning shown with the screenshot preview.',
   },
   describingShotClipped: {
-    message: 'Clipped at the viewport — only the visible part was captured.',
+    message: 'Only the part visible on screen was captured.',
     description: 'Note under the screenshot preview.',
   },
   describingShotMoved: {
@@ -367,7 +367,7 @@ export const sidebarMessages = defineMessages({
     description: 'Note under the screenshot preview.',
   },
   describingShotReduced: {
-    message: 'The image was reduced from $FROM$ to $TO$ pixels before it is sent, because providers resize larger images.',
+    message: 'The image is reduced from $FROM$ to $TO$ pixels before sending, because providers resize larger images.',
     description: 'Note under the screenshot preview. $FROM$ and $TO$ are sizes such as 2000 × 1500.',
     placeholders: ['FROM', 'TO'],
   },
@@ -379,7 +379,7 @@ export const sidebarMessages = defineMessages({
     description: 'Title of an error card.',
   },
   errNoProviderBody: {
-    message: 'Nothing can be generated until an API key is stored. Anthropic or any OpenAI-compatible endpoint.',
+    message: 'Nothing can be generated until an AI provider is added. Anthropic and OpenAI-compatible providers are supported.',
     description: 'Body of the card shown when no provider is set up.',
   },
   errAddProvider: {
@@ -443,7 +443,7 @@ export const sidebarMessages = defineMessages({
     description: 'Text of an error card shown when the provider refused to generate a transform.',
   },
   errRateLimitedTitle: {
-    message: 'Rate limited',
+    message: 'Too many requests',
     description: 'Title of an error card.',
   },
   errCountdownOne: {
@@ -460,7 +460,7 @@ export const sidebarMessages = defineMessages({
     description: 'Button that repeats a rate-limited request without waiting.',
   },
   errCredentialExpiredTitle: {
-    message: 'Credential expired',
+    message: 'API key or sign-in expired',
     description: 'Title of an error card.',
   },
   errCredentialExpiredBody: {
@@ -509,16 +509,16 @@ export const sidebarMessages = defineMessages({
     description: 'Title of the notice shown when generated CSS was rejected.',
   },
   refRejectedByAnalysis: {
-    message: 'Static analysis rejected it before anything reached the page.',
+    message: 'The safety check rejected it before anything reached the page.',
     description: 'Explains why generated JavaScript was not run.',
   },
   refRejectedByCssCheck: {
-    message: 'The CSS check rejected it before anything reached the page.',
+    message: 'The safety check rejected it before anything reached the page.',
     description: 'Explains why generated CSS was not applied.',
   },
   refFinding: {
-    message: '$API$ on line $LINE$ — $EXPLANATION$',
-    description: 'One problem found by the static analysis. $API$ is the name of a function or property, $LINE$ is a line number and $EXPLANATION$ says what is wrong.',
+    message: '$API$ on line $LINE$: $EXPLANATION$',
+    description: 'One problem found by the safety check. $API$ is the name of a function or property, $LINE$ is a line number and $EXPLANATION$ says what is wrong.',
     placeholders: ['API', 'LINE', 'EXPLANATION'],
   },
   refPendingUrl: {
@@ -535,11 +535,11 @@ export const sidebarMessages = defineMessages({
     description: 'Title of a notice about previewing JavaScript.',
   },
   refJsNextLoadBody: {
-    message: 'Unlike CSS, a script cannot be applied to a page already on screen. To try it, the page is reloaded with the script registered — exactly the way it would run if you saved it.',
+    message: 'A script cannot change a page that is already open, so the page is reloaded with the script, the same way it would run after saving.',
     description: 'Body of a notice about previewing JavaScript.',
   },
   refNothingStored: {
-    message: 'Nothing is stored. Discarding removes the registration.',
+    message: 'Nothing is saved yet. Discarding removes the script.',
     description: 'Hint under a notice about previewing JavaScript.',
   },
   detailsLabel: {
@@ -556,12 +556,12 @@ export const sidebarMessages = defineMessages({
     description: 'Explains why the preview of JavaScript is not offered yet.',
   },
   refReviewDisagrees: {
-    message: 'The second model did not agree that the code matches your description, so it cannot be run here: $EXPLANATION$',
+    message: 'The code check says the code does not match your description, so it cannot be run here: $EXPLANATION$',
     description: 'Explains why the preview of JavaScript is not offered. $EXPLANATION$ is the second model\'s explanation.',
     placeholders: ['EXPLANATION'],
   },
   refReviewScanRejected: {
-    message: 'The code scan rejected this code, so it cannot be run.',
+    message: 'The safety check rejected this code, so it cannot be run.',
     description: 'Explains why the preview of JavaScript is not offered.',
   },
   refReviewNeeded: {
@@ -573,7 +573,7 @@ export const sidebarMessages = defineMessages({
     description: 'Title of a notice shown after previewed JavaScript has run.',
   },
   refReloadBody: {
-    message: 'The script has already altered the page. A second attempt would run on top of the first, so the page has to be reloaded to get back to the original.',
+    message: 'The script has already changed the page. The page must be reloaded first, so that the next attempt does not run on top of this one.',
     description: 'Body of a notice shown after previewed JavaScript has run.',
   },
   refReloadKept: {
@@ -622,11 +622,11 @@ export const sidebarMessages = defineMessages({
     description: 'Button that starts a screenshot.',
   },
   refShotClipped: {
-    message: 'Clipped at the viewport; only the visible part was captured.',
+    message: 'Only the part visible on screen was captured.',
     description: 'Added to the screenshot warning.',
   },
   refShotReduced: {
-    message: 'The image was reduced from $FROM$ to $TO$ pixels before it is sent, because providers resize larger images.',
+    message: 'The image is reduced from $FROM$ to $TO$ pixels before sending, because providers resize larger images.',
     description: 'Added to the screenshot warning. $FROM$ and $TO$ are sizes such as 2000 × 1500.',
     placeholders: ['FROM', 'TO'],
   },
@@ -655,7 +655,7 @@ export const sidebarMessages = defineMessages({
     description: 'Word before the answer to a question about the draft, in the conversation.',
   },
   refAskNote: {
-    message: 'Questions and answers are not sent with the request that makes the change. Type the change you want and press Regenerate.',
+    message: 'Questions and answers are not sent when regenerating. To change the code, type the change and press Regenerate.',
     description: 'One line under the first answer to a question, saying that the conversation is separate from the changes.',
   },
   refAskWaiting: {
@@ -663,7 +663,7 @@ export const sidebarMessages = defineMessages({
     description: 'Status line shown after a question was sent and before any of the answer has arrived.',
   },
   refAskLimit: {
-    message: 'The most questions allowed ($COUNT$) have been asked. The count restarts after saving or discarding.',
+    message: 'The limit of $COUNT$ questions has been reached. The count restarts after saving or discarding.',
     description: 'Note shown beside the Ask button when no more questions can be asked in the current run. $COUNT$ is a number.',
     placeholders: ['COUNT'],
   },
@@ -704,7 +704,7 @@ export const sidebarMessages = defineMessages({
     description: 'Small heading above the last step of saving a transform.',
   },
   revReading: {
-    message: 'Reading the code…',
+    message: 'Checking the code…',
     description: 'Shown while the review of the code is running.',
   },
   revRunsIn: {
@@ -750,8 +750,13 @@ export const sidebarMessages = defineMessages({
     description: 'A problem that stops the code from being saved. $LINE$ is a line number, $API$ is the name of a function or property and $EXPLANATION$ says what is wrong.',
     placeholders: ['LINE', 'API', 'EXPLANATION'],
   },
+  editLineProblem: {
+    message: 'Line $LINE$: $EXPLANATION$',
+    description: 'One problem that stops hand-edited JavaScript from being saved, one per line. $LINE$ is a line number and $EXPLANATION$ says what is wrong.',
+    placeholders: ['LINE', 'EXPLANATION'],
+  },
   revRefused: {
-    message: 'You refused what this code needs, so it will not be saved. Go back and describe what you want without it.',
+    message: 'This code needs access that was refused, so it cannot be saved. Go back and describe the change without it.',
     description: 'Hint under a card about code that cannot be saved.',
   },
   revGoBackDifferent: {
@@ -763,11 +768,11 @@ export const sidebarMessages = defineMessages({
     description: 'Title of a card about addresses that the CSS loads.',
   },
   revUrlsBodyOne: {
-    message: 'The browser requests this address on every visit. A request can carry information about the page, and the server that receives it can see it. Only the addresses listed here will be allowed to load.',
+    message: 'Firefox requests this address on every visit, and the request can tell that server about the page. Only the addresses listed here will be allowed to load.',
     description: 'Body of a card about one address that the CSS loads.',
   },
   revUrlsBodyMany: {
-    message: 'The browser requests these addresses on every visit. A request can carry information about the page, and the server that receives it can see it. Only the addresses listed here will be allowed to load.',
+    message: 'Firefox requests these addresses on every visit, and each request can tell that server about the page. Only the addresses listed here will be allowed to load.',
     description: 'Body of a card about several addresses that the CSS loads.',
   },
   revWarnLine: {
@@ -776,13 +781,13 @@ export const sidebarMessages = defineMessages({
     placeholders: ['LINE', 'API'],
   },
   revWarnDeclared: {
-    message: 'That is $CAPABILITY$ this transform declared, so it will work.',
-    description: 'Part of a warning. $CAPABILITY$ is a capability name such as network or storage.',
+    message: 'This transform asked for $CAPABILITY$ access, so it is allowed.',
+    description: 'Part of a warning. $CAPABILITY$ is the kind of access, such as network or storage.',
     placeholders: ['CAPABILITY'],
   },
   revWarnUndeclared: {
-    message: 'That is $CAPABILITY$, which this transform did not declare, so it cannot be saved as it stands.',
-    description: 'Part of a warning. $CAPABILITY$ is a capability name such as network or storage.',
+    message: 'This needs $CAPABILITY$ access, which the transform did not ask for, so it cannot be saved.',
+    description: 'Part of a warning. $CAPABILITY$ is the kind of access, such as network or storage.',
     placeholders: ['CAPABILITY'],
   },
   revRequested: {
@@ -794,11 +799,11 @@ export const sidebarMessages = defineMessages({
     description: 'Explains how declared capabilities are enforced.',
   },
   revNotEnforced: {
-    message: 'The browser does not police this once it is saved. Approving is what allows it; refusing means the code is not saved at all.',
+    message: 'Firefox does not enforce this after saving. Approve to allow it, or refuse and the code is not saved.',
     description: 'Explains that the browser does not enforce declared capabilities.',
   },
   revMismatchTitle: {
-    message: 'The second model does not agree this matches your description',
+    message: 'The code check says this does not match your description',
     description: 'Title of a card about the second model\'s verdict.',
   },
   revYouAskedFor: {
@@ -821,28 +826,28 @@ export const sidebarMessages = defineMessages({
     placeholders: ['SCHEMES', 'SITES', 'PAGES', 'VARIANTS'],
   },
   revNoneDeclared: {
-    message: 'None declared. Code that uses network, storage or cookies without declaring it cannot be saved.',
-    description: 'Says that the code declares no capabilities.',
+    message: 'None. Code that uses the network, storage or cookies without asking for it cannot be saved.',
+    description: 'Says that the code asks for no network, storage or cookie access.',
   },
   revCssCheck: {
-    message: 'CSS check',
-    description: 'Row label for the result of the CSS check.',
+    message: 'Safety check',
+    description: 'Row label for the result of the safety check of CSS.',
   },
   revCodeScan: {
-    message: 'Code scan',
-    description: 'Row label for the result of the static analysis of JavaScript.',
+    message: 'Safety check',
+    description: 'Row label for the result of the safety check of JavaScript.',
   },
   revNoFindingsJs: {
-    message: 'No known patterns found. The scan looks for known patterns and cannot prove the code harmless. The code still runs with access to this page.',
-    description: 'Result of the static analysis when it found nothing.',
+    message: 'No known risky patterns found. The check cannot prove the code is safe, and the code still has access to this page.',
+    description: 'Result of the safety check when it found nothing.',
   },
   revNoFindingsCss: {
-    message: 'No known patterns found. The check looks for addresses the CSS would load.',
+    message: 'No problems found. The check looks for addresses that the CSS would load.',
     description: 'Result of the CSS check when it found nothing.',
   },
   revNoFindingsJsShort: {
-    message: 'No known patterns found.',
-    description: 'Short result of the static analysis when it found nothing. The full explanation is shown under it.',
+    message: 'No known risky patterns found.',
+    description: 'Short result of the safety check when it found nothing. The full explanation is shown under it.',
   },
   revFindingsOne: {
     message: '1 finding, listed above.',
@@ -854,19 +859,19 @@ export const sidebarMessages = defineMessages({
     placeholders: ['COUNT'],
   },
   revSecondModel: {
-    message: 'Second model',
-    description: 'Row label for the second model\'s review.',
+    message: 'Code check',
+    description: 'Row label for the result of the code check, which is done by a second model.',
   },
   revCssNotReviewed: {
-    message: 'CSS is not sent to a second model.',
+    message: 'CSS is not sent to the AI provider for the code check.',
     description: 'Result of the second model\'s review.',
   },
   revNotReviewed: {
-    message: 'Not reviewed.',
+    message: 'Not checked.',
     description: 'Result of the second model\'s review.',
   },
   revModelAgreed: {
-    message: 'Read the code and agreed it does what you described.',
+    message: 'The code check found that the code does what you described.',
     description: 'Result of the second model\'s review.',
   },
   revModelNote: {
@@ -884,12 +889,12 @@ export const sidebarMessages = defineMessages({
     description: 'Heading of the section that shows the code.',
   },
   revGrant: {
-    message: 'Saving asks Firefox for permission to run on $ORIGIN$. Without it the transform saves but never applies.',
+    message: 'Saving asks Firefox for permission to run on $ORIGIN$. Without it, nothing is saved.',
     description: 'Explains the permission requested when a CSS transform is saved. $ORIGIN$ is a site address.',
     placeholders: ['ORIGIN'],
   },
   revGrantJs: {
-    message: 'Saving asks Firefox for permission to run on $ORIGIN$, and to run user scripts. Without it the transform saves but never applies.',
+    message: 'Saving asks Firefox for permission to run on $ORIGIN$ and to run user scripts. Without it, nothing is saved.',
     description: 'Explains the permissions requested when a JavaScript transform is saved. $ORIGIN$ is a site address.',
     placeholders: ['ORIGIN'],
   },
@@ -898,7 +903,7 @@ export const sidebarMessages = defineMessages({
     description: 'Title of a card shown when the user refused the permission.',
   },
   revDeclinedBody: {
-    message: 'Nothing was saved. A transform without this grant would sit in the list looking active and do nothing on every visit.',
+    message: 'Nothing was saved, because the transform cannot run without this permission.',
     description: 'Body of a card shown when the user refused the permission.',
   },
   back: {
@@ -938,15 +943,15 @@ export const sidebarMessages = defineMessages({
     description: 'Label above the active provider.',
   },
   settingsActive: {
-    message: 'ACTIVE',
+    message: 'Active',
     description: 'Marks the provider that is in use.',
   },
   settingsOauth: {
-    message: 'oauth',
+    message: 'sign-in',
     description: 'How the provider is signed in to.',
   },
   settingsApiKey: {
-    message: 'api key',
+    message: 'API key',
     description: 'How the provider is signed in to.',
   },
   settingsSignInAgain: {
@@ -958,23 +963,23 @@ export const sidebarMessages = defineMessages({
     description: 'Says that the saved credential is no longer available.',
   },
   settingsKeyConfigured: {
-    message: 'Key configured',
-    description: 'Says whether a credential is saved.',
+    message: 'Ready to use',
+    description: 'Says that an API key or sign-in is saved for the provider.',
   },
   settingsNoCredential: {
-    message: 'No credential',
-    description: 'Says whether a credential is saved.',
+    message: 'No API key or sign-in saved',
+    description: 'Says that no API key or sign-in is saved for the provider.',
   },
   settingsWritesCode: {
     message: 'Writes the code',
     description: 'Label of the model that writes the code.',
   },
   settingsReviewsCode: {
-    message: 'Reviews the code',
+    message: 'Checks the code',
     description: 'Label of the model that reviews the code.',
   },
   settingsReviewNote: {
-    message: 'code and intent only',
+    message: 'receives only the code and your description',
     description: 'Says what the review model receives.',
   },
   settingsNoProvider: {
@@ -1009,7 +1014,7 @@ export const sidebarMessages = defineMessages({
     description: 'Label of a switch.',
   },
   settingsKeepShotNote: {
-    message: 'Screenshots need access to all sites. Kept on, you are not asked again — and you stop being asked per site when saving transforms too.',
+    message: 'Screenshots need access to all sites. While this is on, Firefox does not ask again, and it also stops asking for each site when a transform is saved.',
     description: 'Explains the switch that keeps the permission to take screenshots.',
   },
   settingsWhereStored: {
@@ -1021,7 +1026,7 @@ export const sidebarMessages = defineMessages({
     description: 'Link that opens the full settings page.',
   },
   settingsFullNote: {
-    message: 'Adding providers lives there.',
+    message: 'Providers are added there.',
     description: 'Says what is only on the full settings page.',
   },
   trAnotherTransform: {
@@ -1102,16 +1107,16 @@ export const sidebarMessages = defineMessages({
     description: 'Heading above the description of a transform.',
   },
   trYouWanted: {
-    message: 'You wanted',
+    message: 'Your description',
     description: 'Heading above the description of a transform.',
   },
   trEnvChanged: {
-    message: 'Environment changed',
-    description: 'Heading of a notice about a transform that was moved out of the page\'s own world.',
+    message: 'Moved to the isolated world',
+    description: 'Heading of a notice about a transform that was moved out of the page\'s own world into the isolated world.',
   },
   trOpenEditorEnv: {
-    message: 'Open the editor to turn on the page\'s environment',
-    description: 'Button that opens the editor to turn on the page\'s environment.',
+    message: 'Open the editor to allow the page\'s own world',
+    description: 'Button that opens the editor so that the page\'s own world can be allowed.',
   },
   trNotApplying: {
     message: 'Not applying',
@@ -1141,20 +1146,20 @@ export const sidebarMessages = defineMessages({
     placeholders: ['COUNT'],
   },
   trWinsImportant: {
-    message: ' — it marks them !important, so it wins despite being earlier in the list',
+    message: ' because it marks them !important, even though it is earlier in the list',
     description: 'Reason a CSS rule wins. It follows the words "and it wins".',
   },
   trWinsLater: {
-    message: ', being later in the list',
+    message: ' because it is later in the list',
     description: 'Reason a CSS rule wins. It follows the words "and it wins".',
   },
   trWinsOver: {
-    message: 'This one wins $PROPERTIES$ over $LOSER$.',
+    message: 'This one overrides $PROPERTIES$ from $LOSER$.',
     description: 'Says which CSS rules this transform wins. $PROPERTIES$ is a list of property names and $LOSER$ is a transform name.',
     placeholders: ['PROPERTIES', 'LOSER'],
   },
   trWinsOverImportant: {
-    message: 'This one wins $PROPERTIES$ over $LOSER$, because it marks them !important.',
+    message: 'This one overrides $PROPERTIES$ from $LOSER$, because it marks them !important.',
     description: 'Says which CSS rules this transform wins. $PROPERTIES$ is a list of property names and $LOSER$ is a transform name.',
     placeholders: ['PROPERTIES', 'LOSER'],
   },
@@ -1251,7 +1256,7 @@ export const sidebarMessages = defineMessages({
     placeholders: ['HOST'],
   },
   appPausedBody: {
-    message: 'This run is about an element on that page, so it stays there rather than following you here. Go back to carry on, or discard it and start fresh.',
+    message: 'This change is for an element on that page. Go back to finish it, or discard it.',
     description: 'Explains why a run does not follow the user to another page.',
   },
   appBackTo: {
@@ -1327,7 +1332,7 @@ export const sidebarMessages = defineMessages({
     placeholders: ['COUNT'],
   },
   appOrderHint: {
-    message: 'Order decides conflicts — later wins',
+    message: 'When transforms conflict, the later one wins',
     description: 'Hint under the list of transforms.',
   },
   appTurnOn: {
@@ -1339,7 +1344,7 @@ export const sidebarMessages = defineMessages({
     description: 'Button that turns off the transforms of a site.',
   },
   appSiteOffNote: {
-    message: 'No transform runs on this site while this is off. They stay saved.',
+    message: 'No transforms run on this site until they are turned back on. They stay saved.',
     description: 'Explains the state after the transforms of a site were turned off.',
   },
   appSiteOnNote: {
@@ -1347,7 +1352,7 @@ export const sidebarMessages = defineMessages({
     description: 'Explains the button that turns off the transforms of a site.',
   },
   flowNeedsPermission: {
-    message: 'Web Alchemist needs permission to read $HOST$ before it can point at anything on it.',
+    message: 'Web Alchemist needs permission to read $HOST$ before elements on it can be picked.',
     description: 'Error shown when the user has not granted access to the site. $HOST$ is a site name.',
     placeholders: ['HOST'],
   },
@@ -1356,29 +1361,29 @@ export const sidebarMessages = defineMessages({
     description: 'Stands in for the site name when the address cannot be read. It follows the words \'permission to read\'.',
   },
   flowElementGoneRepair: {
-    message: 'Web Alchemist cannot find the element $NAME$ was written for on this page, so there is nothing to repair against. Pick it again to write a new transform.',
+    message: 'Web Alchemist cannot find the element that $NAME$ was written for on this page, so it cannot be repaired. Pick the element again to write a new transform.',
     description: 'Error shown when a repair cannot find the element. $NAME$ is the name of the transform.',
     placeholders: ['NAME'],
   },
   flowElementGone: {
-    message: 'Web Alchemist cannot find the element $NAME$ was written for on this page. Open a page it applies to, or pick the element again.',
+    message: 'Web Alchemist cannot find the element that $NAME$ was written for on this page. Open a page it applies to, or pick the element again.',
     description: 'Error shown when a transform cannot find its element. $NAME$ is the name of the transform.',
     placeholders: ['NAME'],
   },
   flowScreenshotNeedsAllSites: {
-    message: 'Firefox only lets an extension capture a page with access to all sites. Without it, screenshots cannot be taken; everything else still works.',
+    message: 'Firefox allows screenshots only for extensions with access to all sites. Without that access, screenshots cannot be taken, but everything else works.',
     description: 'Error shown when the permission for screenshots was refused.',
   },
   flowNeedsUserScripts: {
-    message: 'Running a script needs Firefox’s user scripts permission. Nothing was run.',
+    message: 'Running a script needs Firefox\'s user scripts permission. Nothing was run.',
     description: 'Error shown when the permission for user scripts was refused.',
   },
   flowPreviewNoApproval: {
-    message: 'The review that allows a preview has no approval, so nothing was run. Read the code again.',
+    message: 'Nothing was run because the code check has not approved it. Select Check the code again.',
     description: 'Error shown when the preview of JavaScript is refused.',
   },
   msgConnectionDropped: {
-    message: 'The connection to the extension dropped before the response arrived.',
+    message: 'The extension stopped responding before the answer arrived.',
     description: 'Error shown when the background did not answer.',
   },
 })

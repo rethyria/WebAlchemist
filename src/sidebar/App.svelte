@@ -528,7 +528,7 @@
       const blocking = analysis.static.filter((f) => f.severity === 'block')
       if (blocking.length > 0) {
         return blocking
-          .map((f) => `Line ${f.line}: ${f.explanation}`)
+          .map((f) => t('editLineProblem', f.line, f.explanation))
           .join('\n')
       }
       // Code the user typed was seen by the user, which is the approval here.

@@ -63,13 +63,13 @@ describe('the approval panel for JavaScript with a clean review', () => {
   it('does not collapse the review to one line', () => {
     expect(body).not.toContain('Checked')
     expect(body).not.toContain('nothing flagged')
-    expect(body).toContain('No known patterns found.')
-    expect(body).toContain('still runs with access to this page')
+    expect(body).toContain('No known risky patterns found.')
+    expect(body).toContain('still has access to this page')
   })
 
   it('shows the world, the capabilities, the sites and the second model note', () => {
     expect(body).toContain('Isolated world (USER_SCRIPT)')
-    expect(body).toContain('None declared')
+    expect(body).toContain('None. Code that uses')
     expect(body).toContain('example.com and every subdomain of example.com')
     expect(body).toContain('pages whose path starts with /shop/')
     expect(body).toContain('It only changes the title.')

@@ -61,7 +61,7 @@ describe('the row of a transform that was moved out of MAIN', () => {
   it('shows the notice and the control to open the editor', () => {
     const body = unescape(html({ ...base, worldResetFromModel: true }))
     expect(body).toContain(unescape(WORLD_RESET_NOTICE))
-    expect(body).toContain("Open the editor to turn on the page's environment")
+    expect(body).toContain("Open the editor to allow the page's own world")
   })
 
   it('shows neither for a transform that was not moved (control)', () => {

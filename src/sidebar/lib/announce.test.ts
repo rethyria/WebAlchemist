@@ -35,7 +35,7 @@ describe('generationAnnouncement', () => {
 
 describe('reviewAnnouncement', () => {
   it('says the review is running while it has not arrived', () => {
-    expect(reviewAnnouncement(null, 'js')).toBe('Reviewing the code.')
+    expect(reviewAnnouncement(null, 'js')).toBe('Checking the code.')
   })
 
   it('differs between waiting and the result, so the arrival is a change', () => {
@@ -53,13 +53,13 @@ describe('reviewAnnouncement', () => {
 
   it('reports a model disagreement for JavaScript only', () => {
     const disagree = review({ model: { verdict: 'mismatch', explanation: 'x' } as ModelReview })
-    expect(reviewAnnouncement(disagree, 'js')).toMatch(/disagrees/)
-    expect(reviewAnnouncement(disagree, 'css')).not.toMatch(/disagrees/)
+    expect(reviewAnnouncement(disagree, 'js')).toMatch(/does not match your description/)
+    expect(reviewAnnouncement(disagree, 'css')).not.toMatch(/does not match your description/)
   })
 
   it('says no problems were found for a clean review, and that CSS is not model reviewed', () => {
     expect(reviewAnnouncement(review(), 'js')).toBe('Review finished. No problems found.')
-    expect(reviewAnnouncement(review(), 'css')).toMatch(/not sent for model review/)
+    expect(reviewAnnouncement(review(), 'css')).toMatch(/not sent for the code check/)
   })
 })
 

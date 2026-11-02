@@ -15,7 +15,7 @@ describe('Marked', () => {
 
   it('draws the value in bold text for a user-typed name', () => {
     const body = html({ text: t('trWinsOver', 'color', MARK), value: 'My dark mode', tag: 'b' })
-    expect(body).toContain('This one wins color over <b>My dark mode</b>.')
+    expect(body).toContain('This one overrides color from <b>My dark mode</b>.')
   })
 
   it('keeps the value where a translation moves the mark', () => {
