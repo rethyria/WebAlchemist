@@ -137,7 +137,7 @@
                 {t('revRunIsolated')}
               </Button>
             {:else}
-              <Button small full onclick={() => onworld('MAIN')}>
+              <Button small full variant="caution" onclick={() => onworld('MAIN')}>
                 {t('revAllowMain')}
               </Button>
             {/if}
@@ -342,7 +342,7 @@
     {:else if pendingUrls.length > 0}
       <div class="split">
         <Button grow={1} small onclick={onback}>{t('back')}</Button>
-        <Button variant="primary" grow={1.3} small disabled={!shown} onclick={onapproveurls}>
+        <Button variant="caution" grow={1.3} small disabled={!shown} onclick={onapproveurls}>
           {t(pendingUrls.length === 1 ? 'revApproveAddress' : 'revApproveAddresses')}
         </Button>
       </div>
@@ -358,7 +358,7 @@
         >
           {t('revRefuse', capabilities.join(' and '))}
         </Button>
-        <Button variant="primary" grow={1.3} small disabled={!shown} onclick={onsave}>
+        <Button variant="caution" grow={1.3} small disabled={!shown} onclick={onsave}>
           {t('revAllowSave')}
         </Button>
       </div>

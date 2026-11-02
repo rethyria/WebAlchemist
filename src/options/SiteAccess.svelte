@@ -103,7 +103,7 @@
             <span class="origin">{grant.origin}</span>
             <span class="count">{describeCount(grant.transforms)}</span>
           </div>
-          <Button small disabled={removing === grant.origin} onclick={() => void remove(grant)}>
+          <Button small variant="danger" disabled={removing === grant.origin} onclick={() => void remove(grant)}>
             {t('optRemoveAccess')}
           </Button>
         </li>

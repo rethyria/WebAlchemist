@@ -287,7 +287,7 @@
 
   <div class="foot">
     <div class="actions">
-      <Button grow={1} small onclick={ondiscard}>{t('discard')}</Button>
+      <Button variant="danger" grow={1} small onclick={ondiscard}>{t('discard')}</Button>
       {#if isJs && !jsRan && !blocked && previewAllowed}
         <Button variant="primary" grow={1.4} small onclick={onrun}>
           {t('refReloadAndRun')}

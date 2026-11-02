@@ -390,7 +390,7 @@
       <div class="manage">
         {#if confirming}
           <span class="ask">{t('trDeleteAsk')}</span>
-          <button type="button" class="danger" onclick={ondelete}>{t('trDelete')}</button>
+          <button type="button" class="btn-danger" onclick={ondelete}>{t('trDelete')}</button>
           <button type="button" class="secondary" onclick={() => (confirming = false)}>
             {t('cancel')}
           </button>
@@ -401,7 +401,7 @@
               {t('trRefine')}
             </button>
           {/if}
-          <button type="button" class="secondary" onclick={() => (confirming = true)}>
+          <button type="button" class="secondary btn-danger" onclick={() => (confirming = true)}>
             {t('trDelete')}
           </button>
         {/if}
@@ -651,7 +651,7 @@
   }
 
   button.secondary,
-  button.danger {
+  button.btn-danger {
     padding: 8px 10px;
     border-radius: var(--r-button);
     font: 600 12.5px var(--font-ui);
@@ -662,13 +662,6 @@
     border: 1px solid var(--border-strong);
     background: transparent;
     color: var(--text);
-  }
-
-  /* The only destructive control in the panel, and the only one tinted. */
-  button.danger {
-    border: 1px solid var(--attention);
-    background: rgb(from var(--attention) r g b / 0.12);
-    color: var(--attention);
   }
 
   .disclosure summary {

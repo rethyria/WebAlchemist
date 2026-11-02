@@ -252,7 +252,7 @@
         >
           {t('optSaveEncrypted')}
         </Button>
-        <Button disabled={busy} onclick={() => void runExport(pendingMode!, false)}>
+        <Button variant="caution" disabled={busy} onclick={() => void runExport(pendingMode!, false)}>
           {t('optSavePlain')}
         </Button>
         <Button disabled={busy} onclick={() => (pendingMode = null)}>{t('cancel')}</Button>

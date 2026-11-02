@@ -168,6 +168,18 @@
   --text-dim: light-dark(rgba(21, 20, 26, 0.75), rgba(251, 251, 254, 0.75));
   --text-faint: light-dark(rgba(21, 20, 26, 0.60), rgba(251, 251, 254, 0.60));
 
+  /*
+   * Button colours with a meaning. --danger marks an action that deletes or
+   * stops something; --caution marks an action that gives code or a file more
+   * reach than it had. Both are used only for text, borders and a 10% tint,
+   * and the button text always says what the button does, so colour is never
+   * the only signal. Measured on every surface above, text on the tinted
+   * button is at least 4.9:1 (danger) and 4.9:1 (caution) in light, and at
+   * least 5.0:1 and 7.0:1 in dark.
+   */
+  --danger: light-dark(#b3261e, #f58a84);
+  --caution: light-dark(#855400, #ffc247);
+
   /* Status. No success colour exists by design. */
   --attention: light-dark(#c2521f, #ef8354);
   --block: light-dark(#b3261e, #f2726b);
@@ -283,6 +295,22 @@ body {
 :focus-visible {
   outline: 2px solid var(--accent-fg);
   outline-offset: 1px;
+}
+
+/*
+ * Semantic buttons for markup that is not the shared Button component. The
+ * :not(#_) raises the specificity above component-scoped button rules.
+ */
+button.btn-danger:not(#_) {
+  border: 1px solid var(--danger);
+  background: rgb(from var(--danger) r g b / 0.1);
+  color: var(--danger);
+}
+
+button.btn-caution:not(#_) {
+  border: 1px solid var(--caution);
+  background: rgb(from var(--caution) r g b / 0.1);
+  color: var(--caution);
 }
 
 /* Text for assistive technology only. Used for live regions whose wording

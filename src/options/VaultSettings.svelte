@@ -159,7 +159,7 @@
       {:else}
         <Button small onclick={() => open('unlock')}>{t('optVaultUnlock')}</Button>
       {/if}
-      <Button small onclick={() => open('disable')}>{t('optVaultRemove')}</Button>
+      <Button small variant="danger" onclick={() => open('disable')}>{t('optVaultRemove')}</Button>
     {/if}
   </div>
 
@@ -209,7 +209,12 @@
       {/if}
 
       <div class="actions">
-        <Button variant="primary" small disabled={!canSubmit} onclick={() => void submit()}>
+        <Button
+          variant={panel === 'disable' ? 'danger' : 'primary'}
+          small
+          disabled={!canSubmit}
+          onclick={() => void submit()}
+        >
           {#if busy}
             {t('optVaultWorking')}
           {:else if panel === 'enable'}
@@ -242,7 +247,7 @@
               {t('optVaultDiscardNote')}
             </p>
             <div class="actions">
-              <Button small onclick={() => void discard()}>
+              <Button small variant="danger" onclick={() => void discard()}>
                 {t('optVaultDiscard')}
               </Button>
               <Button small onclick={() => (discardArmed = false)}>{t('optVaultKeep')}</Button>

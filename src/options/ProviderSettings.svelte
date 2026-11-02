@@ -382,9 +382,9 @@
               </Button>
             {/if}
             {#if status?.configured}
-              <Button small onclick={() => void onclearkey(provider.id)}>{t('optClear')}</Button>
+              <Button small variant="danger" onclick={() => void onclearkey(provider.id)}>{t('optClear')}</Button>
             {/if}
-            <Button small onclick={() => void removeProvider(provider)}>{t('optRemove')}</Button>
+            <Button small variant="danger" onclick={() => void removeProvider(provider)}>{t('optRemove')}</Button>
           </div>
 
           <div class="models" id={active ? 'models' : undefined}>

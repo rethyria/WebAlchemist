@@ -40,7 +40,13 @@
     <p>{t('approvalCapabilities', transform.capabilities.join(', '))}</p>
   {/if}
   <div class="actions">
-    <button type="button" class="primary" disabled={inMain && !risksRead} onclick={onapprove}>
+    <button
+      type="button"
+      class="primary"
+      class:btn-caution={inMain || transform.capabilities.length > 0}
+      disabled={inMain && !risksRead}
+      onclick={onapprove}
+    >
       {t('approvalApprove')}
     </button>
     <button type="button" class="secondary" onclick={oncancel}>{t('cancel')}</button>

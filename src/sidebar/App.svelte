@@ -782,7 +782,7 @@
         <button type="button" class="primary" onclick={() => void flow.returnToOwner()}>
           {t('appBackTo', flow.ownerHost)}
         </button>
-        <button type="button" class="secondary" onclick={() => void flow.discard()}>
+        <button type="button" class="secondary btn-danger" onclick={() => void flow.discard()}>
           {t('appDiscardIt')}
         </button>
       </div>

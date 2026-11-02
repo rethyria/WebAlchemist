@@ -675,7 +675,7 @@
           <span class="note">{t('edUnsaved')}</span>
         {/if}
         {#if !creating}
-          <button type="button" class="secondary" disabled={!dirty || saving} onclick={revert}>
+          <button type="button" class="secondary btn-danger" disabled={!dirty || saving} onclick={revert}>
             {t('edRevert')}
           </button>
         {/if}
@@ -872,6 +872,7 @@
             <div class="actions">
               <button
                 type="button"
+                class:btn-caution={restoreNeedsMainConfirmation(transform.kind, reviewing)}
                 disabled={restoring || saving || restoreRefusal(transform.kind, reviewing, mainRestoreConfirmed) !== null}
                 onclick={() => void restore(reviewing!)}>
                 {t('edRestore')}

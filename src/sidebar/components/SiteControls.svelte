@@ -27,6 +27,7 @@
     <div class="pair">
       <Button
         full
+        variant="danger"
         onclick={() => {
           confirming = false
           onsetoff(true)
@@ -37,7 +38,7 @@
       <Button full onclick={() => (confirming = false)}>{t('cancel')}</Button>
     </div>
   {:else}
-    <Button full onclick={() => (confirming = true)}>{t('appTurnOff')}</Button>
+    <Button full variant="danger" onclick={() => (confirming = true)}>{t('appTurnOff')}</Button>
   {/if}
   {#if notice}<p class="notice" role="status">{notice}</p>{/if}
 </div>

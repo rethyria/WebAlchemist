@@ -2,12 +2,14 @@
   import type { Snippet } from 'svelte'
 
   /**
-   * Primary is a filled accent; secondary is an outline. The design uses
-   * exactly these two everywhere, so they live here rather than being restated
-   * in each panel's scoped styles.
+   * Primary is a filled accent; secondary is an outline. Danger (red) is for
+   * an action that deletes or stops something, and caution (amber) is for an
+   * action that gives code or a file more reach. Both are outlined and tinted,
+   * and the label always says what the button does. They live here rather than
+   * being restated in each panel's scoped styles.
    */
   interface Props {
-    variant?: 'primary' | 'secondary'
+    variant?: 'primary' | 'secondary' | 'danger' | 'caution'
     full?: boolean
     small?: boolean
     disabled?: boolean
@@ -75,5 +77,17 @@
     border: 1px solid var(--border-strong);
     background: transparent;
     color: var(--text);
+  }
+
+  .danger {
+    border: 1px solid var(--danger);
+    background: rgb(from var(--danger) r g b / 0.1);
+    color: var(--danger);
+  }
+
+  .caution {
+    border: 1px solid var(--caution);
+    background: rgb(from var(--caution) r g b / 0.1);
+    color: var(--caution);
   }
 </style>
