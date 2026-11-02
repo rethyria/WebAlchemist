@@ -47,7 +47,7 @@ export const disclosureMessages = defineMessages({
     description: 'An item in the list of what is sent to the provider.',
   },
   sentRepair: {
-    message: 'When you use Repair with AI or Change with AI, the saved code, its description and rationale, and the reason that the transform stopped working',
+    message: 'When you use Repair with AI or Refine, the saved code, its description and rationale, and the reason that the transform stopped working',
     description: 'An item in the list of what is sent to the provider.',
   },
   sentAddress: {

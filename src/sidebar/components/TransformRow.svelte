@@ -396,6 +396,11 @@
           </button>
         {:else}
           <button type="button" class="secondary" onclick={startRename}>{t('trRename')}</button>
+          {#if !regenerates}
+            <button type="button" class="secondary" onclick={oneditwithai}>
+              {t('trRefine')}
+            </button>
+          {/if}
           <button type="button" class="secondary" onclick={() => (confirming = true)}>
             {t('trDelete')}
           </button>
@@ -425,7 +430,8 @@
           <div class="actions">
             <!--
               Three ways to change it, and they are genuinely different jobs.
-              Edit code changes the code. Change with AI continues the
+              Refine sits beside Rename in the row of actions on the record.
+              Edit code changes the code. Refine continues the
               conversation — it has the existing code in hand and asks what
               should be different about it. Edit description goes back to the
               start of that conversation and restates what was wanted, so the
@@ -438,11 +444,6 @@
             <button type="button" class="secondary" onclick={oneditintent}>
               {t('trEditDescription')}
             </button>
-            {#if !regenerates}
-              <button type="button" class="secondary" onclick={oneditwithai}>
-                {t('trChangeWithAi')}
-              </button>
-            {/if}
             <button type="button" class="secondary" onclick={onedit}>{t('trEditCode')}</button>
           </div>
           <pre>{transform.code}</pre>

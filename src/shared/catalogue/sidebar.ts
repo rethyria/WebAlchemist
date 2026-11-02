@@ -1205,8 +1205,8 @@ export const sidebarMessages = defineMessages({
     message: 'Edit description',
     description: 'Button that opens the description of a transform for editing.',
   },
-  trChangeWithAi: {
-    message: 'Change with AI',
+  trRefine: {
+    message: 'Refine',
     description: 'Button that asks the model to change a transform.',
   },
   trEditCode: {

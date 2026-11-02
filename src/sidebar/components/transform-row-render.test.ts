@@ -70,3 +70,13 @@ describe('the row of a transform that was moved out of MAIN', () => {
     expect(body).not.toContain('Open the editor to turn on')
   })
 })
+
+describe('the actions on an open row', () => {
+  it('place Refine beside Rename and keep the old name out', () => {
+    const body = html(base)
+    expect(body).toContain('Refine')
+    expect(body).not.toContain('Change with AI')
+    expect(body.indexOf('Rename')).toBeGreaterThan(-1)
+    expect(body.indexOf('Refine') - body.indexOf('Rename')).toBeLessThan(120)
+  })
+})

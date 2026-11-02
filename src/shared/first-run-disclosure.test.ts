@@ -41,7 +41,7 @@ describe('what the text says', () => {
     ['elements added as references', /each element that you add as a reference/],
     ['questions about a draft', /ask a question about a draft[\s\S]*your question about a draft/],
     ['earlier turns and generated code', /earlier follow-up requests[\s\S]*code that the model generated/],
-    ['the saved code, description, rationale and reason on repair', /Repair with AI or Change with AI, the saved code, its description and rationale, and the reason that the transform stopped working/],
+    ['the saved code, description, rationale and reason on repair', /Repair with AI or Refine, the saved code, its description and rationale, and the reason that the transform stopped working/],
     ['access from saving as well as picking', /Picking an element on a site, and saving a transform for a site, give Web Alchemist lasting access/],
     ['what the excluded list stops', /generate or run transforms, apply saved CSS, count transforms on the toolbar badge, check whether transforms still work, or add any of its own scripts to the page/],
     ['transforms are unencrypted', /not encrypted, even when a passphrase is set/],
