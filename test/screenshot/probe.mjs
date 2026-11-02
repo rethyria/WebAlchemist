@@ -368,6 +368,40 @@ try {
         }
         console.log(`repeated capture-region in the same state: ${tinted} of ${repeats} images contain pixels that are not from the page`, errors.size ? 'errors: ' + [...errors].join(' | ') : '')
         r.repeat = { tinted, repeats }
+        // Two requests at nearly the same moment, as a double click sends them (#37). The second is sent a few
+        // milliseconds after the first, because a tint needs the first request to show the layer again before
+        // the second has captured. Both images of every pair are analysed.
+        // The time one request takes, so that the delays reach from before it ends to after.
+        const timed = JSON.parse(await optionsPage.long(`(async () => { const t0 = performance.now(); await browser.runtime.sendMessage(${JSON.stringify({ ...sentCapture })}); return JSON.stringify(performance.now() - t0) })()`))
+        console.log(`one capture-region request takes ${Number(timed).toFixed(0)} ms`)
+        const delays = [0, 5, 20, 40, 60, 80, 100, 200]
+        const rounds = 2
+        const byDelay = {}
+        let pairImages = 0
+        let pairTinted = 0
+        for (let round = 0; round < rounds; round += 1) {
+          for (const delay of delays) {
+            const both = JSON.parse(await optionsPage.long(`Promise.all([
+              browser.runtime.sendMessage(${JSON.stringify({ ...sentCapture })}),
+              new Promise((resolve) => setTimeout(resolve, ${delay})).then(() => browser.runtime.sendMessage(${JSON.stringify({ ...sentCapture })})),
+            ]).then(rs => JSON.stringify(rs.map(x => x.ok ? { ok: true, dataUrl: x.data.dataUrl } : { ok: false, error: x.error && x.error.message })))`).catch(() => '[{"ok":false},{"ok":false}]'))
+            const entry = (byDelay[delay] ??= { images: 0, tinted: 0, failed: 0 })
+            for (const image of both) {
+              if (!image.ok) { entry.failed += 1; continue }
+              const a = JSON.parse(await B.long(`(${ANALYSE})(${JSON.stringify(image.dataUrl)})`))
+              entry.images += 1
+              pairImages += 1
+              if (a.anomalies > 0) { entry.tinted += 1; pairTinted += 1 }
+            }
+            await sleep(400)
+          }
+        }
+        console.log(`overlapping capture-region pairs: ${pairTinted} of ${pairImages} images contain pixels that are not from the page; by milliseconds before the second request: ${JSON.stringify(byDelay)}`)
+        const afterPairs = JSON.parse(await B.long(`(${ANALYSE})(${JSON.stringify(await B.long(`browser.tabs.captureVisibleTab(${aWin}, { format: 'png' })`))})`))
+        console.log(`raw capture after the pairs: ${afterPairs.anomalies} non-grid pixels (the page's scrollbar alone is ${clean.anomalies})`)
+        r.pairs = { tinted: pairTinted, images: pairImages, byDelay, layerAfter: afterPairs.anomalies }
+        note(`${c.label}: no image from two overlapping capture requests contains pixels of the extension's overlay`, pairImages > 0 && pairTinted === 0, `${pairTinted} of ${pairImages} tinted`)
+        note(`${c.label}: the outline of the picked area is shown again after the overlapping requests`, afterPairs.anomalies > clean.anomalies + 1000, `${afterPairs.anomalies} non-grid pixels against ${clean.anomalies} for the page alone`)
       }
       // The first case also goes to Generate, against the stub.
       if (c.label === 'shot-zoom-100') {

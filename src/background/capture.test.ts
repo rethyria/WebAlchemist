@@ -135,4 +135,54 @@ describe('capture-region', () => {
       expect(reply.data.clipped).toBe(true)
     })
   })
+
+  describe('requests for one tab', () => {
+    // Control: two requests for different tabs are not made to wait for each other, so the test can see an overlap.
+    it('control: requests for two different tabs overlap', async () => {
+      stubImages({ width: 1371, height: 1434 })
+      const release = h.hold('browser.tabs.captureVisibleTab', { firstCallOnly: true })
+      const first = request({ tabId: 3 })
+      await new Promise((resolve) => setTimeout(resolve, 20))
+      const second = request({ tabId: 4 })
+      await new Promise((resolve) => setTimeout(resolve, 20))
+      // The second tab hid its overlay while the first was still capturing.
+      expect(toPage).toEqual(['hide', 'hide', 'show'])
+      release()
+      await Promise.all([first, second])
+    })
+
+    it('hides and shows the overlay once for each request, and captures the second after the first has shown it again', async () => {
+      stubImages({ width: 1371, height: 1434 })
+      const events: string[] = []
+      h.captureVisibleTab = async () => {
+        events.push('capture')
+        return 'data:image/png;base64,AAAA'
+      }
+      h.contentReply = (message: { type: string; visible?: boolean }) => {
+        if (message.type === 'get-viewport') return viewport
+        if (message.type === 'set-lock-visible') events.push(message.visible ? 'show' : 'hide')
+        return undefined
+      }
+      const release = h.hold('browser.tabs.captureVisibleTab', { firstCallOnly: true })
+      const first = request()
+      await new Promise((resolve) => setTimeout(resolve, 20))
+      const second = request()
+      await new Promise((resolve) => setTimeout(resolve, 20))
+      // The first request is waiting inside its capture; the second has not touched the overlay.
+      expect(events).toEqual(['hide'])
+      release()
+      await Promise.all([first, second])
+      expect(events).toEqual(['hide', 'capture', 'show', 'hide', 'capture', 'show'])
+    })
+
+    it('runs the second request after one that failed', async () => {
+      stubImages({ width: 1371, height: 1434 })
+      // The first request is for an address that is not the tab's, which refuses it after the overlay is hidden.
+      const failing = request({ url: 'https://other.example/' })
+      const next = request()
+      expect((await failing).ok).toBe(false)
+      expect((await next).ok).toBe(true)
+      expect(toPage).toEqual(['hide', 'show', 'hide', 'show'])
+    })
+  })
 })

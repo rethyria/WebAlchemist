@@ -18,6 +18,7 @@ import { CAPTURE_GRANT_KEY } from '@shared/capture-grant'
 import { appliesInContainer } from '@shared/container'
 import { refuseInPrivateWindow, requireNormalWindow } from './private-window'
 import { cropWindow, regionAtScroll, viewportChanged, type PixelSize, type ScrollOffset, type Viewport } from '@shared/region'
+import { createSerialQueue } from '@shared/serial'
 import type {
   Accent,
   GenerationResult,
@@ -2180,7 +2181,28 @@ interface CaptureResult {
   moved: boolean
 }
 
-async function captureWithLockDown(
+/**
+ * One capture at a time for each tab. The overlay in the page is hidden before
+ * the capture and shown again after it, once per request, and two requests
+ * that overlap would show it again before the second capture, which then
+ * contains the overlay's tint (measured in test/screenshot/README.md, #37).
+ */
+const captureQueue = createSerialQueue<number>()
+
+function captureWithLockDown(
+  tabId: number,
+  rect: Rect,
+  viewportWidth: number,
+  url: string,
+  scrolledTo?: ScrollOffset,
+  devicePixelRatio?: number,
+): Promise<CaptureResult> {
+  return captureQueue.run(tabId, () =>
+    captureWithLockDownNow(tabId, rect, viewportWidth, url, scrolledTo, devicePixelRatio),
+  )
+}
+
+async function captureWithLockDownNow(
   tabId: number,
   rect: Rect,
   viewportWidth: number,

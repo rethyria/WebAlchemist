@@ -116,13 +116,32 @@ The whole of `probe.mjs`, which drives the real sidebar and picker, passes after
 
 Controls: the scale is taken from a raw capture and not from a small region's few edges (a small region at ratio 2 gave a fitted scale of 2.0000 from five edges where the viewport's 17 edges give 1.9951); the images at ratios 1.5 and 1.8, which a fractional rectangle does not affect at these sizes, are the control that shows the blur metric returns none for an image that was copied cleanly; the grant that `captureVisibleTab` needs is held only for the run and the probe checks that it is back as before; the unit tests in `src/shared/region.test.ts` and `src/background/capture.test.ts` check the same sizes from the numbers in the first table.
 
+## Overlapping capture requests (#37, fixed)
+
+`captureWithLockDown` hid the extension's overlay in the page, took the image and showed the overlay again, once for each request, and nothing made two requests for one tab wait for each other. When the first request showed the overlay again before the second had captured, the second image would contain it. The extension now keeps one queue for each tab (`createSerialQueue` in `src/shared/serial.ts`), so that the hide, capture and show of one request finish before the next request for that tab starts, and a request for another tab does not wait.
+
+### What was measured
+
+- Unit tests (`src/background/capture.test.ts`, `src/shared/serial.test.ts`) run the real background code with a stubbed browser. With the first capture held open and a second request sent for the same tab, the page receives `hide`, then the capture, then `show`, and only then the second request's `hide`, capture and `show`. The control is two requests for different tabs, which are not queued together and which do overlap (`hide`, `hide`, `show`). A request that fails does not stop the one behind it.
+- `probe.mjs` sends pairs of `capture-region` requests from an extension page while the sidebar's picked area is on screen, with the second request sent 0, 5, 20, 40, 60, 80, 100 or 200 ms after the first (one request takes 39 to 48 ms), twice at each delay, and analyses every image for pixels that are not grid colours. The control is that the analysis finds the overlay: a raw capture with the overlay shown has about 1.96 million such pixels, against 3245 for the page's scrollbar alone, so a tinted image would be seen.
+
+### Results
+
+| Build | Pairs | Images with pixels of the overlay | Overlay shown again afterwards |
+|---|---|---|---|
+| Before the queue (commit 92e348f), zoom 1 | 18 delays from 0 to 250 ms, twice each, 72 images | 0 | Yes |
+| After the queue, zoom 1 | 8 delays, twice each, 32 images | 0 | Yes (1,966,014 pixels) |
+| After the queue, zoom 4/3 | 8 delays, twice each, 32 images | 0 | Yes (1,956,240 pixels) |
+
+The race was not reproduced live. The tint that the first session saw once came from a harness that sent every click twice, with the two requests about 2 ms apart; in this run, requests 0 to 250 ms apart on the build before the queue returned 72 clean images. So the live probe does not show a difference between the build before and after, and what shows that the queue works is the unit tests, which place the second request between the first request's hide and its show and check the order of the messages that the page receives. The cause that the first session described (the overlay is hidden and shown again by each request with nothing serialising them) is in the code and is unchanged by this measurement.
+
 ## Clipped regions and the model gate
 
 A region that ends below the viewport (120, 700, 200 × 500 at a ratio of 1.5) is reported as clipped, and the image is 254.7 CSS pixels tall where the region is 500. That image contains 1500 pixels that are not grid colours. They are the page's horizontal scrollbar, which the region reaches, and the probe reports the count without asserting it. A provider whose model does not read images (`supportsVision` false) gets no screenshot controls in the panel.
 
 ## What was found
 
-- Two overlapping capture requests can return an image that contains the extension's lock fill. In one run the test harness sent every click twice by mistake. Two `capture-region` requests were sent about 2 milliseconds apart, and the page showed the extension's overlay removed at the first request's start and added again before the second request's capture, so the second image was tinted (a 10 percent fill of the accent colour over the whole region). A deliberate double click in a later run sent two requests and returned a clean image, so the race is real in the code and was seen once. `captureWithLockDown` in `src/background/index.ts` hides the layer and shows it again for each request, and nothing serialises two requests.
+- Two overlapping capture requests could return an image that contains the extension's lock fill (fixed, see the section on overlapping capture requests). In one run the test harness sent every click twice by mistake. Two `capture-region` requests were sent about 2 milliseconds apart, and the page showed the extension's overlay removed at the first request's start and added again before the second request's capture, so the second image was tinted (a 10 percent fill of the accent colour over the whole region). A deliberate double click in a later run sent two requests and returned a clean image, so the race is real in the code and was seen once. `captureWithLockDown` in `src/background/index.ts` hides the layer and shows it again for each request, and nothing serialises two requests.
 - A large region at a device pixel ratio of 2 came back 4 device pixels short of 1280. The cause was not a defect of that size alone; see the section on the crop.
 - No limit applies to the size of an image. The largest one in this run was 1276 × 1356 pixels and 50 KB, which is small because the grid is flat colour. A photograph of the same size would be larger by a factor that was not measured.
 
