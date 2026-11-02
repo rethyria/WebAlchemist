@@ -13,31 +13,46 @@ export function requiredOrigin(transform: Pick<Transform, 'match'>): string {
   return originPermissionFor(transform.match)
 }
 
-/** The host part of a `*://host/*` pattern, or null for any other shape. */
-function hostOf(origin: string): string | null {
-  const found = /^\*:\/\/([^/]+)\/\*$/.exec(origin)
-  return found?.[1] ?? null
+/** The scheme and host of a `scheme://host/*` pattern, or null for any other shape. */
+function partsOf(origin: string): { scheme: string; host: string } | null {
+  const found = /^(\*|[a-z][a-z0-9+.-]*):\/\/([^/]+)\/\*$/.exec(origin)
+  return found ? { scheme: found[1]!, host: found[2]! } : null
+}
+
+/**
+ * Whether a held scheme covers a required one. The `*` scheme covers http,
+ * https, ws and wss, as it does in Firefox match patterns; any other scheme
+ * covers only itself, and so never covers a required `*`.
+ */
+function schemeCovers(held: string, required: string): boolean {
+  if (held === required) return true
+  return held === '*' && ['http', 'https', 'ws', 'wss'].includes(required)
 }
 
 /**
  * Whether a held origin permission covers a required one.
  *
- * Both are compared by host, following match-pattern rules: a leading `*.`
+ * Both are compared by scheme and host, following match-pattern rules: a leading `*.`
  * covers the domain itself and every subdomain, and `*` covers every host. A
  * grant for `*://www.example.com/*` does not cover `*://*.example.com/*`,
  * because the pattern also names hosts the grant does not include. That is the
  * case a transform saved with the default pattern was in before #102.
  *
- * Patterns that are not in `*://host/*` form (for example
- * `http://localhost/*`) cover only an identical string, which is conservative:
- * it can report a missing grant, never an invented one.
+ * The scheme may be `*`, `http`, `https` or another one: a held `*` covers a
+ * required http or https, and a held `https` covers only a required `https`.
+ * Patterns that are not in `scheme://host/*` form cover only an identical
+ * string, which is conservative: it can report a missing grant, never an
+ * invented one.
  */
 export function originCovers(held: string, required: string): boolean {
   if (held === required || held === '<all_urls>') return true
-  const heldHost = hostOf(held)
-  const requiredHost = hostOf(required)
-  if (heldHost === null || requiredHost === null) return false
-  if (heldHost === '*') return true
+  const heldParts = partsOf(held)
+  const requiredParts = partsOf(required)
+  if (heldParts === null || requiredParts === null) return false
+  if (!schemeCovers(heldParts.scheme, requiredParts.scheme)) return false
+  const heldHost = heldParts.host
+  const requiredHost = requiredParts.host
+  if (heldHost === '*' || heldHost === requiredHost) return true
   if (heldHost.startsWith('*.')) {
     const domain = heldHost.slice(2)
     const bare = requiredHost.startsWith('*.') ? requiredHost.slice(2) : requiredHost

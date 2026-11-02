@@ -40,6 +40,26 @@ describe('originCovers', () => {
   })
 })
 
+describe('originCovers with a scheme', () => {
+  it('covers an https origin from a held any-scheme origin', () => {
+    expect(originCovers('*://www.youtube.com/*', 'https://www.youtube.com/*')).toBe(true)
+    expect(originCovers('*://*.youtube.com/*', 'https://www.youtube.com/*')).toBe(true)
+  })
+
+  it('covers an identical scheme-specific origin', () => {
+    expect(originCovers('https://x/*', 'https://x/*')).toBe(true)
+  })
+
+  it('does not cover another scheme, or an any-scheme origin from one scheme', () => {
+    expect(originCovers('http://x/*', 'https://x/*')).toBe(false)
+    expect(originCovers('https://x/*', '*://x/*')).toBe(false)
+  })
+
+  it('does not cover another host with the same scheme', () => {
+    expect(originCovers('*://www.youtube.com/*', 'https://m.youtube.com/*')).toBe(false)
+  })
+})
+
 describe('hasAccess', () => {
   it('is true when a held origin covers the transform pattern', () => {
     expect(hasAccess(['*://*.example.com/*'], t('*.example.com/*'))).toBe(true)
@@ -52,6 +72,16 @@ describe('hasAccess', () => {
 
   it('is false when only the exact host is held for a subdomain pattern', () => {
     expect(hasAccess(['*://www.example.com/*'], t('*.example.com/*'))).toBe(false)
+  })
+})
+
+describe('access to an https pattern', () => {
+  it('is held through an any-scheme grant and counted by siteGrants', () => {
+    expect(hasAccess(['*://www.youtube.com/*'], t('https://www.youtube.com/*'))).toBe(true)
+    expect(hasAccess(['http://www.youtube.com/*'], t('https://www.youtube.com/*'))).toBe(false)
+    expect(
+      siteGrants(['*://*.youtube.com/*'], [t('https://www.youtube.com/*')]),
+    ).toEqual([{ origin: '*://*.youtube.com/*', transforms: 1 }])
   })
 })
 

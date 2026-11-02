@@ -7,6 +7,7 @@
 import { describe, expect, it } from 'vitest'
 import { render } from 'svelte/server'
 import { WORLD_RESET_NOTICE } from '@shared/world'
+import { hasAccess } from '@shared/site-access'
 import TransformRow from './TransformRow.svelte'
 
 const base = {
@@ -27,7 +28,7 @@ const base = {
   updatedAt: 0,
 }
 
-function html(transform: Record<string, unknown>) {
+function html(transform: Record<string, unknown>, access = true) {
   const noop = () => {}
   return render(TransformRow as any, {
     props: {
@@ -36,7 +37,7 @@ function html(transform: Record<string, unknown>) {
       position: 1,
       expanded: true,
       dragging: false,
-      hasAccess: true,
+      hasAccess: access,
       ongrant: noop,
       ontoggle: noop,
       onexpand: noop,
@@ -78,5 +79,22 @@ describe('the actions on an open row', () => {
     expect(body).not.toContain('Change with AI')
     expect(body.indexOf('Rename')).toBeGreaterThan(-1)
     expect(body.indexOf('Refine') - body.indexOf('Rename')).toBeLessThan(120)
+  })
+})
+
+describe('the row of a transform on an https page after access is granted', () => {
+  const youtube = { ...base, match: 'https://www.youtube.com/*' }
+  const noAccess = 'No access to this site'
+
+  // permissions.request resolves true without a prompt when Firefox already
+  // holds the origin as an any-scheme pattern, so getAll() does not change.
+  it('stops showing no access when a held any-scheme origin covers it', () => {
+    const held = ['*://www.youtube.com/*']
+    expect(html(youtube, hasAccess(held, youtube))).not.toContain(noAccess)
+  })
+
+  it('shows no access when only another scheme is held (control)', () => {
+    const held = ['http://www.youtube.com/*']
+    expect(html(youtube, hasAccess(held, youtube))).toContain(noAccess)
   })
 })
