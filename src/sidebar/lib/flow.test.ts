@@ -1175,6 +1175,37 @@ describe('including the drawn region', () => {
   })
 })
 
+describe('a screenshot that was made smaller (#37)', () => {
+  it('records both sizes so the preview can say so, and clears them for an image that was not reduced and when the shot is dropped', async () => {
+    const flow = newFlow()
+    flow.picked = { ...found, cropDrawn: true } as any
+    const reduced = { from: { width: 3000, height: 2000 }, to: { width: 1568, height: 1045 } }
+    handler = (m) =>
+      m.type === 'capture-region'
+        ? { ok: true, data: { dataUrl: 'data:', rect: crop, clipped: false, reduced } }
+        : { ok: true, data: null }
+    await flow.includePickedRegion()
+    expect(flow.shotReduced).toEqual(reduced)
+
+    // Control: the next reply has no reduction and the note goes.
+    handler = (m) =>
+      m.type === 'capture-region'
+        ? { ok: true, data: { dataUrl: 'data:', rect: crop, clipped: false } }
+        : { ok: true, data: null }
+    await flow.includePickedRegion()
+    expect(flow.shotReduced).toBeNull()
+
+    handler = (m) =>
+      m.type === 'capture-region'
+        ? { ok: true, data: { dataUrl: 'data:', rect: crop, clipped: false, reduced } }
+        : { ok: true, data: null }
+    await flow.includePickedRegion()
+    expect(flow.shotReduced).toEqual(reduced)
+    flow.cancelScreenshot()
+    expect(flow.shotReduced).toBeNull()
+  })
+})
+
 describe('cancelling while the preview is applied', () => {
   beforeEach(() => {
     ports.length = 0

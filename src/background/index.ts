@@ -17,7 +17,7 @@ import { exactPagePattern, matchesUrl, originPermissionForUrl } from '@shared/ma
 import { CAPTURE_GRANT_KEY } from '@shared/capture-grant'
 import { appliesInContainer } from '@shared/container'
 import { refuseInPrivateWindow, requireNormalWindow } from './private-window'
-import { cropWindow, regionAtScroll, viewportChanged, type PixelSize, type ScrollOffset, type Viewport } from '@shared/region'
+import { cropWindow, reducedSize, regionAtScroll, viewportChanged, type PixelSize, type ScrollOffset, type Viewport } from '@shared/region'
 import { createSerialQueue } from '@shared/serial'
 import type {
   Accent,
@@ -2179,6 +2179,8 @@ interface CaptureResult {
   rect: Rect
   clipped: boolean
   moved: boolean
+  /** Present when the image was made smaller before it was returned. */
+  reduced?: { from: PixelSize; to: PixelSize }
 }
 
 /**
@@ -2275,7 +2277,7 @@ async function captureRegion(
   url: string,
   rect: Rect,
   viewport: { width: number; height?: number },
-): Promise<{ dataUrl: string; clipped: boolean }> {
+): Promise<{ dataUrl: string; clipped: boolean; reduced?: { from: PixelSize; to: PixelSize } }> {
   // captureVisibleTab photographs whichever tab is active in a window, which
   // after the user switches tabs is not the run's tab, and can be a different
   // site they are signed in to. It is read again here, just before the call,
@@ -2327,10 +2329,16 @@ async function captureRegion(
   // rather than drawing past the edge and sending transparent padding.
   const { source, clipped } = cropWindow(rect, { width: bitmap.width, height: bitmap.height }, viewportSize)
 
-  const canvas = new OffscreenCanvas(source.width, source.height)
+  // An image whose longer side is over the limit is made smaller before it is
+  // returned, because the providers resize it anyway and the bytes cost time
+  // and, for a metered connection, money.
+  const reducedTo = reducedSize({ width: source.width, height: source.height })
+  const size = reducedTo ?? { width: source.width, height: source.height }
+  const canvas = new OffscreenCanvas(size.width, size.height)
   const context = canvas.getContext('2d')
   if (!context) throw new Error(t('bgCouldNotPrepareTheImage'))
-  context.drawImage(bitmap, source.x, source.y, source.width, source.height, 0, 0, source.width, source.height)
+  if (reducedTo) context.imageSmoothingQuality = 'high'
+  context.drawImage(bitmap, source.x, source.y, source.width, source.height, 0, 0, size.width, size.height)
   const cropped = await canvas.convertToBlob({ type: 'image/png' })
 
   const dataUrl = await new Promise<string>((resolve, reject) => {
@@ -2340,7 +2348,11 @@ async function captureRegion(
     reader.readAsDataURL(cropped)
   })
 
-  return { dataUrl, clipped }
+  return {
+    dataUrl,
+    clipped,
+    ...(reducedTo ? { reduced: { from: { width: source.width, height: source.height }, to: reducedTo } } : {}),
+  }
 }
 
 /** Same as sendToContent, but keeps the content script's reply. */

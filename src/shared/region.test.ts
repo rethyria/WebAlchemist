@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { cropWindow, regionAtScroll, viewportChanged } from './region'
+import { cropWindow, MAX_IMAGE_SIDE, reducedSize, regionAtScroll, viewportChanged } from './region'
 
 const viewport = { width: 800, height: 600 }
 const rect = { x: 100, y: 300, width: 200, height: 100 }
@@ -120,5 +120,22 @@ describe('cropWindow', () => {
     expect(result.source.width).toBeGreaterThanOrEqual(1)
     expect(result.source.height).toBeGreaterThanOrEqual(1)
     expect(result.clipped).toBe(true)
+  })
+})
+
+describe('reducedSize', () => {
+  it('returns null for an image whose longer side is at or below the limit', () => {
+    expect(reducedSize({ width: 1568, height: 900 })).toBeNull()
+    expect(reducedSize({ width: 600, height: 1568 })).toBeNull()
+  })
+
+  it('keeps the shape and brings the longer side to the limit', () => {
+    expect(reducedSize({ width: 3136, height: 1568 })).toEqual({ width: MAX_IMAGE_SIDE, height: 784 })
+    expect(reducedSize({ width: 1000, height: 2000 })).toEqual({ width: 784, height: MAX_IMAGE_SIDE })
+    expect(reducedSize({ width: 1276, height: 1569 })).toEqual({ width: 1275, height: MAX_IMAGE_SIDE })
+  })
+
+  it('takes a limit', () => {
+    expect(reducedSize({ width: 400, height: 200 }, 100)).toEqual({ width: 100, height: 50 })
   })
 })

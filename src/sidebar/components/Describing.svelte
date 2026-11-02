@@ -22,6 +22,8 @@
     shotPreview: string | null
     shotClipped: boolean
     shotMoved: boolean
+    /** The sizes in pixels before and after, when the image was made smaller before it is sent. */
+    shotReduced: { from: { width: number; height: number }; to: { width: number; height: number } } | null
     visionSupported: boolean
     /** The page address as it will be sent to the provider. */
     sentAddress: string
@@ -52,6 +54,7 @@
     shotPreview,
     shotClipped,
     shotMoved,
+    shotReduced,
     visionSupported,
     sentAddress,
     onchange,
@@ -450,6 +453,11 @@
         {#if shotMoved}
           <p class="note">
             {t('describingShotMoved')}
+          </p>
+        {/if}
+        {#if shotReduced}
+          <p class="note">
+            {t('describingShotReduced', `${shotReduced.from.width} × ${shotReduced.from.height}`, `${shotReduced.to.width} × ${shotReduced.to.height}`)}
           </p>
         {/if}
         <button type="button" class="shot-action" onclick={() => onscreenshot(false)}>

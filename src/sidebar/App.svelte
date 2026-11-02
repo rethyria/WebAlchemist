@@ -814,6 +814,7 @@
       shotPreview={flow.shotPreview}
       shotClipped={flow.shotClipped}
       shotMoved={flow.shotMoved}
+      shotReduced={flow.shotReduced}
       visionSupported={flow.visionSupported}
       sentAddress={flow.sentAddress}
       onchange={(value) => (flow.instruction = value)}
@@ -859,6 +860,7 @@
       shotPreview={flow.shotPreview}
       shotClipped={flow.shotClipped}
       shotMoved={flow.shotMoved}
+      shotReduced={flow.shotReduced}
       visionSupported={flow.visionSupported}
       sentAddress={flow.sentAddress}
       onfollowup={(value) => (flow.followUp = value)}

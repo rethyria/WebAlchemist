@@ -550,6 +550,8 @@ export interface Responses {
     clipped: boolean
     /** True when the area was moved because the page scrolled after it was drawn. */
     moved?: boolean
+    /** Present when the image was made smaller, with its sizes in pixels before and after. */
+    reduced?: { from: { width: number; height: number }; to: { width: number; height: number } }
   }
   'start-picking': boolean
   'stop-picking': boolean

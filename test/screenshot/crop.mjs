@@ -1,6 +1,7 @@
 /**
  * #37 -- is the cropped image the region that was drawn, to a device pixel, at
- * every page zoom and after scrolling?
+ * every page zoom and after scrolling, and what does an image that is larger than
+ * the size limit become?
  *
  * Each case sends the `capture-region` message that the panel sends, from an
  * extension page, for a region of the grid page, and analyses the image that
@@ -10,6 +11,9 @@
  * edges to within one device pixel, its sides are the region's times that scale to
  * within one device pixel, and no edge in it is blurred (an image copied pixel
  * for pixel has at most one blended pixel at an edge, and a resampled one has more).
+ *
+ * The cases for the size limit enlarge the dev Firefox window, so that a full
+ * capture is larger than 1568 pixels, and put the window back afterwards.
  *
  * Needs the development Firefox (WA_RDP_PORT) and the host permission for
  * http://localhost/*. The all-sites grant that captureVisibleTab needs is added
@@ -42,6 +46,7 @@ const note = (name, ok, detail = '') => {
 }
 
 const heldBefore = (await B.run(`browser.permissions.contains(${ALL_SITES})`)) === 'true'
+const windowBefore = JSON.parse(await B.run(`browser.windows.getAll().then(ws => JSON.stringify({ id: ws[0].id, width: ws[0].width, height: ws[0].height, left: ws[0].left, top: ws[0].top }))`))
 const optionsTab = Number(await B.run(`browser.tabs.create({ url: ${JSON.stringify(ctx.baseUrl() + 'src/options/index.html')}, active: false }).then(t => t.id)`))
 let O = null
 for (let i = 0; i < 15 && !O; i += 1) {
@@ -149,12 +154,61 @@ try {
       note(`${c.label}: the case ran to the end`, false, String(error.message ?? error).slice(0, 200))
     }
   }
+
+  /* ---- the size limit ---------------------------------------------------- */
+  if (wanted === null || wanted.includes('size-limit')) {
+    console.log('\n--- size limit ---')
+    await B.run(`browser.windows.update(${windowBefore.id}, { left: 0, top: 0, width: 2540, height: 1400 }).then(w => 'resized')`)
+    await sleep(2500)
+    try {
+      const label = 'crop-size-limit'
+      const url = uniqueUrl(`http://localhost:${PAGE_PORT}/`, label)
+      const id = Number(await B.run(`browser.tabs.create({ url: ${JSON.stringify(url)}, active: true }).then(t => t.id)`))
+      await sleep(1800)
+      await B.run(`browser.tabs.setZoom(${id}, 1)`)
+      await sleep(1200)
+      const vp = JSON.parse(await B.run(`browser.tabs.sendMessage(${id}, { type: 'get-viewport' }).then(v => JSON.stringify(v))`))
+      console.log('viewport after the window was enlarged:', JSON.stringify(vp))
+      await grant('add')
+      const ask = async (rect) => {
+        const message = { type: 'capture-region', tabId: id, rect, viewportWidth: vp.width, url, devicePixelRatio: vp.devicePixelRatio }
+        const raw = await O.long(`(async () => {
+          const r = await browser.runtime.sendMessage(${JSON.stringify(message)});
+          if (!r.ok) return JSON.stringify({ ok: false, error: r.error });
+          const a = JSON.parse(await (${ANALYSE})(r.data.dataUrl));
+          return JSON.stringify({ ok: true, clipped: r.data.clipped, reduced: r.data.reduced ?? null, bytes: Math.round(r.data.dataUrl.length * 3 / 4), width: a.width, height: a.height, anomalies: a.anomalies, row: a.row, column: a.column });
+        })()`)
+        return JSON.parse(raw)
+      }
+      const large = await ask({ x: 0, y: 0, width: Math.floor(vp.width), height: Math.floor(vp.height) })
+      console.log('full viewport:', JSON.stringify({ ...large, row: undefined, column: undefined }))
+      const longerSide = large.ok ? Math.max(large.width, large.height) : 0
+      const fullSize = large.reduced ? Math.max(large.reduced.from.width, large.reduced.from.height) : longerSide
+      note('control: the region before the limit is larger than 1568 pixels on its longer side', fullSize > 1568, `${large.reduced ? `${large.reduced.from.width}x${large.reduced.from.height}` : `${large.width}x${large.height}`}`)
+      note('an image over the limit comes back with a longer side of 1568 pixels', large.ok && longerSide === 1568, `${large.width}x${large.height}`)
+      note('the reduced image keeps its shape', large.ok && large.reduced && Math.abs(large.width / large.height - large.reduced.from.width / large.reduced.from.height) < 0.002, large.reduced ? `${(large.width / large.height).toFixed(4)} against ${(large.reduced.from.width / large.reduced.from.height).toFixed(4)}` : 'not reduced')
+      note('the reply says it was reduced, with both sizes', large.ok && large.reduced && large.reduced.to.width === large.width && large.reduced.to.height === large.height, JSON.stringify(large.reduced))
+      note('the reduced image has no pixel outside the grid colours except those the reduction blends at edges (counted, not asserted)', true, `anomalies ${large.anomalies} of ${large.width * large.height}`)
+      console.log(`INFORMATION size limit: the image is ${Math.round(large.bytes / 1024)} KB`)
+      // Control: a small region of the same page is not touched.
+      const small = await ask({ x: 100, y: 100, width: 300, height: 200 })
+      note('control: a region whose image is under the limit is not reduced', small.ok && small.reduced === null, `${small.width}x${small.height}`)
+      await B.run(`browser.tabs.remove(${id}).catch(() => {})`)
+    } catch (error) {
+      note('the size limit case ran to the end', false, String(error.message ?? error).slice(0, 300))
+    } finally {
+      await B.run(`browser.windows.update(${windowBefore.id}, { left: ${windowBefore.left}, top: ${windowBefore.top}, width: ${windowBefore.width}, height: ${windowBefore.height} }).then(() => 'restored')`)
+      await sleep(1500)
+    }
+  }
 } catch (error) {
   note('the probe ran to the end', false, String(error.message ?? error).slice(0, 300))
 } finally {
   await B.run(`browser.tabs.remove(${optionsTab}).catch(() => {})`)
   if (!heldBefore) await grant('remove')
   note('control: the all-sites grant is back to what it was', (await B.run(`browser.permissions.contains(${ALL_SITES})`)) === String(heldBefore))
+  const windowAfter = JSON.parse(await B.run(`browser.windows.getAll().then(ws => JSON.stringify({ width: ws[0].width, height: ws[0].height }))`))
+  note('control: the window is back to its size', windowAfter.width === windowBefore.width && windowAfter.height === windowBefore.height, JSON.stringify(windowAfter))
   const ok = verdict(rows)
   servers.close()
   rdp.close()

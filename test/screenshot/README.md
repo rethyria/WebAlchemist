@@ -15,7 +15,7 @@ The screenshot path works as designed in every case that was driven, with the de
 | Is the all-sites grant handed back? | Yes. It is not held before the screenshot, is held while the image is taken, and is not held after the panel's Cancel button ends the run. |
 | Is anything sent without Generate? | No. The stub provider received no request while the screenshot was taken. After Generate it received one request, and the image in it is byte-identical to the one the panel showed. |
 | Does the next request carry the image? | No. After a failed first request the panel no longer shows the image, and the second request has none. |
-| Do the extension's own overlays appear in the image? | No, in a normal single action. In one run an action that was triggered twice by accident returned an image with the lock fill in it (see below). |
+| Do the extension's own overlays appear in the image? | No. In one earlier run an action that was triggered twice by accident returned an image with the lock fill in it. That was not reproduced in 136 images from pairs of overlapping requests, and requests for one tab now wait for each other (see the section on overlapping capture requests). |
 
 ## Method
 
@@ -135,6 +135,26 @@ Controls: the scale is taken from a raw capture and not from a small region's fe
 
 The race was not reproduced live. The tint that the first session saw once came from a harness that sent every click twice, with the two requests about 2 ms apart; in this run, requests 0 to 250 ms apart on the build before the queue returned 72 clean images. So the live probe does not show a difference between the build before and after, and what shows that the queue works is the unit tests, which place the second request between the first request's hide and its show and check the order of the messages that the page receives. The cause that the first session described (the overlay is hidden and shown again by each request with nothing serialising them) is in the code and is unchanged by this measurement.
 
+## The size limit (#37, added)
+
+Before this change an image had no size limit: in a window that was enlarged to 2540 by 1400 CSS pixels (the window of this run is 1297 by 1130), a region as large as the viewport came back at 3235 by 1837 pixels and 95 KB, unchanged. On the grid page the bytes are small because the colours are flat; a photograph of the same size would be larger by a factor that was not measured.
+
+The background now reduces an image whose longer side is over 1568 pixels to 1568 pixels on that side, keeping the shape, and returns both sizes. Anthropic's documentation gives 1568 pixels on the longer side as the size above which an image is resized before the model reads it, so a larger image costs upload time and gains nothing; this figure comes from the request for this change and was not read from the documentation again. The same limit is used for every provider. The preview says "The image was reduced from W × H to W × H pixels before it is sent, because providers resize larger images." in both panels that show a screenshot.
+
+### Measurements
+
+| Check | Result |
+|---|---|
+| Whole viewport, window enlarged (`crop.mjs`) | A capture of 3675 by 1838 pixels came back as 1568 by 784 pixels (46 KB); the reply held both sizes; the shape was kept (2.0000 against 1.9995, from rounding to whole pixels) |
+| Control: a small region of the same page (300 by 200 CSS pixels) | 450 by 300 pixels, not reduced |
+| Through the sidebar and picker (`probe.mjs`, case `shot-reduced`) | A region of 1680 by 880 CSS pixels at a ratio of 1.5 was 2521 by 1320 pixels before the limit; the image in the panel was 1568 by 821 pixels (58 KB) and the panel said "The image was reduced from 2521 × 1320 to 1568 × 821 pixels before it is sent, because providers resize larger images." |
+| Control: every other case of the probe | The preview has no note about a reduced image |
+| Unit tests (`src/background/capture.test.ts`, `src/shared/region.test.ts`, `src/sidebar/lib/flow.test.ts`) | A 3000 by 2000 capture is drawn at 1568 by 1045 with smoothing set to high, a tall image is reduced by its height, an image of exactly 1568 pixels is not touched, and the panel clears the note for an image that was not reduced and when the screenshot is dropped |
+
+With the normal window of this run, the capture is at most about 1388 by 1451 pixels, because it cannot be larger than the window in device pixels, so the limit does not apply there. It applies to a larger window or a display with more pixels, and to nothing else.
+
+What was not measured: the image as a model reads it before and after the reduction (a paid call is outside this work); whether a reduced image changes what the model reports for small text; and the limits of providers other than Anthropic. The quality of the reduction was set to the browser's "high" smoothing and was not compared with other settings.
+
 ## Clipped regions and the model gate
 
 A region that ends below the viewport (120, 700, 200 × 500 at a ratio of 1.5) is reported as clipped, and the image is 254.7 CSS pixels tall where the region is 500. That image contains 1500 pixels that are not grid colours. They are the page's horizontal scrollbar, which the region reaches, and the probe reports the count without asserting it. A provider whose model does not read images (`supportsVision` false) gets no screenshot controls in the panel.
@@ -143,7 +163,7 @@ A region that ends below the viewport (120, 700, 200 × 500 at a ratio of 1.5) i
 
 - Two overlapping capture requests could return an image that contains the extension's lock fill (fixed, see the section on overlapping capture requests). In one run the test harness sent every click twice by mistake. Two `capture-region` requests were sent about 2 milliseconds apart, and the page showed the extension's overlay removed at the first request's start and added again before the second request's capture, so the second image was tinted (a 10 percent fill of the accent colour over the whole region). A deliberate double click in a later run sent two requests and returned a clean image, so the race is real in the code and was seen once. `captureWithLockDown` in `src/background/index.ts` hides the layer and shows it again for each request, and nothing serialises two requests.
 - A large region at a device pixel ratio of 2 came back 4 device pixels short of 1280. The cause was not a defect of that size alone; see the section on the crop.
-- No limit applies to the size of an image. The largest one in this run was 1276 × 1356 pixels and 50 KB, which is small because the grid is flat colour. A photograph of the same size would be larger by a factor that was not measured.
+- No limit applied to the size of an image (fixed, see the section on the size limit). The largest one in the first run was 1276 × 1356 pixels and 50 KB, which is small because the grid is flat colour.
 
 ## What was not verified
 
@@ -171,5 +191,5 @@ WA_RDP_PORT=<port> node test/screenshot/crop.mjs
 |---|---|
 | `probe.mjs` | The run, the controls and the verdict |
 | `drive.mjs` | Trusted input, image analysis and the placement of an image on the page, with a fit of the scale from the cell edges |
-| `crop.mjs` | The image against the region at five page zooms, with and without scrolling, from the message that the panel sends |
+| `crop.mjs` | The image against the region at five page zooms, with and without scrolling, from the message that the panel sends, and the size limit with an enlarged window |
 | `server.mjs` | The grid page, a second page, and the stub provider |

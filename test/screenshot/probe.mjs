@@ -280,13 +280,23 @@ try {
     // The largest region the viewport allows at a device pixel ratio of 2, to see how big an image gets.
     { label: 'shot-large', zoom: 4 / 3, drag: [20, 20, 660, 700] },
     { label: 'shot-region-mode', zoom: 1, click: [60, 60], region: true, drag: [200, 160, 360, 280] },
+    // A region whose image is larger than 1568 pixels. The window is made larger for this case and put back after,
+    // because the capture cannot be larger than the window and the window of this run is about 1400 pixels tall.
+    { label: 'shot-reduced', zoom: 1, drag: [20, 20, 1700, 900], enlarge: true, reducedCase: true },
   ]
   const measured = {}
   // CASES=label,label runs only those, for working on one of them.
   const wanted = process.env.CASES ? process.env.CASES.split(',') : null
   for (const c of cases.filter((c) => wanted === null || wanted.includes(c.label))) {
     console.log(`\n--- ${c.label} ---`)
+    const windowSaved = c.enlarge
+      ? JSON.parse(await B.run(`browser.windows.getAll().then(ws => JSON.stringify({ id: ws[0].id, width: ws[0].width, height: ws[0].height, left: ws[0].left, top: ws[0].top }))`))
+      : null
     try {
+      if (windowSaved) {
+        await B.run(`browser.windows.update(${windowSaved.id}, { left: 0, top: 0, width: 2540, height: 1400 }).then(() => 'enlarged')`)
+        await sleep(2500)
+      }
       const r = await runFlow(c)
       measured[c.label] = r
       const intended = c.drag
@@ -300,7 +310,18 @@ try {
       if (c.doubleClick) console.log(`INFORMATION ${c.label}: two clicks sent ${captureRequests} capture requests; the image shown has ${r.analysis?.anomalies ?? 'no'} pixels that are not from the page`)
       else note(`${c.label}: one action sent one capture request`, captureRequests === 1, `requests ${captureRequests}`)
       note(`${c.label}: the grant was held while the image was taken`, r.grantDuring === 'true')
-      if (r.analysis && !c.doubleClick) {
+      if (c.reducedCase && r.analysis) {
+        const longer = Math.max(r.analysis.width, r.analysis.height)
+        const sentCapture = r.sent.find((m) => m.type === 'capture-region')
+        console.log(`reduced case: request ${JSON.stringify(sentCapture?.rect)}, image ${r.analysis.width}x${r.analysis.height}, ${Math.round((r.dataUrl.length * 3) / 4 / 1024)} KB; panel: ${r.text.slice(0, 400)}`)
+        note(`${c.label}: the region's image is larger than 1568 pixels before the limit (the panel's note gives the size it had)`, /was reduced from (\d+) × (\d+) to/.test(r.text) && Math.max(...(/was reduced from (\d+) × (\d+) to/.exec(r.text) ?? []).slice(1).map(Number)) > 1568, r.text.match(/The image was reduced[^.]*\./)?.[0] ?? 'no note')
+        note(`${c.label}: the image the panel shows has a longer side of 1568 pixels`, longer === 1568, `${r.analysis.width}x${r.analysis.height}`)
+        note(`${c.label}: the panel says in the preview that the image was reduced, with both sizes`, new RegExp(`was reduced from \\d+ × \\d+ to ${r.analysis.width} × ${r.analysis.height} pixels`).test(r.text), r.text.match(/The image was reduced[^.]*\./)?.[0] ?? 'no note')
+      } else if (r.analysis) {
+        // Control for the note: a region under the limit has none.
+        note(`control (${c.label}): the preview has no note about a reduced image`, !/was reduced from/.test(r.text))
+      }
+      if (r.analysis && !c.doubleClick && !c.reducedCase) {
         const sentCapture = r.sent.find((m) => m.type === 'capture-region')
         console.log('capture-region request:', JSON.stringify(sentCapture))
         console.log('first pixels of the middle row:', JSON.stringify(r.analysis.row.slice(0, 3)), 'middle column:', JSON.stringify(r.analysis.column.slice(0, 3)))
@@ -458,6 +479,10 @@ try {
     } finally {
       await closeTabs()
       openedTabs.length = 0
+      if (windowSaved) {
+        await B.run(`browser.windows.update(${windowSaved.id}, { left: ${windowSaved.left}, top: ${windowSaved.top}, width: ${windowSaved.width}, height: ${windowSaved.height} }).then(() => 'restored')`)
+        await sleep(1500)
+      }
     }
   }
 

@@ -366,6 +366,11 @@ export const sidebarMessages = defineMessages({
     message: 'The area was moved because the page scrolled after it was drawn.',
     description: 'Note under the screenshot preview.',
   },
+  describingShotReduced: {
+    message: 'The image was reduced from $FROM$ to $TO$ pixels before it is sent, because providers resize larger images.',
+    description: 'Note under the screenshot preview. $FROM$ and $TO$ are sizes such as 2000 × 1500.',
+    placeholders: ['FROM', 'TO'],
+  },
   describingShotRemove: {
     message: 'Remove screenshot',
   },
@@ -598,6 +603,11 @@ export const sidebarMessages = defineMessages({
   refShotClipped: {
     message: 'Clipped at the viewport; only the visible part was captured.',
     description: 'Added to the screenshot warning.',
+  },
+  refShotReduced: {
+    message: 'The image was reduced from $FROM$ to $TO$ pixels before it is sent, because providers resize larger images.',
+    description: 'Added to the screenshot warning. $FROM$ and $TO$ are sizes such as 2000 × 1500.',
+    placeholders: ['FROM', 'TO'],
   },
   refShotMoved: {
     message: 'The area was moved because the page scrolled after it was drawn.',

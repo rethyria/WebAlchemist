@@ -69,6 +69,16 @@ export function regionAtScroll(
   return { rect: clamped, clipped }
 }
 
+/**
+ * The longer side, in pixels, above which an image is reduced before it is sent.
+ *
+ * Anthropic's documentation gives 1568 pixels on the longer side as the size
+ * above which an image is resized before the model reads it, so a larger image
+ * costs upload time and gains nothing. The same value is used for every
+ * provider, because a smaller image is accepted by all of them.
+ */
+export const MAX_IMAGE_SIDE = 1568
+
 export interface PixelSize {
   width: number
   height: number
@@ -123,5 +133,19 @@ export function cropWindow(
       wantTop < -tolerance ||
       wantRight > image.width + tolerance ||
       wantBottom > image.height + tolerance,
+  }
+}
+
+/**
+ * The size an image is reduced to, or null when it is small enough already. The
+ * shape is kept, and each side is rounded to a whole pixel.
+ */
+export function reducedSize(size: PixelSize, limit: number = MAX_IMAGE_SIDE): PixelSize | null {
+  const longer = Math.max(size.width, size.height)
+  if (longer <= limit) return null
+  const factor = limit / longer
+  return {
+    width: Math.max(1, Math.round(size.width * factor)),
+    height: Math.max(1, Math.round(size.height * factor)),
   }
 }

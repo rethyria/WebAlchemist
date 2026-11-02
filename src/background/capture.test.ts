@@ -136,6 +136,41 @@ describe('capture-region', () => {
     })
   })
 
+  describe('the size limit', () => {
+    const wide = { x: 0, y: 0, width: 3000, height: 2000 }
+    beforeEach(() => {
+      viewport = { x: 0, y: 0, width: 3000, height: 2000, devicePixelRatio: 1, exactWidth: 3000, exactHeight: 2000 }
+    })
+
+    it('reduces an image whose longer side is over 1568 pixels, keeps its shape, and reports both sizes', async () => {
+      const drawn = stubImages({ width: 3000, height: 2000 })
+      const reply = await request({ rect: wide, viewportWidth: 3000 })
+      expect(reply.ok).toBe(true)
+      expect(drawn[0]?.canvas).toMatchObject({ width: 1568, height: 1045 })
+      expect(drawn[0]?.args).toEqual([0, 0, 3000, 2000, 0, 0, 1568, 1045])
+      expect(drawn[0]?.smoothing).toBe('high')
+      expect(reply.data.reduced).toEqual({ from: { width: 3000, height: 2000 }, to: { width: 1568, height: 1045 } })
+    })
+
+    it('reduces a tall image by its height', async () => {
+      const drawn = stubImages({ width: 1000, height: 3136 })
+      viewport = { x: 0, y: 0, width: 1000, height: 3136, devicePixelRatio: 1, exactWidth: 1000, exactHeight: 3136 }
+      const reply = await request({ rect: { x: 0, y: 0, width: 1000, height: 3136 }, viewportWidth: 1000 })
+      expect(drawn[0]?.canvas).toMatchObject({ width: 500, height: 1568 })
+      expect(reply.data.reduced.to).toEqual({ width: 500, height: 1568 })
+    })
+
+    // Control for the two tests above: an image at the limit is not touched.
+    it('control: an image whose longer side is exactly 1568 pixels is not reduced and is copied at its own size', async () => {
+      const drawn = stubImages({ width: 1568, height: 1000 })
+      viewport = { x: 0, y: 0, width: 1568, height: 1000, devicePixelRatio: 1, exactWidth: 1568, exactHeight: 1000 }
+      const reply = await request({ rect: { x: 0, y: 0, width: 1568, height: 1000 }, viewportWidth: 1568 })
+      expect(reply.data.reduced).toBeUndefined()
+      expect(drawn[0]?.canvas).toMatchObject({ width: 1568, height: 1000 })
+      expect(drawn[0]?.smoothing).toBeUndefined()
+    })
+  })
+
   describe('requests for one tab', () => {
     // Control: two requests for different tabs are not made to wait for each other, so the test can see an overlap.
     it('control: requests for two different tabs overlap', async () => {

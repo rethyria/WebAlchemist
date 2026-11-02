@@ -23,7 +23,7 @@
 
 import type { AnchoredElement, ContentEvent } from '@shared/messages'
 import type { RefinementTurn, ReviewInstruction } from '@background/providers/types'
-import type { ScrollOffset } from '@shared/region'
+import type { PixelSize, ScrollOffset } from '@shared/region'
 import {
   matchPresetsFor,
   originPermissionFor,
@@ -157,6 +157,15 @@ function samePath(a: TreePath, b: TreePath | null): boolean {
   return a.up === b.up && a.down.length === b.down.length && a.down.every((v, i) => v === b.down[i])
 }
 
+/** What the background returns for a capture of the region. */
+interface CapturedShot {
+  dataUrl: string
+  rect: Rect
+  clipped: boolean
+  moved?: boolean
+  reduced?: { from: PixelSize; to: PixelSize }
+}
+
 export class Flow {
   step = $state<Step>('list')
   error = $state<FlowError | null>(null)
@@ -209,10 +218,12 @@ export class Flow {
   }
 
   /** The captured image, sent with the next request. */
-  shot = $state<{ dataUrl: string; rect: Rect; clipped: boolean; moved?: boolean } | null>(null)
+  shot = $state<CapturedShot | null>(null)
   shotClipped = $state(false)
   /** The area was moved to follow the page after it scrolled. The preview says so. */
   shotMoved = $state(false)
+  /** The sizes in pixels before and after, when the image was made smaller before it is sent. */
+  shotReduced = $state<{ from: PixelSize; to: PixelSize } | null>(null)
   /**
    * The captured image itself, shown in the panel.
    *
@@ -1723,11 +1734,12 @@ export class Flow {
     }
   }
 
-  private acceptShot(shot: { dataUrl: string; rect: Rect; clipped: boolean; moved?: boolean }): void {
+  private acceptShot(shot: CapturedShot): void {
     this.shot = shot
     this.shotPreview = shot.dataUrl
     this.shotClipped = shot.clipped
     this.shotMoved = shot.moved === true
+    this.shotReduced = shot.reduced ?? null
     this.sendScreenshot = true
   }
 
@@ -1741,7 +1753,7 @@ export class Flow {
     if (this.tabId === null) return
     try {
       this.acceptShot(
-        await send<{ dataUrl: string; rect: Rect; clipped: boolean; moved?: boolean }>({
+        await send<CapturedShot>({
           type: 'capture-region',
           tabId: this.tabId,
           rect,
@@ -1769,6 +1781,7 @@ export class Flow {
     this.sendScreenshot = false
     this.shotPreview = null
     this.shot = null
+    this.shotReduced = null
   }
 
   /**
