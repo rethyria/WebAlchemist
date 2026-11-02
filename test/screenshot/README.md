@@ -6,7 +6,7 @@ Measured on 2026-11-01 in Firefox 159.0 (flatpak build, SteamOS) with the window
 
 ## Result
 
-The screenshot path works as designed in every case that was driven, with the defects that the sections below list. The crop was fixed on 2026-11-02 and is measured before and after. The paid end-to-end call, which would show how a real model answers a screenshot, is not part of this and comes later.
+The screenshot path works as designed in every case that was driven, with the defects that the sections below list. The crop was fixed on 2026-11-02 and is measured before and after. The paid end-to-end call, which shows how a real model answers a screenshot, was made on 2026-11-02 and is recorded in the section on the paid run.
 
 | Question | Result |
 |---|---|
@@ -155,6 +155,40 @@ With the normal window of this run, the capture is at most about 1388 by 1451 pi
 
 What was not measured: the image as a model reads it before and after the reduction (a paid call is outside this work); whether a reduced image changes what the model reports for small text; and the limits of providers other than Anthropic. The quality of the reduction was set to the browser's "high" smoothing and was not compared with other settings.
 
+## The paid run with a real model (#37, 2026-11-02)
+
+The runs above end at a stub provider. This one uses the provider of the development profile (Anthropic, `claude-sonnet-5-5` for generation) through the real sidebar and picker, on the extension built from commit 002adab, in Firefox 159.0 with a device pixel ratio of 1.5. It made three calls to the model for this issue. Their tokens and costs are in the table in `test/injection/README.md`, section "Paid run of 2 November 2026".
+
+### Method
+
+- `live.mjs` serves `live-server.mjs`, a page with a section (`#badge`) that holds a 320 by 200 canvas. The canvas draws an orange circle (#e8590c, the largest shape), a small blue square (#1c7ed6) and the word ZEBRA-42. The canvas has no text, alt text or label, so none of this is in the page's markup or text.
+- The script clicks "Select an element" and then the badge's own padding with trusted input, clicks "Add a screenshot", and drags over the canvas. It types the instruction into the panel's box and clicks Generate. The instruction asks for a 6px solid border and a background in the colour of the largest shape in the picture, and for a caption, in the badge's `::after` content, with the word written in the picture.
+- The background's `fetch` is wrapped for the run so that the body of each request to the provider is recorded as sent. Headers are never read, so the credential is not in the record. For each request the script records the content blocks, the image's media type and base64 length, a SHA-256 of the image data, and every text block.
+- The control is the same pick and instruction with no screenshot.
+
+### Results
+
+| Check | With the screenshot | Without it (control) |
+|---|---|---|
+| Requests to the messages endpoint | 1 | 1 |
+| Content blocks in the request, in order | `image`, `text` | `text` |
+| Images in the request | 1, `image/png`, 24,008 base64 characters | 0 |
+| Size of the image | 480 × 300 pixels (the region is 320 × 200 CSS pixels at a ratio of 1.5), under the 1568-pixel limit, so no reduction and no note in the preview | not applicable |
+| Image against the preview | Byte-identical: the bytes of the image in the request and of the one the panel showed have the same SHA-256 (674dcd27...fecac) | not applicable |
+| The words ZEBRA, orange, blue, e8590c and 1c7ed6 in the request's text or system prompt | None | None |
+| Tokens | 5,351 in, 643 out | 5,148 in, 2,638 out |
+
+What the model returned with the screenshot was a CSS transform: a 6px solid border and a background colour of #e85a0c on `#badge`, and `#badge::after` with the content "ZEBRA-42". The colour is one level off in the green channel from the one drawn (#e8590c), and the rationale says it was estimated by eye. The word and the colour appear nowhere in the request except in the image, so the model read them from the image.
+
+What the model returned without the screenshot was a JavaScript transform. It could not know the colour or the word, so it reads the canvas's pixels at run time (`getImageData`), takes the most common colour that is not the corner colour, and takes the caption from the canvas's `aria-label`, which does not exist. Its rationale says that it could not read the word drawn on the canvas. The code would draw no caption on this page.
+
+The calls also show that the live capability lookup happens: a `GET /v1/models/claude-sonnet-5-5` precedes each generation, and the screenshot controls were present in the panel.
+
+### What this does not show
+
+- Only one model and one picture were tried. That the model used the image is shown for this page. It is not a measure of how reliably a model reads small text or fine colour differences.
+- A display with a device pixel ratio of exactly 2 at 100 percent zoom, the consent text naming the provider, cross-origin frames inside the region, tab capture (#135) and Firefox for Android are not covered here and remain as listed in the section on what was not verified.
+
 ## Clipped regions and the model gate
 
 A region that ends below the viewport (120, 700, 200 × 500 at a ratio of 1.5) is reported as clipped, and the image is 254.7 CSS pixels tall where the region is 500. That image contains 1500 pixels that are not grid colours. They are the page's horizontal scrollbar, which the region reaches, and the probe reports the count without asserting it. A provider whose model does not read images (`supportsVision` false) gets no screenshot controls in the panel.
@@ -167,7 +201,7 @@ A region that ends below the viewport (120, 700, 200 × 500 at a ratio of 1.5) i
 
 ## What was not verified
 
-- A real provider and a real model. The stub returns an error, so what a model does with the image is untested.
+- A real provider and a real model, in the runs above. The stub returns an error, so what a model does with the image was untested there; the section on the paid run covers it.
 - Firefox for Android. The probe needs a desktop browser. The background refuses `capture-region` on Android in code, and the panel's own check (`screenshotsAvailable`) was not exercised there.
 - The permission prompt. The preference that skips it was set, so the dialog's wording and its Cancel path were not seen. The request still came from a real click.
 - Whether `<all_urls>` held during a run hides a narrower request that a later save needs (point 3 in the issue's second comment).
@@ -193,3 +227,5 @@ WA_RDP_PORT=<port> node test/screenshot/crop.mjs
 | `drive.mjs` | Trusted input, image analysis and the placement of an image on the page, with a fit of the scale from the cell edges |
 | `crop.mjs` | The image against the region at five page zooms, with and without scrolling, from the message that the panel sends, and the size limit with an enlarged window |
 | `server.mjs` | The grid page, a second page, and the stub provider |
+| `live.mjs` | The paid run with a real model (see the section on it); needs a credential in the profile |
+| `live-server.mjs` | The page with the badge and its canvas |
