@@ -430,6 +430,18 @@ export const sidebarMessages = defineMessages({
     message: 'Billing problem',
     description: 'Title of an error card.',
   },
+  errRefusedTitle: {
+    message: 'Request declined',
+    description: 'Title of an error card shown when the provider declined a request.',
+  },
+  errRefusedReview: {
+    message: 'The provider declined to review this code. This happens when the code or the page looks harmful. The code cannot be saved without a review.',
+    description: 'Text of an error card shown when the provider refused to review code that the user wanted to save or preview.',
+  },
+  errRefusedGeneration: {
+    message: 'The provider declined to write a change for this page.',
+    description: 'Text of an error card shown when the provider refused to generate a transform.',
+  },
   errRateLimitedTitle: {
     message: 'Rate limited',
     description: 'Title of an error card.',

@@ -2715,3 +2715,78 @@ describe('saving from the approval panel (issue 64)', () => {
     expect(flow.reviewShown).toBe(false)
   })
 })
+
+describe('a request the provider refused (#153)', () => {
+  const clean = { static: [], undeclaredCapabilities: [], passed: true }
+
+  async function refusedReview() {
+    const flow = flowAtApprove()
+    flow.draft = { ...saved, kind: 'js', id: 'OLD' }
+    handler = (m) => (m.type === 'review' ? failure('refusal') : { ok: true, data: null })
+    await flow.toReview()
+    return flow
+  }
+
+  async function refusedGeneration(kind: string) {
+    const flow = newFlow()
+    handler = (m) => {
+      if (m.type === 'context-for-anchor') return { ok: true, data: found }
+      if (m.type === 'repair') return failure(kind)
+      return { ok: true, data: null }
+    }
+    await flow.repair(saved, 'broken')
+    return flow
+  }
+
+  it('shows a refused review with its own message and no retry', async () => {
+    const flow = await refusedReview()
+    expect(flow.error).toMatchObject({ kind: 'refused', subject: 'review' })
+    expect(flow.error?.message).toContain('declined to review this code')
+    expect(flow.error?.message).toContain('cannot be saved without a review')
+    expect(flow.canRetry).toBe(false)
+  })
+
+  it('shows a refused generation with its own message and no retry', async () => {
+    const flow = await refusedGeneration('refusal')
+    expect(flow.error).toMatchObject({ kind: 'refused', subject: 'generation' })
+    expect(flow.error?.message).toContain('declined to write a change for this page')
+    expect(flow.canRetry).toBe(false)
+  })
+
+  it('shows a refused review of the preview the same way', async () => {
+    const flow = newFlow()
+    flow.draft = { ...saved, kind: 'js' }
+    flow.result = { ...jsResultBase, code: 'x' } as any
+    flow.analysis = clean as any
+    handler = (m) => (m.type === 'review' ? failure('refusal') : { ok: true, data: null })
+    await flow.reviewForPreview()
+    expect(flow.error).toMatchObject({ kind: 'refused', subject: 'review' })
+    expect(flow.canRetry).toBe(false)
+  })
+
+  it('leaves no approval token after a refused review, and the save stays refused', async () => {
+    const flow = await refusedReview()
+    expect(flow.review).toBeNull()
+    flow.markReviewShown()
+    await flow.save()
+    // Nothing in the flow holds a token to send. The background then refuses a
+    // JavaScript save without one (mayBeSaved in approvals.test.ts).
+    const sent = calls.filter((c) => c.type === 'save-transform')
+    expect(sent.every((c) => c.approvalToken === undefined)).toBe(true)
+  })
+
+  it('still shows the retry card for a network error on a review (control)', async () => {
+    const flow = flowAtApprove()
+    flow.draft = { ...saved, kind: 'js', id: 'OLD' }
+    handler = (m) => (m.type === 'review' ? failure('network') : { ok: true, data: null })
+    await flow.toReview()
+    expect(flow.error).toMatchObject({ kind: 'request-failed' })
+    expect(flow.canRetry).toBe(true)
+  })
+
+  it('still shows the retry card for a network error on a generation (control)', async () => {
+    const flow = await refusedGeneration('network')
+    expect(flow.error).toMatchObject({ kind: 'request-failed' })
+    expect(flow.canRetry).toBe(true)
+  })
+})

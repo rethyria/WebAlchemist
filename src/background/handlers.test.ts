@@ -3,6 +3,7 @@ import { DEFAULT_SETTINGS } from '@shared/types'
 import type { Message } from '@shared/messages'
 import type { ReviewResult, Settings, Transform } from '@shared/types'
 import { isApproved, recordApproval } from './approvals'
+import { ProviderError } from './providers/types'
 
 const BIND = { transformId: 't', match: 'shop.example.com/*' }
 const BIND_FIELDS = BIND
@@ -324,6 +325,18 @@ describe('handleReview and handleApproveCode', () => {
     const stopped: ReviewResult = { static: [], undeclaredCapabilities: [], passed: false }
     const result = await handleReview(review(GOOD_JS), true, { runReview: async () => stopped })
     expect(result.approvalToken).toBeUndefined()
+    expect(Object.keys(session)).toEqual([])
+  })
+
+  it('records no approval when the provider refuses the review (#153)', async () => {
+    const refusal = new ProviderError('declined', 'refusal', false)
+    await expect(
+      handleReview(review(GOOD_JS), true, {
+        runReview: async () => {
+          throw refusal
+        },
+      }),
+    ).rejects.toBe(refusal)
     expect(Object.keys(session)).toEqual([])
   })
 

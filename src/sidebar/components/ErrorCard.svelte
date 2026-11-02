@@ -18,16 +18,18 @@
     /** Opens settings at the model pickers. */
     onmodelsettings: () => void
     ondismiss: () => void
+    /** Throws away the unsaved transform. Used by the card for a refused request. */
+    ondiscard: () => void
   }
 
-  let { error, onretry, onsettings, onmodelsettings, ondismiss }: Props = $props()
+  let { error, onretry, onsettings, onmodelsettings, ondismiss, ondiscard }: Props = $props()
 
   let detailOpen = $state(false)
 </script>
 
 <div
   class="card"
-  class:block={error.kind === 'request-failed' || error.kind === 'billing'}
+  class:block={error.kind === 'request-failed' || error.kind === 'billing' || error.kind === 'refused'}
   class:attention={error.kind === 'rate-limited' || error.kind === 'sensitive-page'}
   role={error.kind === 'rate-limited' ? undefined : 'alert'}
 >
@@ -105,6 +107,15 @@
         <Button variant="primary" small onclick={onretry}>{t('tryAgain')}</Button>
       {/if}
       <Button small onclick={ondismiss}>{t('dismiss')}</Button>
+    </div>
+  {:else if error.kind === 'refused'}
+    <div class="head">
+      <span class="dot block" aria-hidden="true"></span>
+      <span class="title">{t('errRefusedTitle')}</span>
+    </div>
+    <p>{error.message}</p>
+    <div class="actions">
+      <Button variant="primary" small onclick={ondiscard}>{t('discard')}</Button>
     </div>
   {:else if error.kind === 'rate-limited'}
     <!--

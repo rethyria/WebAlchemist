@@ -115,6 +115,12 @@ export type FlowError =
   /** No credit or a billing problem. Retrying cannot help until the user fixes it. */
   | { kind: 'billing'; message: string; descriptionKept?: boolean }
   /**
+   * The provider's safety filter declined the request. Repeating it would only
+   * be declined again, so there is no retry. `subject` says which request it
+   * was, because the two cases tell the user different things.
+   */
+  | { kind: 'refused'; subject: 'review' | 'generation'; message: string }
+  /**
    * The page has a password or payment field. The retry action of the card is
    * "send the page content anyway", and dismissing it sends nothing.
    */
@@ -1979,7 +1985,7 @@ export class Flow {
       this.previewReview = review
       this.previewReviewFor = key
     } catch (cause) {
-      if (token === this.generation) this.fail(cause, () => this.reviewForPreview())
+      if (token === this.generation) this.fail(cause, () => this.reviewForPreview(), 'review')
     } finally {
       this.previewReviewing = false
     }
@@ -2278,7 +2284,7 @@ export class Flow {
       if (this.review.usage) this.lastUsage = this.review.usage
     } catch (cause) {
       this.step = 'saving'
-      this.fail(cause, () => this.toReview())
+      this.fail(cause, () => this.toReview(), 'review')
     }
   }
 
@@ -2521,7 +2527,11 @@ export class Flow {
    * Records the failure of a request, and `retry`, the call that repeats it.
    * Public so the list view can report a failed delete the same way.
    */
-  fail(cause: unknown, retry: (() => Promise<void>) | null = null): void {
+  fail(
+    cause: unknown,
+    retry: (() => Promise<void>) | null = null,
+    subject: 'review' | 'generation' = 'generation',
+  ): void {
     if (!(cause instanceof BackgroundError)) {
       this.show({ kind: 'request-failed', message: String(cause) }, retry)
       return
@@ -2547,6 +2557,15 @@ export class Flow {
         return
       case 'billing':
         this.error = { kind: 'billing', message: cause.message }
+        return
+      case 'refusal':
+        // No retry is recorded, and the provider's own explanation is replaced
+        // by a message that says what the refusal means for this request.
+        this.show({
+          kind: 'refused',
+          subject,
+          message: t(subject === 'review' ? 'errRefusedReview' : 'errRefusedGeneration'),
+        })
         return
       case 'rate-limit':
         this.show(

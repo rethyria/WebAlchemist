@@ -743,6 +743,10 @@
       onsettings={openSettingsPage}
       onmodelsettings={openModelSettings}
       ondismiss={() => flow.dismissError()}
+      ondiscard={() => {
+        flow.dismissError()
+        void flow.discard()
+      }}
     />
   {/if}
 
