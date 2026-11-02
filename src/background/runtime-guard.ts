@@ -390,7 +390,7 @@ export function runtimeGuardSource(
   return `(() => {
   'use strict';
   const failed = [];
-  const refuse = () => { throw new Error('Web Alchemist: this feature was not declared by the transform.'); };
+  const refuse = () => { throw new Error('Web Alchemist: this feature was not declared by the elixir.'); };
   const hide = (target, name) => {
     try {
       Object.defineProperty(target, name, { get: refuse, set: refuse, configurable: false });

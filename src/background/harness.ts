@@ -117,7 +117,7 @@ ${transform.code}
         try { document.documentElement.removeAttribute(${errorName}); } catch (_) {}
       }
     } catch (error) {
-      console.error('[Web Alchemist] transform failed:', NAME, error);
+      console.error('[Web Alchemist] elixir failed:', NAME, error);
       try {
         const text = String((error && error.message) || error);
         document.documentElement.setAttribute(${errorName}, text.slice(0, 500));

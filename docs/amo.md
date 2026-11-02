@@ -20,24 +20,24 @@ The JavaScript is not part of the extension package and is not fetched from a lo
 
 The extension enforces the following before any generated script runs, in a preview or after saving:
 
-- A safety check (a static analysis, in `src/safety/static-analysis.ts`) parses the code and accepts it only when everything it uses is on an allowlist of ordinary DOM reading and writing. It refuses code that builds or loads code at run time, including `eval`, `new Function`, string arguments to timer functions, dynamic `import()` with or without network access, script element creation and the other ways of loading code from an address. It also refuses use of the network, cookies and page storage unless the transform asks for that access, and the user sees the access that is asked for before approving.
+- A safety check (a static analysis, in `src/safety/static-analysis.ts`) parses the code and accepts it only when everything it uses is on an allowlist of ordinary DOM reading and writing. It refuses code that builds or loads code at run time, including `eval`, `new Function`, string arguments to timer functions, dynamic `import()` with or without network access, script element creation and the other ways of loading code from an address. It also refuses use of the network, cookies and page storage unless the elixir asks for that access, and the user sees the access that is asked for before approving.
 - A code check, which is a separate model call, receives the user's typed instructions, the generating model's summary of the intent, the saved description when there is one, and the code. It never receives the page content. Its result is shown to the user in the approval panel.
 - A preview runs the script only after the safety check passed and the code check returned the verdict "match" for that exact code, only on the exact address of the page being edited, and only after the user clicks to reload the page with it.
-- A saved approval record ties the exact code, its world, the access it asks for, the transform and the site pattern to one approval token. Code that differs from what the user was shown is refused at save time, and a token works once.
+- A saved approval record ties the exact code, its world, the access it asks for, the elixir and the site pattern to one approval token. Code that differs from what the user was shown is refused at save time, and a token works once.
 - The code is checked again from storage before it is registered, so a script that does not pass the current checks is not run after a browser restart or an update.
-- Before the script runs, a runtime guard defines throwing properties in its user script world for every feature the transform did not ask for: the network features, storage, cookies, workers, `eval`, `Function` and others. The measured limits of the guard are in `test/runtime-guard/README.md`.
+- Before the script runs, a runtime guard defines throwing properties in its user script world for every feature the elixir did not ask for: the network features, storage, cookies, workers, `eval`, `Function` and others. The measured limits of the guard are in `test/runtime-guard/README.md`.
 
 The extension itself contains no remote code. Every script in the package is bundled, and the content security policy is Firefox's default for Manifest V3 extensions.
 
 ### Network access of generated scripts
 
-An earlier version of the design relied on a content security policy set for each user script world (`connect-src 'none'`) to stop a network request that the transform had not asked for. A measurement in Firefox 145 showed that this does not work. With `connect-src 'none'` in force, `fetch`, `XMLHttpRequest`, `sendBeacon`, `WebSocket` and `EventSource` all reached a listening server from a user script world. Only an image request was stopped, by `img-src`. The test page and results are in `test/csp/`.
+An earlier version of the design relied on a content security policy set for each user script world (`connect-src 'none'`) to stop a network request that the elixir had not asked for. A measurement in Firefox 145 showed that this does not work. With `connect-src 'none'` in force, `fetch`, `XMLHttpRequest`, `sendBeacon`, `WebSocket` and `EventSource` all reached a listening server from a user script world. Only an image request was stopped, by `img-src`. The test page and results are in `test/csp/`.
 
 The extension therefore does not treat the world's content security policy as a security boundary. The policy is still set, because it closes the image channel and costs nothing. The extension relies on two other controls. The safety check refuses to save code that uses the network without asking for it, and the user sees the access that is asked for before approving. The runtime guard removes the network features that were not asked for from the script's world before the script runs. The comments in `src/background/registry.ts` record the measurement.
 
 ### Execution worlds
 
-By default a script runs in the isolated user script world. The model may request the MAIN world, which is the page's own world, where the code can use everything the page's scripts can, when a change needs the page's own objects, and it must state the reason. The request has no effect until the user approves it for that transform. The approval panel and the editor show the world and four risks of MAIN: the page can change the code, the code can read what the page keeps in memory, the safety check cannot see what the page's own functions do, and the restriction on image requests does not apply. Restoring an earlier version or a backup that runs in MAIN needs the same confirmation. A script in MAIN without a record of the user's approval is not registered, and one that has no such record when the extension starts is moved to the isolated world. The runtime guard cannot be applied to the MAIN world, so a script there is protected by the safety check and the user's approval.
+By default a script runs in the isolated user script world. The model may request the MAIN world, which is the page's own world, where the code can use everything the page's scripts can, when a change needs the page's own objects, and it must state the reason. The request has no effect until the user approves it for that elixir. The approval panel and the editor show the world and four risks of MAIN: the page can change the code, the code can read what the page keeps in memory, the safety check cannot see what the page's own functions do, and the restriction on image requests does not apply. Restoring an earlier version or a backup that runs in MAIN needs the same confirmation. A script in MAIN without a record of the user's approval is not registered, and one that has no such record when the extension starts is moved to the isolated world. The runtime guard cannot be applied to the MAIN world, so a script there is protected by the safety check and the user's approval.
 
 ### Build probes
 
@@ -53,7 +53,7 @@ Each of these appears in the install prompt, so each needs a reason a user can a
 
 | Permission | Use in the code | Justification |
 |---|---|---|
-| `storage` | Settings, saved transforms, usage records and credentials in `storage.local`; short-lived approvals and drafts in `storage.session` | Saved changes and the user's settings must persist between sessions. |
+| `storage` | Settings, saved elixirs, usage records and credentials in `storage.local`; short-lived approvals and drafts in `storage.session` | Saved changes and the user's settings must persist between sessions. |
 | `scripting` | Injects the page picker, which highlights the element the user selects, and applies CSS changes | The picker and CSS injection run in the page and cannot be done from the background script. |
 | `activeTab` | Lets the extension act on the current tab after the user clicks the toolbar button or opens the sidebar, without access to every site; also allows a screenshot of the visible tab | The extension asks for access to a site only when the user works on it. |
 | `tabs` | Reads the address and window of tabs to decide which saved changes apply, to re-evaluate open tabs when a change is saved or access is granted, and to read a tab's address for the editor | Without it the address of a tab that the user has not just activated is not available. |
@@ -67,12 +67,12 @@ These are requested at the moment the user needs them, from a click, and the use
 
 | Permission | Use in the code | Justification |
 |---|---|---|
-| `userScripts` | Registers approved JavaScript transforms | Requested when the user first saves a JavaScript transform. CSS-only use does not need it. |
-| `cookies` | Reads the container (cookie store) of the tab the editor was opened from | Requested only when the user restricts a CSS transform to one Firefox container. |
+| `userScripts` | Registers approved JavaScript elixirs | Requested when the user first saves a JavaScript elixir. CSS-only use does not need it. |
+| `cookies` | Reads the container (cookie store) of the tab the editor was opened from | Requested only when the user restricts a CSS elixir to one Firefox container. |
 
 ### Optional host permissions
 
-The manifest lists `*://*/*` and `<all_urls>`. They are requested only from a click, in three cases: for one site when the user turns a saved change on for that site; for the sites named in a file, in one request of at most 20 sites, when the user imports transforms; and once for all sites when the user asks for screenshots, because `captureVisibleTab` accepts only the all-sites grant or `activeTab`. A saved change cannot run on a site the user did not grant.
+The manifest lists `*://*/*` and `<all_urls>`. They are requested only from a click, in three cases: for one site when the user turns a saved change on for that site; for the sites named in a file, in one request of at most 20 sites, when the user imports elixirs; and once for all sites when the user asks for screenshots, because `captureVisibleTab` accepts only the all-sites grant or `activeTab`. A saved change cannot run on a site the user did not grant.
 
 ## Data collection declaration
 
@@ -145,13 +145,13 @@ Describe a change to any webpage in plain words. A model you choose writes it, y
 
 Web Alchemist changes how websites look and behave, based on a description that you write in plain language. Select part of a page or type what you want, for example "hide the sidebar" or "make the text larger and the background dark". A language model writes the CSS or JavaScript. Before anything is saved, Web Alchemist shows you the code and an explanation, and a second model call checks any JavaScript. While you refine a draft, you can ask the model questions about it.
 
-Saved changes, which Web Alchemist calls transforms, apply again each time you visit the site. When a site updates its design and a transform stops working, Web Alchemist tells you and offers to write a new version from your original description.
+Saved changes, which Web Alchemist calls elixirs, apply again each time you visit the site. When a site updates its design and an elixir stops working, Web Alchemist tells you and offers to write a new version from your original description.
 
 You provide the model. Web Alchemist works with the Anthropic API and with any AI provider that uses the OpenAI chat completions interface, and you enter your own API key. Each generation, each code check and each question is a call that your AI provider bills you for. The settings page shows the token use and cost of your calls.
 
 When you ask for a change or ask a question, the text of the relevant part of the page, the page address and your description are sent to the AI provider you chose, and to no one else. A screenshot is sent only when you add one. The developer receives nothing. Your API keys can be encrypted with a passphrase.
 
-JavaScript transforms need the optional permission to run user scripts, which Web Alchemist requests when you first save one. Access to a site is requested one site at a time. The settings page can export transforms to share, back them up and restore them, with optional passphrase encryption. Neither kind of file holds credentials or provider settings. On Firefox for Android the panel opens in a browser tab, and picking works by touch.
+JavaScript elixirs need the optional permission to run user scripts, which Web Alchemist requests when you first save one. Access to a site is requested one site at a time. The settings page can export elixirs to share, back them up and restore them, with optional passphrase encryption. Neither kind of file holds credentials or provider settings. On Firefox for Android the panel opens in a browser tab, and picking works by touch.
 
 Web Alchemist is free software under the GPL-3.0-or-later licence.
 
@@ -197,7 +197,7 @@ These steps can be done only by the owner of the AMO account.
 3. Check Mozilla's current data collection categories and adjust the manifest and this document if they differ from those named here.
 4. Raise the version in `package.json` and `src/manifest.json` together if this is not the first upload.
 5. Run `npm run check`, `npm test`, `npm run build`, `npm run lint:ext` and `npm run package` on a clean checkout of the release commit.
-6. Test an update from the previous signed version, where one exists. Confirm that every user script and content script is registered again after the update (`onInstalled` with reason "update") and that settings and saved transforms are kept. For a first upload this step does not apply.
+6. Test an update from the previous signed version, where one exists. Confirm that every user script and content script is registered again after the update (`onInstalled` with reason "update") and that settings and saved elixirs are kept. For a first upload this step does not apply.
 7. Create the source zip with `git archive --format=zip HEAD` and check that its build matches the package, as described above.
 8. Upload `web-ext-artifacts/web_alchemist-0.1.0.zip` on AMO, attach the source zip, and paste the reviewer notes, permission justifications, summary and description from this document.
 9. Publish the privacy policy at a stable address or paste it into the policy field, with the contact address filled in.

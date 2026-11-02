@@ -14,6 +14,6 @@ describe('kill switch wording', () => {
   it('tells the user to reload, with the number of tabs', () => {
     expect(killSwitchNotice(true, 1)).toContain('One open tab')
     expect(killSwitchNotice(true, 3)).toContain('3 open tabs')
-    expect(killSwitchNotice(false, 2)).toMatch(/run JavaScript transforms there again/)
+    expect(killSwitchNotice(false, 2)).toMatch(/run JavaScript elixirs there again/)
   })
 })

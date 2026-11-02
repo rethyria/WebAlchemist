@@ -82,11 +82,11 @@ describe('the approval panel for JavaScript with a clean review', () => {
 
 describe('the approve button', () => {
   it('is disabled until the panel has been shown', () => {
-    expect(html({ shown: false })).toMatch(/<button[^>]*disabled=""[^>]*><!---->Save transform/)
+    expect(html({ shown: false })).toMatch(/<button[^>]*disabled=""[^>]*><!---->Save elixir/)
   })
 
   it('control: is enabled once the panel has been shown', () => {
-    expect(html({ shown: true })).not.toMatch(/<button[^>]*disabled=""[^>]*><!---->Save transform/)
+    expect(html({ shown: true })).not.toMatch(/<button[^>]*disabled=""[^>]*><!---->Save elixir/)
   })
 })
 

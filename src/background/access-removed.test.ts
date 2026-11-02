@@ -54,8 +54,8 @@ describe('permissions.onRemoved', () => {
 
 describe('the question before removing access', () => {
   it('is asked when transforms depend on the grant, with the count', () => {
-    expect(removeAccessQuestion({ origin: '*://a.example/*', transforms: 1 })).toContain('One saved transform uses')
-    expect(removeAccessQuestion({ origin: '*://a.example/*', transforms: 3 })).toContain('3 saved transforms use')
+    expect(removeAccessQuestion({ origin: '*://a.example/*', transforms: 1 })).toContain('One saved elixir uses')
+    expect(removeAccessQuestion({ origin: '*://a.example/*', transforms: 3 })).toContain('3 saved elixirs use')
   })
 
   it('is not asked when no transform depends on the grant (control)', () => {

@@ -16,10 +16,10 @@ export const sidebarMessages = defineMessages({
   },
   firstRunWriteMyself: {
     message: 'Write it myself instead',
-    description: 'Link that skips the provider and opens the editor to write a transform by hand.',
+    description: 'Link that skips the provider and opens the editor to write an elixir by hand.',
   },
   firstRunHandNote: {
-    message: 'Writing a transform by hand needs no provider and sends nothing.',
+    message: 'Writing an elixir by hand needs no provider and sends nothing.',
   },
   pickingModeDrawing: {
     message: 'Drawing a rectangle',
@@ -92,27 +92,27 @@ export const sidebarMessages = defineMessages({
   },
   announceContext: {
     message: 'Reading the element and its ancestors.',
-    description: 'Read out by a screen reader while a transform is generated.',
+    description: 'Read out by a screen reader while an elixir is generated.',
   },
   announceSent: {
     message: 'Request sent to the model.',
-    description: 'Read out by a screen reader while a transform is generated.',
+    description: 'Read out by a screen reader while an elixir is generated.',
   },
   announceThinking: {
     message: 'The model is thinking.',
-    description: 'Read out by a screen reader while a transform is generated.',
+    description: 'Read out by a screen reader while an elixir is generated.',
   },
   announceStreaming: {
     message: 'The model is writing code.',
-    description: 'Read out by a screen reader while a transform is generated.',
+    description: 'Read out by a screen reader while an elixir is generated.',
   },
   announceAnalysis: {
     message: 'Running the safety check…',
-    description: 'Read out by a screen reader while a transform is generated. It names the local safety check of the code.',
+    description: 'Read out by a screen reader while an elixir is generated. It names the local safety check of the code.',
   },
   announcePreview: {
     message: 'Applying a preview to the page.',
-    description: 'Read out by a screen reader while a transform is generated.',
+    description: 'Read out by a screen reader while an elixir is generated.',
   },
   announceReviewing: {
     message: 'Checking the code.',
@@ -153,12 +153,12 @@ export const sidebarMessages = defineMessages({
     description: 'Read out by a screen reader when the review of generated code changes.',
   },
   announceOneBroken: {
-    message: '1 transform stopped working.',
-    description: 'Read out by a screen reader when the health check finds a broken transform.',
+    message: '1 elixir stopped working.',
+    description: 'Read out by a screen reader when the health check finds a broken elixir.',
   },
   announceBroken: {
-    message: '$COUNT$ transforms stopped working.',
-    description: 'Read out by a screen reader when the health check finds broken transforms. $COUNT$ is a number.',
+    message: '$COUNT$ elixirs stopped working.',
+    description: 'Read out by a screen reader when the health check finds broken elixirs. $COUNT$ is a number.',
     placeholders: ['COUNT'],
   },
   retryAnnouncement: {
@@ -168,47 +168,47 @@ export const sidebarMessages = defineMessages({
   },
   generatingStepContext: {
     message: 'Read the element and its ancestors',
-    description: 'A step in the checklist shown while a transform is generated.',
+    description: 'A step in the checklist shown while an elixir is generated.',
   },
   generatingStepSentShot: {
     message: 'Sent $SIZE$ kB of page context, with a screenshot',
-    description: 'A step in the checklist shown while a transform is generated. $SIZE$ is a number of kilobytes.',
+    description: 'A step in the checklist shown while an elixir is generated. $SIZE$ is a number of kilobytes.',
     placeholders: ['SIZE'],
   },
   generatingStepSentNoShot: {
     message: 'Sent $SIZE$ kB of page context, no screenshot',
-    description: 'A step in the checklist shown while a transform is generated. $SIZE$ is a number of kilobytes.',
+    description: 'A step in the checklist shown while an elixir is generated. $SIZE$ is a number of kilobytes.',
     placeholders: ['SIZE'],
   },
   generatingStepThinkingCount: {
     message: 'Thinking ($COUNT$ characters)',
-    description: 'A step in the checklist shown while a transform is generated. $COUNT$ is a number.',
+    description: 'A step in the checklist shown while an elixir is generated. $COUNT$ is a number.',
     placeholders: ['COUNT'],
   },
   generatingStepThinking: {
     message: 'Thinking',
-    description: 'A step in the checklist shown while a transform is generated.',
+    description: 'A step in the checklist shown while an elixir is generated.',
   },
   generatingStepWritingLines: {
     message: 'Writing code ($COUNT$ lines so far)',
-    description: 'A step in the checklist shown while a transform is generated. $COUNT$ is a number.',
+    description: 'A step in the checklist shown while an elixir is generated. $COUNT$ is a number.',
     placeholders: ['COUNT'],
   },
   generatingStepWriting: {
     message: 'Writing code',
-    description: 'A step in the checklist shown while a transform is generated.',
+    description: 'A step in the checklist shown while an elixir is generated.',
   },
   generatingStepAnalysis: {
     message: 'Safety check',
-    description: 'A step in the checklist shown while a transform is generated. It names the local safety check of the code.',
+    description: 'A step in the checklist shown while an elixir is generated. It names the local safety check of the code.',
   },
   generatingStepPreview: {
     message: 'Preview on the page',
-    description: 'A step in the checklist shown while a transform is generated.',
+    description: 'A step in the checklist shown while an elixir is generated.',
   },
   generatingTitle: {
     message: 'Generating',
-    description: 'Heading while a transform is generated, before the kind is known.',
+    description: 'Heading while an elixir is generated, before the kind is known.',
   },
   generatingTitleJs: {
     message: 'Writing JavaScript',
@@ -220,7 +220,7 @@ export const sidebarMessages = defineMessages({
   },
   generatingBarLabel: {
     message: 'Working',
-    description: 'Accessible name of the progress bar shown while a transform is generated.',
+    description: 'Accessible name of the progress bar shown while an elixir is generated.',
   },
   savingStep1: {
     message: 'Step 1 of 3 · Confirm',
@@ -231,20 +231,20 @@ export const sidebarMessages = defineMessages({
     description: 'Heading of the step that asks the user to confirm the description of the change.',
   },
   savingNoteConsolidated: {
-    message: 'Written from your messages. Edit it if needed. This text is used to rebuild the transform when the site changes.',
+    message: 'Written from your messages. Edit it if needed. This text is used to rebuild the elixir when the site changes.',
     description: 'Note under the description of the change, when the description was written from several messages.',
   },
   savingNote: {
-    message: 'Edit it if needed. This text is used to rebuild the transform when the site changes.',
+    message: 'Edit it if needed. This text is used to rebuild the elixir when the site changes.',
     description: 'Note under the description of the change.',
   },
   savingStep2: {
     message: 'Step 2 of 3 · Where it applies',
-    description: 'Small heading above the choice of pages that the transform applies to.',
+    description: 'Small heading above the choice of pages that the elixir applies to.',
   },
   savingWhereLabel: {
     message: 'Where it applies',
-    description: 'Accessible name of the group of choices for which pages the transform applies to.',
+    description: 'Accessible name of the group of choices for which pages the elixir applies to.',
   },
   savingMeta: {
     message: '$COUNT$ lines · $KIND$',
@@ -280,7 +280,7 @@ export const sidebarMessages = defineMessages({
   },
   approvalApprove: {
     message: 'Approve and turn on',
-    description: 'Button that approves restored code and turns the transform on.',
+    description: 'Button that approves restored code and turns the elixir on.',
   },
   describingLocked: {
     message: 'locked',
@@ -440,7 +440,7 @@ export const sidebarMessages = defineMessages({
   },
   errRefusedGeneration: {
     message: 'The provider declined to write a change for this page.',
-    description: 'Text of an error card shown when the provider refused to generate a transform.',
+    description: 'Text of an error card shown when the provider refused to generate an elixir.',
   },
   errRateLimitedTitle: {
     message: 'Too many requests',
@@ -464,7 +464,7 @@ export const sidebarMessages = defineMessages({
     description: 'Title of an error card.',
   },
   errCredentialExpiredBody: {
-    message: '$MESSAGE$ Saved transforms keep working; new ones cannot be generated.',
+    message: '$MESSAGE$ Saved elixirs keep working; new ones cannot be generated.',
     description: 'Body of the card shown when a credential has expired. $MESSAGE$ is the error text.',
     placeholders: ['MESSAGE'],
   },
@@ -494,11 +494,11 @@ export const sidebarMessages = defineMessages({
   },
   refBadgeJs: {
     message: 'JS',
-    description: 'Short badge that marks a JavaScript transform.',
+    description: 'Short badge that marks a JavaScript elixir.',
   },
   refUnsaved: {
     message: 'not saved yet',
-    description: 'Marks that the transform is only a preview.',
+    description: 'Marks that the elixir is only a preview.',
   },
   refBlockedJsTitle: {
     message: 'This code was not run',
@@ -673,11 +673,11 @@ export const sidebarMessages = defineMessages({
   },
   refRegenerate: {
     message: 'Regenerate',
-    description: 'Button that generates the transform again with the follow-up request.',
+    description: 'Button that generates the elixir again with the follow-up request.',
   },
   discard: {
     message: 'Discard',
-    description: 'Button that throws away the unsaved transform.',
+    description: 'Button that throws away the unsaved elixir.',
   },
   refReloadAndRun: {
     message: 'Reload and run it',
@@ -693,11 +693,11 @@ export const sidebarMessages = defineMessages({
   },
   refKeep: {
     message: 'Keep it',
-    description: 'Button that keeps the previewed transform.',
+    description: 'Button that keeps the previewed elixir.',
   },
   revStep3: {
     message: 'Step 3 of 3 · Approve',
-    description: 'Small heading above the last step of saving a transform.',
+    description: 'Small heading above the last step of saving an elixir.',
   },
   revReading: {
     message: 'Checking the code…',
@@ -777,12 +777,12 @@ export const sidebarMessages = defineMessages({
     placeholders: ['LINE', 'API'],
   },
   revWarnDeclared: {
-    message: 'This transform asked for $CAPABILITY$ access, so it is allowed.',
+    message: 'This elixir asked for $CAPABILITY$ access, so it is allowed.',
     description: 'Part of a warning. $CAPABILITY$ is the kind of access, such as network or storage.',
     placeholders: ['CAPABILITY'],
   },
   revWarnUndeclared: {
-    message: 'This needs $CAPABILITY$ access, which the transform did not ask for, so it cannot be saved.',
+    message: 'This needs $CAPABILITY$ access, which the elixir did not ask for, so it cannot be saved.',
     description: 'Part of a warning. $CAPABILITY$ is the kind of access, such as network or storage.',
     placeholders: ['CAPABILITY'],
   },
@@ -809,16 +809,16 @@ export const sidebarMessages = defineMessages({
   },
   revRunsOn: {
     message: 'Runs on',
-    description: 'Row label for the pages the transform applies to.',
+    description: 'Row label for the pages the elixir applies to.',
   },
   revWhere: {
     message: '$SCHEMES$; $SITES$; $PAGES$.',
-    description: 'Which pages the transform applies to. The three values are phrases, for example https pages, every site, every page.',
+    description: 'Which pages the elixir applies to. The three values are phrases, for example https pages, every site, every page.',
     placeholders: ['SCHEMES', 'SITES', 'PAGES'],
   },
   revWhereVariants: {
     message: '$SCHEMES$; $SITES$; $PAGES$. $VARIANTS$',
-    description: 'Which pages the transform applies to, followed by a sentence about variants of the address.',
+    description: 'Which pages the elixir applies to, followed by a sentence about variants of the address.',
     placeholders: ['SCHEMES', 'SITES', 'PAGES', 'VARIANTS'],
   },
   revNoneDeclared: {
@@ -886,12 +886,12 @@ export const sidebarMessages = defineMessages({
   },
   revGrant: {
     message: 'Saving asks Firefox for permission to run on $ORIGIN$. Without it, nothing is saved.',
-    description: 'Explains the permission requested when a CSS transform is saved. $ORIGIN$ is a site address.',
+    description: 'Explains the permission requested when a CSS elixir is saved. $ORIGIN$ is a site address.',
     placeholders: ['ORIGIN'],
   },
   revGrantJs: {
     message: 'Saving asks Firefox for permission to run on $ORIGIN$ and to run user scripts. Without it, nothing is saved.',
-    description: 'Explains the permissions requested when a JavaScript transform is saved. $ORIGIN$ is a site address.',
+    description: 'Explains the permissions requested when a JavaScript elixir is saved. $ORIGIN$ is a site address.',
     placeholders: ['ORIGIN'],
   },
   revDeclinedTitle: {
@@ -899,7 +899,7 @@ export const sidebarMessages = defineMessages({
     description: 'Title of a card shown when the user refused the permission.',
   },
   revDeclinedBody: {
-    message: 'Nothing was saved, because the transform cannot run without this permission.',
+    message: 'Nothing was saved, because the elixir cannot run without this permission.',
     description: 'Body of a card shown when the user refused the permission.',
   },
   back: {
@@ -921,11 +921,11 @@ export const sidebarMessages = defineMessages({
   },
   revAllowSave: {
     message: 'Allow and save',
-    description: 'Button that approves the declared capabilities and saves the transform.',
+    description: 'Button that approves the declared capabilities and saves the elixir.',
   },
   revSave: {
-    message: 'Save transform',
-    description: 'Button that saves the transform.',
+    message: 'Save elixir',
+    description: 'Button that saves the elixir.',
   },
   settingsRegion: {
     message: 'Settings',
@@ -987,11 +987,11 @@ export const sidebarMessages = defineMessages({
     description: 'Link that opens the full settings page to add a provider.',
   },
   settingsHealth: {
-    message: 'Check for broken transforms',
+    message: 'Check for broken elixirs',
   },
   settingsHealthEvery: {
     message: 'Every page load',
-    description: 'Choice of when to check for broken transforms.',
+    description: 'Choice of when to check for broken elixirs.',
   },
   settingsHealthDefault: {
     message: 'default',
@@ -999,18 +999,18 @@ export const sidebarMessages = defineMessages({
   },
   settingsHealthOnce: {
     message: 'Once per site per session',
-    description: 'Choice of when to check for broken transforms.',
+    description: 'Choice of when to check for broken elixirs.',
   },
   settingsHealthManual: {
     message: 'Manual only',
-    description: 'Choice of when to check for broken transforms.',
+    description: 'Choice of when to check for broken elixirs.',
   },
   settingsKeepShot: {
     message: 'Keep screenshot permission',
     description: 'Label of a switch.',
   },
   settingsKeepShotNote: {
-    message: 'Screenshots need access to all sites. While this is on, Firefox does not ask again, and it also stops asking for each site when a transform is saved.',
+    message: 'Screenshots need access to all sites. While this is on, Firefox does not ask again, and it also stops asking for each site when an elixir is saved.',
     description: 'Explains the switch that keeps the permission to take screenshots.',
   },
   settingsWhereStored: {
@@ -1026,8 +1026,8 @@ export const sidebarMessages = defineMessages({
     description: 'Says what is only on the full settings page.',
   },
   trAnotherTransform: {
-    message: 'another transform',
-    description: 'Stands in for the name of a transform that no longer exists.',
+    message: 'another elixir',
+    description: 'Stands in for the name of an elixir that no longer exists.',
   },
   trListTwo: {
     message: '$FIRST$ and $SECOND$',
@@ -1041,38 +1041,38 @@ export const sidebarMessages = defineMessages({
   },
   trReorder: {
     message: 'Reorder $NAME$. Arrow keys move it.',
-    description: 'Accessible name of the handle that reorders a transform. $NAME$ is the name of the transform.',
+    description: 'Accessible name of the handle that reorders an elixir. $NAME$ is the name of the elixir.',
     placeholders: ['NAME'],
   },
   trEnable: {
     message: 'Enable $NAME$',
-    description: 'Accessible name of the switch that turns a transform on. $NAME$ is the name of the transform.',
+    description: 'Accessible name of the switch that turns an elixir on. $NAME$ is the name of the elixir.',
     placeholders: ['NAME'],
   },
   trName: {
     message: 'Name',
-    description: 'Accessible name of the box where a transform is renamed.',
+    description: 'Accessible name of the box where an elixir is renamed.',
   },
   trNeedsRegen: {
     message: 'needs regenerating',
-    description: 'Marks a transform that has no code.',
+    description: 'Marks an elixir that has no code.',
   },
   trOverriddenBy: {
     message: 'Overridden by $NAMES$',
-    description: 'Tooltip of a transform whose CSS is overridden. $NAMES$ is a list of transform names.',
+    description: 'Tooltip of an elixir whose CSS is overridden. $NAMES$ is a list of elixir names.',
     placeholders: ['NAMES'],
   },
   trOverridden: {
     message: 'overridden',
-    description: 'Marks a transform whose CSS is overridden by another.',
+    description: 'Marks an elixir whose CSS is overridden by another.',
   },
   trStopped: {
     message: 'Stopped working',
-    description: 'Tooltip of the status dot of a transform.',
+    description: 'Tooltip of the status dot of an elixir.',
   },
   trWorking: {
     message: 'Working',
-    description: 'Tooltip of the status dot of a transform.',
+    description: 'Tooltip of the status dot of an elixir.',
   },
   trNoAccess: {
     message: 'No access to this site',
@@ -1084,11 +1084,11 @@ export const sidebarMessages = defineMessages({
   },
   trNeedsRegenNote: {
     message: 'Needs regenerating. It has no code, so it cannot run.',
-    description: 'Says that a transform has no code.',
+    description: 'Says that an elixir has no code.',
   },
   trReviewDescription: {
     message: 'Review description',
-    description: 'Button that opens a transform\'s description.',
+    description: 'Button that opens an elixir\'s description.',
   },
   trRestoredNote: {
     message: 'Restored from a backup. It stays off until its code is approved.',
@@ -1100,15 +1100,15 @@ export const sidebarMessages = defineMessages({
   },
   trDescriptionImported: {
     message: 'Description from an imported file',
-    description: 'Heading above the description of a transform.',
+    description: 'Heading above the description of an elixir.',
   },
   trYouWanted: {
     message: 'Your description',
-    description: 'Heading above the description of a transform.',
+    description: 'Heading above the description of an elixir.',
   },
   trEnvChanged: {
     message: 'Moved to the isolated world',
-    description: 'Heading of a notice about a transform that was moved out of the page\'s own world into the isolated world.',
+    description: 'Heading of a notice about an elixir that was moved out of the page\'s own world into the isolated world.',
   },
   trOpenEditorEnv: {
     message: 'Open the editor to allow the page\'s own world',
@@ -1124,12 +1124,12 @@ export const sidebarMessages = defineMessages({
   },
   trLosesOne: {
     message: '$PROPERTIES$ is set by $WINNER$ on $ELEMENTS$, and it wins$REASON$.',
-    description: 'Explains why a CSS rule does not apply. $PROPERTIES$ is one property name, $WINNER$ is a transform name, $ELEMENTS$ and $REASON$ are phrases.',
+    description: 'Explains why a CSS rule does not apply. $PROPERTIES$ is one property name, $WINNER$ is an elixir name, $ELEMENTS$ and $REASON$ are phrases.',
     placeholders: ['PROPERTIES', 'WINNER', 'ELEMENTS', 'REASON'],
   },
   trLosesMany: {
     message: '$PROPERTIES$ are set by $WINNER$ on $ELEMENTS$, and it wins$REASON$.',
-    description: 'Explains why CSS rules do not apply. $PROPERTIES$ is a list of property names, $WINNER$ is a transform name, $ELEMENTS$ and $REASON$ are phrases.',
+    description: 'Explains why CSS rules do not apply. $PROPERTIES$ is a list of property names, $WINNER$ is an elixir name, $ELEMENTS$ and $REASON$ are phrases.',
     placeholders: ['PROPERTIES', 'WINNER', 'ELEMENTS', 'REASON'],
   },
   trSameElement: {
@@ -1151,21 +1151,21 @@ export const sidebarMessages = defineMessages({
   },
   trWinsOver: {
     message: 'This one overrides $PROPERTIES$ from $LOSER$.',
-    description: 'Says which CSS rules this transform wins. $PROPERTIES$ is a list of property names and $LOSER$ is a transform name.',
+    description: 'Says which CSS rules this elixir wins. $PROPERTIES$ is a list of property names and $LOSER$ is an elixir name.',
     placeholders: ['PROPERTIES', 'LOSER'],
   },
   trWinsOverImportant: {
     message: 'This one overrides $PROPERTIES$ from $LOSER$, because it marks them !important.',
-    description: 'Says which CSS rules this transform wins. $PROPERTIES$ is a list of property names and $LOSER$ is a transform name.',
+    description: 'Says which CSS rules this elixir wins. $PROPERTIES$ is a list of property names and $LOSER$ is an elixir name.',
     placeholders: ['PROPERTIES', 'LOSER'],
   },
   trMoveLater: {
     message: 'Move this one later in the list to win instead.',
-    description: 'Hint about how to make a transform win a CSS conflict.',
+    description: 'Hint about how to make an elixir win a CSS conflict.',
   },
   trWhatBroke: {
     message: 'What broke',
-    description: 'Heading above why a transform stopped working.',
+    description: 'Heading above why an elixir stopped working.',
   },
   trPageError: {
     message: 'Error text reported by the page: $TEXT$',
@@ -1173,8 +1173,8 @@ export const sidebarMessages = defineMessages({
     placeholders: ['TEXT'],
   },
   trAssumed: {
-    message: 'This transform assumed $ASSUMPTION$.',
-    description: 'Says which assumption of the transform was false. $ASSUMPTION$ is a phrase.',
+    message: 'This elixir assumed $ASSUMPTION$.',
+    description: 'Says which assumption of the elixir was false. $ASSUMPTION$ is a phrase.',
     placeholders: ['ASSUMPTION'],
   },
   trStoppedDefault: {
@@ -1183,48 +1183,48 @@ export const sidebarMessages = defineMessages({
   },
   trRepair: {
     message: 'Repair with AI',
-    description: 'Button that asks the model to repair a broken transform.',
+    description: 'Button that asks the model to repair a broken elixir.',
   },
   trDisable: {
     message: 'Disable',
-    description: 'Button that turns a transform off.',
+    description: 'Button that turns an elixir off.',
   },
   trDeleteAsk: {
-    message: 'Delete this transform?',
-    description: 'Question shown before a transform is deleted.',
+    message: 'Delete this elixir?',
+    description: 'Question shown before an elixir is deleted.',
   },
   trDelete: {
     message: 'Delete',
-    description: 'Button that deletes a transform.',
+    description: 'Button that deletes an elixir.',
   },
   trRename: {
     message: 'Rename',
-    description: 'Button that renames a transform.',
+    description: 'Button that renames an elixir.',
   },
   trEditDescription: {
     message: 'Edit description',
-    description: 'Button that opens the description of a transform for editing.',
+    description: 'Button that opens the description of an elixir for editing.',
   },
   trRefine: {
     message: 'Refine',
-    description: 'Button that asks the model to change a transform.',
+    description: 'Button that asks the model to change an elixir.',
   },
   trEditCode: {
     message: 'Edit code',
-    description: 'Button that opens the code of a transform for editing.',
+    description: 'Button that opens the code of an elixir for editing.',
   },
   appReloadOneTab: {
-    message: 'Reload 1 open tab to run JavaScript transforms again.',
+    message: 'Reload 1 open tab to run JavaScript elixirs again.',
     description: 'Shown after everything is turned back on for a site.',
   },
   appReloadTabs: {
-    message: 'Reload $COUNT$ open tabs to run JavaScript transforms again.',
+    message: 'Reload $COUNT$ open tabs to run JavaScript elixirs again.',
     description: 'Shown after everything is turned back on for a site. $COUNT$ is a number.',
     placeholders: ['COUNT'],
   },
   appEditedByHand: {
     message: 'Edited by hand. Any description of the previous code no longer applies.',
-    description: 'Saved with a transform whose code the user edited, in place of the model\'s description of its approach.',
+    description: 'Saved with an elixir whose code the user edited, in place of the model\'s description of its approach.',
   },
   appBrand: {
     message: 'Web Alchemist',
@@ -1238,12 +1238,12 @@ export const sidebarMessages = defineMessages({
     message: 'Settings',
   },
   appBlockedOne: {
-    message: '1 transform on this site is blocked by the safety check and is not running.',
-    description: 'Banner shown when the safety check blocks a saved transform.',
+    message: '1 elixir on this site is blocked by the safety check and is not running.',
+    description: 'Banner shown when the safety check blocks a saved elixir.',
   },
   appBlockedMany: {
-    message: '$COUNT$ transforms on this site are blocked by the safety check and are not running.',
-    description: 'Banner shown when the safety check blocks saved transforms. $COUNT$ is a number.',
+    message: '$COUNT$ elixirs on this site are blocked by the safety check and are not running.',
+    description: 'Banner shown when the safety check blocks saved elixirs. $COUNT$ is a number.',
     placeholders: ['COUNT'],
   },
   appPausedTitle: {
@@ -1278,7 +1278,7 @@ export const sidebarMessages = defineMessages({
   },
   appEmptyBody: {
     message: 'An AI writes the CSS or JavaScript. It is saved for $HOST$ and applied on every visit. You approve the code before it runs.',
-    description: 'Explains what the extension does. $HOST$ is a site name.',
+    description: 'Explains what the extension does. $HOST$ is a site name. The product calls a saved CSS or JavaScript change to a website an elixir.',
     placeholders: ['HOST'],
   },
   appEmptyBodyNoHost: {
@@ -1291,57 +1291,57 @@ export const sidebarMessages = defineMessages({
   },
   appWriteMyself: {
     message: 'Write it myself',
-    description: 'Button that opens the editor to write a transform by hand.',
+    description: 'Button that opens the editor to write an elixir by hand.',
   },
   appCheckTitle: {
     message: 'Check whether these still work',
-    description: 'Tooltip of the button that checks saved transforms.',
+    description: 'Tooltip of the button that checks saved elixirs.',
   },
   appChecking: {
     message: 'Checking…',
-    description: 'Button text while saved transforms are checked.',
+    description: 'Button text while saved elixirs are checked.',
   },
   appCheck: {
     message: 'Check',
-    description: 'Button that checks whether saved transforms still work.',
+    description: 'Button that checks whether saved elixirs still work.',
   },
   appActive: {
     message: '$COUNT$ active',
-    description: 'Number of transforms that are turned on. $COUNT$ is a number.',
+    description: 'Number of elixirs that are turned on. $COUNT$ is a number.',
     placeholders: ['COUNT'],
   },
   appSiteOff: {
     message: 'Everything is turned off on this site.',
-    description: 'Shown when every transform is turned off for the site.',
+    description: 'Shown when every elixir is turned off for the site.',
   },
   appBrokenOne: {
-    message: '1 transform stopped working',
-    description: 'Banner shown when the health check finds a broken transform.',
+    message: '1 elixir stopped working',
+    description: 'Banner shown when the health check finds a broken elixir.',
   },
   appBroken: {
-    message: '$COUNT$ transforms stopped working',
-    description: 'Banner shown when the health check finds broken transforms. $COUNT$ is a number.',
+    message: '$COUNT$ elixirs stopped working',
+    description: 'Banner shown when the health check finds broken elixirs. $COUNT$ is a number.',
     placeholders: ['COUNT'],
   },
   appOrderHint: {
-    message: 'If transforms conflict, the later one wins',
-    description: 'Hint under the buttons below the list of transforms. Shown only when the site has more than one transform.',
+    message: 'If elixirs conflict, the later one wins',
+    description: 'Hint under the buttons below the list of elixirs. Shown only when the site has more than one elixir.',
   },
   appTurnOn: {
     message: 'Turn everything back on for this site',
-    description: 'Button that turns the transforms of a site back on.',
+    description: 'Button that turns the elixirs of a site back on.',
   },
   appTurnOff: {
     message: 'Turn off everything on this site',
-    description: 'Button that turns off the transforms of a site.',
+    description: 'Button that turns off the elixirs of a site.',
   },
   appTurnOffAsk: {
-    message: 'Turn off every transform on this site? Open tabs of this site that ran JavaScript are reloaded.',
-    description: 'Question shown before the transforms of a site are turned off.',
+    message: 'Turn off every elixir on this site? Open tabs of this site that ran JavaScript are reloaded.',
+    description: 'Question shown before the elixirs of a site are turned off.',
   },
   appTurnOffConfirm: {
     message: 'Turn off',
-    description: 'Button that confirms turning off the transforms of a site.',
+    description: 'Button that confirms turning off the elixirs of a site.',
   },
   flowNeedsPermission: {
     message: 'Web Alchemist needs permission to read $HOST$ before elements on it can be picked.',
@@ -1353,13 +1353,13 @@ export const sidebarMessages = defineMessages({
     description: 'Stands in for the site name when the address cannot be read. It follows the words \'permission to read\'.',
   },
   flowElementGoneRepair: {
-    message: 'Web Alchemist cannot find the element that $NAME$ was written for on this page, so it cannot be repaired. Pick the element again to write a new transform.',
-    description: 'Error shown when a repair cannot find the element. $NAME$ is the name of the transform.',
+    message: 'Web Alchemist cannot find the element that $NAME$ was written for on this page, so it cannot be repaired. Pick the element again to write a new elixir.',
+    description: 'Error shown when a repair cannot find the element. $NAME$ is the name of the elixir.',
     placeholders: ['NAME'],
   },
   flowElementGone: {
     message: 'Web Alchemist cannot find the element that $NAME$ was written for on this page. Open a page it applies to, or pick the element again.',
-    description: 'Error shown when a transform cannot find its element. $NAME$ is the name of the transform.',
+    description: 'Error shown when an elixir cannot find its element. $NAME$ is the name of the elixir.',
     placeholders: ['NAME'],
   },
   flowScreenshotNeedsAllSites: {

@@ -38,7 +38,7 @@ export const optionsMessages = defineMessages({
   },
   optHealth: {
     message: 'Health check',
-    description: 'Heading of the choice of when to check for broken transforms.',
+    description: 'Heading of the choice of when to check for broken elixirs.',
   },
   optNotSiteName: {
     message: '"$NAME$" is not a site name. Enter a name such as example.com.',
@@ -55,7 +55,7 @@ export const optionsMessages = defineMessages({
     description: 'Heading of the list of excluded sites.',
   },
   optExcludedBody: {
-    message: 'On these sites and their subdomains, Web Alchemist does not pick elements, generate transforms or ask for access.',
+    message: 'On these sites and their subdomains, Web Alchemist does not pick elements, generate elixirs or ask for access.',
     description: 'Explains the list of excluded sites.',
   },
   optSiteName: {
@@ -102,16 +102,16 @@ export const optionsMessages = defineMessages({
     placeholders: ['ORIGIN'],
   },
   optUsesNone: {
-    message: 'No transforms use this site',
-    description: 'Says how many transforms apply to a site.',
+    message: 'No elixirs use this site',
+    description: 'Says how many elixirs apply to a site.',
   },
   optUsesOne: {
-    message: '1 transform uses this site',
-    description: 'Says how many transforms apply to a site.',
+    message: '1 elixir uses this site',
+    description: 'Says how many elixirs apply to a site.',
   },
   optUsesMany: {
-    message: '$COUNT$ transforms use this site',
-    description: 'Says how many transforms apply to a site. $COUNT$ is a number.',
+    message: '$COUNT$ elixirs use this site',
+    description: 'Says how many elixirs apply to a site. $COUNT$ is a number.',
     placeholders: ['COUNT'],
   },
   optSiteAccessTitle: {
@@ -119,16 +119,16 @@ export const optionsMessages = defineMessages({
     description: 'Heading of the list of sites that the extension can read and change.',
   },
   optSiteAccessBody: {
-    message: 'Web Alchemist can read and change these sites. Removing access stops transforms from running on that site until access is granted again.',
+    message: 'Web Alchemist can read and change these sites. Removing access stops elixirs from running on that site until access is granted again.',
     description: 'Explains the list of sites that the extension can read and change.',
   },
   optBlockedOne: {
-    message: 'Across all sites, 1 transform is blocked by the safety check and is not running.',
-    description: 'Shown on the settings page when the safety check blocks a saved transform on any site.',
+    message: 'Across all sites, 1 elixir is blocked by the safety check and is not running.',
+    description: 'Shown on the settings page when the safety check blocks a saved elixir on any site.',
   },
   optBlockedMany: {
-    message: 'Across all sites, $COUNT$ transforms are blocked by the safety check and are not running.',
-    description: 'Shown on the settings page when the safety check blocks saved transforms. $COUNT$ is a number.',
+    message: 'Across all sites, $COUNT$ elixirs are blocked by the safety check and are not running.',
+    description: 'Shown on the settings page when the safety check blocks saved elixirs. $COUNT$ is a number.',
     placeholders: ['COUNT'],
   },
   optNoAccess: {
@@ -184,16 +184,16 @@ export const optionsMessages = defineMessages({
     placeholders: ['COUNT', 'SUMMARY'],
   },
   optUsagePerTransform: {
-    message: 'Per transform',
-    description: 'Heading of a list of model use for each transform.',
+    message: 'Per elixir',
+    description: 'Heading of a list of model use for each elixir.',
   },
   optUsageDrafts: {
     message: 'Drafts that were not saved',
     description: 'Name of the row that adds up the model use of drafts.',
   },
   optUsageDeleted: {
-    message: 'Deleted transform',
-    description: 'Name of a row whose transform no longer exists.',
+    message: 'Deleted elixir',
+    description: 'Name of a row whose elixir no longer exists.',
   },
   optVaultWrongPassphrase: {
     message: 'The passphrase is not correct.',
@@ -289,7 +289,7 @@ export const optionsMessages = defineMessages({
     description: 'Button that offers to discard the keys when the passphrase is lost.',
   },
   optVaultDiscardNote: {
-    message: 'A forgotten passphrase cannot be recovered. Discarding deletes the stored keys so you can enter them again. Your transforms are kept.',
+    message: 'A forgotten passphrase cannot be recovered. Discarding deletes the stored keys so you can enter them again. Your elixirs are kept.',
     description: 'Explains what discarding the stored keys does.',
   },
   optVaultDiscard: {
@@ -492,7 +492,7 @@ export const optionsMessages = defineMessages({
     description: 'Error shown when the chosen file cannot be parsed.',
   },
   optExportWarning: {
-    message: 'The file contains the descriptions of the transforms, the addresses they apply to, and the start of the text of each page element they change. On a mail, banking or health site, that text can be personal. The file is plain text unless you encrypt it with a passphrase. Anyone with the file and the passphrase can read it, and a forgotten passphrase cannot be recovered.',
+    message: 'The file contains the descriptions of the elixirs, the addresses they apply to, and the start of the text of each page element they change. On a mail, banking or health site, that text can be personal. The file is plain text unless you encrypt it with a passphrase. Anyone with the file and the passphrase can read it, and a forgotten passphrase cannot be recovered.',
     description: 'Warning shown before an export file is written.',
   },
   optPassphraseShort: {
@@ -505,29 +505,29 @@ export const optionsMessages = defineMessages({
     description: 'Reason a passphrase for an export cannot be used.',
   },
   optResultImportedOne: {
-    message: 'Imported 1 transform. It is turned off.',
+    message: 'Imported 1 elixir. It is turned off.',
     description: 'What the user is told after an import.',
   },
   optResultImported: {
-    message: 'Imported $COUNT$ transforms. They are all turned off.',
+    message: 'Imported $COUNT$ elixirs. They are all turned off.',
     description: 'What the user is told after an import. $COUNT$ is a number.',
     placeholders: ['COUNT'],
   },
   optResultRegenOne: {
-    message: '1 transform has no code and needs regenerating from the description.',
+    message: '1 elixir has no code and needs regenerating from the description.',
     description: 'What the user is told after an import.',
   },
   optResultRegen: {
-    message: '$COUNT$ transforms have no code and need regenerating from the description.',
+    message: '$COUNT$ elixirs have no code and need regenerating from the description.',
     description: 'What the user is told after an import. $COUNT$ is a number.',
     placeholders: ['COUNT'],
   },
   optResultAwaitingOne: {
-    message: '1 transform was restored with JavaScript code. It stays off until you read and approve its code in the sidebar.',
+    message: '1 elixir was restored with JavaScript code. It stays off until you read and approve its code in the sidebar.',
     description: 'What the user is told after an import.',
   },
   optResultAwaiting: {
-    message: '$COUNT$ transforms were restored with JavaScript code. Each stays off until you read and approve its code in the sidebar.',
+    message: '$COUNT$ elixirs were restored with JavaScript code. Each stays off until you read and approve its code in the sidebar.',
     description: 'What the user is told after an import. $COUNT$ is a number.',
     placeholders: ['COUNT'],
   },
@@ -536,25 +536,25 @@ export const optionsMessages = defineMessages({
     description: 'What the user is told after an import.',
   },
   optResultDuplicateOne: {
-    message: '1 transform was already saved, so it was skipped.',
+    message: '1 elixir was already saved, so it was skipped.',
     description: 'What the user is told after an import.',
   },
   optResultDuplicates: {
-    message: '$COUNT$ transforms were already saved, so they were skipped.',
+    message: '$COUNT$ elixirs were already saved, so they were skipped.',
     description: 'What the user is told after an import. $COUNT$ is a number.',
     placeholders: ['COUNT'],
   },
   optResultRefusedOne: {
-    message: '1 transform could not be imported.',
+    message: '1 elixir could not be imported.',
     description: 'What the user is told after an import.',
   },
   optResultRefused: {
-    message: '$COUNT$ transforms could not be imported.',
+    message: '$COUNT$ elixirs could not be imported.',
     description: 'What the user is told after an import. $COUNT$ is a number.',
     placeholders: ['COUNT'],
   },
   optResultNoAccess: {
-    message: 'Access to the sites was not granted, so the imported transforms show "No access to this site" until it is.',
+    message: 'Access to the sites was not granted, so the imported elixirs show "No access to this site" until it is.',
     description: 'What the user is told after an import.',
   },
   optSavedEncrypted: {
@@ -567,31 +567,31 @@ export const optionsMessages = defineMessages({
   },
   optKindJs: {
     message: 'JavaScript',
-    description: 'Name of a kind of transform.',
+    description: 'Name of a kind of elixir.',
   },
   optExportTitle: {
     message: 'Export and import',
     description: 'Heading of the section about export and import.',
   },
   optExportBody1: {
-    message: '"Export to share" saves your transforms to a file that you can give to someone else. JavaScript transforms are saved as their descriptions only, without code. "Back up" also saves the JavaScript code, the accent colour and the health check mode, so that everything can be restored on another computer. Neither file contains your API keys, sign-ins or provider settings. Both files contain text and addresses from the pages the transforms were written for, and either can be encrypted with a passphrase.',
+    message: '"Export to share" saves your elixirs to a file that you can give to someone else. JavaScript elixirs are saved as their descriptions only, without code. "Back up" also saves the JavaScript code, the accent colour and the health check mode, so that everything can be restored on another computer. Neither file contains your API keys, sign-ins or provider settings. Both files contain text and addresses from the pages the elixirs were written for, and either can be encrypted with a passphrase.',
     description: 'Explains the two kinds of export file.',
   },
   optExportBody2: {
-    message: 'Import shows what a file would add before anything is saved. Imported transforms are always turned off. JavaScript from a shared file has no code until you read its description, then generate and check the code in the sidebar. JavaScript code from a backup stays off until you read and approve it in the sidebar.',
+    message: 'Import shows what a file would add before anything is saved. Imported elixirs are always turned off. JavaScript from a shared file has no code until you read its description, then generate and check the code in the sidebar. JavaScript code from a backup stays off until you read and approve it in the sidebar.',
     description: 'Explains what an import does.',
   },
   optExportShare: {
     message: 'Export to share',
-    description: 'Button that exports transforms to a file for sharing. It is also the heading of the form that follows.',
+    description: 'Button that exports elixirs to a file for sharing. It is also the heading of the form that follows.',
   },
   optBackUp: {
     message: 'Back up',
-    description: 'Button that exports transforms and settings to a backup file. It is also the heading of the form that follows.',
+    description: 'Button that exports elixirs and settings to a backup file. It is also the heading of the form that follows.',
   },
   optImportFile: {
     message: 'Import from file',
-    description: 'Button that imports transforms from a file.',
+    description: 'Button that imports elixirs from a file.',
   },
   optFileLabel: {
     message: 'File to import',
@@ -628,22 +628,22 @@ export const optionsMessages = defineMessages({
     description: 'Explains what importing a backup file does.',
   },
   optNoTransforms: {
-    message: 'The file holds no transforms.',
+    message: 'The file holds no elixirs.',
     description: 'Shown when an import file is empty.',
   },
   optAppliesTo: {
     message: 'Applies to: $SITES$',
-    description: 'Says which pages an imported transform applies to. $SITES$ is a phrase.',
+    description: 'Says which pages an imported elixir applies to. $SITES$ is a phrase.',
     placeholders: ['SITES'],
   },
   optWillNotImport: {
     message: 'Will not be imported. $REASON$',
-    description: 'Says an imported transform is refused. $REASON$ is a sentence.',
+    description: 'Says an imported elixir is refused. $REASON$ is a sentence.',
     placeholders: ['REASON'],
   },
   optWillSkip: {
     message: 'Will be skipped. $REASON$',
-    description: 'Says an imported transform is skipped. $REASON$ is a sentence.',
+    description: 'Says an imported elixir is skipped. $REASON$ is a sentence.',
     placeholders: ['REASON'],
   },
   optCodeRestored: {
@@ -656,20 +656,20 @@ export const optionsMessages = defineMessages({
   },
   optShowCode: {
     message: 'Show code',
-    description: 'Heading of a section that shows the code of an imported transform.',
+    description: 'Heading of a section that shows the code of an imported elixir.',
   },
   optReasonRegen: {
     message: '$REASON$ It will need regenerating.',
-    description: 'Says an imported transform has no code. $REASON$ is a sentence.',
+    description: 'Says an imported elixir has no code. $REASON$ is a sentence.',
     placeholders: ['REASON'],
   },
   optCodeNotImported: {
     message: 'Code not imported; will need regenerating.',
-    description: 'Says an imported transform has no code.',
+    description: 'Says an imported elixir has no code.',
   },
   optAuthorDescription: {
     message: 'Description by the author of this file, not by you: $TEXT$',
-    description: 'Shows the description of an imported transform. $TEXT$ is the text in quotation marks.',
+    description: 'Shows the description of an imported elixir. $TEXT$ is the text in quotation marks.',
     placeholders: ['TEXT'],
   },
   optRestoreSettings: {
@@ -692,12 +692,12 @@ export const optionsMessages = defineMessages({
     placeholders: ['COUNT', 'TOTAL', 'SITES'],
   },
   optImportOne: {
-    message: 'Import 1 transform',
-    description: 'Button that imports the transforms of the file.',
+    message: 'Import 1 elixir',
+    description: 'Button that imports the elixirs of the file.',
   },
   optImportMany: {
-    message: 'Import $COUNT$ transforms',
-    description: 'Button that imports the transforms of the file. $COUNT$ is a number.',
+    message: 'Import $COUNT$ elixirs',
+    description: 'Button that imports the elixirs of the file. $COUNT$ is a number.',
     placeholders: ['COUNT'],
   },
   optPageTitle: {

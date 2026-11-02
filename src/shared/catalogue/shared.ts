@@ -33,7 +33,7 @@ export const sharedMessages = defineMessages({
   },
   matchPresetExactPage: {
     message: 'This exact page',
-    description: 'Label of a choice for which pages a transform applies to.',
+    description: 'Label of a choice for which pages an elixir applies to.',
   },
   matchSchemeHttps: {
     message: 'https pages',
@@ -89,7 +89,7 @@ export const sharedMessages = defineMessages({
     description: 'Added when a pattern names one page that has no query.',
   },
   needsRegeneratingNote: {
-    message: 'This transform came from an imported file and has no code yet. To create the code, open a page it applies to and choose Edit description.',
+    message: 'This elixir came from an imported file and has no code yet. To create the code, open a page it applies to and choose Edit description.',
   },
   awaitingApprovalNote: {
     message: 'This JavaScript was restored from a backup and has not been approved. Read its code, then approve it to turn it on.',
@@ -127,10 +127,10 @@ export const sharedMessages = defineMessages({
     description: 'Choice in the editor.',
   },
   containerScopeNote: {
-    message: 'Applies to CSS transforms only. Firefox cannot limit JavaScript transforms to one container, so they run in every container. The container is taken from the tab the sidebar showed when this editor opened. Saving asks for the cookies permission, which Firefox needs to report a tab\'s container.',
+    message: 'Applies to CSS elixirs only. Firefox cannot limit JavaScript elixirs to one container, so they run in every container. The container is taken from the tab the sidebar showed when this editor opened. Saving asks for the cookies permission, which Firefox needs to report a tab\'s container.',
   },
   containerUnreadableNote: {
-    message: 'This transform is limited to one container, but without the cookies permission Firefox cannot report a tab\'s container, so the transform applies in no tab. To fix this, save it and grant the cookies permission, or choose "Every tab".',
+    message: 'This elixir is limited to one container, but without the cookies permission Firefox cannot report a tab\'s container, so the elixir applies in no tab. To fix this, save it and grant the cookies permission, or choose "Every tab".',
   },
   containerTabUnknown: {
     message: 'The tab this editor was opened from has closed or cannot be read, so its container is not known. Open the editor again from the sidebar.',
@@ -148,28 +148,28 @@ export const sharedMessages = defineMessages({
     description: 'Shown when the background reports an error without a message.',
   },
   killSwitchLabel: {
-    message: 'Stop running all transforms',
+    message: 'Stop running all elixirs',
   },
   killSwitchNote: {
-    message: 'Stops all CSS and JavaScript transforms on every site. CSS is removed from open tabs straight away. A tab that already ran JavaScript keeps running it until the tab is reloaded.',
-    description: 'Explains what the setting that stops every transform does.',
+    message: 'Stops all CSS and JavaScript elixirs on every site. CSS is removed from open tabs straight away. A tab that already ran JavaScript keeps running it until the tab is reloaded.',
+    description: 'Explains what the setting that stops every elixir does.',
   },
   killSwitchOnOneTab: {
     message: 'One open tab may still be running JavaScript. Reload it to stop it.',
-    description: 'Shown after the setting that stops every transform is turned on. $COUNT$ is not used for one tab.',
+    description: 'Shown after the setting that stops every elixir is turned on. $COUNT$ is not used for one tab.',
   },
   killSwitchOnTabs: {
     message: '$COUNT$ open tabs may still be running JavaScript. Reload them to stop it.',
-    description: 'Shown after the setting that stops every transform is turned on. $COUNT$ is the number of open tabs.',
+    description: 'Shown after the setting that stops every elixir is turned on. $COUNT$ is the number of open tabs.',
     placeholders: ['COUNT'],
   },
   killSwitchOffOneTab: {
-    message: 'Reload 1 open tab to run JavaScript transforms there again.',
-    description: 'Shown after the setting that stops every transform is turned off.',
+    message: 'Reload 1 open tab to run JavaScript elixirs there again.',
+    description: 'Shown after the setting that stops every elixir is turned off.',
   },
   killSwitchOffTabs: {
-    message: 'Reload $COUNT$ open tabs to run JavaScript transforms there again.',
-    description: 'Shown after the setting that stops every transform is turned off. $COUNT$ is the number of open tabs.',
+    message: 'Reload $COUNT$ open tabs to run JavaScript elixirs there again.',
+    description: 'Shown after the setting that stops every elixir is turned off. $COUNT$ is the number of open tabs.',
     placeholders: ['COUNT'],
   },
   importMatchEmpty: {
@@ -263,23 +263,23 @@ export const sharedMessages = defineMessages({
   },
   sourceGeneration: {
     message: 'Generated by the model',
-    description: 'Says what produced a version of a transform.',
+    description: 'Says what produced a version of an elixir.',
   },
   sourceRepair: {
     message: 'Repaired by the model',
-    description: 'Says what produced a version of a transform.',
+    description: 'Says what produced a version of an elixir.',
   },
   sourceAiEdit: {
     message: 'Changed by the model',
-    description: 'Says what produced a version of a transform.',
+    description: 'Says what produced a version of an elixir.',
   },
   sourceHandEdit: {
     message: 'Edited by hand',
-    description: 'Says what produced a version of a transform.',
+    description: 'Says what produced a version of an elixir.',
   },
   sourceUnknown: {
     message: 'Source not recorded',
-    description: 'Says what produced a version of a transform.',
+    description: 'Says what produced a version of an elixir.',
   },
   versionWorldNotCss: {
     message: 'Not used by CSS',
@@ -298,7 +298,7 @@ export const sharedMessages = defineMessages({
   },
   capabilitiesNone: {
     message: 'None',
-    description: 'Shown when a transform has no capabilities.',
+    description: 'Shown when an elixir has no capabilities.',
   },
   versionRowMatch: {
     message: 'Applies to',
@@ -403,18 +403,18 @@ export const sharedMessages = defineMessages({
     description: 'Name of a provider setting, used inside a sentence.',
   },
   removeAccessQuestionOne: {
-    message: 'One saved transform uses $ORIGIN$. If you remove access, it stops running there and its CSS is removed from open tabs. Remove access?',
+    message: 'One saved elixir uses $ORIGIN$. If you remove access, it stops running there and its CSS is removed from open tabs. Remove access?',
     description: 'Question asked before the permission for a site is removed. $ORIGIN$ is a site address pattern.',
     placeholders: ['ORIGIN'],
   },
   removeAccessQuestionMany: {
-    message: '$COUNT$ saved transforms use $ORIGIN$. If you remove access, they stop running there and their CSS is removed from open tabs. Remove access?',
+    message: '$COUNT$ saved elixirs use $ORIGIN$. If you remove access, they stop running there and their CSS is removed from open tabs. Remove access?',
     description: 'Question asked before the permission for a site is removed. $COUNT$ is a number and $ORIGIN$ is a site address pattern.',
     placeholders: ['COUNT', 'ORIGIN'],
   },
   matchPresetSubdomains: {
     message: '$DOMAIN$ and all its subdomains',
-    description: 'Label of a choice for which pages a transform applies to. $DOMAIN$ is a domain name.',
+    description: 'Label of a choice for which pages an elixir applies to. $DOMAIN$ is a domain name.',
     placeholders: ['DOMAIN'],
   },
 })

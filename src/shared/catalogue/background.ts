@@ -67,7 +67,7 @@ export const backgroundMessages = defineMessages({
     description: 'Text that the background returns to the interface, which shows it to the user.',
   },
   bgWebAlchemistDoesNotPickGenerate: {
-    message: 'Transforms cannot be made in a private window, because a saved transform keeps text from the page after the window closes. Use a normal window. Transforms you already saved still apply in private windows.',
+    message: 'Elixirs cannot be made in a private window, because a saved elixir keeps text from the page after the window closes. Use a normal window. Elixirs you already saved still apply in private windows.',
     description: 'Text that the background returns to the interface, which shows it to the user.',
   },
   bgThisCssLoadsAddressesOutsideThe: {
@@ -75,11 +75,11 @@ export const backgroundMessages = defineMessages({
     description: 'Text that the background returns to the interface, which shows it to the user.',
   },
   bgRunningJavascriptTransformsNeedsAnExtra: {
-    message: 'Running JavaScript transforms needs an extra permission. Grant it from the sidebar.',
+    message: 'Running JavaScript elixirs needs an extra permission. Grant it from the sidebar.',
     description: 'Text that the background returns to the interface, which shows it to the user.',
   },
   bgRunningTransformsIsSwitchedOffIn: {
-    message: '"Stop running all transforms" is turned on in settings, so the JavaScript was not run. Turn it off to run the JavaScript.',
+    message: '"Stop running all elixirs" is turned on in settings, so the JavaScript was not run. Turn it off to run the JavaScript.',
     description: 'Text that the background returns to the interface, which shows it to the user.',
   },
   bgThisCodeDidNotPassThe: {
@@ -87,7 +87,7 @@ export const backgroundMessages = defineMessages({
     description: 'Text that the background returns to the interface, which shows it to the user.',
   },
   bgNoAiProviderIsSetUp: {
-    message: 'No AI provider is set up yet. Add one in settings to start generating transforms.',
+    message: 'No AI provider is set up yet. Add one in settings to start generating elixirs.',
     description: 'Text that the background returns to the interface, which shows it to the user.',
   },
   bgNoAiProviderIsSelected: {
@@ -99,11 +99,11 @@ export const backgroundMessages = defineMessages({
     description: 'Text that the background returns to the interface, which shows it to the user.',
   },
   bgTheRecordIsMissingAField: {
-    message: 'This transform in the file is damaged or incomplete.',
+    message: 'This elixir in the file is damaged or incomplete.',
     description: 'Text that the background returns to the interface, which shows it to the user.',
   },
   bgATransformWithTheSameName: {
-    message: 'A transform with the same name, kind, sites and content is already saved.',
+    message: 'An elixir with the same name, kind, sites and content is already saved.',
     description: 'Text that the background returns to the interface, which shows it to the user.',
   },
   bgAnthropicSupportsApiKeysOnlyOauth: {
@@ -195,11 +195,11 @@ export const backgroundMessages = defineMessages({
     description: 'Text that the background returns to the interface, which shows it to the user.',
   },
   bgThatTransformNoLongerExists: {
-    message: 'That transform no longer exists.',
+    message: 'That elixir no longer exists.',
     description: 'Text that the background returns to the interface, which shows it to the user.',
   },
   bgThisTransformCameFromAnImported: {
-    message: 'This transform came from an imported file. Read its description first with "Edit description".',
+    message: 'This elixir came from an imported file. Read its description first with "Edit description".',
     description: 'Text that the background returns to the interface, which shows it to the user.',
   },
   bgThatVersionIsNoLongerKept: {
@@ -231,7 +231,7 @@ export const backgroundMessages = defineMessages({
     description: 'Text that the background returns to the interface, which shows it to the user.',
   },
   bgThisPageIsNotOneThat: {
-    message: 'This transform does not apply to this page, so the script was not run.',
+    message: 'This elixir does not apply to this page, so the script was not run.',
     description: 'Text that the background returns to the interface, which shows it to the user.',
   },
   bgTheModelReviewDidNotMatch: {
@@ -243,7 +243,7 @@ export const backgroundMessages = defineMessages({
     description: 'Text that the background returns to the interface, which shows it to the user.',
   },
   bgRunningTransformsIsSwitchedOffIn2: {
-    message: '"Stop running all transforms" is turned on in settings, so the preview was not shown. Turn it off to see a preview.',
+    message: '"Stop running all elixirs" is turned on in settings, so the preview was not shown. Turn it off to see a preview.',
     description: 'Text that the background returns to the interface, which shows it to the user.',
   },
   bgWebAlchemistIsTurnedOffOn: {
@@ -413,7 +413,7 @@ export const backgroundMessages = defineMessages({
     placeholders: ['KEY'],
   },
   bgThisTransformHasNoValidField: {
-    message: 'This transform has no valid "$PROBLEM$" field, so it was not saved.',
+    message: 'This elixir has no valid "$PROBLEM$" field, so it was not saved.',
     description: 'Text that the background returns to the interface, which shows it to the user. Placeholders: PROBLEM.',
     placeholders: ['PROBLEM'],
   },
@@ -448,12 +448,12 @@ export const backgroundMessages = defineMessages({
     placeholders: ['SCHEMA_VERSION'],
   },
   bgThePatternReachesWhichIsOn: {
-    message: 'This transform applies to $EXCLUDED$, which is on your list of excluded sites. To import it, first remove that site from the list in settings.',
+    message: 'This elixir applies to $EXCLUDED$, which is on your list of excluded sites. To import it, first remove that site from the list in settings.',
     description: 'Text that the background returns to the interface, which shows it to the user. Placeholders: EXCLUDED.',
     placeholders: ['EXCLUDED'],
   },
   bgThisFileAsksForAccessTo: {
-    message: 'This file asks for access to more than $MAX_IMPORT_ORIGINS$ sites, so this transform was not imported. Import a smaller file.',
+    message: 'This file asks for access to more than $MAX_IMPORT_ORIGINS$ sites, so this elixir was not imported. Import a smaller file.',
     description: 'Text that the background returns to the interface, which shows it to the user. Placeholders: MAX_IMPORT_ORIGINS.',
     placeholders: ['MAX_IMPORT_ORIGINS'],
   },
@@ -468,12 +468,12 @@ export const backgroundMessages = defineMessages({
     placeholders: ['PROBLEM'],
   },
   bgUnnamedRecord: {
-    message: 'Unnamed transform',
+    message: 'Unnamed elixir',
     description: 'Name shown for an imported record that has no name.',
   },
   bgSetToRunInMainNotApproved: {
     message: 'It is set to run in the page\'s own world (MAIN), where the page can read and change it. This has not been approved, so it is not running.',
-    description: 'Reason shown for a transform that is set to run in the page\'s own world without the user\'s approval.',
+    description: 'Reason shown for an elixir that is set to run in the page\'s own world without the user\'s approval.',
   },
   bgNotSiteNameCssSetting: {
     message: 'That is not a site name, so its CSS setting was not changed.',

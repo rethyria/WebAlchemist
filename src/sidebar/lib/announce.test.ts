@@ -69,8 +69,8 @@ describe('brokenAnnouncement', () => {
   })
 
   it('names the count with the right plural', () => {
-    expect(brokenAnnouncement(1)).toBe('1 transform stopped working.')
-    expect(brokenAnnouncement(3)).toBe('3 transforms stopped working.')
+    expect(brokenAnnouncement(1)).toBe('1 elixir stopped working.')
+    expect(brokenAnnouncement(3)).toBe('3 elixirs stopped working.')
   })
 })
 

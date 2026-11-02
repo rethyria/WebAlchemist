@@ -271,7 +271,7 @@ export const safetyMessages = defineMessages({
     description: 'A finding of the safety check, shown to the user before code is saved.',
   },
   saUsesWhichIsNotOnThe: {
-    message: 'Uses $NAME$.$NAME2$, which is not on the list of features a transform may use.',
+    message: 'Uses $NAME$.$NAME2$, which is not on the list of features an elixir may use.',
     description: 'A finding of the safety check, shown to the user before code is saved. Placeholders: NAME, NAME2.',
     placeholders: ['NAME', 'NAME2'],
   },
@@ -343,7 +343,7 @@ export const safetyMessages = defineMessages({
     description: 'A finding of the safety check, shown to the user before code is saved.',
   },
   saSelectsAScriptOrStyleElement: {
-    message: 'Selects a script or style element. Transforms may not do this, because the text of these elements can be rewritten to run code or load an address that this check cannot see.',
+    message: 'Selects a script or style element. Elixirs may not do this, because the text of these elements can be rewritten to run code or load an address that this check cannot see.',
     description: 'A finding of the safety check, shown to the user before code is saved.',
   },
   saSelectsEveryElementWhichIncludesScript: {
@@ -364,7 +364,7 @@ export const safetyMessages = defineMessages({
     placeholders: ['NAME'],
   },
   saUsesWhichIsNotOnThe2: {
-    message: 'Uses $NAME$, which is not on the list of features a transform may use.',
+    message: 'Uses $NAME$, which is not on the list of features an elixir may use.',
     description: 'A finding of the safety check, shown to the user before code is saved. Placeholders: NAME.',
     placeholders: ['NAME'],
   },
@@ -386,7 +386,7 @@ export const safetyMessages = defineMessages({
     placeholders: ['SHOWN', 'OWN'],
   },
   saThisCssImportsAnotherStylesheetThe: {
-    message: 'This CSS imports another stylesheet. The imported file can change after the transform is approved, so @import is never allowed.',
+    message: 'This CSS imports another stylesheet. The imported file can change after the elixir is approved, so @import is never allowed.',
     description: 'A finding of the safety check, shown to the user before code is saved.',
   },
   saThisCssContainsAUrlThat: {

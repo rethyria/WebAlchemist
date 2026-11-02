@@ -11,40 +11,40 @@ export const editorMessages = defineMessages({
     description: 'Label of a checkbox that confirms the risks were read.',
   },
   edCodeLabel: {
-    message: 'Transform code',
+    message: 'Elixir code',
     description: 'Accessible name of the box that holds the code.',
   },
   edDraftGone: {
     message: 'That draft is no longer available. Drafts are kept only until the browser closes. Pick the element again to start over.',
-    description: 'Error shown when a draft transform was lost.',
+    description: 'Error shown when a draft elixir was lost.',
   },
   edWrittenByHandIntent: {
     message: 'Written by hand.',
-    description: 'Saved as the description of a transform that the user wrote by hand.',
+    description: 'Saved as the description of an elixir that the user wrote by hand.',
   },
   edWrittenByHandApproach: {
     message: 'Written by hand, so there is no generated description of it.',
-    description: 'Saved as the approach of a transform that the user wrote by hand.',
+    description: 'Saved as the approach of an elixir that the user wrote by hand.',
   },
   edTitleNew: {
-    message: 'New transform · Web Alchemist',
-    description: 'Title of the editor tab for a new transform.',
+    message: 'New elixir · Web Alchemist',
+    description: 'Title of the editor tab for a new elixir.',
   },
   edTitleNamed: {
     message: '$NAME$ · Web Alchemist',
-    description: 'Title of the editor tab. $NAME$ is the name of the transform.',
+    description: 'Title of the editor tab. $NAME$ is the name of the elixir.',
     placeholders: ['NAME'],
   },
   edTransformGone: {
-    message: 'That transform no longer exists. It may have been deleted.',
-    description: 'Error shown when the transform to edit was deleted.',
+    message: 'That elixir no longer exists. It may have been deleted.',
+    description: 'Error shown when the elixir to edit was deleted.',
   },
   edNeedsPermissionRestore: {
     message: 'Web Alchemist needs permission for the site this version applies to before it can restore it.',
     description: 'Error shown when permission for the site was refused.',
   },
   edNeedsPermissionJs: {
-    message: 'Web Alchemist needs the permission to run JavaScript transforms, and permission for the site it applies to, before it can save this.',
+    message: 'Web Alchemist needs the permission to run JavaScript elixirs, and permission for the site it applies to, before it can save this.',
     description: 'Error shown when a permission was refused.',
   },
   edNeedsPermissionCookies: {
@@ -68,10 +68,10 @@ export const editorMessages = defineMessages({
   },
   edNothingTitle: {
     message: 'Nothing to edit',
-    description: 'Heading shown when no transform can be opened.',
+    description: 'Heading shown when no elixir can be opened.',
   },
   edNamePlaceholder: {
-    message: 'Name this transform',
+    message: 'Name this elixir',
     description: 'Hint shown in the empty name box.',
   },
   edHandNote: {
@@ -79,7 +79,7 @@ export const editorMessages = defineMessages({
     description: 'Explains that writing by hand sends nothing.',
   },
   edKindLabel: {
-    message: 'Transform kind',
+    message: 'Elixir kind',
     description: 'Accessible name of the choice between CSS and JavaScript.',
   },
   edCheckedBadge: {
@@ -88,7 +88,7 @@ export const editorMessages = defineMessages({
   },
   edDisabledBadge: {
     message: 'disabled',
-    description: 'Badge that marks a transform that is turned off.',
+    description: 'Badge that marks an elixir that is turned off.',
   },
   edSavedAnnounce: {
     message: 'Saved.',
@@ -108,15 +108,15 @@ export const editorMessages = defineMessages({
   },
   edSaving: {
     message: 'Saving…',
-    description: 'Button text while a transform is saved.',
+    description: 'Button text while an elixir is saved.',
   },
   edCreate: {
     message: 'Create',
-    description: 'Button that creates a new transform.',
+    description: 'Button that creates a new elixir.',
   },
   edSave: {
     message: 'Save',
-    description: 'Button that saves a transform.',
+    description: 'Button that saves an elixir.',
   },
   edAppliesTo: {
     message: 'Applies to',
@@ -138,8 +138,8 @@ export const editorMessages = defineMessages({
     placeholders: ['WORLD'],
   },
   edKeepsMain: {
-    message: 'This transform was saved to run in the page\'s own world and keeps doing so.',
-    description: 'Explains that a saved transform keeps running in the page\'s own world.',
+    message: 'This elixir was saved to run in the page\'s own world and keeps doing so.',
+    description: 'Explains that a saved elixir keeps running in the page\'s own world.',
   },
   edRunInMain: {
     message: 'Run in the page\'s own world (MAIN)',
@@ -213,7 +213,7 @@ export const editorMessages = defineMessages({
     placeholders: ['DATE'],
   },
   edRestoreExplain: {
-    message: 'Restoring replaces the code, the pages it applies to, the access it asks for and the world of this transform with those of this version. The current state is kept as a version, so a restore can be undone.',
+    message: 'Restoring replaces the code, the pages it applies to, the access it asks for and the world of this elixir with those of this version. The current state is kept as a version, so a restore can be undone.',
     description: 'Explains what restoring a version does.',
   },
   edTableCaption: {
@@ -270,6 +270,6 @@ export const editorMessages = defineMessages({
   },
   edLoading: {
     message: 'Loading…',
-    description: 'Shown while the transform loads.',
+    description: 'Shown while the elixir loads.',
   },
 })

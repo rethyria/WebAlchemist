@@ -1,6 +1,6 @@
 # Web Alchemist
 
-Web Alchemist is a Firefox extension that changes how a webpage looks or behaves, based on a description written in plain language. The user points at part of a page and describes the change. A language model from an AI provider that the user chooses, called with the user's own API key, writes the CSS or JavaScript. Before anything is saved, the user sees the code and an explanation of it, and JavaScript is also checked by a second model call. A saved change, called a transform, is applied again on every later visit to the matching site. When a site changes so that a transform no longer applies, the extension reports it and offers to write a replacement from the original description.
+Web Alchemist is a Firefox extension that changes how a webpage looks or behaves, based on a description written in plain language. The user points at part of a page and describes the change. A language model from an AI provider that the user chooses, called with the user's own API key, writes the CSS or JavaScript. Before anything is saved, the user sees the code and an explanation of it, and JavaScript is also checked by a second model call. A saved change, called an elixir, is applied again on every later visit to the matching site. When a site changes so that an elixir no longer applies, the extension reports it and offers to write a replacement from the original description.
 
 As of November 2026 the extension works on desktop Firefox and has not been published. The interface for Firefox for Android is built but has not been tested. The material for a submission to addons.mozilla.org (AMO) is in `docs/amo.md`.
 
@@ -67,7 +67,7 @@ The extension has three parts.
 
 ### The record
 
-A saved transform keeps three text fields that are not merged.
+A saved elixir keeps three text fields that are not merged.
 
 | Field | Author | Purpose |
 |---|---|---|
@@ -75,7 +75,7 @@ A saved transform keeps three text fields that are not merged.
 | `rationale` | model | The targets, the approach and the assumptions. It is written again on every repair. |
 | `code` | model, or the user in the editor | The implementation. |
 
-A transform also stores an `anchor`, a set of signals that identify the elements the code targets. The health check tests the anchor on each visit. `rationale.assumptions` states the same conditions in words, and the user sees them when the check fails. The last five versions of a transform are kept, and the editor can restore one after a confirmation.
+An elixir also stores an `anchor`, a set of signals that identify the elements the code targets. The health check tests the anchor on each visit. `rationale.assumptions` states the same conditions in words, and the user sees them when the check fails. The last five versions of an elixir are kept, and the editor can restore one after a confirmation.
 
 ## Safety design
 
@@ -95,53 +95,53 @@ The code check receives the user's own typed instructions, the generating model'
 
 ### Approval
 
-A code check returns a one-time approval token. The token is tied to the exact code, its execution world, the access it asks for (network, storage or cookies), the transform and the match pattern, which is the pattern of addresses the transform runs on. A JavaScript preview needs a token from a code check with the verdict "match", and it runs the script only on the exact address of the page being edited. Saving also needs the token and deletes it, so a token cannot be used twice, for other code, or for another transform or site. Tokens are kept in session storage. The approval panel shows the code, the world, the sites and the full code check before the user can approve. When the user removes some of the access that the code asks for, the existing token still applies, because a smaller set allows less.
+A code check returns a one-time approval token. The token is tied to the exact code, its execution world, the access it asks for (network, storage or cookies), the elixir and the match pattern, which is the pattern of addresses the elixir runs on. A JavaScript preview needs a token from a code check with the verdict "match", and it runs the script only on the exact address of the page being edited. Saving also needs the token and deletes it, so a token cannot be used twice, for other code, or for another elixir or site. Tokens are kept in session storage. The approval panel shows the code, the world, the sites and the full code check before the user can approve. When the user removes some of the access that the code asks for, the existing token still applies, because a smaller set allows less.
 
 ### Execution world
 
-JavaScript runs in the isolated user script world by default. The model can ask for the MAIN world, which is the page's own world, where the code can use everything the page's scripts can, and must give a reason. The request has no effect until the user approves it. The panel and the editor then show four risks of MAIN: the page can change the code, the code can read what the page keeps in memory, the safety check cannot see what the page's own functions do, and the restriction on image requests does not apply. Restoring an earlier version or a backup that runs in MAIN needs a separate confirmation. A JavaScript transform that runs in MAIN with no record of the user's approval is moved to the isolated world once, when the extension starts.
+JavaScript runs in the isolated user script world by default. The model can ask for the MAIN world, which is the page's own world, where the code can use everything the page's scripts can, and must give a reason. The request has no effect until the user approves it. The panel and the editor then show four risks of MAIN: the page can change the code, the code can read what the page keeps in memory, the safety check cannot see what the page's own functions do, and the restriction on image requests does not apply. Restoring an earlier version or a backup that runs in MAIN needs a separate confirmation. A JavaScript elixir that runs in MAIN with no record of the user's approval is moved to the isolated world once, when the extension starts.
 
 ### Stored code is checked again
 
-The safety check, and the CSS check for CSS, run when code is saved, before a preview, when a script is registered and when stored CSS is applied. Code that was saved under an earlier version of the checks is therefore checked again by the current version and does not run if it fails. A script that stops with an error when it runs is reported as a broken transform.
+The safety check, and the CSS check for CSS, run when code is saved, before a preview, when a script is registered and when stored CSS is applied. Code that was saved under an earlier version of the checks is therefore checked again by the current version and does not run if it fails. A script that stops with an error when it runs is reported as a broken elixir.
 
 ### CSS addresses
 
-CSS can make the browser request an address, and the request can carry page data, for example one character of a token at a time through attribute selectors. The CSS check (`src/safety/css-check.ts`) tokenizes the CSS as a browser does and refuses `@import`, `url()`, `src()` and bare strings in `image-set()` or `image()`. The default allows only `data:` addresses. A setting for each site allows addresses on the page's own origin (the same domain, protocol and port), or addresses that the user approved one at a time for a transform. An `@import` rule is refused in every mode.
+CSS can make the browser request an address, and the request can carry page data, for example one character of a token at a time through attribute selectors. The CSS check (`src/safety/css-check.ts`) tokenizes the CSS as a browser does and refuses `@import`, `url()`, `src()` and bare strings in `image-set()` or `image()`. The default allows only `data:` addresses. A setting for each site allows addresses on the page's own origin (the same domain, protocol and port), or addresses that the user approved one at a time for an elixir. An `@import` rule is refused in every mode.
 
 ### The content security policy of the script world
 
-Each transform runs in its own user script world with a content security policy that is built from the access it asks for. The policy is set, but it is not a security boundary. A measurement on 2026-08-07 in Firefox 145 showed that Firefox does not apply `connect-src` in a user script world: `fetch`, `XMLHttpRequest`, `sendBeacon`, `WebSocket` and `EventSource` all reached a server with `connect-src 'none'` in force. Only image requests were stopped, by `img-src`. The result and the method are in `test/csp/README.md`. The access that a transform asks for (`network`, `storage` and `cookies`) is shown to the user at approval. It is enforced by the safety check, which refuses code that uses access it did not ask for, and by the runtime guard described in the next section.
+Each elixir runs in its own user script world with a content security policy that is built from the access it asks for. The policy is set, but it is not a security boundary. A measurement on 2026-08-07 in Firefox 145 showed that Firefox does not apply `connect-src` in a user script world: `fetch`, `XMLHttpRequest`, `sendBeacon`, `WebSocket` and `EventSource` all reached a server with `connect-src 'none'` in force. Only image requests were stopped, by `img-src`. The result and the method are in `test/csp/README.md`. The access that an elixir asks for (`network`, `storage` and `cookies`) is shown to the user at approval. It is enforced by the safety check, which refuses code that uses access it did not ask for, and by the runtime guard described in the next section.
 
 ### The runtime guard
 
-Before a transform runs in its user script world, a guard (`src/background/runtime-guard.ts`) replaces, with properties that throw an error, every feature that the transform did not ask for access to. These are the network features, storage, cookies, workers, `open`, `eval`, `Function`, strings given to timers, `FontFace`, the audio worklet, `navigator.storage` (the origin private file system), the form submit methods, the page's real window and the windows of frames. The guard works independently of the safety check. Measurements in Firefox 159 on 2026-11-01 showed that it hides these features from every route to the window that was tried, and that the page's own use of them is unaffected.
+Before an elixir runs in its user script world, a guard (`src/background/runtime-guard.ts`) replaces, with properties that throw an error, every feature that the elixir did not ask for access to. These are the network features, storage, cookies, workers, `open`, `eval`, `Function`, strings given to timers, `FontFace`, the audio worklet, `navigator.storage` (the origin private file system), the form submit methods, the page's real window and the windows of frames. The guard works independently of the safety check. Measurements in Firefox 159 on 2026-11-01 showed that it hides these features from every route to the window that was tried, and that the page's own use of them is unaffected.
 
 The measurements also showed what the guard does not close. Firefox's Xray waiver (`wrappedJSObject` and `XPCNativeWrapper.unwrap`) works on every page object. Only the window, `document`, `navigator`, `location`, `history` and the prototype objects could be hidden, so the waiver on any element, event or collection still reaches the page's window and `Function`. Other open routes are windows reached by index (`window[0]`), requests made by inserted `style` and `iframe` elements, a `video` poster, `link rel="modulepreload"`, and a click on a submit button. Resource-loading APIs that were not measured are not covered. For these routes the protection is the safety check, which refuses the waiver names. The method, the controls and the full list are in `test/runtime-guard/README.md`.
 
-The guard cannot be applied to the MAIN world, so a transform that runs there is protected only by the safety check and by the user's approval.
+The guard cannot be applied to the MAIN world, so an elixir that runs there is protected only by the safety check and by the user's approval.
 
 ### Other protections
 
-- The kill switch, "Stop running all transforms", stops CSS and JavaScript transforms on every site. CSS is removed from open tabs when the switch is turned on. A tab that already ran JavaScript keeps running it until the tab is reloaded.
+- The kill switch, "Stop running all elixirs", stops CSS and JavaScript elixirs on every site. CSS is removed from open tabs when the switch is turned on. A tab that already ran JavaScript keeps running it until the tab is reloaded.
 - Each site can also be turned off on its own. Turning a site off removes its CSS and reloads every open tab of that site that ran JavaScript.
-- The excluded sites list starts empty. On a listed host and its subdomains the extension does not pick, generate, run saved JavaScript, apply saved CSS, check transforms or load its content script. A warning asks for confirmation before text from a page with password or payment fields is sent.
-- Picking, generating, capturing and saving are refused in private windows. Saved transforms still apply there.
+- The excluded sites list starts empty. On a listed host and its subdomains the extension does not pick, generate, run saved JavaScript, apply saved CSS, check elixirs or load its content script. A warning asks for confirmation before text from a page with password or payment fields is sent.
+- Picking, generating, capturing and saving are refused in private windows. Saved elixirs still apply there.
 - A credential is bound to the provider address it was entered for, and a request to an AI provider treats a redirect as a failure, so a credential and a prompt are not sent to a second address.
 
 ## Storage
 
-Settings, transforms and usage records are in `storage.local`. API keys and sign-in credentials are stored as plain text by default. The user can set a passphrase of at least 12 characters, and the credentials are then sealed with a key derived from it (PBKDF2 and AES-GCM). While the sealed credentials are unlocked, the derived key is kept in session storage, and they lock again after 30 minutes without use unless the user changes that time. Transforms are always stored unencrypted, even when a passphrase is set. Firefox deletes an extension's storage when the extension is removed, but it cannot revoke an API key at the AI provider, so the user has to delete the key in the provider's console. The extension tells the user this.
+Settings, elixirs and usage records are in `storage.local`. API keys and sign-in credentials are stored as plain text by default. The user can set a passphrase of at least 12 characters, and the credentials are then sealed with a key derived from it (PBKDF2 and AES-GCM). While the sealed credentials are unlocked, the derived key is kept in session storage, and they lock again after 30 minutes without use unless the user changes that time. Elixirs are always stored unencrypted, even when a passphrase is set. Firefox deletes an extension's storage when the extension is removed, but it cannot revoke an API key at the AI provider, so the user has to delete the key in the provider's console. The extension tells the user this.
 
 ## What is sent to the AI provider
 
-When the user generates, refines or repairs a transform, or asks a question about a draft, the background script sends the following to the AI provider that the user chose:
+When the user generates, refines or repairs an elixir, or asks a question about a draft, the background script sends the following to the AI provider that the user chose:
 
-- the user's description and earlier follow-up requests for the same transform, with the code generated for them;
+- the user's description and earlier follow-up requests for the same elixir, with the code generated for them;
 - for the picked element, its tag, id, class values and role, its ancestors up to four levels, the elements inside it, and the text of those elements, up to 80 characters for each element without children, including text that is hidden on the page;
 - the matching CSS rules, the custom properties in scope and a fixed set of computed style values;
 - the same details for each reference element the user adds;
-- for a repair, the saved code, its description and rationale, and the reason that the transform stopped working;
+- for a repair, the saved code, its description and rationale, and the reason that the elixir stopped working;
 - for a question, the question, the earlier questions and answers of the same session, and the current draft's code and explanation;
 - the page address, with the part after # and the query values removed, and parts that look like tokens removed;
 - a screenshot, only when the user adds one.
@@ -150,12 +150,12 @@ Questions go to the model that writes the code. Their answers are shown to the u
 
 ## Import, export and backup
 
-The settings page has an "Export and import" section with three actions: "Export to share", "Back up" and "Import from file". Both kinds of export are JSON files, and either can be encrypted with a passphrase of at least 12 characters (PBKDF2 and AES-GCM). Neither file contains credentials or provider settings, and a backup does not contain provider addresses. Both hold text and addresses taken from the pages the transforms were written for.
+The settings page has an "Export and import" section with three actions: "Export to share", "Back up" and "Import from file". Both kinds of export are JSON files, and either can be encrypted with a passphrase of at least 12 characters (PBKDF2 and AES-GCM). Neither file contains credentials or provider settings, and a backup does not contain provider addresses. Both hold text and addresses taken from the pages the elixirs were written for.
 
 - A shared export carries CSS code, and for JavaScript only the description (the intent), without code.
 - A backup also carries JavaScript code, the access it asks for, the world it runs in, and two settings, the accent colour and the health check mode.
 
-An import shows what it would add before anything is saved, and the transforms that it adds are always turned off. The importing extension rebuilds each record from the fields that an import may take, so a file cannot set an approval or a transform's enabled state. A shared file cannot set the world either: its JavaScript always runs in the isolated world.
+An import shows what it would add before anything is saved, and the elixirs that it adds are always turned off. The importing extension rebuilds each record from the fields that an import may take, so a file cannot set an approval or an elixir's enabled state. A shared file cannot set the world either: its JavaScript always runs in the isolated world.
 
 What happens to imported code depends on its kind:
 

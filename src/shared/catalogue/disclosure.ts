@@ -39,15 +39,15 @@ export const disclosureMessages = defineMessages({
     description: 'An item in the list of what is sent to the provider.',
   },
   sentReferences: {
-    message: 'The same details for each element that you add as a reference while refining a transform',
+    message: 'The same details for each element that you add as a reference while refining an elixir',
     description: 'An item in the list of what is sent to the provider.',
   },
   sentHistory: {
-    message: 'Your earlier follow-up requests and questions for the same transform, with the answers and the code that the model generated for them',
+    message: 'Your earlier follow-up requests and questions for the same elixir, with the answers and the code that the model generated for them',
     description: 'An item in the list of what is sent to the provider.',
   },
   sentRepair: {
-    message: 'When you use Repair with AI or Refine, the saved code, its description and rationale, and the reason that the transform stopped working',
+    message: 'When you use Repair with AI or Refine, the saved code, its description and rationale, and the reason that the elixir stopped working',
     description: 'An item in the list of what is sent to the provider.',
   },
   sentAddress: {
@@ -66,30 +66,30 @@ export const disclosureMessages = defineMessages({
     message: 'The provider\'s own retention policy applies to what it receives. Nothing is sent to the developer of Web Alchemist.',
   },
   enforcementNotice: {
-    message: 'Firefox does not enforce a network restriction on the transform scripts this extension runs on a page. A script that you approve can use the network and read pages that you are logged in to. Approving the code is the main protection.',
+    message: 'Firefox does not enforce a network restriction on the elixir scripts this extension runs on a page. A script that you approve can use the network and read pages that you are logged in to. Approving the code is the main protection.',
   },
   checksNotice: {
     message: 'JavaScript written by the model is checked by the safety check, which is automatic, and by the code check, which is a review by a second model. Neither check catches every problem. The second model is sent only the code and your description. All CSS, including CSS you write, is checked for the addresses it would load. By default it may load only data: addresses. A setting for each site can also allow the page\'s own addresses (same domain, protocol and port), or addresses that you approve. An @import rule is always refused.',
     description: 'Describes how JavaScript and CSS from the model are checked, including the CSS address policy.',
   },
   transformsStorageNotice: {
-    message: 'Saved transforms are not encrypted, even when a passphrase is set. They are stored in the Firefox profile.',
+    message: 'Saved elixirs are not encrypted, even when a passphrase is set. They are stored in the Firefox profile.',
   },
   passphraseOptionNotice: {
     message: 'To encrypt the keys, set a passphrase on the settings page.',
   },
   siteAccessNotice: {
-    message: 'Picking an element on a site, and saving a transform for a site, give Web Alchemist lasting access to that site. The access stays until it is removed under Site access on the settings page.',
+    message: 'Picking an element on a site, and saving an elixir for a site, give Web Alchemist lasting access to that site. The access stays until it is removed under Site access on the settings page.',
   },
   exclusionNotice: {
-    message: 'On excluded sites and their subdomains, Web Alchemist does not pick elements, generate or run transforms, apply saved CSS, count transforms on the toolbar badge, check whether transforms still work, or add any of its own scripts to the page. A page that is already open keeps its changes until it is reloaded. The list is under Excluded sites on the settings page and starts empty. Before text from a page with password or payment fields is sent, a warning asks you to confirm.',
+    message: 'On excluded sites and their subdomains, Web Alchemist does not pick elements, generate or run elixirs, apply saved CSS, count elixirs on the toolbar badge, check whether elixirs still work, or add any of its own scripts to the page. A page that is already open keeps its changes until it is reloaded. The list is under Excluded sites on the settings page and starts empty. Before text from a page with password or payment fields is sent, a warning asks you to confirm.',
   },
   headingSent: {
     message: 'What is sent to your AI provider',
     description: 'Heading of a section of the first-run disclosure.',
   },
   leadSent: {
-    message: 'When you generate a transform or ask a question about a draft, Web Alchemist sends the following to the AI provider that you chose.',
+    message: 'When you generate an elixir or ask a question about a draft, Web Alchemist sends the following to the AI provider that you chose.',
   },
   headingChecks: {
     message: 'How code is checked',
@@ -116,7 +116,7 @@ export const disclosureMessages = defineMessages({
     description: 'Says how API keys are stored when a passphrase is set.',
   },
   disclosureTransforms: {
-    message: 'Transforms are not encrypted, even with a passphrase. Each saved transform is stored as plain text in this browser profile, including text from the element it changes, the addresses of the pages it applies to, and your description. Exported files hold the same text.',
+    message: 'Elixirs are not encrypted, even with a passphrase. Each saved elixir is stored as plain text in this browser profile, including text from the element it changes, the addresses of the pages it applies to, and your description. Exported files hold the same text.',
   },
   statusUnlocked: {
     message: 'Unlocked for this session.',
@@ -156,6 +156,6 @@ export const disclosureMessages = defineMessages({
     description: 'Name of the page\'s own execution world. The identifier in brackets is a technical name and stays as written.',
   },
   worldResetNotice: {
-    message: 'The model chose to run this transform in the page\'s own world. It now runs in the isolated world. Turn on "Run in the page\'s own world (MAIN)" in the editor only if the change needs it.',
+    message: 'The model chose to run this elixir in the page\'s own world. It now runs in the isolated world. Turn on "Run in the page\'s own world (MAIN)" in the editor only if the change needs it.',
   },
 })

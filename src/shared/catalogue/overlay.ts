@@ -37,7 +37,7 @@ export const overlayMessages = defineMessages({
   },
   overlayNoMatch: {
     message: 'Nothing on this page matches $SELECTOR$',
-    description: 'Reason shown for a transform whose element is gone. $SELECTOR$ is a CSS selector.',
+    description: 'Reason shown for an elixir whose element is gone. $SELECTOR$ is a CSS selector.',
     placeholders: ['SELECTOR'],
   },
   scriptErrorReason: {
@@ -51,27 +51,27 @@ export const overlayMessages = defineMessages({
   },
   anchorKeepsRole: {
     message: 'the element still has role="$ROLE$"',
-    description: 'Names an assumption of a transform that no longer holds. It follows the words \'This transform assumed\'. $ROLE$ is an attribute value.',
+    description: 'Names an assumption of an elixir that no longer holds. It follows the words \'This elixir assumed\'. $ROLE$ is an attribute value.',
     placeholders: ['ROLE'],
   },
   anchorKeepsId: {
     message: 'the element still has id="$ID$"',
-    description: 'Names an assumption of a transform that no longer holds. It follows the words \'This transform assumed\'. $ID$ is an attribute value.',
+    description: 'Names an assumption of an elixir that no longer holds. It follows the words \'This elixir assumed\'. $ID$ is an attribute value.',
     placeholders: ['ID'],
   },
   anchorKeepsClass: {
     message: 'the element still has the class $CLASSES$',
-    description: 'Names an assumption of a transform that no longer holds. It follows the words \'This transform assumed\'. $CLASSES$ is a list of class names.',
+    description: 'Names an assumption of an elixir that no longer holds. It follows the words \'This elixir assumed\'. $CLASSES$ is a list of class names.',
     placeholders: ['CLASSES'],
   },
   anchorTextStarts: {
     message: 'the element\'s text still starts with "$TEXT$…"',
-    description: 'Names an assumption of a transform that no longer holds. It follows the words \'This transform assumed\'. $TEXT$ is the start of the element text.',
+    description: 'Names an assumption of an elixir that no longer holds. It follows the words \'This elixir assumed\'. $TEXT$ is the start of the element text.',
     placeholders: ['TEXT'],
   },
   anchorInside: {
     message: 'the element is still inside $LANDMARK$',
-    description: 'Names an assumption of a transform that no longer holds. It follows the words \'This transform assumed\'. $LANDMARK$ is the name of a page region.',
+    description: 'Names an assumption of an elixir that no longer holds. It follows the words \'This elixir assumed\'. $LANDMARK$ is the name of a page region.',
     placeholders: ['LANDMARK'],
   },
 })
