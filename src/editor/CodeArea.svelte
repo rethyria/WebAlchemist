@@ -32,6 +32,23 @@
   let drawn = $derived(value.endsWith('\n') ? `${value} ` : value)
   let drawnTokens = $derived(highlight(drawn, kind))
 
+  /**
+   * Replaces the whole text as an edit of the textarea, so that Ctrl+Z undoes
+   * it, in the same way as the indent edits below.
+   */
+  export function replaceAll(text: string): void {
+    if (!area || text === area.value) return
+    area.focus()
+    area.setSelectionRange(0, area.value.length)
+    if (!document.execCommand('insertText', false, text)) {
+      area.setRangeText(text, 0, area.value.length, 'end')
+      area.dispatchEvent(new Event('input', { bubbles: true }))
+    }
+    area.setSelectionRange(0, 0)
+    area.scrollTop = 0
+    sync()
+  }
+
   function sync(): void {
     if (!area) return
     if (painted) {

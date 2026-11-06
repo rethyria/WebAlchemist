@@ -106,6 +106,10 @@ export const editorMessages = defineMessages({
     message: 'Revert',
     description: 'Button that undoes unsaved changes.',
   },
+  edFormatCode: {
+    message: 'Format code',
+    description: 'Button above the code that lays the code out on separate lines with indentation.',
+  },
   edSaving: {
     message: 'Saving…',
     description: 'Button text while an elixir is saved.',

@@ -27,6 +27,7 @@
   import { editorOriginToRequest, permissionRequestsFor, requestAll } from '@shared/permissions'
   import { excludedAccessMessage, excludedHostForPattern } from '@shared/excluded-sites'
   import { MAIN_WORLD_RISKS, WORLD_NAMES, WORLD_RESET_NOTICE, worldOf } from '@shared/world'
+  import { formatCode } from '@shared/format-code'
   import CodeArea from './CodeArea.svelte'
   import ConfigSection from '@shared/ConfigSection.svelte'
   import MainRestoreRisks from './MainRestoreRisks.svelte'
@@ -561,6 +562,17 @@
     }
   }
 
+  let codeArea = $state<CodeArea | undefined>(undefined)
+
+  /**
+   * Lays out the code in the box as an ordinary edit. Saving it goes through
+   * the same checks and approval as any other edit of the code.
+   */
+  function formatEditorCode() {
+    const language = creating || !transform ? kind : transform.kind
+    codeArea?.replaceAll(formatCode(code, language))
+  }
+
   function revert() {
     code = saved
     match = savedMatch
@@ -836,7 +848,16 @@
       </div>
     {/if}
 
-    <CodeArea value={code} kind={creating ? kind : transform.kind} onchange={(next) => (code = next)} />
+    <div class="code-tools">
+      <button type="button" class="secondary" onclick={formatEditorCode}>{t('edFormatCode')}</button>
+    </div>
+
+    <CodeArea
+      bind:this={codeArea}
+      value={code}
+      kind={creating ? kind : transform.kind}
+      onchange={(next) => (code = next)}
+    />
 
     {#if !creating && versions.length > 0}
       <details class="versions">
@@ -1052,6 +1073,11 @@
     align-items: center;
     gap: var(--sp-7);
     margin-left: auto;
+  }
+
+  .code-tools {
+    display: flex;
+    justify-content: flex-end;
   }
 
   .note {
