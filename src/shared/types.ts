@@ -823,4 +823,17 @@ export interface GenerationResult {
   intent: string
   /** The settings the model proposes, validated. Empty for most elixirs. */
   config: ConfigField[]
+  /**
+   * Present when the model asked a question instead of writing code. `code` is
+   * then empty and nothing else in the result is meaningful.
+   */
+  clarification?: Clarification
+}
+
+/** A question from the model, shown to the user as the model's message. */
+export interface Clarification {
+  /** Plain text. Never rendered as HTML. */
+  question: string
+  /** True when the user can answer by adding an example element from the page. */
+  wantsExample: boolean
 }

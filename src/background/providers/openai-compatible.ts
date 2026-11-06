@@ -10,7 +10,7 @@
  * support cannot be queried and is set by hand on the Provider record.
  */
 
-import { toGenerationResult } from '@shared/generation-result'
+import { parseGeneration } from './generation'
 import {
   modelDisplayName,
   type Credential,
@@ -327,7 +327,7 @@ export async function createOpenAiCompatibleProvider(
           ]
         : text
 
-      return toGenerationResult(await complete<Record<string, unknown>>({
+      return parseGeneration(await complete<Record<string, unknown>>({
         model: provider.generateModel,
         system: GENERATE_SYSTEM_PROMPT,
         userContent,
@@ -337,7 +337,7 @@ export async function createOpenAiCompatibleProvider(
         maxTokens: 16000,
         effort: brewEffort,
         signal: request.signal,
-      }))
+      }), request, provider.label)
     },
 
     /**

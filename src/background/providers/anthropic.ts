@@ -12,7 +12,7 @@
  * work from any context.
  */
 
-import { toGenerationResult } from '@shared/generation-result'
+import { parseGeneration } from './generation'
 import Anthropic from '@anthropic-ai/sdk'
 import {
   modelDisplayName,
@@ -238,7 +238,7 @@ export async function createAnthropicProvider(
         )
 
         reportUsage(generateModel, response)
-        return toGenerationResult(parseJsonResponse<Record<string, unknown>>(response))
+        return parseGeneration(parseJsonResponse<Record<string, unknown>>(response), request, provider.label)
       } catch (error) {
         throw toProviderError(error, { model: generateModel, label: provider.label })
       }
@@ -337,7 +337,7 @@ export async function createAnthropicProvider(
         )
 
         reportUsage(generateModel, final)
-        return toGenerationResult(parseJsonResponse<Record<string, unknown>>(final))
+        return parseGeneration(parseJsonResponse<Record<string, unknown>>(final), request, provider.label)
       } catch (error) {
         throw toProviderError(error, { model: generateModel, label: provider.label })
       }

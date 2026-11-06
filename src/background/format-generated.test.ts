@@ -18,7 +18,7 @@ const FORMATTED_CSS = 'h1 {\n  color: red;\n  margin: 0\n}'
 
 let h: Harness
 let bodies: string[]
-let generated: { kind: 'css' | 'js'; code: string }
+let generated: { kind: 'css' | 'js'; code: string; clarification?: { question: string; wantsExample: boolean } }
 
 const answer = (content: unknown) =>
   new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(content) }, finish_reason: 'stop' }], usage: { prompt_tokens: 1, completion_tokens: 1 } }))
@@ -37,6 +37,7 @@ beforeEach(async () => {
     return answer({
       name: 'n', kind: generated.kind, requestedWorld: 'USER_SCRIPT', worldReason: '', capabilities: [],
       code: generated.code, rationale: { targets: '', approach: '', assumptions: [] }, intent: 'i', config: [],
+      clarification: generated.clarification ?? { question: '', wantsExample: false },
     })
   })
   h = createHarness()
@@ -109,5 +110,22 @@ describe('repaired code', () => {
     const reply = await h.onMessage({ type: 'repair', transformId: 'a', context, brokenReason: 'x', tabId: 1 })
     expect(reply.ok).toBe(true)
     expect(reply.data.result.code).toBe(FORMATTED_JS)
+  })
+})
+
+describe('a question from the model', () => {
+  it('arrives without code and starts no review request', async () => {
+    generated = { kind: 'js', code: '', clarification: { question: 'How are sponsored videos marked?', wantsExample: true } }
+    const done = await generateOverPort()
+    expect(done.result.code).toBe('')
+    expect(done.result.clarification).toEqual({ question: 'How are sponsored videos marked?', wantsExample: true })
+    expect(bodies).toHaveLength(1)
+    expect(bodies.some((b) => b.includes('reviewing JavaScript'))).toBe(false)
+  })
+
+  it('is not accepted as the answer to a repair', async () => {
+    generated = { kind: 'js', code: '', clarification: { question: 'Which one?', wantsExample: false } }
+    const reply = await h.onMessage({ type: 'repair', transformId: 'a', context, brokenReason: 'x', tabId: 1 })
+    expect(reply.ok).toBe(false)
   })
 })

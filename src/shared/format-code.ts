@@ -50,7 +50,8 @@ export function formatCode(code: string, kind: CodeKind): string {
  */
 export function formatGeneration<T extends { kind: CodeKind; code: string }>(result: T): T {
   // A provider's answer is parsed from the model's JSON and can lack the field.
-  if (typeof result.code !== 'string') return result
+  // A question from the model has no code to lay out.
+  if (typeof result.code !== 'string' || result.code === '') return result
   const code = formatCode(result.code, result.kind)
   return code === result.code ? result : { ...result, code }
 }

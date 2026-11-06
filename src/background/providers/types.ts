@@ -336,6 +336,25 @@ export const GENERATION_SCHEMA = {
       type: 'string',
       description: 'Single sentence describing the end state. Must stand alone.',
     },
+    clarification: {
+      type: 'object',
+      description:
+        'A question for the user when the request depends on something that is not in the page content and a wrong guess would make the change wrong. An empty question when code is written.',
+      properties: {
+        question: {
+          type: 'string',
+          description:
+            'One short, specific question for the user. An empty string when code is written. When it is not empty, code is an empty string.',
+        },
+        wantsExample: {
+          type: 'boolean',
+          description:
+            'True when the user can answer by adding an example element from the page. False otherwise, and always false when question is empty.',
+        },
+      },
+      required: ['question', 'wantsExample'],
+      additionalProperties: false,
+    },
     config: {
       type: 'array',
       description:
@@ -395,7 +414,7 @@ export const GENERATION_SCHEMA = {
       },
     },
   },
-  required: ['name', 'kind', 'requestedWorld', 'worldReason', 'capabilities', 'code', 'rationale', 'intent', 'config'],
+  required: ['name', 'kind', 'requestedWorld', 'worldReason', 'capabilities', 'code', 'rationale', 'intent', 'config', 'clarification'],
   additionalProperties: false,
 } as const
 

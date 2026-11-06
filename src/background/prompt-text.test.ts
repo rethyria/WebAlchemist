@@ -24,6 +24,13 @@ describe('prompt texts', () => {
     }).toEqual(HASHES)
   })
 
+  it('tells the generating model when to ask a question instead of writing code', () => {
+    expect(GENERATE_SYSTEM_PROMPT).toContain('## When you cannot see what you need')
+    expect(GENERATE_SYSTEM_PROMPT).toContain('Ask at most one question per response.')
+    expect(GENERATE_SYSTEM_PROMPT).toContain('Add one sponsored video as an example')
+    expect(repairPrompt('n')).toContain('A repair is never answered with a question')
+  })
+
   it('leaves no placeholder in a finished prompt', () => {
     for (const text of [GENERATE_SYSTEM_PROMPT, ASK_SYSTEM_PROMPT, REVIEW_SYSTEM_PROMPT, repairPrompt('n')]) {
       expect(text).not.toMatch(/\{\{|\}\}/)
@@ -55,8 +62,8 @@ describe('fillPrompt', () => {
 
 const HASHES = {
   pageContentIsData: '54623e0231ff8f97df9725022325dbfc9039da0187e0d6a9c5c0732a749c4c37',
-  generate: 'ef33f9115f74898c8203f2f2472d18e0f74db2732c9112953cfac6fca45fee70',
+  generate: 'd375eedf8d49751c9e79fdbebf45558d5da468aeccf15629061c8716eee4f5f6',
   ask: '2a6b074fa9993175694242c1b37146ac6510074738eb6532aa3b2663a9c342b8',
   review: '4da4ce617bbb269949a57cdb83f7b43f436fa67f39c16b5f9c8d786ad432a6be',
-  repair: 'af07c2ff95e943d685d882521b5be58b1981559a184f9b880253687329154249',
+  repair: 'facf4e7382729ce09fa88e1506449da32476696f5c9581dabb13fed75c6190e5',
 }
