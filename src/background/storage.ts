@@ -80,6 +80,7 @@ import {
   type PlannedTransform,
 } from './transfer'
 import { t } from '@shared/i18n'
+import { defaultEffort, isEffortChoice } from '@shared/effort'
 
 const KEY_SETTINGS = 'settings'
 const KEY_TRANSFORMS = 'transforms'
@@ -192,6 +193,8 @@ const PROVIDER_FIELDS = [
   'generateModel',
   'reviewModel',
   'supportsVision',
+  'brewEffort',
+  'reviewEffort',
   'price',
   'oauth',
 ] as const satisfies readonly ProviderEditableField[]
@@ -220,7 +223,7 @@ export function changeSettings(
         }
         next = {
           ...current,
-          providers: [...current.providers, change.provider],
+          providers: [...current.providers, withEffortDefaults(checkedEffort(change.provider))],
           activeProviderId: current.activeProviderId ?? change.provider.id,
         }
         break
@@ -279,6 +282,7 @@ export function changeSettings(
             ;(updated as unknown as Record<string, unknown>)[key] = (change.set as Record<string, unknown>)[key]
           }
         }
+        checkedEffort(updated)
         // Only the optional fields may be removed. The list comes from a
         // message, and deleting the id, the type, the address or the label
         // would leave a provider that cannot be used or found.
@@ -300,10 +304,37 @@ export function changeSettings(
   })
 }
 
+/**
+ * Gives a provider the effort settings it lacks. Providers stored before the
+ * settings existed have neither field, and a stored value that is not a known
+ * choice is replaced as well, so that the adapters only ever see valid values.
+ */
+function withEffortDefaults(provider: Provider): Provider {
+  const fallback = defaultEffort(provider.type)
+  return {
+    ...provider,
+    brewEffort: isEffortChoice(provider.brewEffort) ? provider.brewEffort : fallback,
+    reviewEffort: isEffortChoice(provider.reviewEffort) ? provider.reviewEffort : fallback,
+  }
+}
+
+/** Refuses a provider whose effort fields are present but not a known choice. */
+function checkedEffort(provider: Provider): Provider {
+  for (const key of ['brewEffort', 'reviewEffort'] as const) {
+    if (key in provider && provider[key] !== undefined && !isEffortChoice(provider[key])) {
+      throw new Error(t('bgTheEffortMustBeLowMediumHigh'))
+    }
+  }
+  return provider
+}
+
 function migrateSettings(raw: Partial<Settings>): Settings {
   // Only one schema version exists so far. Future migrations chain from here,
   // each one bumping schemaVersion, so a stale profile upgrades in order.
   const merged: Settings = { ...DEFAULT_SETTINGS, ...raw, schemaVersion: SCHEMA_VERSION }
+  // The effort fields were added without a new schema version: a missing field
+  // is filled in on every read, so no stored value needs rewriting.
+  merged.providers = (merged.providers ?? []).map(withEffortDefaults)
   return merged
 }
 

@@ -14,6 +14,7 @@
  */
 
 import { DEFAULT_VAULT_IDLE_MINUTES } from './vault-policy'
+import type { EffortChoice } from './effort'
 
 export const SCHEMA_VERSION = 1
 
@@ -424,6 +425,13 @@ export interface Provider {
    */
   supportsVision: boolean
   /**
+   * How much the model reasons when it brews (Brew, Brew again, Repair) and
+   * when it answers side questions. See askEffortFor for the side questions.
+   */
+  brewEffort: EffortChoice
+  /** How much the model reasons in the code check. */
+  reviewEffort: EffortChoice
+  /**
    * Optional price the user entered, in US dollars per million tokens. Used for
    * OpenAI-compatible providers only, because they have no price list the
    * extension could read. Anthropic prices come from ANTHROPIC_MODELS.
@@ -618,6 +626,8 @@ export type ProviderEditableField =
   | 'generateModel'
   | 'reviewModel'
   | 'supportsVision'
+  | 'brewEffort'
+  | 'reviewEffort'
   | 'price'
   | 'oauth'
 

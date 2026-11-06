@@ -18,6 +18,8 @@ const provider = (id: string): Provider => ({
   generateModel: 'm',
   reviewModel: 'm',
   supportsVision: false,
+  brewEffort: 'high',
+  reviewEffort: 'high',
 })
 
 beforeEach(async () => {

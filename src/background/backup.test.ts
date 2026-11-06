@@ -61,6 +61,8 @@ const withProvider = {
       generateModel: 'g',
       reviewModel: 'r',
       supportsVision: false,
+      brewEffort: 'default',
+      reviewEffort: 'default',
     },
   ],
   activeProviderId: 'p1',

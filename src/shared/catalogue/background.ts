@@ -166,6 +166,10 @@ export const backgroundMessages = defineMessages({
     message: 'The time before locking must be a whole number of minutes, or 0 for never.',
     description: 'Text that the background returns to the interface, which shows it to the user.',
   },
+  bgTheEffortMustBeLowMediumHigh: {
+    message: 'The effort must be Low, Medium, High or the model default.',
+    description: 'Text that the background returns to the interface when a provider setting for effort is not one of the choices.',
+  },
   bgAProviderWithThatIdAlready: {
     message: 'A provider with that id already exists.',
     description: 'Text that the background returns to the interface, which shows it to the user.',

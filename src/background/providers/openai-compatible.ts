@@ -35,6 +35,7 @@ import {
 } from '../prompts'
 import { TOKEN_REQUEST_TIMEOUT_MS, credentialFrom, needsRefresh, type TokenPayload } from '../oauth'
 import { endpointProblem, isLoopbackHostname } from '@shared/endpoint-policy'
+import { askEffortFor, defaultEffort, effortToSend, type EffortChoice } from '@shared/effort'
 import { destinationOf } from '@shared/credential-binding'
 import { retryAfterSeconds } from './retry-after'
 import { readCredentialOrProviderError, withCredentialOrProviderError } from './credential'
@@ -102,6 +103,10 @@ export async function createOpenAiCompatibleProvider(
     return { headers: { Authorization: `Bearer ${token}` }, oauthToken: token }
   }
 
+  // A provider that was stored before the settings existed has neither field.
+  const brewEffort = provider.brewEffort ?? defaultEffort('openai-compatible')
+  const reviewEffort = provider.reviewEffort ?? defaultEffort('openai-compatible')
+
   const complete = async <T>(args: {
     model: string
     system: string
@@ -111,12 +116,16 @@ export async function createOpenAiCompatibleProvider(
     schema: unknown
     schemaName: string
     maxTokens: number
+    /** The effort to send as `reasoning_effort`; 'default' or absent sends nothing. */
+    effort?: EffortChoice | undefined
     /** Aborts the HTTP request when the caller no longer wants the answer. */
     signal?: AbortSignal | undefined
   }): Promise<T> => {
-    const body = JSON.stringify({
+    const level = args.effort === undefined ? undefined : effortToSend(args.effort)
+    const buildBody = (withEffort: boolean) => JSON.stringify({
       model: args.model,
       max_tokens: args.maxTokens,
+      ...(withEffort && level ? { reasoning_effort: level } : {}),
       messages: [
         { role: 'system', content: args.system },
         ...(args.history ?? []).map((turn) => ({ role: turn.role, content: turn.content })),
@@ -127,6 +136,7 @@ export async function createOpenAiCompatibleProvider(
         json_schema: { name: args.schemaName, strict: true, schema: args.schema },
       },
     })
+    let body = buildBody(true)
 
     const reportUnknownUsage = () => onUsage?.({ model: args.model, usage: null })
 
@@ -163,7 +173,8 @@ export async function createOpenAiCompatibleProvider(
      * told to unlock or reconnect.
      */
     const first = await authHeader()
-    let response = await send(first.headers)
+    let headers = first.headers
+    let response = await send(headers)
 
     /*
      * A 401 on a sign-in token is not yet a rejected credential. The lifetime
@@ -181,7 +192,23 @@ export async function createOpenAiCompatibleProvider(
      */
     if (response.status === 401 && first.oauthToken !== undefined) {
       const token = await refreshAfterRejection(provider, first.oauthToken)
-      response = await send({ Authorization: `Bearer ${token}` })
+      headers = { Authorization: `Bearer ${token}` }
+      response = await send(headers)
+    }
+
+    /*
+     * An endpoint that does not know `reasoning_effort` answers 400 and names
+     * the field. Then the request is sent once more without it, as the
+     * Anthropic adapter does for a field its model rejects. Any other 400 is
+     * left to the error handling below, and a rejection with no mention of
+     * the field is not retried.
+     */
+    if (response.status === 400 && level) {
+      const { message } = await readErrorFields(response.clone())
+      if (/reasoning_effort/i.test(message)) {
+        body = buildBody(false)
+        response = await send(headers)
+      }
     }
 
     if (!response.ok) {
@@ -308,6 +335,7 @@ export async function createOpenAiCompatibleProvider(
         schema: GENERATION_SCHEMA,
         schemaName: 'transform',
         maxTokens: 16000,
+        effort: brewEffort,
         signal: request.signal,
       }))
     },
@@ -341,6 +369,8 @@ export async function createOpenAiCompatibleProvider(
         schema: ASK_SCHEMA,
         schemaName: 'answer',
         maxTokens: 8000,
+        // One level below the brewing effort; see askEffortFor.
+        effort: askEffortFor(brewEffort),
         signal: request.signal,
       })
       if (typeof reply?.answer !== 'string') {
@@ -362,6 +392,7 @@ export async function createOpenAiCompatibleProvider(
         schema: REVIEW_SCHEMA,
         schemaName: 'review',
         maxTokens: 4000,
+        effort: reviewEffort,
       })
     },
   }

@@ -28,6 +28,8 @@
   } from '@shared/types'
   import { endpointProblem } from '@shared/endpoint-policy'
   import ModelPicker from './ModelPicker.svelte'
+  import EffortPicker from './EffortPicker.svelte'
+  import { defaultEffort, type EffortChoice } from '@shared/effort'
   import { addProviderWithKey } from './provider-add'
   import Button from '@sidebar/components/Button.svelte'
 
@@ -197,6 +199,8 @@
           : {}),
         generateModel: DEFAULT_GENERATE_MODEL,
         reviewModel: DEFAULT_REVIEW_MODEL,
+        brewEffort: defaultEffort(draftType),
+        reviewEffort: defaultEffort(draftType),
         // Anthropic resolves this live from the models endpoint. For an
         // arbitrary endpoint there is no equivalent, so it starts off and the
         // screenshot option stays hidden until it is turned on by hand.
@@ -250,6 +254,14 @@
     }
 
     await onchange({ kind: 'update-provider', providerId: provider.id, set })
+  }
+
+  async function setEffort(
+    provider: Provider,
+    field: 'brewEffort' | 'reviewEffort',
+    effort: EffortChoice,
+  ) {
+    await onchange({ kind: 'update-provider', providerId: provider.id, set: { [field]: effort } })
   }
 
   /**
@@ -398,6 +410,20 @@
               hint={t('settingsReviewNote')}
               value={provider.reviewModel}
               onchange={(model) => void setModel(provider, 'reviewModel', model)}
+            />
+          </div>
+
+          <div class="models">
+            <EffortPicker
+              label={t('optEffortBrew')}
+              value={provider.brewEffort}
+              onchange={(effort) => void setEffort(provider, 'brewEffort', effort)}
+            />
+            <EffortPicker
+              label={t('optEffortReview')}
+              hint={t('optEffortReviewNote')}
+              value={provider.reviewEffort}
+              onchange={(effort) => void setEffort(provider, 'reviewEffort', effort)}
             />
           </div>
 

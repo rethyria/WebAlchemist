@@ -78,6 +78,34 @@ export const optionsMessages = defineMessages({
     message: 'Other…',
     description: 'Choice in the list of models that lets the user type a model identifier.',
   },
+  optEffortBrew: {
+    message: 'Effort when brewing',
+    description: 'Label of the choice of how much the model reasons when it writes code and answers questions.',
+  },
+  optEffortReview: {
+    message: 'Effort of the code check',
+    description: 'Label of the choice of how much the model reasons in the code check.',
+  },
+  optEffortLow: {
+    message: 'Low',
+    description: 'Choice of a low reasoning effort.',
+  },
+  optEffortMedium: {
+    message: 'Medium',
+    description: 'Choice of a medium reasoning effort.',
+  },
+  optEffortHigh: {
+    message: 'High',
+    description: 'Choice of a high reasoning effort.',
+  },
+  optEffortDefault: {
+    message: 'Model default',
+    description: 'Choice that sends no reasoning effort, so the model uses its own default.',
+  },
+  optEffortReviewNote: {
+    message: 'Lower effort is faster and cheaper, and the check may miss more.',
+    description: 'Note under the choice of effort for the code check.',
+  },
   optModelId: {
     message: 'Model ID',
     description: 'Hint shown in the empty box for a model identifier.',

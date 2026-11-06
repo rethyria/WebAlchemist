@@ -55,6 +55,7 @@ import {
   type UsageListener,
 } from './types'
 import { readUsage } from '@shared/usage'
+import { askEffortFor, defaultEffort, effortToSend, type EffortChoice } from '@shared/effort'
 
 /**
  * Anthropic's guidance is that model downgrades are the caller's decision, not
@@ -127,6 +128,16 @@ async function withoutUnsupportedFields<T>(
   }
 }
 
+/**
+ * The fields of `output_config` for one call: the effort, when a level was
+ * chosen, and the response format. The choice 'default' leaves the effort out
+ * so the model uses its own default.
+ */
+function outputConfig(effort: EffortChoice, format: unknown): Body {
+  const level = effortToSend(effort)
+  return { ...(level ? { effort: level } : {}), format }
+}
+
 export async function createAnthropicProvider(
   provider: Provider,
   onUsage?: UsageListener,
@@ -160,6 +171,9 @@ export async function createAnthropicProvider(
 
   const generateModel = provider.generateModel || DEFAULT_GENERATE_MODEL
   const reviewModel = provider.reviewModel || DEFAULT_REVIEW_MODEL
+  // A provider that was stored before the settings existed has neither field.
+  const brewEffort = provider.brewEffort ?? defaultEffort('anthropic')
+  const reviewEffort = provider.reviewEffort ?? defaultEffort('anthropic')
 
   /*
    * Only input_tokens and output_tokens are read. Thinking tokens are already
@@ -211,10 +225,10 @@ export async function createAnthropicProvider(
               { role: 'user' as const, content },
             ],
             // effort and format are both fields of output_config.
-            output_config: {
-              effort: 'high',
-              format: { type: 'json_schema', schema: GENERATION_SCHEMA },
-            },
+            output_config: outputConfig(brewEffort, {
+              type: 'json_schema',
+              schema: GENERATION_SCHEMA,
+            }),
           },
           (body) =>
             client.messages.create(
@@ -274,10 +288,10 @@ export async function createAnthropicProvider(
               })),
               { role: 'user' as const, content },
             ],
-            output_config: {
-              effort: 'high',
-              format: { type: 'json_schema', schema: GENERATION_SCHEMA },
-            },
+            output_config: outputConfig(brewEffort, {
+              type: 'json_schema',
+              schema: GENERATION_SCHEMA,
+            }),
           },
           async (payload) => {
             const stream = client.messages.stream(
@@ -332,7 +346,7 @@ export async function createAnthropicProvider(
     /**
      * A side question about the draft. It streams so the panel can show the
      * answer as it is written. The configured generation model answers it, with
-     * adaptive thinking at medium effort where the model supports them; a
+     * adaptive thinking at one level below the brewing effort where the model supports them; a
      * rejected field is taken off by `withoutUnsupportedFields` as for
      * generation. The reply is capped at 8000 tokens, which is far more than the
      * prompt asks for, so a cut-off reply is unusual.
@@ -354,10 +368,11 @@ export async function createAnthropicProvider(
               })),
               { role: 'user' as const, content },
             ],
-            output_config: {
-              effort: 'medium',
-              format: { type: 'json_schema', schema: ASK_SCHEMA },
-            },
+            // One level below the brewing effort; see askEffortFor.
+            output_config: outputConfig(askEffortFor(brewEffort), {
+              type: 'json_schema',
+              schema: ASK_SCHEMA,
+            }),
           },
           async (payload) => {
             const stream = client.messages.stream(
@@ -402,10 +417,10 @@ export async function createAnthropicProvider(
             system: REVIEW_SYSTEM_PROMPT,
             thinking: { type: 'adaptive' },
             messages: [{ role: 'user', content: body }],
-            output_config: {
-              effort: 'high',
-              format: { type: 'json_schema', schema: REVIEW_SCHEMA },
-            },
+            output_config: outputConfig(reviewEffort, {
+              type: 'json_schema',
+              schema: REVIEW_SCHEMA,
+            }),
           },
           (payload) =>
             client.messages.create(
