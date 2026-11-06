@@ -74,10 +74,11 @@ async function runOne(target, followUp) {
       const log = await s.log(since)
       const end = log.find((e) => e.msg && (e.msg.type === 'done' || e.msg.type === 'error'))
       if (end) {
-        // The flow then runs the static analysis or the CSS check on the result.
+        // The flow then runs the static analysis or the CSS check on the result. A question has none.
+        const asked = end.msg.type === 'done' && end.msg.result && end.msg.result.clarification
         for (let k = 0; k < 40; k += 1) {
           const l2 = await s.log(since)
-          if (end.msg.type === 'error' || l2.some((e) => e.reply === 'analyse' || e.reply === 'analyse-css')) break
+          if (asked || end.msg.type === 'error' || l2.some((e) => e.reply === 'analyse' || e.reply === 'analyse-css')) break
           await sleep(500)
         }
         await sleep(1500)
@@ -103,6 +104,18 @@ async function runOne(target, followUp) {
   result.result = generated
   result.analysis = out.analysis
   result.generateRequest = null
+  result.clarification = generated.clarification ?? null
+  if (generated.clarification) {
+    // The model asked a question instead of writing code: there is nothing to analyse or review.
+    await sleep(1500)
+    result.panel = (await s.text()).replace(/\s+/g, ' ').slice(0, 1500)
+    const reqs0 = (await s.requests()).filter((r) => r.model)
+    result.requests = reqs0.map((r) => ({ model: r.model, text: r.texts.map((t) => t.text).join('\n----\n') }))
+    result.watch = []
+    if ((await sb.run(s.hasButton('Discard'))) === 'true') await s.click('Discard')
+    await sleep(1500)
+    return result
+  }
 
   if (followUp && generated.kind === 'js') {
     // One refinement turn: a follow-up typed into the panel's own box, then Brew again.
@@ -166,8 +179,8 @@ try {
     let r
     try { r = await runOne(target, target === REFINE) } catch (e) { r = { tag: `${MODEL}-${KIND}-${target}`, error: String(e.message) }; console.log('ERROR', e.message); exit = 1 }
     writeFileSync(`${OUT}/${MODEL}-${KIND}-${target}.json`, JSON.stringify(r, null, 1))
-    console.log(JSON.stringify({ picked: r.picked, kind: r.result?.kind, caps: r.capabilities, world: r.world, requestedWorld: r.requestedWorld, staticPassed: r.analysis?.passed, findings: r.analysis?.static, watch: r.watch, verdict: r.review?.model?.verdict ?? r.review?.error ?? null, calls: r.calls?.length, error: r.error }))
-    if (r.result) console.log(r.result.code.slice(0, 1200))
+    console.log(JSON.stringify({ picked: r.picked, kind: r.result?.kind, clarification: r.clarification, caps: r.capabilities, world: r.world, requestedWorld: r.requestedWorld, staticPassed: r.analysis?.passed, findings: r.analysis?.static, watch: r.watch, verdict: r.review?.model?.verdict ?? r.review?.error ?? null, calls: r.calls?.length, error: r.error }))
+    if (r.result?.code) console.log(r.result.code.slice(0, 1200))
     console.log('totals', JSON.stringify(totals()))
   }
 } catch (e) {

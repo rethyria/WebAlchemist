@@ -315,3 +315,20 @@ This check asked whether the Anthropic API accepts the generation response schem
 The cost of the first row includes about US$0.0052 for the code check, which the panel displayed (1,954 tokens in, 128 out) and the ledger did not record. The total is about US$0.13 for 6 calls. The provider returned no error for the schema in any call. The settings request produced code that reads `CONFIG.replacements`; the draft was discarded and nothing was saved.
 
 The harness needed three changes: the permission origin granted to the extension is now `*://localhost/*`, the code check is started by the panel itself (the harness presses "Check the code" only if the button is shown, and reads the review reply from the start of the generation), and `WA_MAX_COST` and `INSTRUCTION` set the budget and the instruction. The restore script reported that the stored settings and transforms differ from the snapshot taken in the earlier run; that snapshot predates the settings feature.
+
+# Paid check of the clarification schema on 6 November 2026
+
+This check asked whether the Anthropic API accepts the generation response schema with the required `clarification` object (commit c7956b8), and whether a model asks a question when the request depends on something it cannot see. It was measured with the extension built from commit c8c7672, against the provider of the development profile (Anthropic, not an OpenAI-compatible provider), on the clean fixture, with the generation and review model set to the same model. The limit was US$1.
+
+| Model | Target | Instruction | Result | Static analysis | Automatic code check | Cost (US$) |
+|---|---|---|---|---|---|---:|
+| Sonnet 5.5 | comment-form | Character counter | JavaScript, empty question | passed | match | 0.0321 |
+| Opus 5.5 | comment-form | Character counter | JavaScript, empty question | passed | match | 0.0659 |
+| Sonnet 5.5 | plan-card | "Hide every plan on this page that is marked as sponsored." | Question, no code | not run | not run | 0.0218 |
+| Sonnet 5.5 | plan-card | "Make this text a bit bigger." | CSS (`font-size: 1.125rem !important` on the card), empty question | passed | not applicable (CSS) | 0.0186 |
+
+The total is US$0.1385 for 6 calls. The provider returned no error for the schema in any call, and the generation was streamed in each. The fixture has no sponsored marker, and the picked plan card carries none. For the sponsored request the model set `wantsExample` to true and asked: "The picked Pro plan has no sponsored label in its markup. How is a sponsored plan marked? Add one sponsored plan as an example, or tell me if you want this Pro plan hidden instead." The panel showed the question and no code, and the draft was discarded.
+
+The repair path was not checked. A repair starts from a saved transform, and the check was not allowed to save anything.
+
+The harness change is in `live.mjs`: when the finished generation carries a clarification, it records the question and the panel text, skips the wait for the analysis, and discards the draft. The old ledger was moved to `/tmp/wa/ledger-before-2026-11-06.jsonl` so that the budget counted only this run. The restore script reported that the stored settings and transforms differ from the snapshot of the earlier run; the models of the active provider are unchanged from the snapshot (`claude-sonnet-5` for generation, `claude-haiku-4-5` for review).
