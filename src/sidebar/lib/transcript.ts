@@ -5,7 +5,12 @@
  */
 
 export interface TranscriptEntry {
-  kind: 'request' | 'result' | 'question' | 'answer'
+  /**
+   * `replied` is the user's text that the model answered with a question, and
+   * `asked` is that question. They are a conversation turn, not a side
+   * exchange, and they are not an attempt.
+   */
+  kind: 'request' | 'result' | 'question' | 'answer' | 'replied' | 'asked'
   /** Empty for an attempt whose text the panel does not show once it is replaced. */
   text: string
 }
@@ -50,6 +55,10 @@ export function transcriptBubbles(
         return { role: 'user', text: entry.text, side: 'question' }
       case 'answer':
         return { role: 'assistant', text: entry.text, side: 'answer' }
+      case 'replied':
+        return { role: 'user', text: entry.text }
+      case 'asked':
+        return { role: 'assistant', text: entry.text }
     }
   })
   if (pending) {

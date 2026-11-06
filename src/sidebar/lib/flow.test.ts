@@ -3534,3 +3534,278 @@ describe('the settings of an elixir in the flow', () => {
     expect(flow.configNotKept).toEqual([])
   })
 })
+
+/* -------------------------------------------------------------------- */
+/* A question from the model instead of code                              */
+/* -------------------------------------------------------------------- */
+
+describe('a question from the model instead of code', () => {
+  const QUESTION = 'How are sponsored videos marked on this page?'
+  const ask = (wantsExample = false) => ({
+    name: '',
+    kind: 'css',
+    capabilities: [],
+    config: [],
+    code: '',
+    rationale: { targets: '', approach: '', assumptions: [] },
+    intent: '',
+    clarification: { question: QUESTION, wantsExample },
+  }) as any
+  const lastReview = () => calls.filter((c) => c.type === 'review').at(-1)
+  const reviewable = { static: [], undeclaredCapabilities: [], passed: true }
+
+  beforeEach(() => {
+    ports.length = 0
+    calls.length = 0
+    ;(globalThis as any).browser.runtime.connect = fakeConnect
+  })
+  afterEach(() => {
+    ;(globalThis as any).browser.runtime.connect = realConnect
+  })
+
+  function describing(text = 'hide sponsored videos') {
+    const flow = newFlow()
+    flow.picked = { ...found, cropDrawn: false } as any
+    flow.instruction = text
+    flow.step = 'describing'
+    return flow
+  }
+
+  /** Sends the instruction and has the fake port answer with `result`. */
+  async function brew(flow: InstanceType<typeof Flow>, result: object, again = false) {
+    const run = again ? flow.regenerate() : flow.generate()
+    const port = await nextPort(ports.length + 1)
+    port.emit({ type: 'done', result })
+    await run
+    return port
+  }
+
+  /** Asks for a review of a JavaScript result that the flow holds, and returns what was sent. */
+  async function reviewOf(flow: InstanceType<typeof Flow>) {
+    flow.draft = { ...saved, kind: 'js', id: 'OLD' }
+    flow.result = { ...jsResultBase, code: 'x' } as any
+    handler = (m) => ({ ok: true, data: m.type === 'review' ? reviewable : null })
+    await flow.toReview()
+    return lastReview()
+  }
+
+  it('is shown while describing, with nothing analysed, reviewed or previewed', async () => {
+    handler = () => ({ ok: true, data: null })
+    const flow = describing()
+    await brew(flow, ask(true))
+
+    expect(flow.step).toBe('describing')
+    expect(flow.clarification).toEqual({ question: QUESTION, wantsExample: true })
+    expect(flow.result).toBeNull()
+    expect(flow.draft).toBeNull()
+    expect(flow.instruction).toBe('')
+    expect(flow.history).toEqual([])
+    expect(calls.map((c) => c.type)).not.toContain('analyse')
+    expect(calls.map((c) => c.type)).not.toContain('analyse-css')
+    expect(calls.map((c) => c.type)).not.toContain('review')
+    expect(transcriptModule.transcriptBubbles(flow.transcript, '', '').map((b) => [b.role, b.text])).toEqual([
+      ['user', 'hide sponsored videos'],
+      ['assistant', QUESTION],
+    ])
+  })
+
+  it('is kept while refining, with the result and its history untouched', async () => {
+    const flow = flowAtRefining()
+    flow.followUp = 'only the sponsored ones'
+    await brew(flow, ask(), true)
+
+    expect(flow.step).toBe('refining')
+    expect(flow.clarification?.question).toBe(QUESTION)
+    expect(flow.result?.code).toBe('/* A1 */')
+    expect(flow.history).toEqual([])
+    expect(flow.instruction).toBe('first')
+    expect(flow.followUp).toBe('')
+  })
+
+  it('is sent with the answer as the typed instruction, and the question as an assistant turn', async () => {
+    const flow = describing()
+    await brew(flow, ask())
+
+    flow.instruction = 'they have a Sponsored label'
+    const port = await brew(flow, cssResult('A1'))
+    expect(port.request.instruction).toBe('they have a Sponsored label')
+    expect(port.request.instructionSaved).toBe(false)
+    expect(port.request.history).toEqual([
+      { role: 'user', content: 'hide sponsored videos' },
+      { role: 'assistant', content: QUESTION },
+    ])
+    expect(flow.step).toBe('refining')
+    expect(flow.clarification).toBeNull()
+    expect(flow.history).toEqual(port.request.history)
+  })
+
+  it('gives the reviewer what the user typed and not the question', async () => {
+    const flow = describing()
+    await brew(flow, ask())
+    flow.instruction = 'they have a Sponsored label'
+    await brew(flow, cssResult('A1'))
+
+    const sent = await reviewOf(flow)
+    expect(sent.instructions).toEqual([
+      { text: 'hide sponsored videos', source: 'typed' },
+      { text: 'they have a Sponsored label', source: 'typed' },
+    ])
+    expect(JSON.stringify(sent)).not.toContain(QUESTION)
+  })
+
+  it('gives the reviewer the old result\'s instructions while a question about a change is open', async () => {
+    const flow = flowAtRefining()
+    flow.followUp = 'only the sponsored ones'
+    await brew(flow, ask(), true)
+    const sent = await reviewOf(flow)
+    expect(sent.instructions).toEqual([{ text: 'first', source: 'typed' }])
+  })
+
+  it('puts the earlier turns, the question and the answer in the next request while refining', async () => {
+    const flow = flowAtRefining()
+    flow.followUp = 'only the sponsored ones'
+    await brew(flow, ask(), true)
+
+    flow.followUp = 'the ones with a Sponsored label'
+    const port = await brew(flow, cssResult('A2'), true)
+    expect(port.request.instruction).toBe('the ones with a Sponsored label')
+    expect(port.request.history).toEqual([
+      { role: 'user', content: 'first' },
+      { role: 'assistant', content: 'A1' },
+      { role: 'user', content: 'only the sponsored ones' },
+      { role: 'assistant', content: QUESTION },
+    ])
+
+    const sent = await reviewOf(flow)
+    expect(sent.instructions.map((i: any) => i.text)).toEqual([
+      'first',
+      'only the sponsored ones',
+      'the ones with a Sponsored label',
+    ])
+    expect(JSON.stringify(sent)).not.toContain(QUESTION)
+  })
+
+  it('does not count a question as an attempt', async () => {
+    const { attemptNumber } = await import('./attempt')
+    const flow = describing()
+    await brew(flow, ask())
+    flow.instruction = 'the Sponsored label'
+    await brew(flow, cssResult('A1'))
+    expect(attemptNumber(flow.history.length - 2 * flow.questionPairs)).toBe(1)
+
+    flow.followUp = 'bigger'
+    await brew(flow, cssResult('A2'), true)
+    expect(attemptNumber(flow.history.length - 2 * flow.questionPairs)).toBe(2)
+  })
+
+  it('keeps the question for the next request when the answer fails to brew', async () => {
+    const flow = describing()
+    await brew(flow, ask())
+    flow.instruction = 'the Sponsored label'
+    const failing = flow.generate()
+    ;(await nextPort(ports.length + 1)).emit({ type: 'error', error: { message: 'failed', kind: 'network' } })
+    await failing
+    expect(flow.step).toBe('describing')
+    expect(flow.instruction).toBe('the Sponsored label')
+
+    const port = await brew(flow, cssResult('A1'))
+    expect(port.request.history.map((turn: any) => turn.content)).toEqual(['hide sponsored videos', QUESTION])
+  })
+
+  it('records usage as for any brew', async () => {
+    const flow = describing()
+    const run = flow.generate()
+    const port = await nextPort(ports.length + 1)
+    port.emit({ type: 'done', result: ask(), usage: { inputTokens: 5, outputTokens: 2 } })
+    await run
+    expect(flow.lastUsage).toEqual({ inputTokens: 5, outputTokens: 2 })
+  })
+
+  describe('and a saved description sent unchanged', () => {
+    function savedDescribing(imported: boolean) {
+      const flow = describing('STORED INTENT')
+      ;(flow as any).prefillInstruction('STORED INTENT', imported)
+      return flow
+    }
+
+    it('keeps the saved description out of the turns, and the answer does not count as the saved one', async () => {
+      const flow = savedDescribing(false)
+      const first = await brew(flow, ask())
+      expect(first.request.instructionSaved).toBe(true)
+      expect(flow.history).toEqual([])
+
+      flow.instruction = 'the Sponsored label'
+      const port = await brew(flow, cssResult('A1'))
+      expect(port.request.instructionSaved).toBe(false)
+      expect(port.request.savedDescription).toBe('STORED INTENT')
+      expect(port.request.history).toEqual([])
+
+      const sent = await reviewOf(flow)
+      expect(sent.instructions).toEqual([
+        { text: 'STORED INTENT', source: 'saved-description' },
+        { text: 'the Sponsored label', source: 'typed' },
+      ])
+    })
+
+    it('does the same for an imported description', async () => {
+      const flow = savedDescribing(true)
+      const first = await brew(flow, ask())
+      expect(first.request.instructionImported).toBe(true)
+
+      flow.instruction = 'the Sponsored label'
+      const port = await brew(flow, cssResult('A1'))
+      expect(port.request.instructionImported).toBe(false)
+      expect(port.request.importedDescription).toBe('STORED INTENT')
+
+      const sent = await reviewOf(flow)
+      expect(sent.instructions).toEqual([
+        { text: 'STORED INTENT', source: 'imported-description' },
+        { text: 'the Sponsored label', source: 'typed' },
+      ])
+    })
+
+    it('counts an edited description as the user\'s, and says where it started', async () => {
+      const flow = savedDescribing(false)
+      flow.instruction = 'STORED INTENT, only videos'
+      await brew(flow, ask())
+
+      flow.instruction = 'the Sponsored label'
+      await brew(flow, cssResult('A1'))
+      expect(flow.history[0]).toEqual({ role: 'user', content: 'STORED INTENT, only videos' })
+      const sent = await reviewOf(flow)
+      expect(sent.instructions).toEqual([
+        { text: 'STORED INTENT, only videos', source: 'saved-description-edited' },
+        { text: 'the Sponsored label', source: 'typed' },
+      ])
+    })
+  })
+
+  it('does not change what a later change request sends', async () => {
+    const flow = describing()
+    await brew(flow, ask())
+    flow.instruction = 'the Sponsored label'
+    await brew(flow, cssResult('A1'))
+
+    flow.followUp = 'bigger'
+    const port = await brew(flow, cssResult('A2'), true)
+    expect(port.request.history.map((turn: any) => turn.content)).toEqual([
+      'hide sponsored videos',
+      QUESTION,
+      'the Sponsored label',
+      'A1',
+    ])
+  })
+})
+
+describe('adding an example element after a question', () => {
+  it('is possible while describing', async () => {
+    handler = () => ({ ok: true, data: null })
+    calls.length = 0
+    const flow = newFlow()
+    flow.picked = { ...found, cropDrawn: false } as any
+    flow.step = 'describing'
+    await flow.addReference()
+    expect(flow.awaitingReference).toBe(true)
+    expect(calls.map((c) => c.type)).toContain('start-picking')
+  })
+})

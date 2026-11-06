@@ -2,7 +2,8 @@
   import { MARK } from '@shared/i18n'
   import Marked from '@shared/Marked.svelte'
   import { t } from '@shared/i18n'
-  import type { HoverTarget, Rect, TreePath, TreeRow } from '@shared/types'
+  import type { Clarification, ElementContext, HoverTarget, Rect, TreePath, TreeRow } from '@shared/types'
+  import { transcriptBubbles, type TranscriptEntry } from '../lib/transcript'
   import { autogrow } from '../lib/autogrow'
   import { focusOnMount } from '../lib/focus'
   import Button from './Button.svelte'
@@ -17,6 +18,14 @@
     crop: Rect
     cropClipped: boolean
     instruction: string
+    /** The question the model asked instead of writing code, or null. */
+    clarification?: Clarification | null
+    /** Earlier questions and the replies to them, shown above the box. */
+    transcript?: TranscriptEntry[]
+    references?: ElementContext[]
+    awaitingReference?: boolean
+    onaddreference?: () => void
+    onremovereference?: (selector: string) => void
     choosingRegion: boolean
     /** The captured image, once there is one. */
     shotPreview: string | null
@@ -49,6 +58,12 @@
     crop,
     cropClipped,
     instruction,
+    clarification = null,
+    transcript = [],
+    references = [],
+    awaitingReference = false,
+    onaddreference = () => {},
+    onremovereference = () => {},
     regionAvailable,
     choosingRegion,
     shotPreview,
@@ -72,6 +87,9 @@
     oncancel,
     ongenerate,
   }: Props = $props()
+
+  /* Only the questions of the model and the replies to them. Nothing else is in the log here. */
+  let bubbles = $derived(transcriptBubbles(transcript, '', ''))
 
   let selector = $derived(target.breadcrumb.at(-1) ?? '')
 
@@ -377,6 +395,33 @@
   {/if}
 
   <section>
+    {#if bubbles.length > 0}
+      <div class="bubbles">
+        {#each bubbles as bubble}
+          <p class="bubble {bubble.role}">{bubble.text}</p>
+        {/each}
+        {#if clarification?.wantsExample}
+          <button type="button" class="add prominent" disabled={awaitingReference} onclick={onaddreference}>
+            {awaitingReference ? t('refPickOne') : t('refPointAt')}
+          </button>
+        {/if}
+      </div>
+    {/if}
+    {#if references.length > 0}
+      <div class="context">
+        {#each references as reference (reference.selector)}
+          <span class="chip">
+            <code>{reference.selector}</code>
+            <button
+              type="button"
+              class="drop"
+              aria-label={t('refRemoveRef', reference.selector)}
+              onclick={() => onremovereference(reference.selector)}>×</button
+            >
+          </span>
+        {/each}
+      </div>
+    {/if}
     <Label>{t('describingInstructionLabel')}</Label>
     <textarea
       use:autogrow={instruction}
@@ -527,6 +572,85 @@
     display: flex;
     flex-direction: column;
     gap: var(--sp-5);
+  }
+
+  .bubbles {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-4);
+  }
+
+  .bubble {
+    max-width: 88%;
+    margin: 0;
+    padding: 7px 9px;
+    font: 12px/1.5 var(--font-ui);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+
+  .bubble.user {
+    align-self: flex-end;
+    border-radius: var(--r-panel) var(--r-panel) var(--sp-2) var(--r-panel);
+    background: var(--accent-chip);
+    color: var(--text);
+  }
+
+  .bubble.assistant {
+    align-self: flex-start;
+    border-radius: var(--r-panel) var(--r-panel) var(--r-panel) var(--sp-2);
+    background: var(--surface-raised);
+    color: var(--text-dim);
+  }
+
+  .context {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--sp-4);
+  }
+
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 4px 2px 6px;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--r-badge);
+    background: var(--surface-sunken);
+    max-width: 100%;
+  }
+
+  .chip code {
+    font: 10.5px var(--font-mono);
+    color: var(--text-dim);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .drop {
+    padding: 0 3px;
+    border: none;
+    background: none;
+    font: 12px var(--font-ui);
+    color: var(--text-faint);
+    cursor: pointer;
+  }
+
+  .add.prominent {
+    align-self: flex-start;
+    padding: 6px 10px;
+    border: 1px solid var(--accent-fg);
+    border-radius: var(--r-badge);
+    background: var(--accent-chip);
+    font: 12px var(--font-ui);
+    color: var(--text);
+    cursor: pointer;
+  }
+
+  .add.prominent:disabled {
+    color: var(--accent-fg);
+    cursor: default;
   }
 
   textarea {

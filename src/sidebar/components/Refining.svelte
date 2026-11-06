@@ -2,9 +2,9 @@
   import { MARK } from '@shared/i18n'
   import Marked from '@shared/Marked.svelte'
   import { t } from '@shared/i18n'
-  import { focusOnMount } from '../lib/focus'
+  import { focusOnMount, mayMoveFocus } from '../lib/focus'
   import type { RefinementTurn } from '@background/providers/types'
-  import type { GenerationResult, ReviewResult } from '@shared/types'
+  import type { Clarification, GenerationResult, ReviewResult } from '@shared/types'
   import type { ElementContext } from '@shared/types'
   import { attemptNumber } from '../lib/attempt'
   import { transcriptBubbles, type TranscriptEntry } from '../lib/transcript'
@@ -19,6 +19,10 @@
     analysis: ReviewResult | null
     intent: string
     history: RefinementTurn[]
+    /** The question the model asked instead of writing code, or null. It is also the last bubble of the transcript. */
+    clarification?: Clarification | null
+    /** How many question pairs the history holds, which are not attempts. */
+    questionPairs?: number
     /** The conversation as shown: attempts and side questions in the order they happened. */
     transcript: TranscriptEntry[]
     followUp: string
@@ -77,6 +81,8 @@
     analysis,
     intent,
     history,
+    clarification = null,
+    questionPairs = 0,
     transcript,
     followUp,
     asking,
@@ -115,7 +121,7 @@
 
   let isJs = $derived(result.kind === 'js')
   let blocked = $derived(analysis !== null && !analysis.passed)
-  let attempt = $derived(attemptNumber(history.length))
+  let attempt = $derived(attemptNumber(history.length - 2 * questionPairs))
   /** True when a finished review stopped the run, which is shown outside the collapsed text. */
   let reviewBlocks = $derived(
     previewReview !== null &&
@@ -139,6 +145,12 @@
     ),
   )
   let canAsk = $derived(followUp.trim().length > 0 && !askLimitReached && !reloading)
+
+  let box = $state<HTMLTextAreaElement | null>(null)
+  /* A question waits for an answer, so the box that takes it has the focus. */
+  $effect(() => {
+    if (clarification && box && mayMoveFocus(document)) box.focus({ preventScroll: true })
+  })
 
   let codeOpen = $state(false)
   let lineCount = $derived(result.code.split('\n').length)
@@ -260,6 +272,11 @@
           <p class="bubble {bubble.role}">{bubble.text}</p>
         {/if}
       {/each}
+      {#if clarification?.wantsExample}
+        <button type="button" class="add prominent" disabled={awaitingReference} onclick={onaddreference}>
+          {awaitingReference ? t('refPickOne') : t('refPointAt')}
+        </button>
+      {/if}
       {#if asking && !askPartial}
         <p class="side-note" role="status">{t('refAskWaiting')}</p>
       {/if}
@@ -307,6 +324,7 @@
       <Label>{t('refAskLabel')}</Label>
       <textarea
         use:autogrow={followUp}
+        bind:this={box}
         value={followUp}
         placeholder={t('refPlaceholder')}
         readonly={asking}
@@ -331,9 +349,11 @@
             >
           </span>
         {/each}
-        <button type="button" class="add" disabled={awaitingReference} onclick={onaddreference}>
-          {awaitingReference ? t('refPickOne') : t('refPointAt')}
-        </button>
+        {#if !clarification?.wantsExample}
+          <button type="button" class="add" disabled={awaitingReference} onclick={onaddreference}>
+            {awaitingReference ? t('refPickOne') : t('refPointAt')}
+          </button>
+        {/if}
       </div>
 
       {#if visionSupported}
@@ -699,6 +719,16 @@
     font: 10.5px var(--font-ui);
     color: var(--text-dim);
     cursor: pointer;
+  }
+
+  /* The button that answers the model's question: filled, and larger than the usual one. */
+  .add.prominent {
+    align-self: flex-start;
+    padding: 6px 10px;
+    border: 1px solid var(--accent-fg);
+    background: var(--accent-chip);
+    font: 12px var(--font-ui);
+    color: var(--text);
   }
 
   .add:disabled {

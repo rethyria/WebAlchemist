@@ -825,6 +825,12 @@
       crop={flow.picked.crop}
       cropClipped={flow.picked.cropClipped}
       instruction={flow.instruction}
+      clarification={flow.clarification}
+      transcript={flow.transcript}
+      references={flow.references}
+      awaitingReference={flow.awaitingReference}
+      onaddreference={() => void flow.addReference()}
+      onremovereference={(selector) => flow.removeReference(selector)}
       regionAvailable={flow.pickedRegionAvailable}
       choosingRegion={flow.choosingRegion}
       shotPreview={flow.shotPreview}
@@ -868,6 +874,8 @@
       analysis={flow.analysis}
       intent={flow.instruction}
       history={flow.history}
+      clarification={flow.clarification}
+      questionPairs={flow.questionPairs}
       transcript={flow.transcript}
       followUp={flow.followUp}
       asking={flow.asking}

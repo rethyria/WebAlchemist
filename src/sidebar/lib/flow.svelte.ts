@@ -36,6 +36,7 @@ import type {
   ExecutionWorld,
   ConfigField,
   ConfigValue,
+  Clarification,
   GenerationResult,
   HoverTarget,
   PageContext,
@@ -265,6 +266,24 @@ export class Flow {
 
   history = $state<RefinementTurn[]>([])
   followUp = $state('')
+
+  /**
+   * The question the model asked instead of writing code, while it is waiting
+   * for an answer. The panel shows it as the model's message and, when
+   * `wantsExample` is set, offers the button that adds an example element.
+   */
+  clarification = $state<Clarification | null>(null)
+  /**
+   * The turns of questions that have not been sent with a request yet: the
+   * user's text that was answered with a question, and the question as the
+   * assistant's turn. They are added to the history by the request that
+   * follows, so the history keeps matching the result on screen until a new
+   * result replaces it. The question is an assistant turn, so it never counts
+   * as an instruction of the user.
+   */
+  private clarified: RefinementTurn[] = []
+  /** How many question pairs are in `history`, so that they are not counted as attempts. */
+  questionPairs = $state(0)
 
   /**
    * Questions asked about the draft and the answers given, oldest first. They
@@ -977,6 +996,7 @@ export class Flow {
     this.resultFromImport = false
     this.storedConfig = null
     this.history = []
+    this.resetClarification()
     this.followUp = ''
     this.references = []
     this.awaitingReference = false
@@ -1150,6 +1170,7 @@ export class Flow {
       this.intentBaseline = transform.intent
       this.prefillInstruction(transform.intent)
       this.history = []
+      this.resetClarification()
       this.references = []
       this.draft = transform
       this.rememberStoredConfig(transform)
@@ -1388,6 +1409,7 @@ export class Flow {
       // well showed the first exchange twice in the transcript and sent it to
       // the model twice.
       this.history = []
+      this.resetClarification()
 
       /*
        * The saved copy comes off the page for the duration. Both it and any
@@ -1443,6 +1465,8 @@ export class Flow {
     transcriptLength: number
     instruction: string
     followUp: string
+    clarified: RefinementTurn[]
+    questionPairs: number
     importedDescription: string | null
     savedDescription: string | null
     resultFromImport: boolean
@@ -1514,6 +1538,56 @@ export class Flow {
     ]
   }
 
+  private resetClarification(): void {
+    this.clarification = null
+    this.clarified = []
+    this.questionPairs = 0
+  }
+
+  /**
+   * Keeps the model's question after an attempt that returned one instead of
+   * code. The step stays where the attempt started. An attempt that replaced
+   * the history is put back first, so the history still matches the result on
+   * screen, and the user's text and the question wait in `clarified` for the
+   * next request.
+   *
+   * A saved or imported description sent unchanged is not the user's text and
+   * is not put in the turns. It is kept as the fenced description instead, as
+   * a later request does for it, and the question is shown but is not sent
+   * back, because a history cannot start with the assistant's turn.
+   */
+  private keepQuestion(question: Clarification, from: Step): void {
+    const text = this.instruction
+    const refining = from === 'refining'
+    this.undoRefinement()
+    this.step = refining ? 'refining' : 'describing'
+    const firstSaved =
+      !refining &&
+      this.history.length === 0 &&
+      this.clarified.length === 0 &&
+      this.savedInstruction !== null &&
+      text === this.savedInstruction
+    if (firstSaved) {
+      if (this.savedImported) this.importedDescription = text
+      else this.savedDescription = text
+    } else {
+      this.clarified = [
+        ...this.clarified,
+        { role: 'user', content: text },
+        { role: 'assistant', content: question.question },
+      ]
+    }
+    this.transcript = [
+      ...this.transcript,
+      { kind: 'replied', text },
+      { kind: 'asked', text: question.question },
+    ]
+    this.clarification = question
+    // The text was sent. The box is for the answer.
+    if (refining) this.followUp = ''
+    else this.instruction = ''
+  }
+
   private undoRefinement(): void {
     const held = this.refinement
     this.refinement = null
@@ -1526,6 +1600,8 @@ export class Flow {
       this.intentBaseline = held.previous.intentBaseline
     }
     this.history = held.history
+    this.clarified = held.clarified
+    this.questionPairs = held.questionPairs
     this.transcript = this.transcript.slice(0, held.transcriptLength)
     this.instruction = held.instruction
     this.followUp = held.followUp
@@ -1571,7 +1647,11 @@ export class Flow {
     this.stopSecondaryPicker()
     this.step = 'generating'
     this.error = null
+    this.clarification = null
     this.startClock()
+    // What is sent: the history and the turns of a question that were not
+    // sent yet. A request after a question from describing has the pair here.
+    const sentHistory = [...this.history, ...this.clarified]
 
     try {
       this.stage = 'context'
@@ -1616,17 +1696,17 @@ export class Flow {
             this.savedImported &&
             this.savedInstruction !== null &&
             this.instruction === this.savedInstruction &&
-            this.history.length === 0,
+            sentHistory.length === 0,
           // The same for a saved description that was not typed or edited in
           // this session.
           instructionSaved:
             !this.savedImported &&
             this.savedInstruction !== null &&
             this.instruction === this.savedInstruction &&
-            this.history.length === 0,
+            sentHistory.length === 0,
           ...(this.importedDescription === null ? {} : { importedDescription: this.importedDescription }),
           ...(this.savedDescription === null ? {} : { savedDescription: this.savedDescription }),
-          history: this.history,
+          history: sentHistory,
           // The fields and defaults of the result being refined, so that the
           // model keeps the key of each setting whose meaning is unchanged.
           ...(this.result && this.result.config.length > 0 ? { currentConfig: this.result.config } : {}),
@@ -1676,6 +1756,12 @@ export class Flow {
       this.cancelGeneration = null
       if (!current()) return
 
+      // A question has no code to check, review, preview or approve.
+      if (result.clarification) {
+        this.keepQuestion(result.clarification, from)
+        return
+      }
+
       /*
        * Nothing about the new result is stored until the analysis has come
        * back and the run is still current. Cancel is available during the
@@ -1702,6 +1788,13 @@ export class Flow {
           intent: this.intent,
           intentBaseline: this.intentBaseline,
         }
+      }
+      // The turns of earlier questions become part of the history with the
+      // result that they led to.
+      if (this.clarified.length > 0) {
+        this.history = sentHistory
+        this.questionPairs += this.clarified.length / 2
+        this.clarified = []
       }
       this.result = result
       this.resultFromImport = false
@@ -1938,9 +2031,10 @@ export class Flow {
    * and this is the same page in the same run. The step deliberately stays on
    * 'refining' — the picker runs in the page while the panel keeps the
    * conversation, so cancelling in the page returns to exactly where they were.
+   * It is also offered while describing, where the model may ask for an example.
    */
   async addReference(): Promise<void> {
-    if (this.tabId === null || this.step !== 'refining') return
+    if (this.tabId === null || (this.step !== 'refining' && this.step !== 'describing')) return
     this.awaitingReference = true
     try {
       await send({ type: 'start-picking', tabId: this.tabId, mode: 'reference' })
@@ -2269,6 +2363,8 @@ export class Flow {
       transcriptLength: this.transcript.length,
       instruction: this.instruction,
       followUp: this.followUp,
+      clarified: this.clarified,
+      questionPairs: this.questionPairs,
       importedDescription: this.importedDescription,
       savedDescription: this.savedDescription,
       resultFromImport: this.resultFromImport,
@@ -2300,7 +2396,12 @@ export class Flow {
       ...(firstTurnImported || firstTurnSaved || this.resultFromImport
         ? []
         : [{ role: 'assistant' as const, content: this.result.rationale.approach }]),
+      // A question the model asked after the previous request, with the text
+      // that it answered.
+      ...this.clarified,
     ]
+    this.questionPairs += this.clarified.length / 2
+    this.clarified = []
     this.instruction = text
     this.followUp = ''
     await this.generate(() => this.regenerate())
@@ -3064,6 +3165,7 @@ export class Flow {
     this.keptSavedImported = false
     this.sendScreenshot = false
     this.history = []
+    this.resetClarification()
     this.followUp = ''
     this.result = null
     this.draft = null
