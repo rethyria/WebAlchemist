@@ -16,8 +16,10 @@ import {
   fencePageContent,
   generationInstruction,
   pageDataSections,
+  repairPrompt,
   reviewContent,
 } from './prompts'
+import { GENERATION_SCHEMA } from './providers/types'
 
 describe('fencing page content', () => {
   it('wraps the content in markers carrying the same value', () => {
@@ -182,5 +184,25 @@ describe('the intent given to a review (#56)', () => {
     const out = reviewContent(args, 'n0nce')
     expect(out).toContain("THE GENERATOR'S SUMMARY OF THE INTENT")
     expect(out).not.toContain('imported')
+  })
+})
+
+describe('the layout asked of generated code', () => {
+  it('asks for readable code in the generation prompt, for JavaScript and CSS', () => {
+    expect(GENERATE_SYSTEM_PROMPT).toContain('## Layout of the code')
+    expect(GENERATE_SYSTEM_PROMPT).toContain('one statement on each line')
+    expect(GENERATE_SYSTEM_PROMPT).toContain('indent by 2 spaces')
+    expect(GENERATE_SYSTEM_PROMPT).toContain('blank line between logical parts')
+    expect(GENERATE_SYSTEM_PROMPT).toContain('each declaration on its own line')
+  })
+
+  it('asks for readable code in the repair instruction', () => {
+    expect(repairPrompt('n0nce')).toContain('one statement or declaration per line, 2-space indentation')
+  })
+
+  it('describes the layout in the code field of the response schema', () => {
+    const description = (GENERATION_SCHEMA.properties.code as { description?: string }).description ?? ''
+    expect(description).toContain('one statement or declaration per line')
+    expect(description).toContain('2-space indentation')
   })
 })

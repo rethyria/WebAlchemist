@@ -317,7 +317,11 @@ export const GENERATION_SCHEMA = {
       items: { type: 'string', enum: ['network', 'storage', 'cookies'] },
       description: 'Empty for almost every transform. Undeclared use is rejected.',
     },
-    code: { type: 'string' },
+    code: {
+      type: 'string',
+      description:
+        'The code, formatted for a person to read: one statement or declaration per line, 2-space indentation, blank lines between logical parts, short comments only where they help.',
+    },
     rationale: {
       type: 'object',
       properties: {
