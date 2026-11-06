@@ -13,6 +13,7 @@ import type {
   Message,
   MessageResponse,
 } from '@shared/messages'
+import { formatGeneration } from '@shared/format-code'
 import { matchesUrl, originPermissionForUrl, pagePattern, sameAddressOfPage } from '@shared/match'
 import { CAPTURE_GRANT_KEY } from '@shared/capture-grant'
 import { appliesInContainer } from '@shared/container'
@@ -700,8 +701,8 @@ async function handle(
       let result: GenerationResult
       try {
         const provider = await resolveActiveProvider(usage.listener)
-        result = await withKeepalive(() =>
-          provider.generate({
+        result = await withKeepalive(async () =>
+          formatGeneration(await provider.generate({
             context: message.context,
             instruction: existing.intent,
             history: [],
@@ -714,7 +715,7 @@ async function handle(
               ...(existing.configFields && existing.configFields.length > 0 ? { previousConfig: existing.configFields } : {}),
               brokenReason,
             },
-          }),
+          })),
         )
       } finally {
         // In `finally` so a billed call that then failed to parse is counted.
@@ -1805,7 +1806,7 @@ async function runGeneration(
       const currentConfig = parseConfigFields(request.currentConfig).fields
       const { currentConfig: _unchecked, ...rest } = request
       const withSignal = { ...rest, ...(currentConfig.length > 0 ? { currentConfig } : {}), signal }
-      return provider.generateStream
+      const generated = provider.generateStream
         ? provider.generateStream(
             withSignal,
             (accumulated) => {
@@ -1816,6 +1817,9 @@ async function runGeneration(
             },
           )
         : provider.generate(withSignal)
+      // The code is laid out here, before the sidebar analyses, reviews or
+      // approves it.
+      return generated.then(formatGeneration)
     },
   })
 }
