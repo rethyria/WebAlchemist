@@ -39,6 +39,7 @@ const CONDITIONAL_ATTRIBUTES = ['value']
  */
 const SKIPPED_FILES: Record<string, string> = {
   'background/prompts.ts': 'Instructions to the model, which the model reads and the user does not.',
+  'background/prompt-text/fill.ts': 'Error messages about prompt files, for developers.',
   'background/providers/types.ts': 'Descriptions in the schema of the model response, read by the model.',
   'background/csp-probe.ts': 'Test code that is built only with VITE_CSP_PROBE=1.',
   'background/test-browser.ts': 'A fake browser for tests.',

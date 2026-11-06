@@ -14,6 +14,10 @@ The user selects part of a page, or describes a change in words, and a language 
 
 The user chooses the AI provider (Anthropic, or any provider compatible with the OpenAI chat completions interface) and enters their own API key. The extension has no server of its own and the developer receives no data.
 
+### Where the instructions to the model are
+
+The instructions that the extension sends to the model are plain Markdown files in `src/background/prompt-text/`, described in the `README.md` of that folder. They are the system prompt for writing a change (`generate.md`), the system prompt for the code check (`review.md`), the system prompt for side questions (`ask.md`), the instruction for repairing a change (`repair.md`) and a section shared by two of them (`page-content-is-data.md`). The build bundles each file into the background script, `dist/src/background/index.js`, as a string, and the text is sent as written apart from a few named placeholders. The code that builds each request message, including the fences around page content, is in `src/background/prompts.ts`.
+
 ### Why generated JavaScript is user-script code and not remote code
 
 The JavaScript is not part of the extension package and is not fetched from a location that the developer controls. It is written on request by a model that the user set up with the user's own key, shown to the user in the approval panel together with the result of an automatic check, and saved only after the user approves it. The extension then registers it with the `userScripts` API, which Firefox provides for running code that the user has chosen to run. This is the same arrangement as a user-script manager, except that the code is written by a model from the user's description and not copied from a repository.
