@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { describeMatch, exactPagePattern, matchPresetsFor, matchesUrl, originPermissionFor, parsePattern } from './match'
+import { describeMatch, matchPresetsFor, matchesUrl, originPermissionFor, pagePattern, parsePattern, sameAddressOfPage } from './match'
 
 describe('matchesUrl', () => {
   it('matches a whole-site pattern against any path', () => {
@@ -238,35 +238,44 @@ describe('originPermissionFor', () => {
   })
 })
 
-describe('exactPagePattern', () => {
-  it('keeps the scheme, host, path and query and drops the fragment', () => {
-    expect(exactPagePattern('https://www.example.com/a/b?q=1#top')).toBe('https://www.example.com/a/b?q=1')
-    expect(exactPagePattern('https://www.example.com/a/b#top')).toBe('https://www.example.com/a/b')
-  })
-
-  it('does not cover the same path with another query (#55)', () => {
-    const pattern = exactPagePattern('https://www.example.com/watch?v=abc')!
-    expect(matchesUrl(pattern, 'https://www.example.com/watch?v=abc')).toBe(true)
-    expect(matchesUrl(pattern, 'https://www.example.com/watch?v=other')).toBe(false)
-  })
-
-  it('refuses a `*` in the query, which would widen the pattern (#55)', () => {
-    expect(exactPagePattern('https://example.com/a?q=*')).toBeNull()
+describe('pagePattern', () => {
+  it('keeps the scheme, host and path and drops the query and the fragment', () => {
+    expect(pagePattern('https://www.example.com/a/b?q=1#top')).toBe('https://www.example.com/a/b')
+    expect(pagePattern('https://www.example.com/a/b#top')).toBe('https://www.example.com/a/b')
   })
 
   it('does not cover another subdomain or another path', () => {
-    const pattern = exactPagePattern('https://www.example.com/a')!
+    const pattern = pagePattern('https://www.example.com/a')!
     expect(matchesUrl(pattern, 'https://www.example.com/a')).toBe(true)
     expect(matchesUrl(pattern, 'https://mail.example.com/a')).toBe(false)
     expect(matchesUrl(pattern, 'https://www.example.com/b')).toBe(false)
   })
 
-  it('refuses a page that cannot be written as an exact pattern', () => {
-    expect(exactPagePattern(undefined)).toBeNull()
-    expect(exactPagePattern('about:blank')).toBeNull()
-    expect(exactPagePattern('not a url')).toBeNull()
+  it('refuses a page that cannot be written as a pattern', () => {
+    expect(pagePattern(undefined)).toBeNull()
+    expect(pagePattern('about:blank')).toBeNull()
+    expect(pagePattern('not a url')).toBeNull()
     // A `*` in the path would be read as a wildcard and widen the pattern.
-    expect(exactPagePattern('https://example.com/a*b')).toBeNull()
+    expect(pagePattern('https://example.com/a*b')).toBeNull()
+  })
+})
+
+describe('sameAddressOfPage', () => {
+  const FILTERED =
+    'https://www.spaceship.com/en-GB/domain-search/domains/?query=engram.&status=premium%2Cpromo%2Caftermarket'
+  const PLAIN = 'https://www.spaceship.com/en-GB/domain-search/domains/?query=engram.'
+
+  it('accepts the same path with another query or fragment', () => {
+    expect(sameAddressOfPage(FILTERED, PLAIN)).toBe(true)
+    expect(sameAddressOfPage(PLAIN, `${PLAIN}#top`)).toBe(true)
+    expect(sameAddressOfPage('https://example.com/a', 'https://example.com/a?x=1')).toBe(true)
+  })
+
+  it('refuses another path, host or scheme', () => {
+    expect(sameAddressOfPage(PLAIN, 'https://www.spaceship.com/en-GB/domain-search/other/?query=engram.')).toBe(false)
+    expect(sameAddressOfPage(PLAIN, 'https://spaceship.com/en-GB/domain-search/domains/?query=engram.')).toBe(false)
+    expect(sameAddressOfPage('https://example.com/a', 'http://example.com/a')).toBe(false)
+    expect(sameAddressOfPage('not a url', 'https://example.com/a')).toBe(false)
   })
 })
 

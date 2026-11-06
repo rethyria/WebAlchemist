@@ -105,9 +105,10 @@ export function matchPatternsFor(
   options: { exactPath?: boolean } = {},
 ): string[] {
   const { scheme, host, path } = parsePattern(transform.match)
-  // A preview is registered for the one address it was given, with none of the
-  // trailing-slash or query forms that pathsFor adds for a saved script (#55).
-  const bares = (options.exactPath ? [path] : pathsFor(path)).map((variant) => `${host}${variant}`)
+  // A preview is registered for the one page it was given, with any query
+  // string (`path` and `path?*`), and without the trailing-slash forms that
+  // pathsFor adds for a saved script (#55).
+  const bares = (options.exactPath ? [path, `${path}?*`] : pathsFor(path)).map((variant) => `${host}${variant}`)
   const forScheme = (name: string) => bares.map((bare) => `${name}://${bare}`)
   switch (scheme) {
     case 'http':

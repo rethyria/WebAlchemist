@@ -156,15 +156,16 @@ export function describeMatch(pattern: string): {
 }
 
 /**
- * The match pattern for one page: its scheme, host, path and query. Used for a
- * script preview, which must run on the tab being edited and on no other page,
- * so the query is part of the pattern (a page that differs only in its query
- * is another page). The registry does not add the query and trailing-slash
- * forms to a preview. Returns null for a page that cannot be written as a
- * pattern: a scheme other than http and https, or a path or query containing
- * `*`, which a match pattern would read as a wildcard and so widen.
+ * The match pattern for one page: its scheme, host and path, without the query
+ * or the fragment. Used for a script preview, which must run on the page being
+ * edited and not on other paths of the site (#55). The query is left out
+ * because a site can rewrite it (filters, search terms, tracking parameters),
+ * and the registry adds the form with any query (see matchPatternsFor with
+ * `exactPath`). Returns null for a page that cannot be written as a pattern: a
+ * scheme other than http and https, or a path containing `*`, which a match
+ * pattern would read as a wildcard and so widen.
  */
-export function exactPagePattern(rawUrl: string | undefined): string | null {
+export function pagePattern(rawUrl: string | undefined): string | null {
   if (rawUrl === undefined) return null
   let url: URL
   try {
@@ -173,8 +174,24 @@ export function exactPagePattern(rawUrl: string | undefined): string | null {
     return null
   }
   if (url.protocol !== 'http:' && url.protocol !== 'https:') return null
-  if (url.pathname.includes('*') || url.search.includes('*')) return null
-  return `${url.protocol}//${url.hostname}${url.pathname}${url.search}`
+  if (url.pathname.includes('*')) return null
+  return `${url.protocol}//${url.hostname}${url.pathname}`
+}
+
+/**
+ * True when two addresses are the same page for a preview: the same scheme,
+ * host and path. The query and the fragment are ignored, because a page can
+ * change them without becoming another page. An address that cannot be read is
+ * never the same page.
+ */
+export function sameAddressOfPage(first: string, second: string): boolean {
+  try {
+    const a = new URL(first)
+    const b = new URL(second)
+    return a.protocol === b.protocol && a.host === b.host && a.pathname === b.pathname
+  } catch {
+    return false
+  }
 }
 
 /** Escapes regex metacharacters except `*`, which becomes a wildcard. */

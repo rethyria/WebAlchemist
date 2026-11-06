@@ -71,6 +71,47 @@ describe('the page of the preview', () => {
     expect(registered()).toBe(false)
   })
 
+  it('accepts the same page when its query differs from the address the sidebar showed', async () => {
+    const reply = await send(
+      await h.approvedPreview({
+        type: 'preview-js',
+        tabId: TAB,
+        transform: draft(),
+        expectedUrl: 'https://www.example.com/shop/item?id=4&status=premium%2Cpromo',
+      }),
+    )
+    expect(reply.ok).toBe(true)
+    expect(registered()).toBe(true)
+  })
+
+  it('accepts the two spaceship.com addresses as the same page', async () => {
+    const filtered =
+      'https://www.spaceship.com/en-GB/domain-search/domains/?query=engram.&status=premium%2Cpromo%2Caftermarket'
+    h.tabUrls.set(TAB, 'https://www.spaceship.com/en-GB/domain-search/domains/?query=engram.')
+    const reply = await send(
+      await h.approvedPreview({
+        type: 'preview-js',
+        tabId: TAB,
+        transform: draft({ match: 'www.spaceship.com/*' }),
+        expectedUrl: filtered,
+      }),
+    )
+    expect(reply.ok).toBe(true)
+  })
+
+  it('refuses another host with the same path', async () => {
+    const reply = await send(
+      await h.approvedPreview({
+        type: 'preview-js',
+        tabId: TAB,
+        transform: draft(),
+        expectedUrl: 'https://shop.example.com/shop/item?id=4',
+      }),
+    )
+    expect(reply.ok).toBe(false)
+    expect(reply.error.message).toMatch(/moved to another page/)
+  })
+
   it('ignores the fragment when comparing the addresses', async () => {
     const reply = await send(
       await h.approvedPreview({
@@ -84,10 +125,13 @@ describe('the page of the preview', () => {
   })
 })
 
-describe('the exact address of the preview', () => {
-  it('is registered for the path and query only, with no trailing-slash or any-query form', async () => {
+describe('the page of the preview, with any query', () => {
+  it('is registered for the path with and without a query, and with no trailing-slash form', async () => {
     await send(await h.approvedPreview({ type: 'preview-js', tabId: TAB, transform: draft() }))
-    expect(h.userScriptsHeld.get('preview-draft').matches).toEqual(['https://www.example.com/shop/item?id=4'])
+    expect(h.userScriptsHeld.get('preview-draft').matches).toEqual([
+      'https://www.example.com/shop/item',
+      'https://www.example.com/shop/item?*',
+    ])
   })
 
   it('control: the saved script with the same pattern is registered with the expanded forms', async () => {
@@ -98,8 +142,8 @@ describe('the exact address of the preview', () => {
     expect(matches.length).toBeGreaterThan(1)
   })
 
-  it('refuses a page whose query has a wildcard character', async () => {
-    h.tabUrls.set(TAB, 'https://www.example.com/shop/item?id=*')
+  it('refuses a page whose path has a wildcard character', async () => {
+    h.tabUrls.set(TAB, 'https://www.example.com/shop/*')
     const reply = await send(await h.approvedPreview({ type: 'preview-js', tabId: TAB, transform: draft() }))
     expect(reply.ok).toBe(false)
     expect(registered()).toBe(false)

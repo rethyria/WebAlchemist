@@ -13,7 +13,7 @@ import type {
   Message,
   MessageResponse,
 } from '@shared/messages'
-import { exactPagePattern, matchesUrl, originPermissionForUrl } from '@shared/match'
+import { matchesUrl, originPermissionForUrl, pagePattern, sameAddressOfPage } from '@shared/match'
 import { CAPTURE_GRANT_KEY } from '@shared/capture-grant'
 import { appliesInContainer } from '@shared/container'
 import { parseConfigFields, reconcileValues } from '@shared/config'
@@ -1062,20 +1062,23 @@ async function handle(
         throw new Error(t('bgStaticAnalysisRejectedThisCodeSo3'))
       }
       /*
-       * Registered for the page in this tab only. The draft's own match pattern
+       * Registered for the page in this tab only, with any query string of
+       * that page and no other path of the site. The draft's own match pattern
        * is usually the whole site with its subdomains, and a preview that used
        * it ran unreviewed code on every other tab of the site that loaded
        * while the preview was registered (#55). The address is read from the
        * tab here and not taken from the message.
        */
       const tabUrl = await tabUrlOf(message.tabId)
-      const previewMatch = exactPagePattern(tabUrl)
+      const previewMatch = pagePattern(tabUrl)
       if (tabUrl === undefined || previewMatch === null) {
         throw new Error(t('bgThisPageCannotBePreviewedSo'))
       }
       // The sidebar names the address it showed the user. A tab that has since
-      // moved to another page is not the page the code was reviewed for.
-      if (withoutFragment(message.expectedUrl) !== withoutFragment(tabUrl)) {
+      // moved to another page is not the page the code was reviewed for. The
+      // query and the fragment are not part of the page: a site can rewrite
+      // them, and the preview covers the page with any query.
+      if (!sameAddressOfPage(message.expectedUrl, tabUrl)) {
         throw new Error(t('bgTheTabHasMovedToAnother'))
       }
       // The draft's own pattern says where the code is meant to run, and the
@@ -1618,11 +1621,6 @@ void (async () => {
 })()
 
 /** Throws the message to show when the address is on the excluded list. */
-function withoutFragment(url: string): string {
-  const at = url.indexOf('#')
-  return at === -1 ? url : url.slice(0, at)
-}
-
 async function refuseExcludedUrl(url: string): Promise<void> {
   const host = await excludedHostOf(url)
   if (host !== null) throw new Error(excludedSiteMessage(host))
